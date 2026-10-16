@@ -9,13 +9,14 @@ This file is authoritative where the detail docs disagree (see §2).
 
 | # | Decision | Source |
 |---|---|---|
-| D1 | **Shell: Tauri 2** (macOS/Windows/Linux/iOS/Android). **UI: Svelte 5 + TypeScript + Vite**, virtualized timeline via `virtua`. All logic in Rust. *(user-confirmed)* | 01 |
-| D2 | Fallback if WebView perf gate fails (iPhone 11 / Android Go, 60 fps scroll): **Flutter + flutter_rust_bridge** reusing `alloy-core`. Decided at Gate G1. | 01 |
+| D1 | **Shell: Tauri 2**. Targets for first versions: **macOS/Windows/Linux + Android only**; iOS deferred (D10). **UI: Svelte 5 + TypeScript + Vite**, virtualized timeline via `virtua`. All logic in Rust. *(user-confirmed)* | 01 |
+| D2 | Fallback if WebView perf gate fails (low-end Android / Android Go, 60 fps scroll): **Flutter + flutter_rust_bridge** reusing `alloy-core`. Decided at Gate G1. | 01 |
 | D3 | Matrix engine: `matrix-sdk` + `matrix-sdk-ui` (RoomListService, Timeline, send queue), MSC4186 sliding sync (MSC3575 proxy fallback), vodozemac E2EE, OIDC/MAS login with password fallback, authenticated media. | 02 |
 | D4 | Core↔UI: typed command/event protocol (`alloy-protocol`), `VectorDiff` streams, TS types generated with specta/ts-rs. Transport = Tauri IPC now, WASM/worker later. | 01, 02 |
 | D5 | Customization in 3 tiers: **A** declarative JSON(C) packages (themes, tokens, keybinds, slash commands, render rules); **B** WASM Component Model plugins (Wasmtime; Wasmi fallback); **C** signed static-index marketplace. Exactly 12 named UI extension slots; plugins emit declarative view schemas, never DOM/raw handles. | 03, 05 |
 | D6 | **Calls (MatrixRTC) post-1.0.** *(user-confirmed)* | 02 |
-| D7 | **iOS: declarative packages only; no WASM code plugins in v1.** Revisit curated Pulley catalog after legal review. *(user-confirmed)* | 03 |
+| D7 | iOS WASM-plugin policy (declarative packages only, no code plugins) applies **whenever iOS is eventually added**; moot for now. *(user-confirmed)* | 03 |
+| D10 | **No iOS in first versions** (user, 2026-10-16): ship desktop + Android only, distributed by direct install (signed installers/AppImage/deb/rpm/MSI, APK via GitHub Releases, F-Droid later) so no app-store publication is required before first version. iOS (and App Store/TestFlight, APNs, NSE, Pulley) moves to P5. Play Store optional later. Android push = UnifiedPush first (no Google dependency), FCM optional. | user |
 | D8 | Apache-2.0. `forbid(unsafe_code)` workspace-wide; cargo-deny/audit in CI; zero telemetry by default. | 04 |
 | D9 | Package format `.alloy-pkg`, signed Minisign/Ed25519; dev-mode sideload on desktop. Manifest files are **JSON/JSONC validated by published JSON Schema** (user asked for `.json`; TOML dropped). | 03 |
 
@@ -23,8 +24,8 @@ This file is authoritative where the detail docs disagree (see §2).
 
 | Conflict | Resolution |
 |---|---|
-| 02 proposes UniFFI `alloy-ffi` Swift/Kotlin shells (Element X model); 01 chooses Tauri. | `alloy-ffi` kept **only** for background paths a WebView can't serve: iOS Notification Service Extension and Android FCM/UnifiedPush service (decrypt + notify without launching the UI). Not a UI shell. |
-| 04 lists Tauri updater **and** Sparkle. | Tauri updater only (signed manifests). Sparkle dropped: needs native app-shell integration. Store builds (App Store/Play/MAS) use the store's update path. |
+| 02 proposes UniFFI `alloy-ffi` Swift/Kotlin shells (Element X model); 01 chooses Tauri. | `alloy-ffi` kept **only** for background paths a WebView can't serve: Android UnifiedPush/FCM service (iOS NSE deferred with D10) (decrypt + notify without launching the UI). Not a UI shell. |
+| 04 lists Tauri updater **and** Sparkle. | Tauri updater only (signed manifests). Sparkle dropped: needs native app-shell integration. Android APK sideload builds self-update via Tauri updater/in-app prompt; store builds (later) use the store's path. |
 | 04 says SQLCipher; 02 says `matrix-sdk-sqlite`. | Use matrix-sdk-sqlite's own store encryption with key in OS keychain. SQLCipher only for app-level DBs if needed. **Verify in spike S4** `[INFERENCE]`. |
 | 02 puts plugin host in Phase 3; 03 puts themes in v0.2; 05 puts customization tokens in MVP. | Tokens/themes ship with MVP, JSON packages Phase 2, WASM host Phase 3 (§4). |
 | 01 UI-08 (APNs/FCM) vs 02 CORE-14/15. | Single work stream: CORE-14/15 own native side; UI-08 only wires events. |
@@ -48,7 +49,7 @@ flowchart TB
     Plug[alloy-plugin: manifest, caps, Wasmtime host, pkg verify]
     Theme[alloy-theme: token schema/loader]
     Proto[alloy-protocol: DTOs]
-    FFI[alloy-ffi: NSE / push service only]
+    FFI[alloy-ffi: Android push service only]
   end
   API --> Core & Plug & Theme
   Core --> Store
@@ -77,9 +78,9 @@ Gate = must pass before the next phase starts. Each phase lists parallel work un
 Serial prerequisite: **P0-A workspace bootstrap** (CORE-01, UI-01, security "workspace setup", LICENSE). Then in parallel:
 - **S1** matrix-sdk-ui login + room list + timeline against local Synapse (CORE-02/03/05 skeleton).
 - **S2** UI-02 type generation + UI-04 virtualized timeline prototype with 10k synthetic events.
-- **S3** Tauri mobile: build+run on iOS sim and Android emulator; **perf gate G1** on iPhone 11 / Android Go class device (scroll ≥ 55 fps, cold start budget).
+- **S3** Tauri mobile: install Android SDK/NDK, build+run debug APK on emulator and a low-end profile; **perf gate G1** (scroll ≥ 55 fps, cold start budget) on real low-end Android hardware when available (emulator numbers are indicative only).
 - **S4** Storage/keychain: matrix-sdk-sqlite encryption + `keyring`/Keystore.
-- **S5** Wasmtime component host: Cranelift on desktop/Android, Pulley build for iOS, 32 MB cap, fuel (EXT-04/05 prototype).
+- **S5** Wasmtime component host: Cranelift on desktop/Android (Pulley/iOS feasibility recorded, not needed now), 32 MB cap, fuel (EXT-04/05 prototype).
 - **S6** CI skeleton: fmt, clippy, deny, audit, test matrix macOS/Win/Linux + mobile builds (04).
 - **G0:** S1,S2,S4,S6 green. **G1:** S3 meets perf budget, else pivot per D2.
 
@@ -92,25 +93,25 @@ Parallel streams (after P0 contracts frozen: `alloy-protocol` v0, token schema v
 - **Exit:** log in, E2EE chat, send/receive/edit/redact/reply/react, media, verify device, dark/light/AMOLED, on macOS+Windows+Linux; signed nightly builds; perf budgets in CI.
 
 ### P2 — Mobile + parity + Tier-A customization (v0.2–0.4)
-- **Mobile:** UI-05 safe areas/gestures, CORE-14/15 `alloy-ffi` NSE + FCM/UnifiedPush, UI-08 event wiring; TestFlight + Play internal.
+- **Mobile:** UI-05 safe areas/gestures, CORE-14/15 `alloy-ffi` UnifiedPush (+ optional FCM) service, UI-08 event wiring; signed APK via GitHub Releases. iOS not in scope (D10).
 - **Features:** CORE-10 reactions/polls, CORE-11 threads (UX-10), CORE-12 spaces, CORE-13 encrypted search, UX-09 QR login + SAS UX, UX-11 voice messages/polls UI, UX-12 Fluent i18n/RTL, a11y pass.
 - **Customization Tier A:** EXT-01/02/03 (theme packages, hot reload, keybindings, slash commands), UX-14 settings screen, local `.json` package loading, JSON Schemas published.
 - **Exit:** feature parity with Element X core flows; push works on both mobiles; users can load a custom theme/keybinding JSON.
 
 ### P3 — Tier-B plugins (v0.5)
 Serial first: EXT-04 WIT + `alloy-protocol` plugin events (needs stable core API). Then parallel: EXT-05 engine, EXT-06 Wasmi fallback, EXT-07 capabilities/prompts, EXT-08 limits, EXT-09 scoped KV, EXT-10 `alloy-pdk-rust`, EXT-11 `.alloy-pkg`, UX-13 + UI-06/07 slots & declarative renderer & sandboxed iframe widgets, EXT-16 TS PDK (optional/nonblocking).
-- **Exit:** sideloaded WASM plugin adds a command + panel + message renderer under capability prompts; quotas enforced; disabled on iOS builds per D7.
+- **Exit:** sideloaded WASM plugin adds a command + panel + message renderer under capability prompts; quotas enforced; code plugins available on desktop + Android.
 
 ### P4 — Marketplace & 1.0
-EXT-12 signing, EXT-13 index client, EXT-15 revocation, EXT-14 in-app extension manager, `alloy-community-index` repo + PR validation, CDN; store submissions (App Store, Play, Flathub, winget, Homebrew, F-Droid); security review + external audit of plugin host; device-farm E2E; a11y audit; docs site.
+EXT-12 signing, EXT-13 index client, EXT-15 revocation, EXT-14 in-app extension manager, `alloy-community-index` repo + PR validation, CDN; distribution channels: GitHub Releases (installers + APK), Flathub, winget, Homebrew cask, F-Droid; Play Store optional; no App Store; security review + external audit of plugin host; device-farm E2E; a11y audit; docs site.
 - **Exit (v1.0):** installable signed plugins/themes from marketplace; all budgets green; stores live.
 
 ### P5 — Post-1.0
-Web target (WASM `alloy-core` + IndexedDB store, UI-09), MatrixRTC/LiveKit calls (CORE-16), multi-account, Matrix widgets (MSC1236), curated iOS plugin catalog (pending legal), JS plugin runtime improvements.
+Web target (WASM `alloy-core` + IndexedDB store, UI-09), MatrixRTC/LiveKit calls (CORE-16), multi-account, Matrix widgets (MSC1236), **iOS target** (Tauri iOS shell, APNs + Notification Service Extension, TestFlight/App Store, curated plugin catalog pending legal review), JS plugin runtime improvements.
 
 ## 5. Critical path
 `P0-A → S1 (core skeleton) → protocol freeze → Core 05/06/07 ‖ UI shell/timeline → MVP → alloy-ffi/push → stable core API → WIT → plugin host → marketplace → 1.0`.
-Highest risks: WebView perf on low-end Android (G1), iOS NSE under 30 s budget, sliding-sync spec churn, App Store policy for downloaded code, Pulley interpreter speed on iOS (moot under D7).
+Highest risks: WebView perf on low-end Android (G1), Android background delivery without Google services (UnifiedPush), sliding-sync spec churn, Android OEM battery killers. (iOS risks deferred under D10.)
 
 ## 6. Orchestration rules for implementation
 - One subagent per disjoint crate/dir; shared contracts (`alloy-protocol`, `schemas/`, token schema) are written first by a single owner and frozen per phase.
@@ -119,7 +120,7 @@ Highest risks: WebView perf on low-end Android (G1), iOS NSE under 30 s budget, 
 - Git: remote `origin` = https://github.com/centopw/alloy, branch `main`, author hiep@hce.vn. Until the first functioning version, push directly to `main` after every green logical unit (no red trees); keep GitHub current. History linear, one logical change per commit, Conventional Commits enforced by `scripts/check-commit-msg.sh` (hooks via `just hooks`, CI job `commits`). Stage explicit paths only; never `git add -A` while subagents are working. After the first functioning version, `main` becomes PR-only.
 
 ## 7. Open items (non-blocking, defaults chosen)
-- Oldest device baseline: iPhone 11 / iOS 17, Android 10+ (default).
+- Oldest device baseline: Android 10+ low-end devices (default); iOS out of scope.
 - Default density: Normal; bubbles for DMs, gutter for channels (05 recommendation).
 - Mobile tabs: 4 (Spaces, DMs, Mentions, Settings).
 - Apple Developer ID / Play accounts: needed by P1 signing CI (owner: user).
