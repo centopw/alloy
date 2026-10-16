@@ -8,7 +8,7 @@ Alloy is a privacy-first, extensible Matrix client written in Rust with a Tauri 
 
 ## Features (Planned)
 
-- **Desktop & Mobile:** Native apps for macOS, Windows, Linux, iOS, and Android
+- **Desktop & Mobile:** Native apps for macOS, Windows, Linux, and Android (direct distribution; sideload APK)
 - **End-to-End Encryption:** E2EE via vodozemac; message verification & backup
 - **Deep Customization:**
   - Tier-A: JSON packages (themes, keybindings, slash commands)

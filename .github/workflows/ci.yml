@@ -114,53 +114,6 @@ jobs:
       - name: Build frontend production assets
         run: pnpm build
 
-  mobile-ios:
-    name: Mobile Build (iOS)
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Check iOS project files
-        id: check-ios
-        run: |
-          if [ -n "${{ hashFiles('apps/alloy/src-tauri/gen/apple/**') }}" ]; then
-            echo "has_ios=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_ios=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Install Rust & iOS targets
-        if: steps.check-ios.outputs.has_ios == 'true'
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-ios,x86_64-apple-ios,aarch64-apple-ios-sim
-
-      - name: Install pnpm
-        if: steps.check-ios.outputs.has_ios == 'true'
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9
-
-      - name: Setup Node.js 22
-        if: steps.check-ios.outputs.has_ios == 'true'
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Install UI dependencies
-        if: steps.check-ios.outputs.has_ios == 'true'
-        working-directory: ${{ env.UI_DIR }}
-        run: pnpm install
-
-      - name: Install Tauri CLI
-        if: steps.check-ios.outputs.has_ios == 'true'
-        run: cargo install tauri-cli --locked --version '^2'
-
-      - name: Build iOS app bundle (no watch)
-        if: steps.check-ios.outputs.has_ios == 'true'
-        working-directory: ${{ env.UI_DIR }}
-        run: cargo tauri ios build --no-watch
-
   mobile-android:
     name: Mobile Build (Android)
     runs-on: ubuntu-latest

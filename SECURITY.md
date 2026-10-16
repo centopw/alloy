@@ -62,7 +62,7 @@ Alloy enforces the following architectural constraints per [docs/plan/04-securit
 4. **No downloading unsigned code** (plugins require Minisign/Ed25519 signature;
    marketplace enforces signed-only delivery).
 5. **Platform keychains** for secrets at rest (macOS/Linux/Windows Credential Manager;
-   iOS Keychain; Android Keystore).
+   Android Keystore).
 6. **Memory-safe secret handling** (zeroize + secrecy crates for crypto material).
 
 ## Plugin Sandbox
@@ -72,23 +72,20 @@ Plugins run in **Wasmtime with capabilities-based security:**
 - **Memory**: 32 MB cap per plugin.
 - **Declarations**: Each plugin declares required capabilities (e.g., "read_room_list",
   "fetch_url"); user grants/denies at install.
-- **iOS**: No WASM plugins in v1 (Tier-A JSON packages only); see D7.
-- **Disabled on iOS builds** per product decision; Android enables full Tier-B.
+- **Android:** Full Tier-B WASM plugin support enabled.
 
 ## Code Signing & Notarization
 
-### macOS & iOS
-- Code signed with Apple Developer ID certificate
-- Notarized via Apple's servers (via Tauri + xcrun notarytool)
-- App Store submission requires notarization
+### macOS (Desktop)
+- Code signed with Apple Developer ID certificate for direct distribution
+- Notarized via Apple's servers (via Tauri + xcrun notarytool) for gatekeeper bypass
 
 ### Windows
-- Authenticode-signed EXE/MSI with DigiCert or similar
-- MSIX optional for Microsoft Store; direct download uses signed manifests
+- Authenticode-signed EXE/MSI with DigiCert or similar for direct distribution
 
-### Linux
-- GPG-signed tarballs or Flatpak/AppImage bundles
-- Flathub provides AppImage signing
+### Linux (Desktop)
+- GPG-signed tarballs or AppImage bundles for direct distribution
+- Flatpak/F-Droid submission planned (post-v1)
 
 ### All Platforms
 - **Tauri updater** with Ed25519-signed manifests (no Sparkle outside macOS)
@@ -107,8 +104,8 @@ Plugins run in **Wasmtime with capabilities-based security:**
 
 - [ ] Device certificate pinning (post-MVP)
 - [ ] Local storage encryption (SQLCipher investigation ongoing—see PLAN.md D2 conflict note)
-- [ ] AppAttest (iOS) / SafetyNet (Android) pinning (post-v1)
-- [ ] Formal security audit (planned pre-App Store/Play launch)
+- [ ] SafetyNet (Android) pinning (post-v1)
+- [ ] Formal security audit (planned post-MVP before expanding distribution channels)
 
 ## Contact
 

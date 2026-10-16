@@ -7,7 +7,8 @@
 
 ## Overview
 
-Alloy uses **GitHub Actions** for continuous integration, automated testing, security checks, and binary releases. The pipeline enforces code quality, dependency hygiene, and security best practices across macOS, Windows, and Linux.
+Alloy targets **desktop (macOS, Windows, Linux) and Android** via **direct-install distribution** (no app stores).
+Continuous integration, automated testing, security checks, and binary releases are orchestrated with **GitHub Actions**.
 
 ### Architecture
 
@@ -23,7 +24,7 @@ graph LR
     C --> H["cargo deny check"]
     C --> I["cargo audit"]
     C --> J["pnpm check & build"]
-    C --> K["Mobile builds<br/>conditional"]
+    C --> K["Android build<br/>conditional"]
 
     H --> L{"Pass?"}
     I --> L
@@ -32,10 +33,13 @@ graph LR
 
     D --> O["Build Matrix"]
     O --> P["macOS<br/>Linux<br/>Windows"]
+    O --> P2["Android APK<br/>Signed"]
 
-    P --> Q["Code Sign<br/>Notarize<br/>SBOM"]
+    P --> Q["Code Sign<br/>Notarize (macOS)<br/>SBOM"]
+    P2 --> Q2["apksigner<br/>SHA256SUMS"]
     Q --> R["Draft Release"]
-    R --> S["Upload Artifacts<br/>& Update Info"]
+    Q2 --> R
+    R --> S["Upload Artifacts<br/>& Direct Download"]
 ```
 
 ---
@@ -50,18 +54,18 @@ graph LR
 
 | Job | Runs On | Purpose |
 |-----|---------|---------|
+| `commits` | `ubuntu-latest` | Validate Conventional Commits format |
 | `fmt` | `ubuntu-latest` | Verify Rust code formatting (`rustfmt`) |
-| `clippy-test` | Ubuntu, macOS, Windows | Lint + unit/integration tests (matrix) |
+| `clippy-test` | Ubuntu, macOS, Windows | Lint + unit/integration tests with `wasm32-wasip2` target |
 | `cargo-deny` | `ubuntu-latest` | License audit + banned crates check |
 | `ui` | `ubuntu-latest` | SvelteKit type-check + Vite build |
-| `mobile-ios` | `macos-latest` | iOS app bundle (gated: only if `apps/alloy/src-tauri/gen/apple/` exists) |
 | `mobile-android` | `ubuntu-latest` | Android APK build (gated: only if `apps/alloy/src-tauri/gen/android/` exists) |
 
 **Key Features:**
-- Caches `.cargo` registry & targets across runs (Swatinem/rust-cache)
+- Caches `.cargo` registry & targets across runs (`Swatinem/rust-cache@v2`)
 - Caches pnpm dependencies
-- Mobile jobs run conditionally: check for generated platform directories before installing SDKs
-- No secrets required
+- Android build job runs conditionally: gates execution on presence of generated project directory before installing SDKs
+- No secrets required for CI PR validation
 
 **Duration:** ~15–25 minutes per OS
 
@@ -79,8 +83,8 @@ graph LR
 | `audit` | Run `cargo-audit` (RustSec advisory DB) + `cargo deny` (licenses, bans, sources) |
 
 **Key Features:**
-- Uses `rustsec/audit-check@v2` action for convenient GitHub integration
-- Fails on known CVEs but allows warnings for unmaintained transitive deps
+- Uses `rustsec/audit-check@v2` action for GitHub integration
+- Fails on known CVEs but allows warnings for unmaintained transitive dependencies
 - Runs independently from PR checks to catch new vulnerabilities post-merge
 
 ### 3. `.github/workflows/release.yml`
@@ -91,28 +95,34 @@ graph LR
 
 | Job | Platforms | Purpose |
 |-----|-----------|---------|
-| `build-tauri` | macOS, Linux, Windows | Build signed desktop bundles + SBOM |
+| `build-tauri` | macOS, Linux, Windows | Build signed desktop bundles + CycloneDX SBOM |
+| `build-android` | Android (Ubuntu runner) | Build signed Android APK via `apksigner` + `SHA256SUMS` |
 
 **Key Features:**
-- Builds UI assets in advance (single `pnpm build` per matrix)
+- Desktop bundles built via `tauri-apps/tauri-action@v0`
+- Android APK built via `cargo tauri android build --apk` and signed with `apksigner`
+- Computes `SHA256SUMS` checksums
 - Generates CycloneDX SBOM per platform (JSON format)
-- Uses `tauri-apps/tauri-action@v0` to orchestrate platform-specific builds
-- Creates **draft release** (manual publish in GitHub UI)
-- Uploads SBOM + bundles as release assets
+- Creates **draft release** on GitHub Releases for direct-install downloads
+- Uploads SBOM, desktop bundles, signed APK, and `SHA256SUMS` as release assets
 
-**Code Signing & Notarization:**
+**Code Signing Secrets:**
 
 | Platform | Secret | Purpose | Status |
 |----------|--------|---------|--------|
-| **macOS** | `APPLE_CERTIFICATE` (Base64 P12) | Code signing certificate | TODO: Deploy in repo settings |
+| **macOS** | `APPLE_CERTIFICATE` (Base64 P12) | Developer ID application certificate for macOS desktop DMG/App | TODO: Deploy in repo settings |
 | | `APPLE_CERTIFICATE_PASSWORD` | P12 password | TODO |
-| | `APPLE_SIGNING_IDENTITY` | Team ID + code-signing identity string | TODO |
-| | `APPLE_ID` | Apple Developer account email | TODO |
-| | `APPLE_PASSWORD` | App-specific password (not general account password) | TODO |
+| | `APPLE_SIGNING_IDENTITY` | Team ID + Developer ID application identity string | TODO |
+| | `APPLE_ID` | Apple Developer account email (for desktop notarytool) | TODO |
+| | `APPLE_PASSWORD` | App-specific password for desktop notarytool | TODO |
 | | `APPLE_TEAM_ID` | Apple Developer Team ID (10 alphanumeric) | TODO |
-| **Windows** | `WINDOWS_CERTIFICATE` (Base64 PFX) | Code signing certificate | TODO |
+| **Windows** | `WINDOWS_CERTIFICATE` (Base64 PFX) | Authenticode code signing certificate | TODO |
 | | `WINDOWS_CERTIFICATE_PASSWORD` | PFX password | TODO |
-| **All** | `TAURI_SIGNING_PRIVATE_KEY` (Base64 PEM) | Ed25519 private key for updater manifest signing | TODO |
+| **Android** | `ANDROID_KEYSTORE_BASE64` | Base64-encoded Java release keystore (`.keystore`/`.jks`) | TODO |
+| | `ANDROID_KEYSTORE_PASSWORD` | Keystore password | TODO |
+| | `ANDROID_KEY_ALIAS` | Key alias in keystore | TODO |
+| | `ANDROID_KEY_PASSWORD` | Key password | TODO |
+| **All Desktop** | `TAURI_SIGNING_PRIVATE_KEY` (Base64 PEM) | Ed25519 private key for direct Tauri updater manifest signing | TODO |
 | | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Passphrase for private key | TODO |
 | | `GITHUB_TOKEN` | Auto-supplied by GitHub Actions | Already available |
 
@@ -149,8 +159,6 @@ This executes:
 5. `cargo audit` (security advisories)
 6. `pnpm install`, `pnpm check`, `pnpm build` (UI)
 
-Expected result: **0 errors, 4 warnings (from transitive deps in audit)**.
-
 ---
 
 ## Security Policy
@@ -163,8 +171,8 @@ Expected result: **0 errors, 4 warnings (from transitive deps in audit)**.
 
 1. **Advisories**
    - Blocks: Yanked crates (production versions)
-   - Warns: Unmaintained crates (e.g., `anymap2`, `derivative`, `proc-macro-error` from upstream deps)
-   - Action: None (warnings allowed; new CVEs fail)
+   - Warns: Unmaintained crates (e.g., `anymap2`, `derivative`, `proc-macro-error` from upstream dependencies)
+   - Action: Known vulnerabilities are denied; unmaintained transitive warnings are permitted.
 
 2. **Licenses**
    - Allowed: Apache-2.0, Apache-2.0 WITH LLVM-exception, MIT, BSD-2/3-Clause, ISC, Unicode-3.0/DFS-2016, MPL-2.0, Zlib, CC0-1.0, OpenSSL, BSL-1.0, CDLA-Permissive-2.0
@@ -172,7 +180,7 @@ Expected result: **0 errors, 4 warnings (from transitive deps in audit)**.
    - Workspace members: Ignored (not checked)
 
 3. **Bans**
-   - Multiple versions: Warns (e.g., `tokio v1.0` + `tokio v1.40` in tree)
+   - Multiple versions: Warns
    - Highlight: All paths (simplest + lowest-version)
 
 4. **Sources**
@@ -182,25 +190,26 @@ Expected result: **0 errors, 4 warnings (from transitive deps in audit)**.
 ### Audit Checks (`cargo-audit`)
 
 - Scans `Cargo.lock` against RustSec advisory database
-- **Fails** on known CVEs (CRITICAL, HIGH, MEDIUM)
+- **Fails** on known CVEs
 - **Warns** on unmaintained crate notices (allowed in CI)
-- **Does not** block low-severity advisories by default
 
 ### Coverage
 
 - **Rust crates:** Workspace + all transitive dependencies
-- **Frontend:** pnpm dependency tree (via Node.js package.json)
-- **Mobile platforms:** Gated; only run if Tauri iOS/Android directories exist
+- **Frontend:** pnpm dependency tree (`apps/alloy`)
+- **Android platform:** Gated; runs when Tauri Android directory exists
 
 ---
 
 ## Release Process
 
-### Prerequisites
+### Direct Distribution (No App Stores)
 
-1. **Secrets configured** in GitHub repo settings (see table above)
-2. **Git tags** created locally: `git tag v0.1.0`
-3. **Changelog** prepared (manually added to release draft post-CI)
+Alloy binaries are distributed directly to users via GitHub Releases and direct downloads:
+- **macOS:** Notarized `.dmg` / `.app` disk image
+- **Windows:** Authenticode-signed `.exe` / `.msi` installer
+- **Linux:** AppImage + `.tar.gz` bundle
+- **Android:** Sideloadable signed `.apk`
 
 ### Steps
 
@@ -212,107 +221,44 @@ Expected result: **0 errors, 4 warnings (from transitive deps in audit)**.
    ```
 
 2. **GitHub Actions runs:** `release.yml` is triggered
-   - Builds all three platforms in parallel
-   - Signs & notarizes binaries (requires secrets)
-   - Generates SBOM per platform
+   - Builds all three desktop platforms + Android APK in parallel/sequence
+   - Signs desktop binaries & signs Android APK with `apksigner`
+   - Generates SBOM per platform and `SHA256SUMS`
    - Creates draft release with all artifacts
 
-3. **Manual steps:**
+3. **Publishing:**
    - Review draft release in GitHub UI
-   - Add detailed release notes & changelog
+   - Add release notes & changelog
    - Click "Publish release"
 
 ### Artifacts
 
 **Each release contains:**
-- macOS `.app` bundle (code-signed, notarized)
-- macOS `.dmg` (installer)
+- macOS `.app` bundle / `.dmg` (code-signed, notarized for desktop gatekeeper)
 - Windows `.exe` / `.msi` (signed)
 - Linux AppImage + tarball
-- `alloy-sbom-{macos,linux,windows}.json` (SBOM per platform)
-- `update.json` (Tauri updater manifest, auto-generated)
-
----
-
-## TODO & Open Items
-
-### Pre-Production (Before v1.0)
-
-- [ ] **macOS Secrets**
-  - [ ] Obtain Apple Developer ID certificate (yearly ~$99)
-  - [ ] Generate app-specific password (not general account password)
-  - [ ] Add `APPLE_CERTIFICATE` (P12 → Base64), `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` to GitHub repo secrets
-
-- [ ] **Windows Secrets**
-  - [ ] Obtain code-signing certificate (DigiCert, GoDaddy, or similar; ~$200/year)
-  - [ ] Generate PFX file: `openssl pkcs12 -export -in cert.crt -inkey key.key -out cert.pfx`
-  - [ ] Add `WINDOWS_CERTIFICATE` (PFX → Base64), `WINDOWS_CERTIFICATE_PASSWORD` to secrets
-
-- [ ] **Tauri Updater Keys**
-  - [ ] Generate Ed25519 keypair: `cargo tauri signer generate`
-  - [ ] Store private key as Base64 in `TAURI_SIGNING_PRIVATE_KEY` secret
-  - [ ] Publish public key in app or docs
-
-- [ ] **Verify mobile build gating:** Test that iOS/Android jobs skip when directories don't exist
-
-- [ ] **Synapse test setup:** Confirm `tests/synapse/docker-compose.yml` exists (owned by another agent)
-
-### Post-v1.0 Enhancements
-
-- [ ] **Device certificate pinning:** TLS pin Synapse homeserver certs in app
-- [ ] **Signed APK builds:** Enable APK signing in Android release CI
-- [ ] **F-Droid submission:** Build & sign Flatpak/APK for F-Droid distribution
-- [ ] **Formal security audit:** Third-party audit pre-App Store / Play Store launch
-- [ ] **Attestation:** GitHub release artifact attestation (SLSA 3+)
-
----
-
-## Performance & Costs
-
-### GitHub Actions
-
-- **macOS runners:** $0.10/minute (most expensive)
-- **Linux runners:** $0.004/minute (cheapest)
-- **Windows runners:** $0.006/minute
-
-**Estimated cost per PR:** ~$0.10–0.30 (depending on concurrent runs)  
-**Free tier:** 2,000 minutes/month (sufficient for personal/small teams)
+- Android `.apk` (signed with release keystore)
+- `alloy-sbom-{macos,linux,windows}.json` (CycloneDX SBOMs)
+- `SHA256SUMS` (checksum file for integrity verification)
+- `update.json` (Tauri direct updater manifest)
 
 ---
 
 ## Troubleshooting
 
-### CI Fails: "cargo deny check"
+### Android APK build fails
 
-**Cause:** Unlicensed or incompatible license in new dependency  
-**Fix:**
-1. Check the error message for the crate name & license
-2. If legitimate, add to `deny.toml` `[licenses] allow` list
-3. Re-run `cargo deny check` locally to verify
-
-### CI Fails: "cargo audit"
-
-**Cause:** New CVE published in RustSec DB  
-**Fix:**
-1. Run `cargo audit` locally to see details
-2. If dependency is unmaintained, file issue / report to crate maintainer
-3. Upgrade to patched version if available
-4. Or ignore in `[advisories] ignore` if false positive / low-risk
-
-### Mobile builds don't run
-
-**Check:** Do directories exist?
+**Check:** Does Android project directory exist?
 ```bash
-test -d apps/alloy/src-tauri/gen/apple && echo "iOS configured"
 test -d apps/alloy/src-tauri/gen/android && echo "Android configured"
 ```
 
-If missing, mobile jobs are skipped (expected during development).
+If missing, the Android CI job is safely skipped until generated.
 
-### macOS notarization fails
+### macOS desktop notarization fails
 
-**Common cause:** Apple ID password is not an app-specific password  
-**Fix:** Generate app-specific password in [Apple ID settings](https://appleid.apple.com/account/manage)
+**Common cause:** Apple ID password is not an app-specific password.  
+**Fix:** Generate app-specific password in Apple ID settings for desktop notarytool submission.
 
 ---
 
@@ -322,5 +268,5 @@ If missing, mobile jobs are skipped (expected during development).
 - **GitHub Actions:** https://docs.github.com/en/actions
 - **cargo-deny:** https://embarkstudios.github.io/cargo-deny/
 - **cargo-audit:** https://rustsec.org/
-- **ActionLint:** https://github.com/rhysd/actionlint (YAML validation)
-- **CycloneDX:** https://cyclonedx.org/ (SBOM standard)
+- **ActionLint:** https://github.com/rhysd/actionlint
+- **CycloneDX:** https://cyclonedx.org/

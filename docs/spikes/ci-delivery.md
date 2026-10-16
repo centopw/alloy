@@ -51,7 +51,7 @@
 - **Command:** `python3 -c "import glob, yaml; [yaml.safe_load(open(f)) for f in glob.glob('.github/workflows/*.yml')]"`
 - **Output:** All workflows parsed successfully.
 - **Surprises & Findings:**
-  - In GitHub Actions expressions, `hashFiles` is not valid at `jobs.<id>.if` context (only within `steps`). Implemented step-level checks gating mobile build jobs (`apps/alloy/src-tauri/gen/apple/**` and `apps/alloy/src-tauri/gen/android/**`) cleanly without using `workflow_dispatch` stubs.
+  - In GitHub Actions expressions, `hashFiles` is not valid at `jobs.<id>.if` context (only within `steps`). Implemented step-level checks gating the Android build job (`apps/alloy/src-tauri/gen/android/**`) cleanly without using `workflow_dispatch` stubs.
 
 ### 5. Frontend & Documentation Integration
 - Verified `apps/alloy` package layout: UI scripts `check` and `build` wired into `just ui-check`, `just ui-build`, and `ci.yml` via configurable `UI_DIR` environment variable.
