@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alloy.chat/schemas/v1/plugin-manifest.schema.json",
+  "title": "AlloyPluginManifest",
+  "description": "Manifest schema for Alloy WASM plugins",
+  "type": "object",
+  "required": ["id", "version", "api_version", "entrypoint", "permissions"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9._-]+$"
+    },
+    "name": {
+      "type": "string"
+    },
+    "version": {
+      "type": "string"
+    },
+    "api_version": {
+      "type": "string"
+    },
+    "entrypoint": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "permissions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": [
+              "room:read",
+              "room:send",
+              "network:fetch",
+              "storage:kv",
+              "ui:slot",
+              "clipboard:write",
+              "notifications:send"
+            ]
+          },
+          "scope": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "hosts": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "quota_kb": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "slots": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "contributes": {
+      "type": "object",
+      "properties": {
+        "commands": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "title"],
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" },
+              "description": { "type": "string" }
+            }
+          }
+        },
+        "panels": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "title", "slot"],
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" },
+              "icon": { "type": "string" },
+              "slot": { "type": "string" }
+            }
+          }
+        },
+        "message_renderers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id"],
+            "properties": {
+              "id": { "type": "string" },
+              "description": { "type": "string" }
+            }
+          }
+        },
+        "themes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "path"],
+            "properties": {
+              "id": { "type": "string" },
+              "path": { "type": "string" }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

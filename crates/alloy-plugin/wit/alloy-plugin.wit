@@ -1,0 +1,57 @@
+package alloy:plugin;
+
+interface types {
+    record room-info {
+        id: string,
+        name: option<string>,
+        topic: option<string>,
+        is-direct: bool,
+    }
+
+    record room-event {
+        event-id: string,
+        room-id: string,
+        sender: string,
+        body: string,
+        timestamp: u64,
+    }
+
+    enum log-level {
+        debug,
+        info,
+        warn,
+        error,
+    }
+}
+
+interface host {
+    use types.{log-level};
+
+    /// Logging (always allowed)
+    log: func(level: log-level, message: string);
+
+    /// Scoped key-value storage (gated by storage:kv capability)
+    kv-get: func(key: string) -> result<option<list<u8>>, string>;
+    kv-set: func(key: string, value: list<u8>) -> result<_, string>;
+
+    /// Send a message to a room (gated by room:send capability)
+    send-message: func(room-id: string, body: string) -> result<string, string>;
+}
+
+interface guest {
+    use types.{room-event};
+
+    /// Called once when the plugin is loaded
+    init: func() -> result<_, string>;
+
+    /// Called for each room event (e.g. new messages)
+    on-event: func(event: room-event) -> result<_, string>;
+
+    /// Render a declarative JSON view for a panel. Returns a JSON string describing the UI.
+    render-panel: func() -> result<string, string>;
+}
+
+world alloy-plugin {
+    import host;
+    export guest;
+}
