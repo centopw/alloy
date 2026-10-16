@@ -62,3 +62,28 @@ ci:
 # Enable repo git hooks (Conventional Commits check on commit-msg and pre-push)
 hooks:
     git config core.hooksPath .githooks
+
+# Generate changelog from Conventional Commits via git-cliff
+changelog *args:
+    @command -v git-cliff >/dev/null 2>&1 || (echo "Error: git-cliff is not installed. Install via: brew install git-cliff or cargo install git-cliff" && exit 1)
+    git-cliff {{args}}
+
+# Build unsigned desktop bundle locally
+nightly-local:
+    pnpm -C {{UI_DIR}} install
+    pnpm -C {{UI_DIR}} build
+    pnpm -C apps/alloy tauri build
+
+# Build Android debug APK (requires JAVA_HOME (JDK 17), ANDROID_HOME, and target e.g. aarch64)
+android-debug target="aarch64":
+    @test -n "$$JAVA_HOME" || (echo "Error: JAVA_HOME is not set. Android build requires JDK 17." && exit 1)
+    @test -n "$$ANDROID_HOME" || (echo "Error: ANDROID_HOME is not set. Android build requires Android SDK/NDK." && exit 1)
+    rustup target add {{target}}-linux-android 2>/dev/null || true
+    pnpm -C {{UI_DIR}} install
+    pnpm -C {{UI_DIR}} build
+    pnpm -C apps/alloy tauri android build --apk --debug --target {{target}}
+
+# Run timeline scroll performance benchmark script via headless Chrome
+perf-ui:
+    pnpm -C apps/alloy/ui build
+    node apps/alloy/ui/scripts/measure-scroll-perf.mjs

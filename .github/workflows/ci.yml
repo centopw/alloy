@@ -27,7 +27,7 @@ jobs:
             case "${{ github.event.before }}" in 0000000*) range="${{ github.sha }}" ;; esac
           fi
           for c in $(git rev-list "$range"); do
-            git log -1 --format=%s "$c" | scripts/check-commit-msg.sh - || { echo "::error::bad commit $c"; exit 1; }
+            git log -1 --format=%B "$c" | scripts/check-commit-msg.sh - || { echo "::error::bad commit $c"; exit 1; }
           done
 
   fmt:
@@ -73,6 +73,16 @@ jobs:
       - name: Run workspace tests
         run: cargo test --workspace --locked
 
+      - name: theme-css-check
+        if: matrix.os == 'ubuntu-latest' && hashFiles('crates/alloy-theme/src/bin/gen-css.rs') != ''
+        run: cargo run -p alloy-theme --bin gen-css -- --check
+
+      - name: protocol-ts-check
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          cargo run -p alloy-protocol --bin generate-types
+          git diff --exit-code apps/alloy/ui/src/lib/generated
+
   cargo-deny:
     name: Cargo Deny (Licenses & Bans)
     runs-on: ubuntu-latest
@@ -113,6 +123,16 @@ jobs:
 
       - name: Build frontend production assets
         run: pnpm build
+
+      - name: ui-test
+        run: |
+          if [ -f "package.json" ] && grep -q '"test"' package.json; then
+            pnpm test
+          elif [ -f "ui/package.json" ] && grep -q '"test"' ui/package.json; then
+            pnpm --prefix ui test
+          else
+            echo "No test script found in package.json; skipping vitest"
+          fi
 
   mobile-android:
     name: Mobile Build (Android)
@@ -171,3 +191,43 @@ jobs:
         if: steps.check-android.outputs.has_android == 'true'
         working-directory: ${{ env.UI_DIR }}
         run: cargo tauri android build --apk
+
+  synapse-integration:
+    name: Synapse Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry & targets
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            apps/alloy/src-tauri
+
+      - name: Start Synapse Homeserver
+        run: |
+          bash tests/synapse/start.sh
+          bash tests/synapse/register_test_users.sh || true
+
+      - name: Run Synapse integration tests
+        env:
+          ALLOY_TEST_HS: http://localhost:8008
+        run: cargo test -p alloy-core --test synapse_integration -- --nocapture
+
+      - name: Dump Docker logs on failure
+        if: failure()
+        run: |
+          mkdir -p /tmp/synapse-logs
+          docker compose -f tests/synapse/docker-compose.yml logs > /tmp/synapse-logs/synapse.log 2>&1 || true
+
+      - name: Upload Synapse Docker logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: synapse-docker-logs
+          path: /tmp/synapse-logs/synapse.log
+          if-no-files-found: ignore
