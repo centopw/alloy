@@ -12,24 +12,35 @@
 set -euo pipefail
 REPO="${ALLOY_REPO:-centopw/alloy}"; OWNER="${ALLOY_PROJECT_OWNER:-centopw}"; PN="${ALLOY_PROJECT_NUMBER:-2}"
 
-project_json() { gh project view "$PN" --owner "$OWNER" --format json; }
-fields_json()  { gh project field-list "$PN" --owner "$OWNER" --format json; }
+CACHE="${ALLOY_BOARD_CACHE:-${TMPDIR:-/tmp}/alloy-board-cache-$PN.json}"
 
-item_id_for_issue() { # echoes project item id (adds issue to project if absent)
-  local num="$1" url id
-  id=$(gh project item-list "$PN" --owner "$OWNER" --format json -L 500 | jq -r --argjson n "$num" '.items[]|select(.content.number==$n)|.id' | head -n1)
+meta() { # project id + field/option ids, cached (delete the cache file to refresh)
+  if [ ! -s "$CACHE" ]; then
+    local pid fj
+    pid=$(gh project view "$PN" --owner "$OWNER" --format json | jq -r .id)
+    fj=$(gh project field-list "$PN" --owner "$OWNER" --format json)
+    jq -n --arg pid "$pid" --argjson f "$fj" '{project_id:$pid, fields:$f.fields}' >"$CACHE"
+  fi
+  cat "$CACHE"
+}
+
+item_id_for_issue() { # echoes project item id (adds issue to project if absent); one GraphQL query
+  local num="$1" pid id
+  pid=$(meta | jq -r .project_id)
+  id=$(gh api graphql -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){issue(number:$n){projectItems(first:20){nodes{id project{id}}}}}}' \
+        -f o="${REPO%%/*}" -f r="${REPO##*/}" -F n="$num" 2>/dev/null \
+        | jq -r --arg pid "$pid" '.data.repository.issue.projectItems.nodes[]|select(.project.id==$pid)|.id' | head -n1 || true)
   if [ -z "$id" ]; then
-    url="https://github.com/$REPO/issues/$num"
-    id=$(gh project item-add "$PN" --owner "$OWNER" --url "$url" --format json | jq -r .id)
+    id=$(gh project item-add "$PN" --owner "$OWNER" --url "https://github.com/$REPO/issues/$num" --format json | jq -r .id)
   fi
   echo "$id"
 }
 
 set_field() { # item_id field_name option_name
-  local item="$1" field="$2" value="$3" pid fj fid oid
-  pid=$(project_json | jq -r .id); fj=$(fields_json)
-  fid=$(jq -r --arg f "$field" '.fields[]|select(.name==$f)|.id' <<<"$fj")
-  oid=$(jq -r --arg f "$field" --arg v "$value" '.fields[]|select(.name==$f)|.options[]?|select(.name==$v)|.id' <<<"$fj")
+  local item="$1" field="$2" value="$3" m pid fid oid
+  m=$(meta); pid=$(jq -r .project_id <<<"$m")
+  fid=$(jq -r --arg f "$field" '.fields[]|select(.name==$f)|.id' <<<"$m")
+  oid=$(jq -r --arg f "$field" --arg v "$value" '.fields[]|select(.name==$f)|.options[]?|select(.name==$v)|.id' <<<"$m")
   [ -n "$fid" ] && [ -n "$oid" ] || { echo "unknown field/value: $field=$value" >&2; exit 2; }
   gh project item-edit --id "$item" --project-id "$pid" --field-id "$fid" --single-select-option-id "$oid" >/dev/null
 }

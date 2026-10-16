@@ -43,6 +43,7 @@ Issue body (use the *Work item* form) must contain:
 - **Verification** (exact commands).
 
 Rules for agents:
+- Agents never write to the board or issues (rate limits, single writer): the orchestrator updates status in batches (`scripts/board.sh`, which caches field ids and uses one GraphQL query per item).
 - Read the issue (`gh issue view N`), `docs/PLAN.md`, and the relevant `docs/plan/*`.
 - Edit only owned paths. **Never run git write commands** (add/commit/reset/stash/checkout/rm) and never delete files you did not create - the orchestrator commits (`type(scope): ... + Refs #N`) after independent verification.
 - Run formatters/linters only for your own crate/package; the orchestrator runs workspace gates once per wave.
