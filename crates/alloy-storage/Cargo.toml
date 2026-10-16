@@ -1,0 +1,25 @@
+[package]
+name = "alloy-storage"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+[lints]
+workspace = true
+
+[dependencies]
+alloy-protocol = { path = "../alloy-protocol" }
+async-trait = "0.1"
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1.0"
+tokio = { version = "1.0", features = ["sync", "rt"] }
+tracing = "0.1"
+keyring = { version = "3.0", optional = true }
+
+[dev-dependencies]
+tokio = { version = "1.0", features = ["full"] }
+
+[features]
+default = ["keyring"]
+keyring = ["dep:keyring"]
