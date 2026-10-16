@@ -1,0 +1,19 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/*",
+    "apps/alloy/src-tauri",
+]
+# apps/alloy/src-tauri joins the workspace when scaffolded (see docs/PLAN.md §3)
+
+[workspace.package]
+edition = "2024"
+license = "Apache-2.0"
+rust-version = "1.90"
+repository = "https://github.com/centopw/alloy"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
