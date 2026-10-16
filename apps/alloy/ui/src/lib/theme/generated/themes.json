@@ -1,0 +1,62 @@
+[
+  {
+    "id": "alloy-amoled",
+    "name": "Alloy AMOLED",
+    "mode": "amoled",
+    "author": "Alloy Team",
+    "version": "0.1.0",
+    "passes_aa": true,
+    "passes_aaa": false,
+    "contrast": {
+      "passes_aa": true,
+      "passes_aaa": false,
+      "checks_count": 8,
+      "failures": []
+    }
+  },
+  {
+    "id": "alloy-dark",
+    "name": "Alloy Dark",
+    "mode": "dark",
+    "author": "Alloy Team",
+    "version": "0.1.0",
+    "passes_aa": true,
+    "passes_aaa": false,
+    "contrast": {
+      "passes_aa": true,
+      "passes_aaa": false,
+      "checks_count": 8,
+      "failures": []
+    }
+  },
+  {
+    "id": "alloy-light",
+    "name": "Alloy Light",
+    "mode": "light",
+    "author": "Alloy Team",
+    "version": "0.1.0",
+    "passes_aa": true,
+    "passes_aaa": false,
+    "contrast": {
+      "passes_aa": true,
+      "passes_aaa": false,
+      "checks_count": 8,
+      "failures": []
+    }
+  },
+  {
+    "id": "midnight-ocean",
+    "name": "Midnight Ocean",
+    "mode": "dark",
+    "author": "Alloy Community",
+    "version": "1.0.0",
+    "passes_aa": true,
+    "passes_aaa": false,
+    "contrast": {
+      "passes_aa": true,
+      "passes_aaa": false,
+      "checks_count": 8,
+      "failures": []
+    }
+  }
+]

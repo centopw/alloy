@@ -6,6 +6,42 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
     <title>Alloy</title>
     %sveltekit.head%
+  <script>
+    // No-flash theme bootstrap: runs before first paint
+    (function () {
+      try {
+        const stored = localStorage.getItem('alloy.theme.v1');
+        if (stored) {
+          const prefs = JSON.parse(stored);
+          const theme = prefs.theme || 'alloy-dark';
+          const density = prefs.density || 'normal';
+          const style = prefs.messageStyle || 'bubble';
+          const reducedMotion = prefs.prefersReducedMotion
+            ? 'true'
+            : window.matchMedia('(prefers-reduced-motion: reduce)').matches
+              ? 'true'
+              : 'false';
+          document.documentElement.setAttribute('data-theme', theme);
+          document.documentElement.setAttribute('data-density', density);
+          document.documentElement.setAttribute('data-message-style', style);
+          document.documentElement.setAttribute('data-reduced-motion', reducedMotion);
+        } else {
+          // Fallback to system preference or 'alloy-dark'
+          const theme = window.matchMedia('(prefers-color-scheme: light)').matches ? 'alloy-light' : 'alloy-dark';
+          document.documentElement.setAttribute('data-theme', theme);
+          document.documentElement.setAttribute('data-density', 'normal');
+          document.documentElement.setAttribute('data-message-style', 'bubble');
+          document.documentElement.setAttribute('data-reduced-motion', window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'true' : 'false');
+        }
+      } catch (e) {
+        // Silently fallback on error
+        document.documentElement.setAttribute('data-theme', 'alloy-dark');
+        document.documentElement.setAttribute('data-density', 'normal');
+        document.documentElement.setAttribute('data-message-style', 'bubble');
+        document.documentElement.setAttribute('data-reduced-motion', 'false');
+      }
+    })();
+  </script>
   </head>
   <body data-sveltekit-preload-data="hover">
     <div style="display: contents">%sveltekit.body%</div>

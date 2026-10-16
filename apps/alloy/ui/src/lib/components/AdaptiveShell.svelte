@@ -4,22 +4,16 @@
   import Timeline from "./Timeline.svelte";
   import type { Space, Room, Member } from "../mock/types.js";
   import { generateMockSpaces, generateMockMembers } from "../mock/generator.js";
+  import { themeStore, type Theme } from "../theme/theme.svelte";
 
   // Theming
-  type Theme = "dark" | "light" | "amoled";
-  let currentTheme = $state<Theme>("dark");
-
-  function setTheme(t: Theme) {
-    currentTheme = t;
-    if (typeof document !== "undefined") {
-      document.documentElement.setAttribute("data-theme", t);
-    }
+  function setTheme(t: "dark" | "light" | "amoled" | Theme) {
+    const themeId = t === "dark" ? "alloy-dark" : t === "light" ? "alloy-light" : t === "amoled" ? "alloy-amoled" : t;
+    themeStore.setTheme(themeId);
   }
 
   function cycleTheme() {
-    if (currentTheme === "dark") setTheme("light");
-    else if (currentTheme === "light") setTheme("amoled");
-    else setTheme("dark");
+    themeStore.cycleTheme();
   }
 
   // Shell Layout & State
@@ -51,12 +45,11 @@
   }
 
   onMount(() => {
-    // Read persisted theme or default to dark
-    setTheme(currentTheme);
+    // Theme initialized via themeStore
   });
 </script>
 
-<div class="alloy-shell" data-theme={currentTheme}>
+<div class="alloy-shell" data-theme={themeStore.activeTheme}>
   <Hud bind:visible={hudVisible} />
 
   <!-- 1. SPACES RAIL -->
@@ -84,7 +77,7 @@
         onclick={cycleTheme}
         title="Cycle theme (Dark / Light / AMOLED)"
       >
-        {#if currentTheme === "dark"}🌙{:else if currentTheme === "light"}☀️{:else}🖤{/if}
+        {#if themeStore.activeTheme === "alloy-dark"}🌙{:else if themeStore.activeTheme === "alloy-light"}☀️{:else}🖤{/if}
       </button>
       <button
         class="icon-btn"
@@ -202,9 +195,9 @@
         <div class="drawer-section">
           <div class="detail-label">THEME ENGINE</div>
           <div class="theme-switcher-grid">
-            <button class="theme-pill" class:selected={currentTheme === "dark"} onclick={() => setTheme("dark")}>Dark</button>
-            <button class="theme-pill" class:selected={currentTheme === "light"} onclick={() => setTheme("light")}>Light</button>
-            <button class="theme-pill" class:selected={currentTheme === "amoled"} onclick={() => setTheme("amoled")}>AMOLED</button>
+            <button class="theme-pill" class:selected={themeStore.activeTheme === "alloy-dark"} onclick={() => setTheme("alloy-dark")}>Dark</button>
+            <button class="theme-pill" class:selected={themeStore.activeTheme === "alloy-light"} onclick={() => setTheme("alloy-light")}>Light</button>
+            <button class="theme-pill" class:selected={themeStore.activeTheme === "alloy-amoled"} onclick={() => setTheme("alloy-amoled")}>AMOLED</button>
           </div>
         </div>
       </div>
@@ -228,48 +221,48 @@
     width: 100vw;
     height: 100vh;
     overflow: hidden;
-    background-color: var(--alloy-bg-base);
-    color: var(--alloy-text-primary);
-    font-family: var(--alloy-font-sans);
+    background-color: var(--alloy-color-surface-canvas);
+    color: var(--alloy-color-text-primary);
+    font-family: var(--alloy-typography-font-family-sans);
     position: relative;
   }
 
   /* 1. Spaces Rail */
   .spaces-rail {
     width: 64px;
-    background-color: var(--alloy-bg-surface);
-    border-right: 1px solid var(--alloy-border-subtle);
+    background-color: var(--alloy-color-surface-panel);
+    border-right: 1px solid var(--alloy-color-border-subtle);
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: var(--alloy-space-3) 0;
+    padding: var(--alloy-spacing-scale-3) 0;
     flex-shrink: 0;
     z-index: 5;
   }
 
   .rail-header {
-    margin-bottom: var(--alloy-space-4);
+    margin-bottom: var(--alloy-spacing-scale-4);
   }
 
   .logo-badge {
     width: 40px;
     height: 40px;
-    border-radius: var(--alloy-radius-lg);
-    background: linear-gradient(135deg, var(--alloy-accent), #a855f7);
-    color: var(--alloy-accent-text);
+    border-radius: var(--alloy-radii-lg);
+    background: linear-gradient(135deg, var(--alloy-color-accent-primary), #a855f7);
+    color: var(--alloy-color-text-on-accent);
     display: flex;
     align-items: center;
     justify-content: center;
     font-weight: 800;
     font-size: 20px;
-    box-shadow: var(--alloy-shadow-sm);
+    box-shadow: var(--alloy-elevation-sm);
   }
 
   .spaces-list {
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-space-2);
+    gap: var(--alloy-spacing-scale-2);
     width: 100%;
     align-items: center;
   }
@@ -277,10 +270,10 @@
   .space-item {
     width: 44px;
     height: 44px;
-    border-radius: var(--alloy-radius-md);
-    background: var(--alloy-bg-overlay);
-    border: 1px solid var(--alloy-border-subtle);
-    color: var(--alloy-text-primary);
+    border-radius: var(--alloy-radii-md);
+    background: var(--alloy-color-surface-elevated);
+    border: 1px solid var(--alloy-color-border-subtle);
+    color: var(--alloy-color-text-primary);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -290,30 +283,30 @@
   }
 
   .space-item:hover {
-    background: var(--alloy-bg-active);
-    border-color: var(--alloy-border-default);
+    background: var(--alloy-color-surface-hover);
+    border-color: var(--alloy-color-border-prominent);
   }
 
   .space-item.active {
-    background: var(--alloy-accent);
-    color: var(--alloy-accent-text);
-    border-radius: var(--alloy-radius-lg);
-    box-shadow: 0 0 10px var(--alloy-accent-subtle);
+    background: var(--alloy-color-accent-primary);
+    color: var(--alloy-color-text-on-accent);
+    border-radius: var(--alloy-radii-lg);
+    box-shadow: 0 0 10px var(--alloy-color-accent-subtle);
   }
 
   .rail-footer {
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-space-2);
+    gap: var(--alloy-spacing-scale-2);
   }
 
   .icon-btn {
     width: 36px;
     height: 36px;
-    border-radius: var(--alloy-radius-md);
-    background: var(--alloy-bg-overlay);
-    border: 1px solid var(--alloy-border-subtle);
-    color: var(--alloy-text-secondary);
+    border-radius: var(--alloy-radii-md);
+    background: var(--alloy-color-surface-elevated);
+    border: 1px solid var(--alloy-color-border-subtle);
+    color: var(--alloy-color-text-secondary);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -323,20 +316,20 @@
   }
 
   .icon-btn:hover {
-    background: var(--alloy-bg-active);
-    color: var(--alloy-text-primary);
+    background: var(--alloy-color-surface-hover);
+    color: var(--alloy-color-text-primary);
   }
 
   .icon-btn.active {
-    color: var(--alloy-online);
-    border-color: var(--alloy-online);
+    color: var(--alloy-color-status-online);
+    border-color: var(--alloy-color-status-online);
   }
 
   /* 2. Room List */
   .room-list {
     width: 250px;
-    background-color: var(--alloy-bg-subtle);
-    border-right: 1px solid var(--alloy-border-subtle);
+    background-color: var(--alloy-color-surface-subtle);
+    border-right: 1px solid var(--alloy-color-border-subtle);
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
@@ -344,39 +337,39 @@
   }
 
   .room-list-header {
-    padding: var(--alloy-space-3);
-    border-bottom: 1px solid var(--alloy-border-subtle);
+    padding: var(--alloy-spacing-scale-3);
+    border-bottom: 1px solid var(--alloy-color-border-subtle);
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-space-2);
+    gap: var(--alloy-spacing-scale-2);
   }
 
   .space-title {
     font-weight: 700;
     font-size: 14px;
-    color: var(--alloy-text-primary);
+    color: var(--alloy-color-text-primary);
   }
 
   .search-input {
     width: 100%;
-    padding: var(--alloy-space-1) var(--alloy-space-2);
-    border-radius: var(--alloy-radius-sm);
-    border: 1px solid var(--alloy-border-default);
-    background: var(--alloy-bg-surface);
-    color: var(--alloy-text-primary);
+    padding: var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-2);
+    border-radius: var(--alloy-radii-sm);
+    border: 1px solid var(--alloy-color-border-prominent);
+    background: var(--alloy-color-surface-panel);
+    color: var(--alloy-color-text-primary);
     font-size: 12px;
     outline: none;
     box-sizing: border-box;
   }
 
   .search-input:focus {
-    border-color: var(--alloy-border-focus);
+    border-color: var(--alloy-color-accent-primary);
   }
 
   .rooms-scroll {
     flex: 1;
     overflow-y: auto;
-    padding: var(--alloy-space-2);
+    padding: var(--alloy-spacing-scale-2);
     display: flex;
     flex-direction: column;
     gap: 2px;
@@ -385,17 +378,17 @@
   .section-label {
     font-size: 10px;
     font-weight: 700;
-    color: var(--alloy-text-muted);
-    padding: var(--alloy-space-1) var(--alloy-space-2);
+    color: var(--alloy-color-text-muted);
+    padding: var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-2);
     letter-spacing: 0.5px;
   }
 
   .room-item {
     display: flex;
     align-items: center;
-    gap: var(--alloy-space-2);
-    padding: var(--alloy-space-2);
-    border-radius: var(--alloy-radius-md);
+    gap: var(--alloy-spacing-scale-2);
+    padding: var(--alloy-spacing-scale-2);
+    border-radius: var(--alloy-radii-md);
     background: transparent;
     border: none;
     width: 100%;
@@ -405,19 +398,19 @@
   }
 
   .room-item:hover {
-    background: var(--alloy-bg-overlay);
+    background: var(--alloy-color-surface-elevated);
   }
 
   .room-item.active {
-    background: var(--alloy-bg-active);
+    background: var(--alloy-color-surface-hover);
   }
 
   .room-avatar {
     width: 28px;
     height: 28px;
-    border-radius: var(--alloy-radius-sm);
-    background: var(--alloy-bg-overlay);
-    color: var(--alloy-text-secondary);
+    border-radius: var(--alloy-radii-sm);
+    background: var(--alloy-color-surface-elevated);
+    color: var(--alloy-color-text-secondary);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -440,24 +433,24 @@
   .room-name {
     font-weight: 600;
     font-size: 13px;
-    color: var(--alloy-text-primary);
+    color: var(--alloy-color-text-primary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
   .unread-badge {
-    background: var(--alloy-unread-badge);
-    color: var(--alloy-accent-text);
+    background: var(--alloy-color-status-mention);
+    color: var(--alloy-color-text-on-accent);
     font-size: 10px;
     font-weight: 700;
     padding: 1px 6px;
-    border-radius: var(--alloy-radius-full);
+    border-radius: var(--alloy-radii-full);
   }
 
   .room-preview {
     font-size: 11px;
-    color: var(--alloy-text-muted);
+    color: var(--alloy-color-text-muted);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -484,8 +477,8 @@
   /* 4. Right Drawer */
   .right-drawer {
     width: 260px;
-    background: var(--alloy-bg-surface);
-    border-left: 1px solid var(--alloy-border-subtle);
+    background: var(--alloy-color-surface-panel);
+    border-left: 1px solid var(--alloy-color-border-subtle);
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
@@ -496,51 +489,51 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: var(--alloy-space-3);
-    border-bottom: 1px solid var(--alloy-border-subtle);
+    padding: var(--alloy-spacing-scale-3);
+    border-bottom: 1px solid var(--alloy-color-border-subtle);
   }
 
   .drawer-title {
     font-weight: 700;
     font-size: 13px;
-    color: var(--alloy-text-primary);
+    color: var(--alloy-color-text-primary);
   }
 
   .close-drawer-btn {
     background: transparent;
     border: none;
-    color: var(--alloy-text-muted);
+    color: var(--alloy-color-text-muted);
     font-size: 14px;
     cursor: pointer;
   }
 
   .close-drawer-btn:hover {
-    color: var(--alloy-text-primary);
+    color: var(--alloy-color-text-primary);
   }
 
   .drawer-content {
-    padding: var(--alloy-space-3);
+    padding: var(--alloy-spacing-scale-3);
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-space-4);
+    gap: var(--alloy-spacing-scale-4);
   }
 
   .drawer-section {
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-space-1);
+    gap: var(--alloy-spacing-scale-1);
   }
 
   .detail-label {
     font-size: 10px;
     font-weight: 700;
-    color: var(--alloy-text-muted);
+    color: var(--alloy-color-text-muted);
     letter-spacing: 0.5px;
   }
 
   .detail-value {
     font-size: 12px;
-    color: var(--alloy-text-secondary);
+    color: var(--alloy-color-text-secondary);
     margin: 0;
     line-height: 1.4;
   }
@@ -548,43 +541,43 @@
   .e2ee-status {
     display: flex;
     align-items: center;
-    gap: var(--alloy-space-2);
+    gap: var(--alloy-spacing-scale-2);
     font-size: 12px;
-    color: var(--alloy-online);
+    color: var(--alloy-color-status-online);
     font-weight: 500;
   }
 
   .e2ee-dot {
     width: 8px;
     height: 8px;
-    border-radius: var(--alloy-radius-full);
-    background: var(--alloy-online);
+    border-radius: var(--alloy-radii-full);
+    background: var(--alloy-color-status-online);
   }
 
   .member-list {
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-space-2);
-    margin-top: var(--alloy-space-1);
+    gap: var(--alloy-spacing-scale-2);
+    margin-top: var(--alloy-spacing-scale-1);
   }
 
   .member-row {
     display: flex;
     align-items: center;
-    gap: var(--alloy-space-2);
+    gap: var(--alloy-spacing-scale-2);
     font-size: 12px;
-    color: var(--alloy-text-primary);
+    color: var(--alloy-color-text-primary);
   }
 
   .status-indicator {
     width: 7px;
     height: 7px;
-    border-radius: var(--alloy-radius-full);
-    background: var(--alloy-text-muted);
+    border-radius: var(--alloy-radii-full);
+    background: var(--alloy-color-text-muted);
   }
 
   .status-indicator.online {
-    background: var(--alloy-online);
+    background: var(--alloy-color-status-online);
   }
 
   .status-indicator.idle {
@@ -594,41 +587,41 @@
   .theme-switcher-grid {
     display: grid;
     grid-template-columns: 1fr 1fr 1fr;
-    gap: var(--alloy-space-1);
-    margin-top: var(--alloy-space-1);
+    gap: var(--alloy-spacing-scale-1);
+    margin-top: var(--alloy-spacing-scale-1);
   }
 
   .theme-pill {
-    padding: var(--alloy-space-1) var(--alloy-space-2);
-    border: 1px solid var(--alloy-border-default);
-    background: var(--alloy-bg-overlay);
-    color: var(--alloy-text-secondary);
-    border-radius: var(--alloy-radius-sm);
+    padding: var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-2);
+    border: 1px solid var(--alloy-color-border-prominent);
+    background: var(--alloy-color-surface-elevated);
+    color: var(--alloy-color-text-secondary);
+    border-radius: var(--alloy-radii-sm);
     font-size: 11px;
     cursor: pointer;
   }
 
   .theme-pill:hover {
-    background: var(--alloy-bg-active);
-    color: var(--alloy-text-primary);
+    background: var(--alloy-color-surface-hover);
+    color: var(--alloy-color-text-primary);
   }
 
   .theme-pill.selected {
-    background: var(--alloy-accent);
-    color: var(--alloy-accent-text);
-    border-color: var(--alloy-accent);
+    background: var(--alloy-color-accent-primary);
+    color: var(--alloy-color-text-on-accent);
+    border-color: var(--alloy-color-accent-primary);
   }
 
   .reopen-drawer-btn {
     position: absolute;
-    top: var(--alloy-space-3);
+    top: var(--alloy-spacing-scale-3);
     right: 240px;
     width: 28px;
     height: 28px;
-    border-radius: var(--alloy-radius-full);
-    background: var(--alloy-bg-overlay);
-    border: 1px solid var(--alloy-border-default);
-    color: var(--alloy-text-secondary);
+    border-radius: var(--alloy-radii-full);
+    background: var(--alloy-color-surface-elevated);
+    border: 1px solid var(--alloy-color-border-prominent);
+    color: var(--alloy-color-text-secondary);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -638,8 +631,8 @@
   }
 
   .reopen-drawer-btn:hover {
-    background: var(--alloy-bg-active);
-    color: var(--alloy-text-primary);
+    background: var(--alloy-color-surface-hover);
+    color: var(--alloy-color-text-primary);
   }
 
   /* Responsive Mobile Navigation Bar (<680px) */
@@ -650,11 +643,11 @@
 
   .nav-back-btn,
   .nav-toggle-btn {
-    background: var(--alloy-bg-overlay);
-    border: 1px solid var(--alloy-border-subtle);
-    color: var(--alloy-text-primary);
-    padding: var(--alloy-space-1) var(--alloy-space-2);
-    border-radius: var(--alloy-radius-sm);
+    background: var(--alloy-color-surface-elevated);
+    border: 1px solid var(--alloy-color-border-subtle);
+    color: var(--alloy-color-text-primary);
+    padding: var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-2);
+    border-radius: var(--alloy-radii-sm);
     font-size: 11px;
     cursor: pointer;
   }
@@ -675,9 +668,9 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: var(--alloy-space-2) var(--alloy-space-3);
-      background: var(--alloy-bg-surface);
-      border-bottom: 1px solid var(--alloy-border-subtle);
+      padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
+      background: var(--alloy-color-surface-panel);
+      border-bottom: 1px solid var(--alloy-color-border-subtle);
       flex-shrink: 0;
     }
 

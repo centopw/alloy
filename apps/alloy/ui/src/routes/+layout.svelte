@@ -1,5 +1,7 @@
 <script lang="ts">
   import "../lib/tokens.css";
+  import { themeStore } from "$lib/theme/theme.svelte";
+
   let { children } = $props();
 </script>
 
@@ -15,9 +17,9 @@
     padding-bottom: var(--alloy-safe-area-bottom);
     padding-left: var(--alloy-safe-area-left);
     padding-right: var(--alloy-safe-area-right);
-    background-color: var(--alloy-bg-base);
-    color: var(--alloy-text-primary);
-    font-family: var(--alloy-font-sans);
+    background-color: var(--alloy-color-surface-canvas);
+    color: var(--alloy-color-text-primary);
+    font-family: var(--alloy-typography-font-family-sans);
     -webkit-font-smoothing: antialiased;
   }
 

@@ -1,114 +1,280 @@
-/* Alloy Design Tokens (CSS Custom Properties) */
-/* Placeholder token schema pending crates/alloy-theme integration */
+/* Alloy Design Tokens & Base Stylesheet */
+/* Implements the contract defined in crates/alloy-theme */
 
+@import "./theme/generated/themes.css";
+
+/* 1. Base Reset & Box Sizing */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background-color: var(--alloy-color-surface-canvas);
+  color: var(--alloy-color-text-primary);
+  font-family: var(--alloy-typography-font-family-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+/* 2. Safe Area Insets (Mobile / Android / Notches) */
 :root {
-  /* Default: Dark Theme */
-  --alloy-bg-base: #121417;
-  --alloy-bg-subtle: #181b20;
-  --alloy-bg-surface: #1f232b;
-  --alloy-bg-overlay: #282d37;
-  --alloy-bg-active: #313845;
-  
-  --alloy-border-subtle: #2a303c;
-  --alloy-border-default: #384152;
-  --alloy-border-focus: #5b73e8;
-
-  --alloy-text-primary: #f0f2f5;
-  --alloy-text-secondary: #9da7b7;
-  --alloy-text-muted: #647083;
-  --alloy-text-inverse: #0d1117;
-
-  --alloy-accent: #6366f1;
-  --alloy-accent-hover: #4f46e5;
-  --alloy-accent-subtle: rgba(99, 102, 241, 0.15);
-  --alloy-accent-text: #ffffff;
-
-  --alloy-unread-badge: #f43f5e;
-  --alloy-online: #10b981;
-  --alloy-code-bg: #14171d;
-  --alloy-code-border: #2c323f;
-  
-  /* Safe-area insets for devices with notches, dynamic islands, camera punch holes */
   --alloy-safe-area-top: env(safe-area-inset-top, 0px);
   --alloy-safe-area-bottom: env(safe-area-inset-bottom, 0px);
   --alloy-safe-area-left: env(safe-area-inset-left, 0px);
   --alloy-safe-area-right: env(safe-area-inset-right, 0px);
-  
-  --alloy-space-1: 4px;
-  --alloy-space-2: 8px;
-  --alloy-space-3: 12px;
-  --alloy-space-4: 16px;
-  --alloy-space-5: 20px;
-  --alloy-space-6: 24px;
-
-  --alloy-radius-sm: 4px;
-  --alloy-radius-md: 8px;
-  --alloy-radius-lg: 12px;
-  --alloy-radius-full: 9999px;
-
-  --alloy-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --alloy-font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-
-  --alloy-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --alloy-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4);
 }
 
-:root[data-theme="light"] {
-  --alloy-bg-base: #f8fafc;
-  --alloy-bg-subtle: #f1f5f9;
-  --alloy-bg-surface: #ffffff;
-  --alloy-bg-overlay: #e2e8f0;
-  --alloy-bg-active: #cbd5e1;
+:root:not([data-theme]) {
+  /* Fallback defaults for tokens before theme loads */
+  --alloy-color-surface-canvas: #18181b;
+  --alloy-color-surface-subtle: #27272a;
+  --alloy-color-surface-panel: #1f1f23;
+  --alloy-color-surface-elevated: #27272a;
+  --alloy-color-surface-hover: #3f3f46;
+  --alloy-color-background: #18181b;
+  --alloy-color-text-primary: #f4f4f5;
+  --alloy-color-text-secondary: #a1a1aa;
+  --alloy-color-text-muted: #71717a;
+  --alloy-color-text-link: #60a5fa;
+  --alloy-color-text-on-accent: #ffffff;
+  --alloy-color-accent-primary: #5865f2;
+  --alloy-color-accent-secondary: #818cf8;
+  --alloy-color-accent-subtle: #312e81;
+  --alloy-color-accent-hover: #4f46e5;
+  --alloy-color-status-online: #22c55e;
+  --alloy-color-status-away: #f59e0b;
+  --alloy-color-status-busy: #ef4444;
+  --alloy-color-status-offline: #71717a;
+  --alloy-color-status-error: #ef4444;
+  --alloy-color-status-warning: #f59e0b;
+  --alloy-color-status-info: #3b82f6;
+  --alloy-color-status-success: #22c55e;
+  --alloy-color-status-mention: #f97316;
+  --alloy-color-bubble-own-background: #4f46e5;
+  --alloy-color-bubble-own-text: #ffffff;
+  --alloy-color-bubble-other-background: #27272a;
+  --alloy-color-bubble-other-text: #f4f4f5;
+  --alloy-color-border-subtle: #27272a;
+  --alloy-color-border-prominent: #3f3f46;
 
-  --alloy-border-subtle: #e2e8f0;
-  --alloy-border-default: #cbd5e1;
-  --alloy-border-focus: #4f46e5;
+  --alloy-typography-font-family-sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --alloy-typography-font-family-mono: "JetBrains Mono", "Fira Code", monospace;
+  --alloy-typography-font-family-display: Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+  --alloy-typography-size-xs: 11px;
+  --alloy-typography-size-sm: 12px;
+  --alloy-typography-size-base: 14px;
+  --alloy-typography-size-lg: 16px;
+  --alloy-typography-size-xl: 18px;
+  --alloy-typography-size-xxl: 24px;
+  --alloy-typography-weight-regular: 400;
+  --alloy-typography-weight-medium: 500;
+  --alloy-typography-weight-semibold: 600;
+  --alloy-typography-weight-bold: 700;
+  --alloy-typography-line-height-tight: 1.25;
+  --alloy-typography-line-height-normal: 1.5;
+  --alloy-typography-line-height-relaxed: 1.75;
 
-  --alloy-text-primary: #0f172a;
-  --alloy-text-secondary: #475569;
-  --alloy-text-muted: #94a3b8;
-  --alloy-text-inverse: #ffffff;
+  --alloy-spacing-scale-1: 4px;
+  --alloy-spacing-scale-2: 8px;
+  --alloy-spacing-scale-3: 12px;
+  --alloy-spacing-scale-4: 16px;
+  --alloy-spacing-scale-5: 20px;
+  --alloy-spacing-scale-6: 24px;
+  --alloy-spacing-scale-7: 32px;
+  --alloy-spacing-scale-8: 40px;
+  --alloy-spacing-density: normal;
+  --alloy-spacing-message-padding: 8px;
+  --alloy-spacing-avatar-size: 36px;
 
-  --alloy-accent: #4f46e5;
-  --alloy-accent-hover: #4338ca;
-  --alloy-accent-subtle: rgba(79, 70, 229, 0.1);
-  --alloy-accent-text: #ffffff;
+  --alloy-radii-none: 0px;
+  --alloy-radii-sm: 4px;
+  --alloy-radii-md: 8px;
+  --alloy-radii-lg: 12px;
+  --alloy-radii-full: 9999px;
 
-  --alloy-unread-badge: #e11d48;
-  --alloy-online: #059669;
-  --alloy-code-bg: #f1f5f9;
-  --alloy-code-border: #e2e8f0;
+  --alloy-elevation-none: none;
+  --alloy-elevation-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
+  --alloy-elevation-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -2px rgba(0, 0, 0, 0.5);
+  --alloy-elevation-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.6), 0 4px 6px -4px rgba(0, 0, 0, 0.6);
 
-  --alloy-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --alloy-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  --alloy-motion-duration-fast: 100ms;
+  --alloy-motion-duration-normal: 200ms;
+  --alloy-motion-duration-slow: 350ms;
+  --alloy-motion-easing-ease: ease;
+  --alloy-motion-easing-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --alloy-motion-reduced-motion: false;
+
+  --alloy-layout-message-style: bubble;
+  --alloy-layout-avatar-shape: circle;
 }
 
-:root[data-theme="amoled"] {
-  --alloy-bg-base: #000000;
-  --alloy-bg-subtle: #050505;
-  --alloy-bg-surface: #0a0a0a;
-  --alloy-bg-overlay: #141414;
-  --alloy-bg-active: #202020;
+:root {
+  /* Backward-compatibility aliases for prototype code */
+  --alloy-bg-base: var(--alloy-color-surface-canvas);
+  --alloy-bg-subtle: var(--alloy-color-surface-subtle);
+  --alloy-bg-surface: var(--alloy-color-surface-panel);
+  --alloy-bg-overlay: var(--alloy-color-surface-elevated);
+  --alloy-bg-active: var(--alloy-color-surface-hover);
+  --alloy-border-subtle: var(--alloy-color-border-subtle);
+  --alloy-border-default: var(--alloy-color-border-prominent);
+  --alloy-border-focus: var(--alloy-color-accent-primary);
+  --alloy-text-primary: var(--alloy-color-text-primary);
+  --alloy-text-secondary: var(--alloy-color-text-secondary);
+  --alloy-text-muted: var(--alloy-color-text-muted);
+  --alloy-text-inverse: var(--alloy-color-surface-canvas);
+  --alloy-accent: var(--alloy-color-accent-primary);
+  --alloy-accent-hover: var(--alloy-color-accent-hover);
+  --alloy-accent-subtle: var(--alloy-color-accent-subtle);
+  --alloy-accent-text: var(--alloy-color-text-on-accent);
+  --alloy-unread-badge: var(--alloy-color-status-mention);
+  --alloy-online: var(--alloy-color-status-online);
+  --alloy-code-bg: var(--alloy-color-surface-subtle);
+  --alloy-code-border: var(--alloy-color-border-subtle);
+  --alloy-space-1: var(--alloy-spacing-scale-1);
+  --alloy-space-2: var(--alloy-spacing-scale-2);
+  --alloy-space-3: var(--alloy-spacing-scale-3);
+  --alloy-space-4: var(--alloy-spacing-scale-4);
+  --alloy-space-5: var(--alloy-spacing-scale-5);
+  --alloy-space-6: var(--alloy-spacing-scale-6);
+  --alloy-radius-sm: var(--alloy-radii-sm);
+  --alloy-radius-md: var(--alloy-radii-md);
+  --alloy-radius-lg: var(--alloy-radii-lg);
+  --alloy-radius-full: var(--alloy-radii-full);
+  --alloy-font-sans: var(--alloy-typography-font-family-sans);
+  --alloy-font-mono: var(--alloy-typography-font-family-mono);
+  --alloy-shadow-sm: var(--alloy-elevation-sm);
+  --alloy-shadow-md: var(--alloy-elevation-md);
+}
 
-  --alloy-border-subtle: #1c1c1c;
-  --alloy-border-default: #2a2a2a;
-  --alloy-border-focus: #6366f1;
+/* 3. Density Preset Scopes */
+[data-density="compact"] {
+  --alloy-spacing-density: compact;
+  --alloy-spacing-message-padding: var(--alloy-spacing-scale-1);
+  --alloy-spacing-avatar-size: 28px;
+  --alloy-spacing-item-gap: var(--alloy-spacing-scale-1);
+  --alloy-spacing-item-padding: var(--alloy-spacing-scale-1);
+}
 
-  --alloy-text-primary: #ffffff;
-  --alloy-text-secondary: #a0a0a0;
-  --alloy-text-muted: #555555;
-  --alloy-text-inverse: #000000;
+[data-density="normal"] {
+  --alloy-spacing-density: normal;
+  --alloy-spacing-message-padding: var(--alloy-spacing-scale-2);
+  --alloy-spacing-avatar-size: 36px;
+  --alloy-spacing-item-gap: var(--alloy-spacing-scale-2);
+  --alloy-spacing-item-padding: var(--alloy-spacing-scale-2);
+}
 
-  --alloy-accent: #6366f1;
-  --alloy-accent-hover: #4f46e5;
-  --alloy-accent-subtle: rgba(99, 102, 241, 0.2);
-  --alloy-accent-text: #ffffff;
+[data-density="cozy"] {
+  --alloy-spacing-density: cozy;
+  --alloy-spacing-message-padding: var(--alloy-spacing-scale-3);
+  --alloy-spacing-avatar-size: 40px;
+  --alloy-spacing-item-gap: var(--alloy-spacing-scale-3);
+  --alloy-spacing-item-padding: var(--alloy-spacing-scale-3);
+}
 
-  --alloy-unread-badge: #ff0055;
-  --alloy-online: #00ff88;
-  --alloy-code-bg: #050505;
-  --alloy-code-border: #1a1a1a;
+/* 4. Reduced-Motion Handling */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --alloy-motion-duration-fast: 0ms !important;
+    --alloy-motion-duration-normal: 0ms !important;
+    --alloy-motion-duration-slow: 0ms !important;
+    --alloy-motion-reduced-motion: true;
+  }
 
-  --alloy-shadow-sm: 0 0 0 1px #1a1a1a;
-  --alloy-shadow-md: 0 0 0 1px #222222;
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+[data-reduced-motion="true"] {
+  --alloy-motion-duration-fast: 0ms !important;
+  --alloy-motion-duration-normal: 0ms !important;
+  --alloy-motion-duration-slow: 0ms !important;
+  --alloy-motion-reduced-motion: true;
+}
+
+[data-reduced-motion="true"] *,
+[data-reduced-motion="true"] *::before,
+[data-reduced-motion="true"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* 5. Typography Utility Classes (built strictly on --alloy-* tokens) */
+.text-xs {
+  font-size: var(--alloy-typography-size-xs);
+  line-height: var(--alloy-typography-line-height-normal);
+}
+.text-sm {
+  font-size: var(--alloy-typography-size-sm);
+  line-height: var(--alloy-typography-line-height-normal);
+}
+.text-base {
+  font-size: var(--alloy-typography-size-base);
+  line-height: var(--alloy-typography-line-height-normal);
+}
+.text-lg {
+  font-size: var(--alloy-typography-size-lg);
+  line-height: var(--alloy-typography-line-height-normal);
+}
+.text-xl {
+  font-size: var(--alloy-typography-size-xl);
+  line-height: var(--alloy-typography-line-height-tight);
+}
+.text-xxl {
+  font-size: var(--alloy-typography-size-xxl);
+  line-height: var(--alloy-typography-line-height-tight);
+}
+
+.font-sans {
+  font-family: var(--alloy-typography-font-family-sans);
+}
+.font-mono {
+  font-family: var(--alloy-typography-font-family-mono);
+}
+.font-display {
+  font-family: var(--alloy-typography-font-family-display);
+}
+
+.font-regular {
+  font-weight: var(--alloy-typography-weight-regular);
+}
+.font-medium {
+  font-weight: var(--alloy-typography-weight-medium);
+}
+.font-semibold {
+  font-weight: var(--alloy-typography-weight-semibold);
+}
+.font-bold {
+  font-weight: var(--alloy-typography-weight-bold);
+}
+
+.leading-tight {
+  line-height: var(--alloy-typography-line-height-tight);
+}
+.leading-normal {
+  line-height: var(--alloy-typography-line-height-normal);
+}
+.leading-relaxed {
+  line-height: var(--alloy-typography-line-height-relaxed);
+}
+
+.text-primary {
+  color: var(--alloy-color-text-primary);
+}
+.text-secondary {
+  color: var(--alloy-color-text-secondary);
+}
+.text-muted {
+  color: var(--alloy-color-text-muted);
+}
+.text-link {
+  color: var(--alloy-color-text-link);
 }
