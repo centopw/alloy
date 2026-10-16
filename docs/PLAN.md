@@ -116,6 +116,7 @@ Web target (WASM `alloy-core` + IndexedDB store, UI-09), MatrixRTC/LiveKit calls
 Highest risks: WebView perf on low-end Android (G1), Android background delivery without Google services (UnifiedPush), sliding-sync spec churn, Android OEM battery killers. (iOS risks deferred under D10.)
 
 ## 6. Orchestration rules for implementation
+- Tracking: board <https://github.com/users/centopw/projects/2>; every unit of work is an issue; see [TRACKING.md](TRACKING.md) and [../AGENTS.md](../AGENTS.md). Commits carry `Refs #N`; gates are recorded as issue comments.
 - One subagent per disjoint crate/dir; shared contracts (`alloy-protocol`, `schemas/`, token schema) are written first by a single owner and frozen per phase.
 - Subagents edit only; orchestrator runs `cargo fmt`, `clippy -D warnings`, `cargo deny`, tests, `pnpm check`, and smoke runs once per phase.
 - Phase commits only when gates green.

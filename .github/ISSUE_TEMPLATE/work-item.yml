@@ -1,0 +1,23 @@
+name: Work item
+description: A scoped, agent-dispatchable unit of work
+labels: []
+body:
+  - type: textarea
+    id: goal
+    attributes: { label: Goal, description: What and why (link docs/PLAN.md section / docs/plan/*) }
+    validations: { required: true }
+  - type: textarea
+    id: acceptance
+    attributes: { label: Acceptance, description: Observable results, one bullet each }
+    validations: { required: true }
+  - type: textarea
+    id: owned
+    attributes: { label: Owned paths, description: "3-5 explicit paths this work may edit; nothing else" }
+    validations: { required: true }
+  - type: textarea
+    id: deps
+    attributes: { label: Contract / dependencies, description: "Frozen interfaces consumed. 'Blocked by #N' lines." }
+  - type: textarea
+    id: verify
+    attributes: { label: Verification, description: Exact commands (fmt, clippy -D warnings, tests, UI check/build, integration) }
+    validations: { required: true }

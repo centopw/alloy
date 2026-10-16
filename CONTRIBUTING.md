@@ -78,6 +78,9 @@ Use descriptive branch names with appropriate prefixes:
 - `refactor/<short-description>`: Code refactoring without behavior changes
 - `ci/<short-description>`: CI/CD configuration updates
 
+### Tracking
+Every change maps to an issue on the project board; see [docs/TRACKING.md](docs/TRACKING.md). `feat|fix|perf|refactor` commits must contain `Refs #N` or `Closes #N`.
+
 ### Branch policy (pre-v0.1)
 
 Until the first functioning version ships, maintainers push directly to `main`. Rules still apply:

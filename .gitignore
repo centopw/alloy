@@ -8,3 +8,4 @@ dist/
 # repo docs must be tracked (overrides global ignore)
 !docs/
 !docs/**
+!AGENTS.md
