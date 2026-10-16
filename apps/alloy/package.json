@@ -1,0 +1,12 @@
+{
+  "name": "alloy-app-shell",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --prefix ui dev",
+    "build": "pnpm --prefix ui build",
+    "check": "pnpm --prefix ui check",
+    "tauri": "./ui/node_modules/.bin/tauri"
+  }
+}

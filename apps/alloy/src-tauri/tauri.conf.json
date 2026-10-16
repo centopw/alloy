@@ -1,0 +1,37 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Alloy",
+  "version": "0.1.0",
+  "identifier": "chat.alloy.app",
+  "build": {
+    "beforeDevCommand": "pnpm --prefix apps/alloy/ui dev || pnpm --prefix ui dev || pnpm dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm --prefix apps/alloy/ui build || pnpm --prefix ui build || pnpm build",
+    "frontendDist": "../ui/build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Alloy",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 680,
+        "minHeight": 600
+      }
+    ],
+    "security": {
+      "csp": "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: asset:; font-src 'self'; connect-src 'self' ipc:; frame-src 'self' blob:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}
