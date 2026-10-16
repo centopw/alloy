@@ -84,6 +84,8 @@ Serial prerequisite: **P0-A workspace bootstrap** (CORE-01, UI-01, security "wor
 - **S6** CI skeleton: fmt, clippy, deny, audit, test matrix macOS/Win/Linux + mobile builds (04).
 - **G0:** S1,S2,S4,S6 green. **G1:** S3 meets perf budget, else pivot per D2.
 
+**P0 status (2026-10-16): G0 passed** — fmt/clippy `-D warnings`/tests green on the workspace, UI check+build green, `cargo deny` ok, integration tests pass against local Synapse 1.163 (native MSC4186, E2EE room decrypt). Spike reports: `crates/*/SPIKE.md`, `apps/alloy/SPIKE.md`, `docs/spikes/`. **G1 (perf) provisional**: Android emulator WebView p50 16.7 ms, p95 20–22 ms, p99 42–49 ms on 10k-event timeline (Pixel-class and 2 GB/720p profiles) — real low-end hardware still required for final G1. Verified: Wasmtime component host (fuel, 32 MiB cap, capability denial), `matrix-sdk(-ui)` 0.19.1 exists, matrix-sdk-sqlite StoreCipher sufficient (no SQLCipher).
+
 ### P1 — Desktop MVP (v0.1)
 Parallel streams (after P0 contracts frozen: `alloy-protocol` v0, token schema v0):
 - **Core:** CORE-03 auth (OIDC+password), 04 storage, 05 room list, 06 timeline, 07 E2EE/backup/SAS, 08 send queue, 09 authed media.
