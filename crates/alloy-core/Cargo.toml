@@ -1,0 +1,30 @@
+[package]
+name = "alloy-core"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+[lints]
+workspace = true
+
+[dependencies]
+alloy-protocol = { path = "../alloy-protocol" }
+alloy-storage = { path = "../alloy-storage" }
+matrix-sdk = { version = "0.19.1", features = ["e2e-encryption", "sqlite", "markdown"] }
+matrix-sdk-ui = "0.19.1"
+matrix-sdk-sqlite = "0.19.1"
+tokio = { version = "1.0", features = ["sync", "rt"] }
+futures = "0.3"
+tracing = "0.1"
+thiserror = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+url = "2.0"
+base64 = "0.22"
+rand = "0.8"
+
+[dev-dependencies]
+tokio = { version = "1.0", features = ["full"] }
+tempfile = "3.8"
+tracing-subscriber = "0.3"
