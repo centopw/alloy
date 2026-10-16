@@ -11,6 +11,25 @@ env:
   UI_DIR: apps/alloy
 
 jobs:
+  commits:
+    name: Conventional Commits
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate commit subjects
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            range="${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
+          else
+            range="${{ github.event.before }}..${{ github.sha }}"
+            case "${{ github.event.before }}" in 0000000*) range="${{ github.sha }}" ;; esac
+          fi
+          for c in $(git rev-list "$range"); do
+            git log -1 --format=%s "$c" | scripts/check-commit-msg.sh - || { echo "::error::bad commit $c"; exit 1; }
+          done
+
   fmt:
     name: Rustfmt
     runs-on: ubuntu-latest

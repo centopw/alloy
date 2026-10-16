@@ -58,3 +58,7 @@ ci:
     pnpm -C {{UI_DIR}} install
     pnpm -C {{UI_DIR}} check
     pnpm -C {{UI_DIR}} build
+
+# Enable repo git hooks (Conventional Commits check on commit-msg and pre-push)
+hooks:
+    git config core.hooksPath .githooks

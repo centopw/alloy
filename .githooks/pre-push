@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Validates every commit about to be pushed.
+root="$(git rev-parse --show-toplevel)"; zero=0000000000000000000000000000000000000000
+while read -r _ local_sha _ remote_sha; do
+  [ "$local_sha" = "$zero" ] && continue
+  range=$([ "$remote_sha" = "$zero" ] && echo "$local_sha" || echo "$remote_sha..$local_sha")
+  for c in $(git rev-list "$range"); do
+    git log -1 --format=%s "$c" | "$root/scripts/check-commit-msg.sh" - || { echo "bad commit $c" >&2; exit 1; }
+  done
+done

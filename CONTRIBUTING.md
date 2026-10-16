@@ -78,6 +78,14 @@ Use descriptive branch names with appropriate prefixes:
 - `refactor/<short-description>`: Code refactoring without behavior changes
 - `ci/<short-description>`: CI/CD configuration updates
 
+### Branch policy (pre-v0.1)
+
+Until the first functioning version ships, maintainers push directly to `main`. Rules still apply:
+- One logical change per commit; history stays linear (rebase, no merge commits).
+- Every commit subject follows Conventional Commits, enforced by `scripts/check-commit-msg.sh` (local hooks via `just hooks`, and the `commits` CI job).
+- Subject: lowercase imperative, <= 72 chars, no trailing period. Never commit failing builds; push after each green logical unit.
+- After the first functioning version, `main` becomes PR-only.
+
 ### Conventional Commits
 
 Alloy uses [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) for clear change logs:
