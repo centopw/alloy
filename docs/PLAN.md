@@ -116,6 +116,7 @@ Highest risks: WebView perf on low-end Android (G1), iOS NSE under 30 s budget, 
 - One subagent per disjoint crate/dir; shared contracts (`alloy-protocol`, `schemas/`, token schema) are written first by a single owner and frozen per phase.
 - Subagents edit only; orchestrator runs `cargo fmt`, `clippy -D warnings`, `cargo deny`, tests, `pnpm check`, and smoke runs once per phase.
 - Phase commits only when gates green.
+- Git: remote `origin` = https://github.com/centopw/alloy, branch `main`, author hiep@hce.vn. Until the first functioning version, push directly to `main` after every green logical unit (no red trees); keep GitHub current. History linear, one logical change per commit, Conventional Commits enforced by `scripts/check-commit-msg.sh` (hooks via `just hooks`, CI job `commits`). Stage explicit paths only; never `git add -A` while subagents are working. After the first functioning version, `main` becomes PR-only.
 
 ## 7. Open items (non-blocking, defaults chosen)
 - Oldest device baseline: iPhone 11 / iOS 17, Android 10+ (default).
