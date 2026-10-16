@@ -1,0 +1,200 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  UI_DIR: apps/alloy
+
+jobs:
+  fmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Check code formatting
+        run: cargo fmt --all -- --check
+
+  clippy-test:
+    name: Clippy & Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo registry & targets
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            apps/alloy/src-tauri
+
+      - name: Clippy (zero warnings policy)
+        run: cargo clippy -D warnings --workspace
+
+      - name: Run workspace tests
+        run: cargo test --workspace --locked
+
+  cargo-deny:
+    name: Cargo Deny (Licenses & Bans)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run cargo-deny checks
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+
+  ui:
+    name: UI (Check & Build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ env.UI_DIR }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: ${{ env.UI_DIR }}/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile 2>/dev/null || pnpm install
+
+      - name: Type check (svelte-check)
+        run: pnpm check
+
+      - name: Build frontend production assets
+        run: pnpm build
+
+  mobile-ios:
+    name: Mobile Build (iOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check iOS project files
+        id: check-ios
+        run: |
+          if [ -n "${{ hashFiles('apps/alloy/src-tauri/gen/apple/**') }}" ]; then
+            echo "has_ios=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_ios=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Rust & iOS targets
+        if: steps.check-ios.outputs.has_ios == 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,x86_64-apple-ios,aarch64-apple-ios-sim
+
+      - name: Install pnpm
+        if: steps.check-ios.outputs.has_ios == 'true'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js 22
+        if: steps.check-ios.outputs.has_ios == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install UI dependencies
+        if: steps.check-ios.outputs.has_ios == 'true'
+        working-directory: ${{ env.UI_DIR }}
+        run: pnpm install
+
+      - name: Install Tauri CLI
+        if: steps.check-ios.outputs.has_ios == 'true'
+        run: cargo install tauri-cli --locked --version '^2'
+
+      - name: Build iOS app bundle (no watch)
+        if: steps.check-ios.outputs.has_ios == 'true'
+        working-directory: ${{ env.UI_DIR }}
+        run: cargo tauri ios build --no-watch
+
+  mobile-android:
+    name: Mobile Build (Android)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check Android project files
+        id: check-android
+        run: |
+          if [ -n "${{ hashFiles('apps/alloy/src-tauri/gen/android/**') }}" ]; then
+            echo "has_android=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_android=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Java 17
+        if: steps.check-android.outputs.has_android == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android SDK
+        if: steps.check-android.outputs.has_android == 'true'
+        uses: android-actions/setup-android@v3
+
+      - name: Install Rust & Android targets
+        if: steps.check-android.outputs.has_android == 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: Install pnpm
+        if: steps.check-android.outputs.has_android == 'true'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js 22
+        if: steps.check-android.outputs.has_android == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install UI dependencies
+        if: steps.check-android.outputs.has_android == 'true'
+        working-directory: ${{ env.UI_DIR }}
+        run: pnpm install
+
+      - name: Install Tauri CLI
+        if: steps.check-android.outputs.has_android == 'true'
+        run: cargo install tauri-cli --locked --version '^2'
+
+      - name: Build Android APK
+        if: steps.check-android.outputs.has_android == 'true'
+        working-directory: ${{ env.UI_DIR }}
+        run: cargo tauri android build --apk

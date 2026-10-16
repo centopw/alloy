@@ -1,0 +1,2 @@
+# Clippy configuration
+# Applied via workspace lints (see Cargo.toml [workspace.lints.clippy])
