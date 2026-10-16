@@ -105,21 +105,8 @@
 - Minimal layout thrashing with 300px buffer window
 - Lightweight bundle: virtua itself is treeshakeable and <50KB minified
 
-## iOS Initialization Outcome
-
-Attempted: `./ui/node_modules/.bin/tauri ios init --ci` from `apps/alloy/`
-
-```
-✓ Downloaded iOS Rust targets (aarch64-apple-ios-sim, x86_64-apple-ios)
-✓ Installed xcodegen 2.46.0 via homebrew
-✓ Installed libimobiledevice + dependencies (libplist, libtatsu, libimobiledevice-glue, libusbmuxd)
-✗ FAILED: cocoapods (requires sudo for gem installation)
-
-Error: `Failed to install \`cocoapods\`: No such file or directory (os error 2)`
-```
-
-**Recommendation:** iOS build deferred to integration spike. Cocoapods is only needed for native iOS plugin bridging, not for the Tauri WebView itself. Svelte 5 bundle will run unchanged on iOS WKWebView once build infrastructure is configured.
-
+## iOS Status
+iOS deferred (desktop + Android focus per docs/PLAN.md D10).
 ## Project Structure (Final)
 
 ```
