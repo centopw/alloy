@@ -1,0 +1,64 @@
+{
+  "$schema": "https://alloy.chat/schemas/v1/theme.json",
+  "schema_version": 1,
+  "id": "midnight-ocean",
+  "name": "Midnight Ocean",
+  "author": "Alloy Community",
+  "version": "1.0.0",
+  "mode": "dark",
+  "extends": "alloy-dark",
+  "tokens": {
+    "color": {
+      "surface": {
+        "canvas": "#0b132b",
+        "subtle": "#1c2541",
+        "panel": "#111c3a",
+        "elevated": "#1c2541",
+        "hover": "#253256"
+      },
+      "background": "#0b132b",
+      "text": {
+        "primary": "#f8fafc",
+        "secondary": "#94a3b8",
+        "muted": "#64748b",
+        "link": "#38bdf8",
+        "on_accent": "#ffffff"
+      },
+      "accent": {
+        "primary": "#0077b6",
+        "secondary": "#38bdf8",
+        "subtle": "#0c4a6e",
+        "hover": "#0369a1"
+      },
+      "status": {
+        "online": "#34d399",
+        "away": "#fbbf24",
+        "busy": "#f87171",
+        "offline": "#64748b",
+        "error": "#f87171",
+        "warning": "#fbbf24",
+        "info": "#38bdf8",
+        "success": "#34d399",
+        "mention": "#38bdf8"
+      },
+      "bubble": {
+        "own": {
+          "background": "#0077b6",
+          "text": "#ffffff"
+        },
+        "other": {
+          "background": "#1c2541",
+          "text": "#f8fafc"
+        }
+      },
+      "border": {
+        "subtle": "#1e293b",
+        "prominent": "#334155"
+      }
+    },
+    "layout": {
+      "message_style": "bubble",
+      "avatar_shape": "rounded"
+    }
+  }
+}

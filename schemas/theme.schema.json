@@ -1,0 +1,320 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://alloy.chat/schemas/v1/theme.json",
+  "title": "Alloy Design Token Theme",
+  "description": "W3C Design Tokens-based theme definition for Alloy Matrix client",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "id",
+    "name",
+    "author",
+    "version",
+    "mode",
+    "tokens"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "URL reference to this schema (informational)"
+    },
+    "schema_version": {
+      "description": "Schema version (1 for current)",
+      "oneOf": [
+        { "type": "integer", "const": 1 },
+        { "type": "string" }
+      ]
+    },
+    "id": {
+      "type": "string",
+      "description": "Unique theme identifier (e.g., 'org.alloy.theme.light')",
+      "pattern": "^[a-z0-9.-]+$"
+    },
+    "name": {
+      "type": "string",
+      "description": "Human-readable theme name"
+    },
+    "author": {
+      "type": "string",
+      "description": "Theme author or organization"
+    },
+    "version": {
+      "type": "string",
+      "description": "Semantic version (e.g., '1.0.0')"
+    },
+    "mode": {
+      "enum": ["light", "dark", "amoled"],
+      "description": "Color mode: light, dark, or AMOLED pure-black"
+    },
+    "extends": {
+      "type": "string",
+      "description": "Optional parent theme ID to extend and deep-merge from"
+    },
+    "tokens": {
+      "type": "object",
+      "description": "Design tokens organized by category",
+      "properties": {
+        "color": {
+          "type": "object",
+          "description": "Color tokens",
+          "properties": {
+            "surface": {
+              "type": "object",
+              "description": "Background surface colors",
+              "properties": {
+                "canvas": { "type": "string", "description": "Primary canvas/background" },
+                "subtle": { "type": "string", "description": "Subtle elevated surfaces" },
+                "panel": { "type": "string", "description": "Panel/card backgrounds" },
+                "elevated": { "type": "string", "description": "Elevated component backgrounds" },
+                "hover": { "type": "string", "description": "Hover state backgrounds" }
+              },
+              "additionalProperties": false
+            },
+            "background": {
+              "type": "string",
+              "description": "Primary background color"
+            },
+            "text": {
+              "type": "object",
+              "description": "Text and content colors",
+              "properties": {
+                "primary": { "type": "string", "description": "Primary text color" },
+                "secondary": { "type": "string", "description": "Secondary text color" },
+                "muted": { "type": "string", "description": "Muted/disabled text color" },
+                "link": { "type": "string", "description": "Link text color" },
+                "on_accent": { "type": "string", "description": "Text on accent backgrounds" }
+              },
+              "additionalProperties": false
+            },
+            "accent": {
+              "type": "object",
+              "description": "Interactive accent colors",
+              "properties": {
+                "primary": { "type": "string", "description": "Primary accent color" },
+                "secondary": { "type": "string", "description": "Secondary accent color" },
+                "subtle": { "type": "string", "description": "Subtle accent variants" },
+                "hover": { "type": "string", "description": "Accent hover state" }
+              },
+              "additionalProperties": false
+            },
+            "status": {
+              "type": "object",
+              "description": "Status and semantic colors",
+              "properties": {
+                "online": { "type": "string" },
+                "away": { "type": "string" },
+                "busy": { "type": "string" },
+                "offline": { "type": "string" },
+                "error": { "type": "string" },
+                "warning": { "type": "string" },
+                "info": { "type": "string" },
+                "success": { "type": "string" },
+                "mention": { "type": "string" }
+              },
+              "additionalProperties": false
+            },
+            "bubble": {
+              "type": "object",
+              "description": "Message bubble colors (own vs. other)",
+              "properties": {
+                "own": {
+                  "type": "object",
+                  "properties": {
+                    "background": { "type": "string" },
+                    "text": { "type": "string" }
+                  },
+                  "additionalProperties": false
+                },
+                "other": {
+                  "type": "object",
+                  "properties": {
+                    "background": { "type": "string" },
+                    "text": { "type": "string" }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            "border": {
+              "type": "object",
+              "description": "Border and divider colors",
+              "properties": {
+                "subtle": { "type": "string" },
+                "prominent": { "type": "string" }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "typography": {
+          "type": "object",
+          "description": "Typography and font tokens",
+          "properties": {
+            "font_family": {
+              "type": "object",
+              "properties": {
+                "sans": { "type": "string", "description": "Default sans-serif font stack" },
+                "mono": { "type": "string", "description": "Monospace font stack" },
+                "display": { "type": "string", "description": "Display font stack" }
+              },
+              "additionalProperties": false
+            },
+            "size": {
+              "type": "object",
+              "description": "Font size ramp",
+              "properties": {
+                "xs": { "type": "string" },
+                "sm": { "type": "string" },
+                "base": { "type": "string" },
+                "lg": { "type": "string" },
+                "xl": { "type": "string" },
+                "xxl": { "type": "string" }
+              },
+              "additionalProperties": false
+            },
+            "weight": {
+              "type": "object",
+              "description": "Font weights",
+              "properties": {
+                "regular": { "type": "string" },
+                "medium": { "type": "string" },
+                "semibold": { "type": "string" },
+                "bold": { "type": "string" }
+              },
+              "additionalProperties": false
+            },
+            "line_height": {
+              "type": "object",
+              "description": "Line height values",
+              "properties": {
+                "tight": { "type": "string" },
+                "normal": { "type": "string" },
+                "relaxed": { "type": "string" }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "spacing": {
+          "type": "object",
+          "description": "Spacing and density presets",
+          "properties": {
+            "density": {
+              "enum": ["compact", "normal", "cozy"],
+              "description": "Active density preset"
+            },
+            "presets": {
+              "type": "object",
+              "properties": {
+                "compact": {
+                  "type": "object",
+                  "properties": {
+                    "message_padding": { "type": "string" },
+                    "avatar_size": { "type": "string" },
+                    "item_gap": { "type": "string" }
+                  }
+                },
+                "normal": {
+                  "type": "object",
+                  "properties": {
+                    "message_padding": { "type": "string" },
+                    "avatar_size": { "type": "string" },
+                    "item_gap": { "type": "string" }
+                  }
+                },
+                "cozy": {
+                  "type": "object",
+                  "properties": {
+                    "message_padding": { "type": "string" },
+                    "avatar_size": { "type": "string" },
+                    "item_gap": { "type": "string" }
+                  }
+                }
+              },
+              "additionalProperties": false
+            },
+            "scale": {
+              "type": "object",
+              "description": "Spacing scale ramp",
+              "additionalProperties": { "type": "string" }
+            },
+            "message_padding": { "type": "string" },
+            "avatar_size": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "radii": {
+          "type": "object",
+          "description": "Border radius tokens",
+          "properties": {
+            "none": { "type": "string" },
+            "sm": { "type": "string" },
+            "md": { "type": "string" },
+            "lg": { "type": "string" },
+            "full": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "elevation": {
+          "type": "object",
+          "description": "Shadow and elevation tokens",
+          "properties": {
+            "none": { "type": "string" },
+            "sm": { "type": "string" },
+            "md": { "type": "string" },
+            "lg": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "motion": {
+          "type": "object",
+          "description": "Animation and transition tokens",
+          "properties": {
+            "duration": {
+              "type": "object",
+              "properties": {
+                "fast": { "type": "string" },
+                "normal": { "type": "string" },
+                "slow": { "type": "string" }
+              }
+            },
+            "easing": {
+              "type": "object",
+              "properties": {
+                "ease": { "type": "string" },
+                "ease_in_out": { "type": "string" }
+              }
+            },
+            "reduced_motion": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        },
+        "layout": {
+          "type": "object",
+          "description": "Layout and structural tokens",
+          "properties": {
+            "message_style": {
+              "enum": ["bubble", "gutter"],
+              "description": "Message layout: bubble (chat) or gutter (IRC/Slack)"
+            },
+            "avatar_shape": {
+              "enum": ["circle", "rounded", "square"],
+              "description": "Avatar border radius"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "overrides": {
+      "type": "object",
+      "description": "Per-token overrides for advanced customization",
+      "additionalProperties": { "type": "string" }
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,345 @@
+use crate::schema::*;
+use std::collections::BTreeMap;
+
+pub fn alloy_light() -> Theme {
+    Theme {
+        schema_url: Some("https://alloy.chat/schemas/v1/theme.json".into()),
+        schema_version: SchemaVersion::Number(1),
+        id: "alloy-light".into(),
+        name: "Alloy Light".into(),
+        author: "Alloy Team".into(),
+        version: "0.1.0".into(),
+        mode: ThemeMode::Light,
+        extends: None,
+        tokens: Tokens {
+            color: Some(ColorTokens {
+                surface: Some(SurfaceColors {
+                    canvas: Some("#ffffff".into()),
+                    subtle: Some("#f4f4f5".into()),
+                    panel: Some("#fafafa".into()),
+                    elevated: Some("#ffffff".into()),
+                    hover: Some("#e4e4e7".into()),
+                }),
+                background: Some("#ffffff".into()),
+                text: Some(TextColors {
+                    primary: Some("#18181b".into()),
+                    secondary: Some("#52525b".into()),
+                    muted: Some("#71717a".into()),
+                    link: Some("#2563eb".into()),
+                    on_accent: Some("#ffffff".into()),
+                }),
+                accent: Some(AccentColors {
+                    primary: Some("#4f46e5".into()),
+                    secondary: Some("#6366f1".into()),
+                    subtle: Some("#e0e7ff".into()),
+                    hover: Some("#4338ca".into()),
+                }),
+                status: Some(StatusColors {
+                    online: Some("#16a34a".into()),
+                    away: Some("#d97706".into()),
+                    busy: Some("#dc2626".into()),
+                    offline: Some("#71717a".into()),
+                    error: Some("#dc2626".into()),
+                    warning: Some("#d97706".into()),
+                    info: Some("#2563eb".into()),
+                    success: Some("#16a34a".into()),
+                    mention: Some("#ea580c".into()),
+                }),
+                bubble: Some(BubbleColors {
+                    own: Some(BubbleEndpointColors {
+                        background: Some("#4f46e5".into()),
+                        text: Some("#ffffff".into()),
+                    }),
+                    other: Some(BubbleEndpointColors {
+                        background: Some("#f4f4f5".into()),
+                        text: Some("#18181b".into()),
+                    }),
+                }),
+                border: Some(BorderColors {
+                    subtle: Some("#e4e4e7".into()),
+                    prominent: Some("#d4d4d8".into()),
+                }),
+            }),
+            typography: Some(TypographyTokens {
+                font_family: Some(FontFamilyTokens {
+                    sans: Some(
+                        "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+                            .into(),
+                    ),
+                    mono: Some("'JetBrains Mono', 'Fira Code', monospace".into()),
+                    display: Some("Inter, -apple-system, BlinkMacSystemFont, sans-serif".into()),
+                }),
+                size: Some(FontSizeTokens {
+                    xs: Some("11px".into()),
+                    sm: Some("12px".into()),
+                    base: Some("14px".into()),
+                    lg: Some("16px".into()),
+                    xl: Some("18px".into()),
+                    xxl: Some("24px".into()),
+                }),
+                weight: Some(FontWeightTokens {
+                    regular: Some("400".into()),
+                    medium: Some("500".into()),
+                    semibold: Some("600".into()),
+                    bold: Some("700".into()),
+                }),
+                line_height: Some(LineHeightTokens {
+                    tight: Some("1.25".into()),
+                    normal: Some("1.5".into()),
+                    relaxed: Some("1.75".into()),
+                }),
+            }),
+            spacing: Some(SpacingTokens {
+                density: Some(DensityPreset::Normal),
+                presets: Some(SpacingPresets {
+                    compact: Some(DensityPresetTokens {
+                        message_padding: Some("4px".into()),
+                        avatar_size: Some("28px".into()),
+                        item_gap: Some("4px".into()),
+                    }),
+                    normal: Some(DensityPresetTokens {
+                        message_padding: Some("8px".into()),
+                        avatar_size: Some("36px".into()),
+                        item_gap: Some("8px".into()),
+                    }),
+                    cozy: Some(DensityPresetTokens {
+                        message_padding: Some("12px".into()),
+                        avatar_size: Some("40px".into()),
+                        item_gap: Some("12px".into()),
+                    }),
+                }),
+                scale: Some({
+                    let mut m = BTreeMap::new();
+                    m.insert("1".into(), "4px".into());
+                    m.insert("2".into(), "8px".into());
+                    m.insert("3".into(), "12px".into());
+                    m.insert("4".into(), "16px".into());
+                    m.insert("6".into(), "24px".into());
+                    m.insert("8".into(), "32px".into());
+                    m
+                }),
+                message_padding: Some("8px".into()),
+                avatar_size: Some("36px".into()),
+            }),
+            radii: Some(RadiiTokens {
+                none: Some("0px".into()),
+                sm: Some("4px".into()),
+                md: Some("8px".into()),
+                lg: Some("12px".into()),
+                full: Some("9999px".into()),
+            }),
+            elevation: Some(ElevationTokens {
+                none: Some("none".into()),
+                sm: Some("0 1px 2px 0 rgba(0, 0, 0, 0.05)".into()),
+                md: Some(
+                    "0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1)".into(),
+                ),
+                lg: Some(
+                    "0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1)".into(),
+                ),
+            }),
+            motion: Some(MotionTokens {
+                duration: Some(MotionDurationTokens {
+                    fast: Some("100ms".into()),
+                    normal: Some("200ms".into()),
+                    slow: Some("350ms".into()),
+                }),
+                easing: Some(MotionEasingTokens {
+                    ease: Some("ease".into()),
+                    ease_in_out: Some("cubic-bezier(0.4, 0, 0.2, 1)".into()),
+                }),
+                reduced_motion: Some(false),
+            }),
+            layout: Some(LayoutTokens {
+                message_style: Some(MessageStyle::Bubble),
+                avatar_shape: Some(AvatarShape::Circle),
+            }),
+        },
+        overrides: None,
+    }
+}
+
+pub fn alloy_dark() -> Theme {
+    Theme {
+        schema_url: Some("https://alloy.chat/schemas/v1/theme.json".into()),
+        schema_version: SchemaVersion::Number(1),
+        id: "alloy-dark".into(),
+        name: "Alloy Dark".into(),
+        author: "Alloy Team".into(),
+        version: "0.1.0".into(),
+        mode: ThemeMode::Dark,
+        extends: None,
+        tokens: Tokens {
+            color: Some(ColorTokens {
+                surface: Some(SurfaceColors {
+                    canvas: Some("#18181b".into()),
+                    subtle: Some("#27272a".into()),
+                    panel: Some("#1f1f23".into()),
+                    elevated: Some("#27272a".into()),
+                    hover: Some("#3f3f46".into()),
+                }),
+                background: Some("#18181b".into()),
+                text: Some(TextColors {
+                    primary: Some("#f4f4f5".into()),
+                    secondary: Some("#a1a1aa".into()),
+                    muted: Some("#71717a".into()),
+                    link: Some("#60a5fa".into()),
+                    on_accent: Some("#ffffff".into()),
+                }),
+                accent: Some(AccentColors {
+                    primary: Some("#5865f2".into()),
+                    secondary: Some("#818cf8".into()),
+                    subtle: Some("#312e81".into()),
+                    hover: Some("#4f46e5".into()),
+                }),
+                status: Some(StatusColors {
+                    online: Some("#22c55e".into()),
+                    away: Some("#f59e0b".into()),
+                    busy: Some("#ef4444".into()),
+                    offline: Some("#71717a".into()),
+                    error: Some("#ef4444".into()),
+                    warning: Some("#f59e0b".into()),
+                    info: Some("#3b82f6".into()),
+                    success: Some("#22c55e".into()),
+                    mention: Some("#f97316".into()),
+                }),
+                bubble: Some(BubbleColors {
+                    own: Some(BubbleEndpointColors {
+                        background: Some("#4f46e5".into()),
+                        text: Some("#ffffff".into()),
+                    }),
+                    other: Some(BubbleEndpointColors {
+                        background: Some("#27272a".into()),
+                        text: Some("#f4f4f5".into()),
+                    }),
+                }),
+                border: Some(BorderColors {
+                    subtle: Some("#27272a".into()),
+                    prominent: Some("#3f3f46".into()),
+                }),
+            }),
+            typography: Some(TypographyTokens {
+                font_family: Some(FontFamilyTokens {
+                    sans: Some(
+                        "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+                            .into(),
+                    ),
+                    mono: Some("'JetBrains Mono', 'Fira Code', monospace".into()),
+                    display: Some("Inter, -apple-system, BlinkMacSystemFont, sans-serif".into()),
+                }),
+                size: Some(FontSizeTokens {
+                    xs: Some("11px".into()),
+                    sm: Some("12px".into()),
+                    base: Some("14px".into()),
+                    lg: Some("16px".into()),
+                    xl: Some("18px".into()),
+                    xxl: Some("24px".into()),
+                }),
+                weight: Some(FontWeightTokens {
+                    regular: Some("400".into()),
+                    medium: Some("500".into()),
+                    semibold: Some("600".into()),
+                    bold: Some("700".into()),
+                }),
+                line_height: Some(LineHeightTokens {
+                    tight: Some("1.25".into()),
+                    normal: Some("1.5".into()),
+                    relaxed: Some("1.75".into()),
+                }),
+            }),
+            spacing: Some(SpacingTokens {
+                density: Some(DensityPreset::Normal),
+                presets: Some(SpacingPresets {
+                    compact: Some(DensityPresetTokens {
+                        message_padding: Some("4px".into()),
+                        avatar_size: Some("28px".into()),
+                        item_gap: Some("4px".into()),
+                    }),
+                    normal: Some(DensityPresetTokens {
+                        message_padding: Some("8px".into()),
+                        avatar_size: Some("36px".into()),
+                        item_gap: Some("8px".into()),
+                    }),
+                    cozy: Some(DensityPresetTokens {
+                        message_padding: Some("12px".into()),
+                        avatar_size: Some("40px".into()),
+                        item_gap: Some("12px".into()),
+                    }),
+                }),
+                scale: Some({
+                    let mut m = BTreeMap::new();
+                    m.insert("1".into(), "4px".into());
+                    m.insert("2".into(), "8px".into());
+                    m.insert("3".into(), "12px".into());
+                    m.insert("4".into(), "16px".into());
+                    m.insert("6".into(), "24px".into());
+                    m.insert("8".into(), "32px".into());
+                    m
+                }),
+                message_padding: Some("8px".into()),
+                avatar_size: Some("36px".into()),
+            }),
+            radii: Some(RadiiTokens {
+                none: Some("0px".into()),
+                sm: Some("4px".into()),
+                md: Some("8px".into()),
+                lg: Some("12px".into()),
+                full: Some("9999px".into()),
+            }),
+            elevation: Some(ElevationTokens {
+                none: Some("none".into()),
+                sm: Some("0 1px 2px 0 rgba(0, 0, 0, 0.4)".into()),
+                md: Some(
+                    "0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -2px rgba(0, 0, 0, 0.5)".into(),
+                ),
+                lg: Some(
+                    "0 10px 15px -3px rgba(0, 0, 0, 0.6), 0 4px 6px -4px rgba(0, 0, 0, 0.6)".into(),
+                ),
+            }),
+            motion: Some(MotionTokens {
+                duration: Some(MotionDurationTokens {
+                    fast: Some("100ms".into()),
+                    normal: Some("200ms".into()),
+                    slow: Some("350ms".into()),
+                }),
+                easing: Some(MotionEasingTokens {
+                    ease: Some("ease".into()),
+                    ease_in_out: Some("cubic-bezier(0.4, 0, 0.2, 1)".into()),
+                }),
+                reduced_motion: Some(false),
+            }),
+            layout: Some(LayoutTokens {
+                message_style: Some(MessageStyle::Bubble),
+                avatar_shape: Some(AvatarShape::Circle),
+            }),
+        },
+        overrides: None,
+    }
+}
+
+pub fn alloy_amoled() -> Theme {
+    let mut theme = alloy_dark();
+    theme.id = "alloy-amoled".into();
+    theme.name = "Alloy AMOLED".into();
+    theme.mode = ThemeMode::Amoled;
+    if let Some(color) = &mut theme.tokens.color {
+        color.background = Some("#000000".into());
+        if let Some(surface) = &mut color.surface {
+            surface.canvas = Some("#000000".into());
+            surface.subtle = Some("#0a0a0a".into());
+            surface.panel = Some("#050505".into());
+            surface.elevated = Some("#121212".into());
+            surface.hover = Some("#18181b".into());
+        }
+        if let Some(border) = &mut color.border {
+            border.subtle = Some("#18181b".into());
+            border.prominent = Some("#27272a".into());
+        }
+        if let Some(bubble) = &mut color.bubble
+            && let Some(other) = &mut bubble.other
+        {
+            other.background = Some("#121212".into());
+        }
+    }
+    theme
+}

@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://alloy.chat/schemas/v1/keybindings.schema.json",
+  "title": "Alloy Keybindings Configuration",
+  "description": "Keyboard shortcut mapping schema for Alloy Matrix client",
+  "oneOf": [
+    {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/keybinding"
+      }
+    },
+    {
+      "type": "object",
+      "required": ["bindings"],
+      "properties": {
+        "$schema": {
+          "type": "string"
+        },
+        "schema_version": {
+          "oneOf": [
+            { "type": "integer", "const": 1 },
+            { "type": "string" }
+          ]
+        },
+        "bindings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/keybinding"
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  ],
+  "definitions": {
+    "keybinding": {
+      "type": "object",
+      "required": ["key", "command"],
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "Key chord or combination (e.g. 'ctrl+k', 'mod+enter', 'esc', 'shift+alt+down')"
+        },
+        "command": {
+          "type": "string",
+          "description": "Command identifier (e.g. 'quick_switcher.open', 'composer.send')"
+        },
+        "when": {
+          "type": "string",
+          "description": "Optional context expression (e.g. 'timeline_focused', '!modal_open', 'composer_empty')"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

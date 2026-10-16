@@ -1,0 +1,32 @@
+{
+  "$schema": "https://alloy.chat/schemas/v1/theme.json",
+  "schema_version": 1,
+  "id": "alloy-amoled",
+  "name": "Alloy AMOLED",
+  "author": "Alloy Team",
+  "version": "0.1.0",
+  "mode": "amoled",
+  "extends": "alloy-dark",
+  "tokens": {
+    "color": {
+      "surface": {
+        "canvas": "#000000",
+        "subtle": "#0a0a0a",
+        "panel": "#050505",
+        "elevated": "#121212",
+        "hover": "#18181b"
+      },
+      "background": "#000000",
+      "bubble": {
+        "other": {
+          "background": "#121212",
+          "text": "#f4f4f5"
+        }
+      },
+      "border": {
+        "subtle": "#18181b",
+        "prominent": "#27272a"
+      }
+    }
+  }
+}
