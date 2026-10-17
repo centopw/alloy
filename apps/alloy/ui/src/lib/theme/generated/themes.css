@@ -61,7 +61,7 @@
   --alloy-motion-easing-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
   --alloy-motion-reduced-motion: false;
   --alloy-radii-full: 9999px;
-  --alloy-radii-lg: 12px;
+  --alloy-radii-lg: 16px;
   --alloy-radii-md: 8px;
   --alloy-radii-none: 0px;
   --alloy-radii-sm: 4px;
@@ -152,7 +152,7 @@
   --alloy-motion-easing-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
   --alloy-motion-reduced-motion: false;
   --alloy-radii-full: 9999px;
-  --alloy-radii-lg: 12px;
+  --alloy-radii-lg: 16px;
   --alloy-radii-md: 8px;
   --alloy-radii-none: 0px;
   --alloy-radii-sm: 4px;
@@ -243,7 +243,7 @@
   --alloy-motion-easing-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
   --alloy-motion-reduced-motion: false;
   --alloy-radii-full: 9999px;
-  --alloy-radii-lg: 12px;
+  --alloy-radii-lg: 16px;
   --alloy-radii-md: 8px;
   --alloy-radii-none: 0px;
   --alloy-radii-sm: 4px;
@@ -334,7 +334,7 @@
   --alloy-motion-easing-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
   --alloy-motion-reduced-motion: false;
   --alloy-radii-full: 9999px;
-  --alloy-radii-lg: 12px;
+  --alloy-radii-lg: 16px;
   --alloy-radii-md: 8px;
   --alloy-radii-none: 0px;
   --alloy-radii-sm: 4px;

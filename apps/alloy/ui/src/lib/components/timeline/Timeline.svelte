@@ -4,8 +4,6 @@
   import type { VListHandle } from 'virtua/svelte';
   import type { TimelineItemDto } from '$lib/generated';
   import { timelineStore } from '$lib/stores/timeline.svelte';
-  import { session } from '$lib/stores/session.svelte';
-  import { Avatar } from '../common';
   import Icon from '$lib/icons/Icon.svelte';
   import { ArrowDown } from '$lib/icons';
   import MessageRow from './MessageRow.svelte';
@@ -24,7 +22,6 @@
 
   // Virtual items (read marker, timeline start) carry no content worth a row.
   const rows = $derived(timelineStore.items.filter((i) => i.content.kind !== 'Virtual'));
-  const myUserId = $derived(session.account?.user_id ?? null);
 
   // Only `roomId` may retrigger this: the store reads/writes its own state while opening.
   $effect(() => {
@@ -64,15 +61,7 @@
   }
 </script>
 
-<section class="timeline" aria-label="Conversation with {title}">
-  <header class="head">
-    <Avatar userId={roomId} displayName={title} size="md" />
-    <div class="titles">
-      <h2>{title}</h2>
-      <span class="sub">{encrypted ? 'End-to-end encrypted' : 'Not encrypted'}</span>
-    </div>
-  </header>
-
+<section class="timeline" aria-label="Conversation with {title}, {isDirect ? 'direct message' : 'room'}, {encrypted ? 'end-to-end encrypted' : 'not encrypted'}">
   <div class="viewport">
     {#if timelineStore.loading && rows.length === 0}
       <p class="status" aria-busy="true">Loading messages</p>
@@ -92,9 +81,6 @@
           <MessageRow
             {item}
             prev={index > 0 ? rows[index - 1] : null}
-            next={index < rows.length - 1 ? rows[index + 1] : null}
-            {isDirect}
-            {myUserId}
           />
         {/snippet}
       </VList>
@@ -119,28 +105,6 @@
     min-height: 0;
     flex: 1;
     background: var(--alloy-chat-background, none), var(--alloy-color-surface-canvas);
-  }
-  .head {
-    display: flex;
-    align-items: center;
-    gap: var(--alloy-spacing-scale-3);
-    padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-4);
-    border-bottom: 1px solid var(--alloy-color-border-subtle);
-    background: var(--alloy-color-surface-panel);
-  }
-  h2 {
-    margin: 0;
-    font-size: var(--alloy-typography-size-lg);
-    font-weight: var(--alloy-typography-weight-semibold);
-  }
-  .titles {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-  }
-  .sub {
-    font-size: var(--alloy-typography-size-sm);
-    color: var(--alloy-color-text-secondary);
   }
   .viewport {
     position: relative;
@@ -174,7 +138,7 @@
     bottom: var(--alloy-spacing-scale-4);
     transform: translateX(-50%);
     background: var(--alloy-color-status-error);
-    color: #fff;
+    color: var(--alloy-color-text-on-accent);
     padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-4);
     border-radius: var(--alloy-radii-md);
   }

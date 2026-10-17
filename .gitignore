@@ -9,3 +9,4 @@ dist/
 !docs/
 !docs/**
 !AGENTS.md
+docs/spikes/ui/e2e-failure.png

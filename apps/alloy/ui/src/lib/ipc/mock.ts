@@ -796,21 +796,8 @@ export class MockTransport implements Transport {
           payload: { recovery_key: 'EsTc 6543 dcba 8765 hgfe 2109 lkji 6543 mock' },
         };
 
-      case 'SubscribeSpaces': {
-        const subId = `sub_spaces_${++this.subCounter}`;
-        return {
-          type: 'SpacesSubscribed',
-          payload: { subscription_id: subId },
-        };
-      }
-
-      case 'SubscribeSpaceChildren': {
-        const subId = `sub_space_child_${++this.subCounter}`;
-        return {
-          type: 'SpaceChildrenSubscribed',
-          payload: { subscription_id: subId },
-        };
-      }
+      case 'GetSpaceParents':
+        return { type: 'SpaceParents', payload: { parents: [] } };
 
       case 'ListThemes':
         return {

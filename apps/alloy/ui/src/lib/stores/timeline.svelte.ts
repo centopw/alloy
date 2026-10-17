@@ -2,6 +2,7 @@ import { client, applyDiff } from '../ipc/index.js';
 import type { EngineEvent, TimelineItemDto } from '../generated/index.js';
 import { FrameBatcher, Subscription } from './subscription.js';
 import { errorMessage, expect } from './errors.js';
+import { uploadsStore } from './uploads.svelte.js';
 
 type TimelineDiffEvent = Extract<EngineEvent, { type: 'TimelineDiff' }>;
 
@@ -82,7 +83,7 @@ class TimelineStore {
   }
 
   /** Send text (markdown by default); honors a pending reply or edit. */
-  async send(body: string) {
+  async send(body: string, mentions: string[] = []) {
     if (!this.roomId) return;
     const roomId = this.roomId;
     const text = body.trim();
@@ -95,7 +96,11 @@ class TimelineStore {
       } else {
         const reply = this.replyTo?.event_id ?? null;
         this.replyTo = null;
-        await client.sendText(roomId, text, { markdown: true, reply_to: reply });
+        await client.sendText(roomId, text, {
+          markdown: true,
+          reply_to: reply,
+          mentions: mentions.length ? mentions : null
+        });
       }
     } catch (e) {
       this.error = errorMessage(e);
@@ -104,10 +109,15 @@ class TimelineStore {
 
   async sendFile(path: string, mime?: string | null) {
     if (!this.roomId) return;
+    const roomId = this.roomId;
+    const txnId = crypto.randomUUID();
+    uploadsStore.begin({ txnId, roomId, name: path.split(/[\\/]/).pop() || path });
     try {
-      await client.sendAttachment(this.roomId, path, { mime_type: mime ?? null });
+      await client.sendAttachment(roomId, path, { mime_type: mime ?? null, txn_id: txnId });
     } catch (e) {
       this.error = errorMessage(e);
+    } finally {
+      uploadsStore.end(txnId);
     }
   }
 

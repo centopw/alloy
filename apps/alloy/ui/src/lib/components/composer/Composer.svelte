@@ -1,25 +1,60 @@
 <script lang="ts">
   import { timelineStore } from '$lib/stores/timeline.svelte';
+  import { roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
   import { client } from '$lib/ipc';
   import Icon from '$lib/icons/Icon.svelte';
-  import { Paperclip, Send, Smile, X } from '$lib/icons';
+  import { Plus, Smile, X } from '$lib/icons';
   import { canPickFiles, pickFile } from '$lib/platform/files';
   import { EMOJI_PICKER } from '$lib/content/emoji';
+  import { tick } from 'svelte';
+  import type { RoomMemberDto } from '$lib/generated/index.js';
+  import { membersStore, memberLabel } from '$lib/stores/members.svelte';
+  import {
+    activeMention,
+    MENTION_LIMIT,
+    mentionOptionId,
+    rankMembers,
+    reconcileMentions,
+    type ActiveMention,
+    type MentionRecord
+  } from '$lib/stores/mentions';
+  import MentionPicker from './MentionPicker.svelte';
 
   interface Props {
     roomId: string;
   }
   let { roomId }: Props = $props();
+  const pickerId = $props.id();
 
   let text = $state('');
   let field: HTMLTextAreaElement | undefined = $state();
   let emojiOpen = $state(false);
+  let mention = $state<ActiveMention | null>(null);
+  // Key (`start:query`) of a mention dismissed with Escape; it reopens once the query changes.
+  let mentionDismissed = $state<string | null>(null);
+  let mentionIndex = $state(0);
+  // Mentions picked for the current draft, checked against the text on send.
+  let mentionRecords: MentionRecord[] = [];
   let typing = false;
   let typingTimer: ReturnType<typeof setTimeout> | undefined;
 
   const replying = $derived(timelineStore.replyTo);
   const editing = $derived(timelineStore.editing);
+  const composing = $derived(!!(replying || editing));
   const canSend = $derived(text.trim().length > 0);
+  const roomName = $derived.by(() => {
+    const active = roomsStore.active;
+    return active && active.id === roomId ? roomTitle(active) : null;
+  });
+  const placeholder = $derived(roomName ? `Message ${roomName}` : 'Message');
+  const mentionKey = (m: ActiveMention) => `${m.start}:${m.query}`;
+  const candidates = $derived(
+    mention ? rankMembers(membersStore.membersOf(roomId), mention.query, MENTION_LIMIT) : []
+  );
+  const pickerOpen = $derived(
+    mention !== null && candidates.length > 0 && mentionKey(mention) !== mentionDismissed
+  );
+  const highlighted = $derived(Math.min(mentionIndex, Math.max(candidates.length - 1, 0)));
 
   // Entering edit mode prefills the field with the original text.
   $effect(() => {
@@ -30,11 +65,16 @@
     }
   });
 
-  // Switching rooms starts with a clean composer.
+  // Switching rooms starts with a clean composer and loads that room's members for mentions.
   $effect(() => {
     void roomId;
     text = '';
     emojiOpen = false;
+    mention = null;
+    mentionDismissed = null;
+    mentionRecords = [];
+    // Without loaded members the picker stays empty; sending is unaffected.
+    void membersStore.loadMembers(roomId).catch(() => {});
   });
 
   function setTyping(on: boolean) {
@@ -51,6 +91,43 @@
     typingTimer = setTimeout(() => setTyping(false), 4000);
   }
 
+  // Opens, moves or closes the suggestion popup for the `@` token ending at the caret.
+  function syncMention() {
+    const next = field ? activeMention(text, field.selectionStart) : null;
+    if (next && (!mention || mentionKey(next) !== mentionKey(mention))) mentionIndex = 0;
+    mention = next;
+  }
+
+  function onFieldInput() {
+    syncMention();
+    onInput();
+  }
+
+  function onFieldKeyup(e: KeyboardEvent) {
+    if (e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'End') syncMention();
+  }
+
+  function dismissMention() {
+    if (mention) mentionDismissed = mentionKey(mention);
+  }
+
+  // Replaces the `@query` token at the caret with the member's label and records whom it points at.
+  async function pickMention(member: RoomMemberDto) {
+    if (!field) return;
+    const caret = field.selectionStart;
+    const active = activeMention(text, caret);
+    mention = null;
+    if (!active) return;
+    const label = memberLabel(member);
+    const insert = `@${label} `;
+    text = text.slice(0, active.start) + insert + text.slice(caret);
+    mentionRecords = [...mentionRecords, { userId: member.user_id, label }];
+    await tick();
+    const next = active.start + insert.length;
+    field?.setSelectionRange(next, next);
+    onInput();
+  }
+
   function resize() {
     if (!field) return;
     field.style.height = 'auto';
@@ -60,11 +137,14 @@
   async function submit() {
     if (!canSend) return;
     const body = text;
+    const mentions = reconcileMentions(body, mentionRecords);
     text = '';
+    mentionRecords = [];
+    mention = null;
     clearTimeout(typingTimer);
     setTyping(false);
     await tickResize();
-    await timelineStore.send(body);
+    await timelineStore.send(body, mentions);
   }
 
   async function tickResize() {
@@ -73,6 +153,27 @@
   }
 
   function onKeydown(e: KeyboardEvent) {
+    if (pickerOpen && !e.isComposing) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const step = e.key === 'ArrowDown' ? 1 : -1;
+        mentionIndex = (highlighted + step + candidates.length) % candidates.length;
+        return;
+      }
+      if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
+        const picked = candidates[highlighted];
+        if (picked) {
+          e.preventDefault();
+          void pickMention(picked);
+          return;
+        }
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        dismissMention();
+        return;
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
       void submit();
@@ -105,15 +206,16 @@
   }
 </script>
 
-<div class="composer">
-  {#if replying || editing}
+<div class="composer" class:attached={composing}>
+  {#if composing}
     <div class="banner">
       <div class="banner-text">
-        <strong>{editing ? 'Editing message' : `Replying to ${replying?.sender_display_name ?? replying?.sender}`}</strong>
-        <span>{banner()}</span>
+        <span class="label">{editing ? 'Editing message' : `Replying to ${replying?.sender_display_name ?? replying?.sender}`}</span>
+        <span class="preview">{banner()}</span>
       </div>
       <button
         type="button"
+        class="round"
         aria-label="Cancel"
         onclick={() => {
           const wasEditing = !!editing;
@@ -126,10 +228,10 @@
     </div>
   {/if}
 
-  <div class="bar">
+  <div class="field">
     {#if canPickFiles()}
-      <button type="button" class="icon" aria-label="Attach file" title="Attach file" onclick={attach}>
-        <Icon icon={Paperclip} size={20} />
+      <button type="button" class="round" aria-label="Attach file" title="Attach file" onclick={attach}>
+        <Icon icon={Plus} size={20} />
       </button>
     {/if}
 
@@ -137,19 +239,27 @@
       bind:this={field}
       bind:value={text}
       rows="1"
-      placeholder="Write a message"
+      {placeholder}
       aria-label="Message"
-      oninput={onInput}
+      role="combobox"
+      aria-autocomplete="list"
+      aria-expanded={pickerOpen}
+      aria-controls={pickerOpen ? pickerId : undefined}
+      aria-activedescendant={pickerOpen ? mentionOptionId(pickerId, highlighted) : undefined}
+      oninput={onFieldInput}
       onkeydown={onKeydown}
+      onkeyup={onFieldKeyup}
+      onclick={syncMention}
+      onblur={() => (mention = null)}
     ></textarea>
 
     <div class="emoji-wrap">
       <button
         type="button"
-        class="icon"
-        aria-label="Emoji"
+        class="round"
+        aria-label="Insert emoji"
         aria-expanded={emojiOpen}
-        title="Emoji"
+        title="Insert emoji"
         onclick={() => (emojiOpen = !emojiOpen)}
       >
         <Icon icon={Smile} size={20} />
@@ -163,15 +273,15 @@
       {/if}
     </div>
 
-    <button
-      type="button"
-      class="send"
-      aria-label={editing ? 'Save edit' : 'Send'}
-      disabled={!canSend}
-      onclick={submit}
-    >
-      <Icon icon={Send} size={20} />
-    </button>
+    {#if pickerOpen}
+      <MentionPicker
+        id={pickerId}
+        {candidates}
+        {highlighted}
+        onpick={(m) => void pickMention(m)}
+        onhover={(i) => (mentionIndex = i)}
+      />
+    {/if}
   </div>
 </div>
 
@@ -186,34 +296,42 @@
     justify-content: space-between;
     gap: var(--alloy-spacing-scale-3);
     padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
-    margin-bottom: var(--alloy-spacing-scale-2);
-    border-left: 3px solid var(--alloy-color-accent-primary);
     background: var(--alloy-color-surface-subtle);
-    border-radius: var(--alloy-radii-sm);
+    border-radius: var(--alloy-radii-lg) var(--alloy-radii-lg) 0 0;
+    color: var(--alloy-color-text-muted);
     font-size: var(--alloy-typography-size-sm);
   }
   .banner-text {
     display: flex;
-    flex-direction: column;
+    align-items: baseline;
+    gap: var(--alloy-spacing-scale-2);
     min-width: 0;
   }
-  .banner-text span {
-    color: var(--alloy-color-text-secondary);
+  .label {
+    flex: none;
+  }
+  .preview {
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .bar {
+  .field {
+    position: relative;
     display: flex;
     align-items: flex-end;
     gap: var(--alloy-spacing-scale-1);
     padding: var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-2);
-    background: var(--alloy-color-surface-elevated);
+    background: var(--alloy-color-surface-subtle);
     border: 1px solid var(--alloy-color-border-subtle);
     border-radius: var(--alloy-radii-lg);
   }
-  .bar:focus-within {
+  .field:focus-within {
     border-color: var(--alloy-color-accent-primary);
+  }
+  .attached .field {
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
   }
   textarea {
     flex: 1;
@@ -223,13 +341,11 @@
     background: transparent;
     color: var(--alloy-color-text-primary);
     font: inherit;
-    padding: 8px 4px;
+    padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-1);
     max-height: 160px;
     line-height: var(--alloy-typography-line-height-normal);
   }
-  .icon,
-  .send,
-  .banner button {
+  .round {
     border: 0;
     background: transparent;
     color: var(--alloy-color-text-secondary);
@@ -241,29 +357,24 @@
     cursor: pointer;
     flex: none;
   }
-  .banner button {
+  .banner .round {
     width: 28px;
     height: 28px;
   }
-  .icon:hover,
-  .banner button:hover {
+  .round:hover {
     background: var(--alloy-color-surface-hover);
     color: var(--alloy-color-text-primary);
   }
-  .send {
-    background: var(--alloy-color-accent-primary);
-    color: var(--alloy-color-text-on-accent);
-  }
-  .send:disabled {
-    opacity: 0.4;
-    cursor: default;
+  .round:focus-visible {
+    outline: 2px solid var(--alloy-color-accent-primary);
+    outline-offset: 2px;
   }
   .emoji-wrap {
     position: relative;
   }
   .emoji-grid {
     position: absolute;
-    bottom: 44px;
+    bottom: calc(100% + var(--alloy-spacing-scale-2));
     right: 0;
     display: grid;
     grid-template-columns: repeat(8, 1fr);
@@ -271,7 +382,7 @@
     padding: var(--alloy-spacing-scale-2);
     background: var(--alloy-color-surface-elevated);
     border: 1px solid var(--alloy-color-border-subtle);
-    border-radius: var(--alloy-radii-md);
+    border-radius: var(--alloy-radii-lg);
     box-shadow: var(--alloy-elevation-md);
     z-index: 5;
   }
@@ -279,7 +390,7 @@
     border: 0;
     background: transparent;
     font-size: 1.25rem;
-    padding: 4px;
+    padding: var(--alloy-spacing-scale-1);
     border-radius: var(--alloy-radii-sm);
     cursor: pointer;
   }

@@ -1,18 +1,19 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Avatar } from '../common';
-  import Icon from '$lib/icons/Icon.svelte';
-  import { ChevronLeft } from '$lib/icons';
-  import RoomList from './RoomList.svelte';
+  import SpaceRail from './SpaceRail.svelte';
+  import Sidebar from './Sidebar.svelte';
+  import ChatHeader from './ChatHeader.svelte';
+  import MembersPanel from './MembersPanel.svelte';
   import CommandPalette from './CommandPalette.svelte';
   import Timeline from '../timeline/Timeline.svelte';
   import Composer from '../composer/Composer.svelte';
+  import UploadStrip from '../composer/UploadStrip.svelte';
   import NewRoomDialog from './NewRoomDialog.svelte';
   import SettingsDialog from '../settings/SettingsDialog.svelte';
   import VerificationDialog from '../settings/VerificationDialog.svelte';
   import Hud from '../dev/Hud.svelte';
   import { roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
-  import { session } from '$lib/stores/session.svelte';
+  import { ui } from '$lib/stores/ui.svelte';
   import { verification } from '$lib/stores/verification.svelte';
 
   let paletteOpen = $state(false);
@@ -20,11 +21,29 @@
   let newRoomOpen = $state(false);
   let pane = $state<'list' | 'chat'>('list');
   let hudVisible = $state(false);
+  let innerWidth = $state(1280);
+
+  // ADR 0002 breakpoints: wide >= 1100px, medium 900-1099px, narrow < 900px.
+  const layout = $derived<'wide' | 'medium' | 'narrow'>(
+    innerWidth >= 1100 ? 'wide' : innerWidth >= 900 ? 'medium' : 'narrow'
+  );
 
   const active = $derived(roomsStore.active);
   // A string-valued derived: unlike `active` (a new object on every room update) it only changes
   // when the open room changes, so the timeline is not reopened on each unread/preview update.
   const activeId = $derived(roomsStore.active?.id ?? null);
+
+  // Wide: members sit in their own column. Medium: a rounded overlay over the chat.
+  // Narrow: the same overlay, shown only while a chat is open (the list pane has no chat).
+  const membersMode = $derived<'column' | 'overlay' | 'none'>(
+    !activeId || !ui.membersOpen
+      ? 'none'
+      : layout === 'wide'
+        ? 'column'
+        : layout === 'medium' || pane === 'chat'
+          ? 'overlay'
+          : 'none'
+  );
 
   onMount(() => {
     verification.listen();
@@ -53,32 +72,19 @@
   }
 </script>
 
-<svelte:window onkeydown={onKeydown} />
+<svelte:window onkeydown={onKeydown} bind:innerWidth />
 
-<div class="shell" data-pane={pane}>
-  <nav class="rail" aria-label="Account">
-    <div class="brand" aria-hidden="true">A</div>
-    <div class="grow"></div>
-    <button type="button" class="account" aria-label="Settings" title="Settings" onclick={() => (settingsOpen = true)}>
-      <Avatar
-        userId={session.account?.user_id}
-        displayName={session.account?.display_name ?? session.account?.user_id}
-        size="md"
-      />
-    </button>
-  </nav>
-
-  <div class="list-pane">
-    <RoomList onselect={pick} onnew={() => (newRoomOpen = true)} />
+<div class="shell" data-layout={layout} data-pane={pane} data-members={membersMode}>
+  <div class="nav">
+    <SpaceRail onnew={() => (newRoomOpen = true)} />
+    <Sidebar onselect={pick} onnew={() => (newRoomOpen = true)} onsettings={() => (settingsOpen = true)} />
   </div>
 
-  <main class="chat-pane">
+  <main class="chat">
     {#if active && activeId}
-      <button type="button" class="back" onclick={() => (pane = 'list')}>
-        <Icon icon={ChevronLeft} size={20} />
-        <span>Conversations</span>
-      </button>
+      <ChatHeader room={active} onback={() => (pane = 'list')} onsearch={() => (paletteOpen = true)} />
       <Timeline roomId={activeId} title={roomTitle(active)} isDirect={active.is_direct} encrypted={active.encrypted} />
+      <UploadStrip roomId={activeId} />
       <Composer roomId={activeId} />
     {:else}
       <div class="empty">
@@ -87,6 +93,12 @@
       </div>
     {/if}
   </main>
+
+  {#if membersMode !== 'none' && activeId}
+    <div class="members">
+      <MembersPanel roomId={activeId} />
+    </div>
+  {/if}
 </div>
 
 <CommandPalette open={paletteOpen} onclose={() => (paletteOpen = false)} onpick={pick} />
@@ -97,86 +109,79 @@
 
 <style>
   .shell {
+    position: relative;
     display: grid;
-    grid-template-columns: 64px minmax(260px, 340px) 1fr;
+    grid-template-columns: 312px minmax(0, 1fr);
     height: 100vh;
+    overflow: hidden;
     background: var(--alloy-color-surface-canvas);
     color: var(--alloy-color-text-primary);
   }
-  .rail {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: var(--alloy-spacing-scale-3);
-    padding: var(--alloy-spacing-scale-3) 0;
-    background: var(--alloy-color-surface-canvas);
-    border-right: 1px solid var(--alloy-color-border-subtle);
+  .shell[data-members='column'] {
+    grid-template-columns: 312px minmax(0, 1fr) 240px;
   }
-  .brand {
-    width: 40px;
-    height: 40px;
-    border-radius: var(--alloy-radii-lg);
-    background: var(--alloy-color-accent-primary);
-    color: var(--alloy-color-text-on-accent);
+
+  /* The rail (72px) and the sidebar (240px) are separate components; this wrapper lays them out. */
+  .nav {
     display: grid;
-    place-items: center;
-    font-weight: var(--alloy-typography-weight-bold);
-  }
-  .grow {
-    flex: 1;
-  }
-  .account {
-    border: 0;
-    background: transparent;
-    padding: 0;
-    cursor: pointer;
-    border-radius: var(--alloy-radii-full);
-  }
-  .list-pane {
+    grid-template-columns: 72px 240px;
+    min-width: 0;
     min-height: 0;
   }
-  .chat-pane {
+
+  .chat {
     display: flex;
     flex-direction: column;
     min-width: 0;
     min-height: 0;
+    background: var(--alloy-color-surface-canvas);
   }
-  .back {
-    display: none;
+
+  .members {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--alloy-color-surface-panel);
+    border-left: 1px solid var(--alloy-color-border-subtle);
   }
+  .shell[data-members='overlay'] .members {
+    position: absolute;
+    top: var(--alloy-spacing-scale-2);
+    right: var(--alloy-spacing-scale-2);
+    bottom: var(--alloy-spacing-scale-2);
+    z-index: 10;
+    width: 240px;
+    border: 1px solid var(--alloy-color-border-subtle);
+    border-radius: var(--alloy-radii-lg);
+  }
+
   .empty {
     margin: auto;
     text-align: center;
     color: var(--alloy-color-text-secondary);
   }
   .empty h2 {
-    color: var(--alloy-color-text-primary);
     margin: 0 0 var(--alloy-spacing-scale-2);
+    color: var(--alloy-color-text-primary);
   }
 
-  @media (max-width: 680px) {
-    .shell {
-      grid-template-columns: 1fr;
-    }
-    .rail {
-      display: none;
-    }
-    .shell[data-pane='list'] .chat-pane {
-      display: none;
-    }
-    .shell[data-pane='chat'] .list-pane {
-      display: none;
-    }
-    .back {
-      display: flex;
-      align-items: center;
-      gap: var(--alloy-spacing-scale-1);
-      border: 0;
-      background: var(--alloy-color-surface-panel);
-      color: var(--alloy-color-accent-primary);
-      font: inherit;
-      padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
-      cursor: pointer;
-    }
+  /* Narrow: one pane at a time. The list pane is the rail plus sidebar; the chat pane is the conversation. */
+  .shell[data-layout='narrow'] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .shell[data-layout='narrow'] .nav {
+    grid-template-columns: 72px minmax(0, 1fr);
+  }
+  .shell[data-layout='narrow'][data-pane='list'] .chat {
+    display: none;
+  }
+  .shell[data-layout='narrow'][data-pane='chat'] .nav {
+    display: none;
+  }
+  .shell[data-layout='narrow'][data-members='overlay'] .members {
+    left: var(--alloy-spacing-scale-2);
+    width: auto;
   }
 </style>

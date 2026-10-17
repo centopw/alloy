@@ -139,7 +139,7 @@ pub fn alloy_light() -> Theme {
                 none: Some("0px".into()),
                 sm: Some("4px".into()),
                 md: Some("8px".into()),
-                lg: Some("12px".into()),
+                lg: Some("16px".into()),
                 full: Some("9999px".into()),
             }),
             elevation: Some(ElevationTokens {
@@ -318,7 +318,7 @@ pub fn alloy_dark() -> Theme {
                 none: Some("0px".into()),
                 sm: Some("4px".into()),
                 md: Some("8px".into()),
-                lg: Some("12px".into()),
+                lg: Some("16px".into()),
                 full: Some("9999px".into()),
             }),
             elevation: Some(ElevationTokens {

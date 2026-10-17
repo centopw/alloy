@@ -364,16 +364,9 @@ export class AlloyClient {
 
   // === Spaces ===
 
-  async subscribeSpaces() {
+  async getSpaceParents() {
     return this.transport.invoke({
-      action: 'SubscribeSpaces',
-    });
-  }
-
-  async subscribeSpaceChildren(space_id: RoomId) {
-    return this.transport.invoke({
-      action: 'SubscribeSpaceChildren',
-      params: { space_id },
+      action: 'GetSpaceParents',
     });
   }
 

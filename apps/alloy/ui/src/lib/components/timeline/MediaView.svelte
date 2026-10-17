@@ -1,9 +1,10 @@
 <script lang="ts">
   import { client } from '$lib/ipc';
-  import { localFileUrl } from '$lib/platform/files';
   import { formatBytes } from '$lib/content/format';
+  import { localFileUrl } from '$lib/platform/files';
   import { Download } from '$lib/icons';
   import Icon from '$lib/icons/Icon.svelte';
+  import MediaViewer, { fetchMediaFile } from './MediaViewer.svelte';
 
   interface Props {
     uri: string;
@@ -13,22 +14,44 @@
     sizeBytes: number;
     width?: number | null;
     height?: number | null;
+    /** Server-provided poster for videos. */
+    thumbnailUri?: string | null;
   }
-  let { uri, mimeType, body, mediaKind, sizeBytes, width = null, height = null }: Props = $props();
+  let {
+    uri,
+    mimeType,
+    body,
+    mediaKind,
+    sizeBytes,
+    width = null,
+    height = null,
+    thumbnailUri = null,
+  }: Props = $props();
 
   let src = $state<string | null>(null);
   let failed = $state(false);
+  let viewerOpen = $state(false);
+
   const visual = $derived(mediaKind === 'image' || mediaKind === 'sticker');
+  const video = $derived(mediaKind === 'video');
+  const openable = $derived(mediaKind === 'image' || video || mediaKind === 'audio');
+  // Images thumbnail their own media; videos use their poster when one exists.
+  const thumbSource = $derived(visual ? uri : video ? thumbnailUri : null);
+  const thumbMime = $derived(visual ? mimeType : 'image/jpeg');
+  const hasThumb = $derived(thumbSource !== null && !failed);
   const aspect = $derived(width && height ? `${width} / ${height}` : '4 / 3');
 
   $effect(() => {
-    if (!visual) return;
+    const source = thumbSource;
+    if (source === null) return;
     let cancelled = false;
+    src = null;
+    failed = false;
     client
-      .getMedia({ kind: 'Remote', data: { uri } }, 'thumbnail', {
+      .getMedia({ kind: 'Remote', data: { uri: source } }, 'thumbnail', {
         width: 480,
         height: 360,
-        mime_type: mimeType,
+        mime_type: thumbMime,
       })
       .then(async (res) => {
         if (res.type !== 'MediaRetrieved') throw new Error('unexpected response');
@@ -44,38 +67,82 @@
   });
 
   async function download() {
-    const res = await client.getMedia({ kind: 'Remote', data: { uri } }, 'file', { mime_type: mimeType });
-    if (res.type === 'MediaRetrieved') {
-      const { openExternal } = await import('$lib/platform/links');
-      await openExternal(await localFileUrl(res.payload.local_path));
-    }
+    const url = await fetchMediaFile(uri, mimeType);
+    const { openExternal } = await import('$lib/platform/links');
+    await openExternal(url);
   }
 </script>
 
-{#if visual && !failed}
-  <div class="frame" style="aspect-ratio: {aspect};">
-    {#if src}
-      <img {src} alt={body} loading="lazy" />
-    {:else}
-      <div class="placeholder" aria-busy="true"></div>
-    {/if}
-  </div>
+{#snippet frameContent()}
+  {#if src}
+    <img {src} alt={body} loading="lazy" />
+  {:else}
+    <div class="placeholder" aria-busy="true"></div>
+  {/if}
+{/snippet}
+
+{#if hasThumb}
+  {#if openable}
+    <button
+      class="frame frame-open"
+      type="button"
+      style="aspect-ratio: {aspect};"
+      aria-label="Open {body || mediaKind}"
+      onclick={() => (viewerOpen = true)}
+    >
+      {@render frameContent()}
+    </button>
+  {:else}
+    <div class="frame" style="aspect-ratio: {aspect};">
+      {@render frameContent()}
+    </div>
+  {/if}
 {:else}
-  <button class="file" type="button" onclick={download}>
+  <button
+    class="file"
+    type="button"
+    onclick={openable ? () => (viewerOpen = true) : download}
+  >
     <span class="file-name">{body || 'Attachment'}</span>
     <span class="file-meta">{formatBytes(sizeBytes)}</span>
-    <Icon icon={Download} size={16} label="Download" />
+    {#if !openable}
+      <Icon icon={Download} size={16} label="Download" />
+    {/if}
   </button>
+{/if}
+
+{#if openable}
+  <MediaViewer
+    open={viewerOpen}
+    onclose={() => (viewerOpen = false)}
+    {uri}
+    {mimeType}
+    {body}
+    {mediaKind}
+  />
 {/if}
 
 <style>
   .frame {
-    max-width: min(360px, 100%);
+    max-width: min(400px, 100%);
     min-width: 120px;
     max-height: 360px;
-    border-radius: var(--alloy-radii-md);
+    border-radius: var(--alloy-radii-lg);
     overflow: hidden;
     background: var(--alloy-color-surface-subtle);
+  }
+  .frame-open {
+    display: block;
+    padding: 0;
+    border: 0;
+    font: inherit;
+    color: inherit;
+    text-align: inherit;
+    cursor: pointer;
+  }
+  .frame-open:focus-visible {
+    outline: 2px solid var(--alloy-color-accent-primary);
+    outline-offset: 2px;
   }
   img {
     width: 100%;
@@ -94,12 +161,16 @@
     gap: var(--alloy-spacing-scale-2);
     padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
     border: 1px solid var(--alloy-color-border-subtle);
-    border-radius: var(--alloy-radii-md);
+    border-radius: var(--alloy-radii-lg);
     background: transparent;
     color: inherit;
     font: inherit;
     cursor: pointer;
     max-width: 100%;
+  }
+  .file:disabled {
+    cursor: default;
+    color: var(--alloy-color-text-muted);
   }
   .file-name {
     overflow: hidden;

@@ -1,9 +1,13 @@
 <script lang="ts">
-  import { Modal, Button, Toggle, SegmentedControl } from '../common';
-  import { themeStore } from '$lib/theme/theme.svelte';
-  import type { Density, MessageStyle } from '$lib/theme/theme.svelte';
+  import { untrack } from 'svelte';
+  import { Icon, X } from '$lib/icons';
   import { session } from '$lib/stores/session.svelte';
-  import { verification } from '$lib/stores/verification.svelte';
+  import MyAccount from './sections/MyAccount.svelte';
+  import Appearance from './sections/Appearance.svelte';
+  import Security from './sections/Security.svelte';
+  import Notifications from './sections/Notifications.svelte';
+  import Advanced from './sections/Advanced.svelte';
+  import About from './sections/About.svelte';
 
   interface Props {
     open: boolean;
@@ -11,181 +15,279 @@
   }
   let { open, onclose }: Props = $props();
 
-  type Tab = 'appearance' | 'security' | 'account';
-  let tab = $state<Tab>('appearance');
-  let password = $state('');
-  let recoveryInput = $state('');
-  let confirmedKey = $state(false);
+  type Section = 'account' | 'appearance' | 'security' | 'notifications' | 'advanced' | 'about';
 
-  const dark = $derived(themeStore.activeTheme !== 'alloy-light');
-  const amoled = $derived(themeStore.activeTheme === 'alloy-amoled');
+  const GROUPS: { label: string; items: { id: Section; label: string }[] }[] = [
+    {
+      label: 'User settings',
+      items: [
+        { id: 'account', label: 'My Account' },
+        { id: 'security', label: 'Security' },
+      ],
+    },
+    {
+      label: 'App settings',
+      items: [
+        { id: 'appearance', label: 'Appearance' },
+        { id: 'notifications', label: 'Notifications' },
+        { id: 'advanced', label: 'Advanced' },
+      ],
+    },
+    {
+      label: 'Info',
+      items: [{ id: 'about', label: 'About' }],
+    },
+  ];
 
+  let section = $state<Section>('account');
+  let panel: HTMLElement | undefined = $state();
+
+  const FOCUSABLE =
+    'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+  // Move focus into the dialog on open and return it to the opener on close.
   $effect(() => {
-    if (open && tab === 'security') void verification.refreshRecovery();
+    if (!open) return;
+    const returnTo = document.activeElement as HTMLElement | null;
+    untrack(() => panel)?.focus();
+    return () => returnTo?.focus?.();
   });
 
-  function setDark(on: boolean) {
-    themeStore.setTheme(on ? (amoled ? 'alloy-amoled' : 'alloy-dark') : 'alloy-light');
-  }
-  function setAmoled(on: boolean) {
-    themeStore.setTheme(on ? 'alloy-amoled' : 'alloy-dark');
-  }
+  // Escape closes; Tab stays inside the dialog while it is open.
+  $effect(() => {
+    if (!open) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        onclose();
+        return;
+      }
+      if (e.key === 'Tab') trapFocus(e);
+    }
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  });
 
-  async function enable() {
-    const ok = await verification.enableRecovery(password || null);
-    if (ok) {
-      password = '';
-      confirmedKey = false;
+  function trapFocus(e: KeyboardEvent) {
+    if (!panel) return;
+    const items = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE));
+    if (items.length === 0) {
+      e.preventDefault();
+      return;
+    }
+    const first = items[0];
+    const last = items[items.length - 1];
+    const active = document.activeElement;
+    const outside = !panel.contains(active);
+    if (e.shiftKey) {
+      if (outside || active === first) {
+        e.preventDefault();
+        last.focus();
+      }
+    } else if (outside || active === last) {
+      e.preventDefault();
+      first.focus();
     }
   }
-  async function recover() {
-    if (await verification.recoverWithKey(recoveryInput)) recoveryInput = '';
-  }
+
   async function signOut() {
     onclose();
     await session.logout();
   }
 </script>
 
-<Modal {open} title="Settings" {onclose} width="560px">
-  <div class="tabs" role="tablist">
-    {#each [['appearance', 'Appearance'], ['security', 'Security'], ['account', 'Account']] as [id, label]}
-      <button type="button" role="tab" aria-selected={tab === id} class:on={tab === id} onclick={() => (tab = id as Tab)}>{label}</button>
-    {/each}
-  </div>
+{#if open}
+  <!-- Backdrop click dismisses; keyboard users close with Escape or the close button. -->
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    class="backdrop"
+    onclick={(e) => {
+      if (e.target === e.currentTarget) onclose();
+    }}
+  >
+    <div
+      class="panel"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="settings-title"
+      tabindex="-1"
+      bind:this={panel}
+    >
+      <nav class="nav" aria-labelledby="settings-title">
+        <h2 id="settings-title" class="nav-title">Settings</h2>
 
-  {#if tab === 'appearance'}
-    <div class="row"><span>Follow system appearance</span><Toggle label="Follow system appearance" checked={themeStore.followSystem} onchange={(v) => themeStore.setFollowSystem(v)} /></div>
-    <div class="row"><span>Dark mode</span><Toggle label="Dark mode" checked={dark} disabled={themeStore.followSystem} onchange={setDark} /></div>
-    <div class="row"><span>Pure black background</span><Toggle label="Pure black background" checked={amoled} disabled={!dark || themeStore.followSystem} onchange={setAmoled} /></div>
-    <div class="row col">
-      <span>Density</span>
-      <SegmentedControl
-        label="Density"
-        value={themeStore.density}
-        options={[{ value: 'compact', label: 'Compact' }, { value: 'normal', label: 'Normal' }, { value: 'cozy', label: 'Cozy' }]}
-        onchange={(v) => themeStore.setDensity(v as Density)}
-      />
+        {#each GROUPS as group (group.label)}
+          <div class="group">
+            <h3 class="group-label">{group.label}</h3>
+            {#each group.items as item (item.id)}
+              <button
+                type="button"
+                class="nav-item"
+                aria-current={section === item.id ? 'page' : undefined}
+                onclick={() => (section = item.id)}
+              >
+                {item.label}
+              </button>
+            {/each}
+          </div>
+        {/each}
+
+        <div class="nav-footer">
+          <button type="button" class="nav-item danger" onclick={signOut}>Sign out</button>
+        </div>
+      </nav>
+
+      <div class="content">
+        <button type="button" class="close" aria-label="Close settings" onclick={onclose}>
+          <Icon icon={X} size={20} />
+        </button>
+
+        <div class="scroll">
+          <div class="column">
+            {#if section === 'account'}
+              <MyAccount />
+            {:else if section === 'appearance'}
+              <Appearance />
+            {:else if section === 'security'}
+              <Security {onclose} />
+            {:else if section === 'notifications'}
+              <Notifications />
+            {:else if section === 'advanced'}
+              <Advanced />
+            {:else}
+              <About />
+            {/if}
+          </div>
+        </div>
+      </div>
     </div>
-    <div class="row col">
-      <span>Message style</span>
-      <SegmentedControl
-        label="Message style"
-        value={themeStore.messageStyle}
-        options={[{ value: 'bubble', label: 'Bubbles' }, { value: 'gutter', label: 'Lines' }]}
-        onchange={(v) => themeStore.setMessageStyle(v as MessageStyle)}
-      />
-    </div>
-  {:else if tab === 'security'}
-    <section>
-      <h3>Verify this device</h3>
-      <p>Confirm it is you by comparing emojis with another signed-in device.</p>
-      <Button onclick={() => { onclose(); void verification.requestVerification(); }}>Start verification</Button>
-    </section>
-    <section>
-      <h3>Recovery key</h3>
-      {#if verification.recoveryKey}
-        <p>Save this key somewhere safe. It is the only way to restore your encrypted messages, and it will not be shown again.</p>
-        <code class="key">{verification.recoveryKey}</code>
-        <label class="check"><input type="checkbox" bind:checked={confirmedKey} /> I have saved my recovery key</label>
-        <Button disabled={!confirmedKey} onclick={() => verification.clearKey()}>Done</Button>
-      {:else if verification.recovery === 'Enabled'}
-        <p>Recovery is set up. This device has your keys.</p>
-      {:else if verification.recovery === 'Lost'}
-        <p>Enter your recovery key to unlock your encrypted history on this device.</p>
-        <form onsubmit={(e) => { e.preventDefault(); void recover(); }}>
-          <input type="password" bind:value={recoveryInput} placeholder="Recovery key" aria-label="Recovery key" autocomplete="off" />
-          <Button type="submit" disabled={!recoveryInput.trim() || verification.busy}>Unlock</Button>
-        </form>
-      {:else}
-        <p>Set up a recovery key so you never lose your encrypted messages.</p>
-        <form onsubmit={(e) => { e.preventDefault(); void enable(); }}>
-          <input type="password" bind:value={password} placeholder="Account password" aria-label="Account password" autocomplete="current-password" />
-          <Button type="submit" disabled={verification.busy}>Set up recovery</Button>
-        </form>
-      {/if}
-      {#if verification.error}<p class="error" role="alert">{verification.error}</p>{/if}
-    </section>
-  {:else}
-    <section>
-      <h3>{session.account?.display_name ?? session.account?.user_id}</h3>
-      <p>{session.account?.user_id}<br />{session.account?.homeserver_url}</p>
-      <Button variant="danger" onclick={signOut}>Sign out</Button>
-    </section>
-  {/if}
-</Modal>
+  </div>
+{/if}
 
 <style>
-  .tabs {
+  .backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
     display: flex;
-    gap: var(--alloy-spacing-scale-2);
-    margin-bottom: var(--alloy-spacing-scale-4);
-    border-bottom: 1px solid var(--alloy-color-border-subtle);
+    padding: var(--alloy-spacing-scale-4);
+    background: color-mix(in srgb, var(--alloy-color-surface-canvas) 70%, transparent);
   }
-  .tabs button {
+  .panel {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: var(--alloy-color-surface-canvas);
+    border-radius: var(--alloy-radii-lg);
+    box-shadow: var(--alloy-elevation-lg);
+    outline: none;
+  }
+  .nav {
+    display: flex;
+    flex-direction: column;
+    gap: var(--alloy-spacing-scale-4);
+    width: 240px;
+    flex-shrink: 0;
+    padding: var(--alloy-spacing-scale-2);
+    overflow-y: auto;
+    background: var(--alloy-color-surface-panel);
+  }
+  .nav-title {
+    margin: 0;
+    padding: var(--alloy-spacing-scale-2);
+    font-size: var(--alloy-typography-size-lg);
+    font-weight: var(--alloy-typography-weight-semibold);
+    color: var(--alloy-color-text-primary);
+  }
+  .group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--alloy-spacing-scale-1);
+  }
+  .group-label {
+    margin: 0;
+    padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-1);
+    font-size: var(--alloy-typography-size-xs);
+    font-weight: var(--alloy-typography-weight-semibold);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--alloy-color-text-muted);
+  }
+  .nav-item {
+    display: block;
+    width: 100%;
+    margin: 0;
+    padding: var(--alloy-spacing-scale-2);
     border: 0;
+    border-radius: var(--alloy-radii-md);
+    background: transparent;
+    font: inherit;
+    font-size: var(--alloy-typography-size-base);
+    text-align: left;
+    color: var(--alloy-color-text-secondary);
+    cursor: pointer;
+  }
+  .nav-item:hover {
+    background: var(--alloy-color-surface-subtle);
+    color: var(--alloy-color-text-primary);
+  }
+  .nav-item[aria-current='page'] {
+    background: var(--alloy-color-surface-hover);
+    color: var(--alloy-color-text-primary);
+    font-weight: var(--alloy-typography-weight-medium);
+  }
+  .nav-item.danger {
+    color: var(--alloy-color-status-error);
+  }
+  .nav-item:focus-visible,
+  .close:focus-visible {
+    outline: 2px solid var(--alloy-color-accent-primary);
+    outline-offset: 2px;
+  }
+  .nav-footer {
+    margin-top: auto;
+    padding-top: var(--alloy-spacing-scale-2);
+    border-top: 1px solid var(--alloy-color-border-subtle);
+  }
+  .content {
+    position: relative;
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    flex-direction: column;
+    background: var(--alloy-color-surface-canvas);
+  }
+  .close {
+    position: absolute;
+    top: var(--alloy-spacing-scale-3);
+    right: var(--alloy-spacing-scale-3);
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--alloy-radii-md);
     background: transparent;
     color: var(--alloy-color-text-secondary);
-    font: inherit;
-    padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
     cursor: pointer;
-    border-bottom: 2px solid transparent;
   }
-  .tabs button.on {
+  .close:hover {
+    background: var(--alloy-color-surface-hover);
     color: var(--alloy-color-text-primary);
-    border-bottom-color: var(--alloy-color-accent-primary);
   }
-  .row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: var(--alloy-spacing-scale-3) 0;
-    border-bottom: 1px solid var(--alloy-color-border-subtle);
-  }
-  .row.col {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: var(--alloy-spacing-scale-2);
-  }
-  section {
-    margin-bottom: var(--alloy-spacing-scale-6);
-  }
-  h3 {
-    margin: 0 0 var(--alloy-spacing-scale-2);
-  }
-  p {
-    color: var(--alloy-color-text-secondary);
-    margin-top: 0;
-  }
-  form {
-    display: flex;
-    gap: var(--alloy-spacing-scale-2);
-  }
-  input[type='password'] {
+  .scroll {
     flex: 1;
-    font: inherit;
-    color: var(--alloy-color-text-primary);
-    background: var(--alloy-color-surface-subtle);
-    border: 1px solid var(--alloy-color-border-subtle);
-    border-radius: var(--alloy-radii-md);
-    padding: 8px 12px;
+    overflow-y: auto;
   }
-  .key {
-    display: block;
-    padding: var(--alloy-spacing-scale-3);
-    margin-bottom: var(--alloy-spacing-scale-3);
-    background: var(--alloy-color-surface-subtle);
-    border-radius: var(--alloy-radii-md);
-    font-family: var(--alloy-typography-font-family-mono);
-    word-break: break-word;
-    user-select: all;
-  }
-  .check {
-    display: flex;
-    gap: var(--alloy-spacing-scale-2);
-    margin-bottom: var(--alloy-spacing-scale-3);
-  }
-  .error {
-    color: var(--alloy-color-status-error);
+  .column {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: var(--alloy-spacing-scale-8) var(--alloy-spacing-scale-6);
   }
 </style>

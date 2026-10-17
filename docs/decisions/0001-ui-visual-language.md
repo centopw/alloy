@@ -1,6 +1,6 @@
 # 0001: UI visual language v1 (text-first, Telegram-inspired chat)
 
-- Status: accepted
+- Status: accepted (items 2, 4, 5 and 6 superseded by 0002)
 - Issue: tracked on the project board (type:decision "UI visual language v1")
 - Date: 2026-10-16
 - Source: maintainer review of the P1a prototype (all themes) against Telegram Desktop as the reference for a calm, modern chat feel.

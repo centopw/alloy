@@ -103,11 +103,11 @@ try {
   await page.click('button[type=submit]');
 
   step('room list streams in with the invited room');
-  await page.waitForFunction(() => [...document.querySelectorAll('.room .title')].some((e) => e.textContent === 'From Bob'), { timeout: 60000 });
+  await page.waitForFunction(() => [...document.querySelectorAll('button.row .title')].some((e) => e.textContent === 'From Bob'), { timeout: 60000 });
   await page.screenshot({ path: resolve(shots, 'e2e-1-room-list.png') });
 
   step('open room: the other user message is rendered with a coloured name');
-  await page.evaluate(() => [...document.querySelectorAll('.room')].find((e) => e.textContent.includes('From Bob')).click());
+  await page.evaluate(() => [...document.querySelectorAll('button.row')].find((e) => e.textContent.includes('From Bob')).click());
   await page.waitForFunction(() => document.body.innerText.includes('Hi from bob'), { timeout: 60000 });
 
   step('send a markdown message: local echo then confirmed, rendered as formatted html');
@@ -115,7 +115,7 @@ try {
   await page.type('textarea[aria-label=Message]', 'Hello **there**');
   await page.keyboard.press('Enter');
   await page.waitForFunction(() => [...document.querySelectorAll('.body strong')].some((e) => e.textContent === 'there'), { timeout: 30000 });
-  await page.waitForFunction(() => document.querySelector('.row.own [aria-label="Sent"], .row.own [aria-label="Seen"]'), { timeout: 30000 });
+  await page.waitForFunction(() => (() => { const rows = [...document.querySelectorAll('.row.own')]; return rows.length > 0 && rows.every((r) => !r.querySelector('.state, .failed-actions')); })(), { timeout: 30000 });
 
   step('react to the first message');
   const bobRow = await page.evaluateHandle(() => [...document.querySelectorAll('.row')].find((r) => r.textContent.includes('Hi from bob')));
@@ -144,26 +144,25 @@ try {
   await page.waitForFunction(() => document.body.innerText.includes('Message deleted'), { timeout: 30000 });
 
   step('invitation: accept it from the room list');
-  await page.waitForFunction(() => [...document.querySelectorAll('.room.invite')].some((e) => e.textContent.includes('Invite me')), { timeout: 30000 });
-  await page.evaluate(() => [...document.querySelectorAll('.room.invite')].find((e) => e.textContent.includes('Invite me')).querySelector('button').click());
-  await page.waitForFunction(() => [...document.querySelectorAll('button.room')].some((e) => e.textContent.includes('Invite me')), { timeout: 30000 });
+  await page.waitForFunction(() => [...document.querySelectorAll('.row.invite')].some((e) => e.textContent.includes('Invite me')), { timeout: 30000 });
+  await page.evaluate(() => [...document.querySelectorAll('.row.invite')].find((e) => e.textContent.includes('Invite me')).querySelector('button').click());
+  await page.waitForFunction(() => [...document.querySelectorAll('button.row')].some((e) => e.textContent.includes('Invite me')), { timeout: 30000 });
 
   step('create an encrypted room from the UI and send a message in it');
-  await page.click('button[aria-label="New conversation"]');
+  await page.click('button[aria-label="New room"]');
   await page.waitForSelector('[role=dialog] input[type=text]');
   await page.type('[role=dialog] input[type=text]', 'Created in UI');
   await page.evaluate(() => [...document.querySelectorAll('[role=dialog] button')].find((b) => b.textContent.trim() === 'Create').click());
-  await page.waitForFunction(() => document.querySelector('.head h2')?.textContent === 'Created in UI' && document.body.innerText.includes('End-to-end encrypted'), { timeout: 60000 });
+  await page.waitForFunction(() => [...document.querySelectorAll('h2.title')].some((h) => h.textContent === 'Created in UI') && document.body.innerText.includes('End-to-end encrypted'), { timeout: 60000 });
   await page.click('textarea[aria-label=Message]');
   await page.type('textarea[aria-label=Message]', 'secret hello');
   await page.keyboard.press('Enter');
-  await page.waitForFunction(() => document.querySelector('.row.own [aria-label="Sent"], .row.own [aria-label="Seen"]'), { timeout: 60000 });
+  await page.waitForFunction(() => (() => { const rows = [...document.querySelectorAll('.row.own')]; return rows.length > 0 && rows.every((r) => !r.querySelector('.state, .failed-actions')); })(), { timeout: 60000 });
   await page.screenshot({ path: resolve(shots, 'e2e-3-encrypted-room.png') });
 
   step('settings open and sign out returns to onboarding');
-  await page.click('.account');
+  await page.click('button[aria-label="User settings"]');
   await page.waitForSelector('[role=dialog]');
-  await page.evaluate(() => [...document.querySelectorAll('[role=tab]')].find((t) => t.textContent === 'Account').click());
   await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Sign out').click());
   await page.waitForSelector('input[placeholder*="matrix.org"]', { timeout: 30000 });
   console.log('E2E OK');
