@@ -179,21 +179,17 @@ jobs:
         working-directory: apps/alloy/ui
         run: pnpm build
 
-      - name: Build Android APK (Unsigned / Debug)
+      - name: Build Android APK (release, arm64)
         working-directory: apps/alloy
-        run: pnpm tauri android build --apk --debug --target aarch64
+        run: pnpm tauri android build --apk --target aarch64
 
-      - name: Locate and prepare APK
+      - name: Sign APK
         shell: bash
         run: |
-          APK_RAW=$(find apps/alloy/src-tauri/gen/android -name "*.apk" 2>/dev/null | head -n 1)
-          if [ -n "$APK_RAW" ] && [ -f "$APK_RAW" ]; then
-            cp "$APK_RAW" alloy-android-nightly.apk
-            sha256sum alloy-android-nightly.apk > SHA256SUMS-android.txt
-          else
-            echo "Error: Android build failed to produce APK"
-            exit 1
-          fi
+          APK_RAW=$(find apps/alloy/src-tauri/gen/android/app/build/outputs -name '*-release-unsigned.apk' | head -n 1)
+          [ -n "$APK_RAW" ] || { echo "Android build produced no release APK" >&2; exit 1; }
+          scripts/sign-android-apk.sh "$APK_RAW" alloy-android-nightly.apk
+          sha256sum alloy-android-nightly.apk > SHA256SUMS-android.txt
 
       - name: Upload Android APK to Rolling Nightly Prerelease
         shell: bash

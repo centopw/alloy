@@ -195,47 +195,21 @@ jobs:
         working-directory: apps/alloy/ui
         run: pnpm build
 
-      - name: Decode Android Keystore
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-        run: |
-          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
-            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > release.keystore
-          fi
-
-      - name: Build Android APK
+      - name: Build Android APK (release, arm64)
         working-directory: apps/alloy
+        run: pnpm tauri android build --apk --target aarch64
+
+      - name: Sign APK
+        shell: bash
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-        run: |
-          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
-            pnpm tauri android build --apk --target aarch64
-          else
-            # No release keystore: ship an installable debug-signed arm64 APK.
-            pnpm tauri android build --apk --debug --target aarch64
-          fi
-
-      - name: Sign APK with apksigner
-        env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          APK_RAW=$(find apps/alloy/src-tauri/gen/android -name "*.apk" 2>/dev/null | head -n 1)
-          if [ -f "release.keystore" ] && [ -n "$APK_RAW" ]; then
-            APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)
-            "$APKSIGNER" sign --ks release.keystore \
-              --ks-pass "pass:$ANDROID_KEYSTORE_PASSWORD" \
-              --ks-key-alias "$ANDROID_KEY_ALIAS" \
-              --key-pass "pass:$ANDROID_KEY_PASSWORD" \
-              --out alloy-android.apk "$APK_RAW"
-          elif [ -n "$APK_RAW" ]; then
-            echo "Warning: release.keystore missing; shipping the debug-signed APK"
-            cp "$APK_RAW" alloy-android.apk
-          else
-            echo "No APK produced" >&2
-            exit 1
-          fi
+          APK_RAW=$(find apps/alloy/src-tauri/gen/android/app/build/outputs -name '*-release-unsigned.apk' | head -n 1)
+          [ -n "$APK_RAW" ] || { echo "Android build produced no release APK" >&2; exit 1; }
+          scripts/sign-android-apk.sh "$APK_RAW" alloy-android.apk
 
       - name: Compute SHA256 Checksums
         run: sha256sum alloy-android.apk > SHA256SUMS

@@ -20,6 +20,10 @@ debug = "line-tables-only"
 [profile.dev.package."*"]
 debug = false
 
+# Release binaries: drop symbols (the Android .so shrinks from hundreds of MB to tens).
+[profile.release]
+strip = true
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 
