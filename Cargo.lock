@@ -150,6 +150,7 @@ dependencies = [
  "alloy-storage",
  "alloy-theme",
  "async-trait",
+ "matrix-sdk",
  "serde",
  "serde_json",
  "tempfile",

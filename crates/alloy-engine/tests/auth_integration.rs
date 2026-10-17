@@ -14,7 +14,7 @@ fn hs() -> Option<String> {
 }
 
 fn engine(dir: &std::path::Path, secrets: Arc<InMemorySecretStore>) -> (AppEngine, EngineContext) {
-    let ctx = EngineContext::new(dir.to_path_buf(), secrets);
+    let ctx = EngineContext::new(dir.to_path_buf(), secrets).without_background();
     (AppEngine::new(ctx.clone()), ctx)
 }
 
@@ -70,6 +70,10 @@ async fn login_restore_logout_flow() {
         other => panic!("unexpected {other:?}"),
     }
     assert!(ctx.client.read().await.is_some());
+
+    // Simulate an app restart (background sync is disabled here, so the store is quiescent).
+    ctx.set_client(None).await;
+    drop(eng);
 
     // A brand-new engine (app restart) restores the session without a password
     let (eng2, ctx2) = engine(dir.path(), secrets.clone());

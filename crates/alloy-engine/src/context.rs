@@ -14,6 +14,8 @@ pub struct EngineContext {
     pub data_dir: PathBuf,
     pub secrets: Arc<dyn SecretStore>,
     pub subscriptions: SubscriptionRegistry,
+    /// Start sync, recovery and verification watchers after login (disable for headless use).
+    pub background: bool,
 }
 
 impl EngineContext {
@@ -24,7 +26,14 @@ impl EngineContext {
             data_dir,
             secrets,
             subscriptions: SubscriptionRegistry::new(),
+            background: true,
         }
+    }
+
+    /// Do not start background sync/watchers after login.
+    pub fn without_background(mut self) -> Self {
+        self.background = false;
+        self
     }
 }
 

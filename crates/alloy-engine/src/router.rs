@@ -52,9 +52,9 @@ impl CommandGroup {
             | EngineCommand::ConfirmSas { .. }
             | EngineCommand::CancelVerification { .. }
             | EngineCommand::GetRecoveryStatus
-            | EngineCommand::EnableRecovery
+            | EngineCommand::EnableRecovery { .. }
             | EngineCommand::RecoverWithKey { .. }
-            | EngineCommand::ResetRecovery => CommandGroup::Crypto,
+            | EngineCommand::ResetRecovery { .. } => CommandGroup::Crypto,
 
             EngineCommand::GetMedia { .. } => CommandGroup::Media,
 

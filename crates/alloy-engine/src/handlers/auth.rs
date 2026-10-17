@@ -97,6 +97,11 @@ impl GroupHandler for AuthHandler {
                     let _ = std::fs::remove_dir_all(index.store_dir(&old.store_id));
                 }
                 ctx.set_client(Some(client)).await;
+                if ctx.background
+                    && let Ok(active) = ctx.active_client().await
+                {
+                    super::crypto::start_background(ctx, active).await;
+                }
                 ctx.sink.emit(EngineEvent::AuthState {
                     account: Some(account.clone()),
                 });
@@ -112,6 +117,11 @@ impl GroupHandler for AuthHandler {
                 }
                 let account = entry.to_account();
                 ctx.set_client(Some(client)).await;
+                if ctx.background
+                    && let Ok(active) = ctx.active_client().await
+                {
+                    super::crypto::start_background(ctx, active).await;
+                }
                 ctx.sink.emit(EngineEvent::AuthState {
                     account: Some(account.clone()),
                 });

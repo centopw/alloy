@@ -19,6 +19,7 @@ impl RoomsHandler {
 pub(crate) fn map_err(e: AlloyError) -> EngineError {
     match e {
         AlloyError::NotLoggedIn => EngineError::auth_failed("not logged in"),
+        AlloyError::Auth(m) => EngineError::auth_failed(m),
         AlloyError::RoomNotFound(r) => EngineError::not_found(format!("room {r}")),
         AlloyError::InvalidRoomId(m) => EngineError::invalid_argument(m),
         AlloyError::MatrixSdk(m) => EngineError::network_error(m),

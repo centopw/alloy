@@ -99,10 +99,6 @@ async fn test_not_implemented_naming() {
             },
             "GetMedia",
         ),
-        (
-            EngineCommand::RequestSelfVerification,
-            "RequestSelfVerification",
-        ),
         (EngineCommand::SubscribeSpaces, "SubscribeSpaces"),
     ];
 
