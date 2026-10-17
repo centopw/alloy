@@ -56,8 +56,9 @@ jobs:
       - name: Generate SBOM (CycloneDX)
         shell: bash
         run: |
-          cargo install cargo-cyclonedx --locked || true
-          cargo cyclonedx --output-format json -f alloy-sbom-${{ matrix.platform }}.json || true
+          cargo install cargo-cyclonedx --locked
+          cargo cyclonedx --format json --all
+          cp apps/alloy/src-tauri/alloy-app.cdx.json alloy-sbom-${{ matrix.platform }}.json
 
       - name: Build Tauri Desktop Bundle
         uses: tauri-apps/tauri-action@v0
@@ -88,13 +89,11 @@ jobs:
           includeUpdaterJson: true
           args: --verbose
 
-      - name: Upload SBOM to Draft Release
-        uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
-        with:
-          tag_name: ${{ github.ref_name }}
-          files: |
-            alloy-sbom-${{ matrix.platform }}.json
+      - name: Upload SBOM to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.ref_name }}" alloy-sbom-${{ matrix.platform }}.json --clobber
 
   build-android:
     name: Build Signed Android APK
@@ -186,10 +185,7 @@ jobs:
         run: sha256sum alloy-android.apk > SHA256SUMS
 
       - name: Upload Android APK and Checksums to Release
-        uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
-        with:
-          tag_name: ${{ github.ref_name }}
-          files: |
-            alloy-android.apk
-            SHA256SUMS
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.ref_name }}" alloy-android.apk SHA256SUMS --clobber
