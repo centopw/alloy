@@ -26,9 +26,15 @@ pub fn run() {
             // Create data dir if not exists
             let _ = std::fs::create_dir_all(&data_dir);
 
-            // Configure Keyring secret store
+            // Desktop keeps secrets in the OS keyring. Android has no keyring backend, so it uses
+            // an owner-only file in the app-private data directory.
+            #[cfg(not(target_os = "android"))]
             let secret_store: Arc<dyn alloy_storage::SecretStore> =
                 Arc::new(alloy_storage::KeyringSecretStore::new("chat.alloy"));
+            #[cfg(target_os = "android")]
+            let secret_store: Arc<dyn alloy_storage::SecretStore> = Arc::new(
+                alloy_storage::FileSecretStore::new(data_dir.join("secrets.json")),
+            );
 
             let ctx = EngineContext::new(data_dir, secret_store);
             let engine = Arc::new(AppEngine::new(ctx));

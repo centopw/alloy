@@ -99,6 +99,82 @@ impl SecretStore for InMemorySecretStore {
     }
 }
 
+/// Secret store backed by a JSON file with owner-only permissions.
+///
+/// Used where no OS keyring exists (Android). The file lives in the app-private data directory,
+/// which the OS sandboxes and encrypts at rest (file-based encryption); other apps and
+/// unprivileged users cannot read it. Wrapping the values with an Android Keystore key is a
+/// later hardening step.
+pub struct FileSecretStore {
+    path: std::path::PathBuf,
+    /// Serialises read-modify-write cycles so concurrent writers cannot lose updates.
+    lock: tokio::sync::Mutex<()>,
+}
+
+impl FileSecretStore {
+    pub fn new(path: impl Into<std::path::PathBuf>) -> Self {
+        Self {
+            path: path.into(),
+            lock: tokio::sync::Mutex::new(()),
+        }
+    }
+
+    fn load(&self) -> Result<HashMap<String, String>, StorageError> {
+        match std::fs::read_to_string(&self.path) {
+            Ok(text) => serde_json::from_str(&text)
+                .map_err(|e| StorageError::DatabaseError(format!("corrupt secret file: {e}"))),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(HashMap::new()),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Write through a temp file and rename so a crash never leaves a truncated file.
+    fn save(&self, map: &HashMap<String, String>) -> Result<(), StorageError> {
+        let text = serde_json::to_string(map)
+            .map_err(|e| StorageError::DatabaseError(format!("encode secrets: {e}")))?;
+        let tmp = self.path.with_extension("tmp");
+        std::fs::write(&tmp, text)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
+        }
+        std::fs::rename(&tmp, &self.path)?;
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl SecretStore for FileSecretStore {
+    async fn set_secret(&self, key: &str, value: &str) -> Result<(), StorageError> {
+        let _guard = self.lock.lock().await;
+        let mut map = self.load()?;
+        map.insert(key.to_string(), value.to_string());
+        self.save(&map)
+    }
+
+    async fn get_secret(&self, key: &str) -> Result<String, StorageError> {
+        let _guard = self.lock.lock().await;
+        self.load()?
+            .remove(key)
+            .ok_or_else(|| StorageError::SecretNotFound(key.to_string()))
+    }
+
+    async fn delete_secret(&self, key: &str) -> Result<(), StorageError> {
+        let _guard = self.lock.lock().await;
+        let mut map = self.load()?;
+        if map.remove(key).is_some() {
+            self.save(&map)?;
+        }
+        Ok(())
+    }
+
+    async fn has_secret(&self, key: &str) -> Result<bool, StorageError> {
+        let _guard = self.lock.lock().await;
+        Ok(self.load()?.contains_key(key))
+    }
+}
+
 /// OS Keychain-backed secret store using `keyring` crate.
 #[cfg(feature = "keyring")]
 pub struct KeyringSecretStore {
@@ -156,6 +232,38 @@ impl SecretStore for KeyringSecretStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn file_store_persists_across_instances_and_restricts_access() {
+        let dir = std::env::temp_dir().join(format!("alloy-secrets-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("secrets.json");
+        {
+            let store = FileSecretStore::new(&path);
+            assert!(!store.has_secret("a").await.unwrap());
+            store.set_secret("a", "1").await.unwrap();
+            store.set_secret("b", "2").await.unwrap();
+            store.delete_secret("b").await.unwrap();
+        }
+        let reopened = FileSecretStore::new(&path);
+        assert_eq!(reopened.get_secret("a").await.unwrap(), "1");
+        assert!(!reopened.has_secret("b").await.unwrap());
+        assert!(matches!(
+            reopened.get_secret("b").await,
+            Err(StorageError::SecretNotFound(_))
+        ));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(
+                mode & 0o077,
+                0,
+                "secret file must not be group/world accessible"
+            );
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[tokio::test]
     async fn test_in_memory_secret_store() {
