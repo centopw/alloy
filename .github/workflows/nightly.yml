@@ -160,15 +160,7 @@ jobs:
           fi
 
       - name: Upload Android APK to Rolling Nightly Prerelease
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: nightly
-          name: 'Alloy Nightly'
-          body: |
-            Rolling nightly prerelease builds (unsigned).
-            Commit: ${{ github.sha }}
-          prerelease: true
-          make_latest: false
-          files: |
-            alloy-android-nightly.apk
-            SHA256SUMS-android.txt
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload nightly alloy-android-nightly.apk SHA256SUMS-android.txt --clobber
