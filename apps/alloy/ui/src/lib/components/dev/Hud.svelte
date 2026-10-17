@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { themeStore } from "../theme/theme.svelte";
+  import { themeStore } from "../../theme/theme.svelte";
 
   let { visible = $bindable(true) }: { visible?: boolean } = $props();
 

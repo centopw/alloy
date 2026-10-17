@@ -1,20 +1,22 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import Hud from "./Hud.svelte";
-  import Timeline from "./Timeline.svelte";
-  import type { Space, Room, Member } from "../mock/types.js";
-  import { generateMockSpaces, generateMockMembers } from "../mock/generator.js";
-  import { themeStore, type Theme } from "../theme/theme.svelte";
+  import Hud from "../dev/Hud.svelte";
+  import Timeline from "../timeline/Timeline.svelte";
+  import Composer from "../composer/Composer.svelte";
+  import { Avatar, Toggle } from "../common";
+  import Icon from "../../icons/Icon.svelte";
+  import { X, ChevronLeft } from "../../icons";
+  import type { Space, Room, Member } from "../../mock/types.js";
+  import { generateMockSpaces, generateMockMembers } from "../../mock/generator.js";
+  import { themeStore, type Theme } from "../../theme/theme.svelte";
 
-  // Theming
-  function setTheme(t: "dark" | "light" | "amoled" | Theme) {
-    const themeId = t === "dark" ? "alloy-dark" : t === "light" ? "alloy-light" : t === "amoled" ? "alloy-amoled" : t;
-    themeStore.setTheme(themeId);
+  // Theming: light/dark toggle (AMOLED lives in the dev HUD / settings)
+  let isDark = $derived(themeStore.activeTheme !== "alloy-light");
+  function setDark(dark: boolean) {
+    themeStore.setTheme(dark ? "alloy-dark" : "alloy-light");
   }
 
-  function cycleTheme() {
-    themeStore.cycleTheme();
-  }
+  let timeline: Timeline | undefined = $state();
 
   // Shell Layout & State
   const spaces: Space[] = generateMockSpaces();
@@ -66,27 +68,13 @@
           onclick={() => selectSpace(space)}
           title={space.name}
         >
-          <span class="space-icon">{space.icon || space.name.slice(0, 1)}</span>
+          <span class="space-icon">{space.name.slice(0, 1)}</span>
         </button>
       {/each}
     </div>
 
     <div class="rail-footer">
-      <button
-        class="icon-btn"
-        onclick={cycleTheme}
-        title="Cycle theme (Dark / Light / AMOLED)"
-      >
-        {#if themeStore.activeTheme === "alloy-dark"}🌙{:else if themeStore.activeTheme === "alloy-light"}☀️{:else}🖤{/if}
-      </button>
-      <button
-        class="icon-btn"
-        class:active={hudVisible}
-        onclick={() => hudVisible = !hudVisible}
-        title="Toggle FPS HUD (F2)"
-      >
-        ⚡
-      </button>
+      <Toggle checked={isDark} label="Dark mode" onchange={setDark} />
     </div>
   </aside>
 
@@ -95,7 +83,7 @@
     <div class="room-list-header">
       <div class="mobile-back">
         <button class="nav-back-btn" onclick={() => activeMobilePane = "spaces"}>
-          ← Spaces
+          <Icon icon={ChevronLeft} size={16} /> Spaces
         </button>
       </div>
       <div class="space-title">
@@ -114,7 +102,7 @@
           class:active={room.id === activeRoom.id}
           onclick={() => selectRoom(room)}
         >
-          <div class="room-avatar">#</div>
+          <Avatar userId={room.id} displayName={room.name} size="md" />
           <div class="room-info">
             <div class="room-row-top">
               <span class="room-name">{room.name}</span>
@@ -133,19 +121,20 @@
   <main class="pane timeline-pane" class:mobile-active={activeMobilePane === "timeline"}>
     <div class="mobile-nav-bar">
       <button class="nav-back-btn" onclick={() => activeMobilePane = "rooms"}>
-        ← Rooms
+        <Icon icon={ChevronLeft} size={16} /> Rooms
       </button>
       <span class="mobile-room-name">{activeRoom.name}</span>
       <button
         class="nav-toggle-btn"
         onclick={() => activeMobilePane = "drawer"}
       >
-        Info →
+        Info
       </button>
     </div>
 
     <div class="timeline-wrapper">
-      <Timeline />
+      <Timeline bind:this={timeline} />
+      <Composer roomId={activeRoom.id} onSend={(t) => timeline?.appendMessage(t)} />
     </div>
   </main>
 
@@ -162,7 +151,7 @@
           }}
           title="Close details drawer"
         >
-          ✕
+          <Icon icon={X} size={16} label="Close" />
         </button>
       </div>
 
@@ -192,14 +181,6 @@
           </div>
         </div>
 
-        <div class="drawer-section">
-          <div class="detail-label">THEME ENGINE</div>
-          <div class="theme-switcher-grid">
-            <button class="theme-pill" class:selected={themeStore.activeTheme === "alloy-dark"} onclick={() => setTheme("alloy-dark")}>Dark</button>
-            <button class="theme-pill" class:selected={themeStore.activeTheme === "alloy-light"} onclick={() => setTheme("alloy-light")}>Light</button>
-            <button class="theme-pill" class:selected={themeStore.activeTheme === "alloy-amoled"} onclick={() => setTheme("alloy-amoled")}>AMOLED</button>
-          </div>
-        </div>
       </div>
     </aside>
   {/if}
@@ -210,7 +191,7 @@
       onclick={() => showRightDrawer = true}
       title="Open room details"
     >
-      ⓘ
+      Details
     </button>
   {/if}
 </div>
@@ -300,30 +281,8 @@
     gap: var(--alloy-spacing-scale-2);
   }
 
-  .icon-btn {
-    width: 36px;
-    height: 36px;
-    border-radius: var(--alloy-radii-md);
-    background: var(--alloy-color-surface-elevated);
-    border: 1px solid var(--alloy-color-border-subtle);
-    color: var(--alloy-color-text-secondary);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    font-size: 16px;
-    transition: all 0.15s ease;
-  }
 
-  .icon-btn:hover {
-    background: var(--alloy-color-surface-hover);
-    color: var(--alloy-color-text-primary);
-  }
 
-  .icon-btn.active {
-    color: var(--alloy-color-status-online);
-    border-color: var(--alloy-color-status-online);
-  }
 
   /* 2. Room List */
   .room-list {
@@ -405,19 +364,6 @@
     background: var(--alloy-color-surface-hover);
   }
 
-  .room-avatar {
-    width: 28px;
-    height: 28px;
-    border-radius: var(--alloy-radii-sm);
-    background: var(--alloy-color-surface-elevated);
-    color: var(--alloy-color-text-secondary);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: 700;
-    font-size: 13px;
-    flex-shrink: 0;
-  }
 
   .room-info {
     flex: 1;
@@ -465,6 +411,11 @@
     height: 100%;
     position: relative;
     overflow: hidden;
+  }
+
+  .timeline-wrapper > :global(.timeline-container) {
+    flex: 1;
+    min-height: 0;
   }
 
   .timeline-wrapper {
@@ -582,34 +533,6 @@
 
   .status-indicator.idle {
     background: #f59e0b;
-  }
-
-  .theme-switcher-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: var(--alloy-spacing-scale-1);
-    margin-top: var(--alloy-spacing-scale-1);
-  }
-
-  .theme-pill {
-    padding: var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-2);
-    border: 1px solid var(--alloy-color-border-prominent);
-    background: var(--alloy-color-surface-elevated);
-    color: var(--alloy-color-text-secondary);
-    border-radius: var(--alloy-radii-sm);
-    font-size: 11px;
-    cursor: pointer;
-  }
-
-  .theme-pill:hover {
-    background: var(--alloy-color-surface-hover);
-    color: var(--alloy-color-text-primary);
-  }
-
-  .theme-pill.selected {
-    background: var(--alloy-color-accent-primary);
-    color: var(--alloy-color-text-on-accent);
-    border-color: var(--alloy-color-accent-primary);
   }
 
   .reopen-drawer-btn {

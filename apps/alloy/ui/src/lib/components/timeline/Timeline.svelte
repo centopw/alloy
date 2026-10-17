@@ -2,8 +2,11 @@
   import { onMount, tick } from "svelte";
   import { VList } from "virtua/svelte";
   import type { VListHandle } from "virtua/svelte";
-  import type { TimelineEvent } from "../mock/types.js";
-  import { generateSyntheticTimeline } from "../mock/generator.js";
+  import type { TimelineEvent } from "../../mock/types.js";
+  import { generateSyntheticTimeline } from "../../mock/generator.js";
+  import { Avatar, UserName } from "../common";
+  import Icon from "../../icons/Icon.svelte";
+  import { ArrowDown } from "../../icons";
 
   let vlist: VListHandle | undefined = $state();
   let events: TimelineEvent[] = $state([]);
@@ -13,9 +16,6 @@
   let unreadCount = $state(0);
   let firstUnreadIndex = $state(-1);
 
-  // Composer state
-  let composerText = $state("");
-  let isSending = $state(false);
 
   // Initialize 10,000 events
   onMount(() => {
@@ -93,7 +93,7 @@
   }
 
   export function appendMessage(customText?: string) {
-    const text = customText?.trim() || composerText.trim() || `Synthetic real-time message #${events.length + 1}`;
+    const text = customText?.trim() || `Synthetic real-time message #${events.length + 1}`;
     const newMsg: TimelineEvent = {
       id: `live-event-${Date.now()}`,
       sender: "@you:matrix.org",
@@ -106,20 +106,12 @@
 
     const wasAtBottom = isAtBottom;
     events = [...events, newMsg];
-    composerText = "";
 
     tick().then(() => {
       if (wasAtBottom && vlist) {
         vlist.scrollToIndex(events.length - 1, { align: "end", smooth: true });
       }
     });
-  }
-
-  function handleKeydown(e: KeyboardEvent) {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      appendMessage();
-    }
   }
 
   function formatTime(timestamp: number): string {
@@ -145,7 +137,7 @@
         </button>
       {/if}
       <button class="btn btn-secondary" onclick={() => scrollToBottom(true)} title="Jump to bottom">
-        ↓ Bottom
+        Latest
       </button>
     </div>
   </div>
@@ -181,14 +173,11 @@
                   <span>NEW MESSAGES BELOW</span>
                 </div>
               {/if}
-
-              <div class="avatar">
-                {event.senderAvatar || event.sender.slice(1, 2).toUpperCase()}
-              </div>
+              <Avatar userId={event.sender} size="md" />
 
               <div class="event-content">
                 <div class="event-meta">
-                  <span class="sender-name">{event.sender}</span>
+                  <UserName userId={event.sender} />
                   <span class="timestamp">{formatTime(event.timestamp)}</span>
                 </div>
 
@@ -231,29 +220,9 @@
 
     {#if showScrollBottomBtn}
       <button class="floating-bottom-btn" onclick={() => scrollToBottom(true)}>
-        <span>↓</span>
+        <Icon icon={ArrowDown} size={20} label="Jump to latest" />
       </button>
     {/if}
-  </div>
-
-  <!-- Message Composer -->
-  <div class="composer-container">
-    <div class="composer-box">
-      <input
-        type="text"
-        placeholder="Send a message in #general (press Enter)..."
-        bind:value={composerText}
-        onkeydown={handleKeydown}
-        class="composer-input"
-      />
-      <button
-        class="composer-send-btn"
-        disabled={!composerText.trim()}
-        onclick={() => appendMessage()}
-      >
-        Send
-      </button>
-    </div>
   </div>
 </div>
 
@@ -396,19 +365,6 @@
     transform: translateY(-8px);
   }
 
-  .avatar {
-    width: 36px;
-    height: 36px;
-    border-radius: var(--alloy-radii-full);
-    background: var(--alloy-color-accent-primary);
-    color: var(--alloy-color-text-on-accent);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: 700;
-    font-size: 14px;
-    flex-shrink: 0;
-  }
 
   .event-content {
     flex: 1;
@@ -422,11 +378,6 @@
     margin-bottom: var(--alloy-spacing-scale-1);
   }
 
-  .sender-name {
-    font-weight: 600;
-    font-size: 13px;
-    color: var(--alloy-color-text-primary);
-  }
 
   .timestamp {
     font-size: 10px;
@@ -535,58 +486,11 @@
     background: var(--alloy-color-surface-hover);
   }
 
-  .composer-container {
-    padding: var(--alloy-spacing-scale-3) var(--alloy-spacing-scale-4);
-    background: var(--alloy-color-surface-subtle);
-    border-top: 1px solid var(--alloy-color-border-subtle);
-    flex-shrink: 0;
-  }
 
-  .composer-box {
-    display: flex;
-    gap: var(--alloy-spacing-scale-2);
-    background: var(--alloy-color-surface-panel);
-    border: 1px solid var(--alloy-color-border-prominent);
-    border-radius: var(--alloy-radii-md);
-    padding: var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-2);
-  }
 
-  .composer-box:focus-within {
-    border-color: var(--alloy-color-accent-primary);
-  }
 
-  .composer-input {
-    flex: 1;
-    border: none;
-    background: transparent;
-    color: var(--alloy-color-text-primary);
-    font-size: 13px;
-    padding: var(--alloy-spacing-scale-2);
-    outline: none;
-  }
 
-  .composer-input::placeholder {
-    color: var(--alloy-color-text-muted);
-  }
 
-  .composer-send-btn {
-    background: var(--alloy-color-accent-primary);
-    color: var(--alloy-color-text-on-accent);
-    border: none;
-    border-radius: var(--alloy-radii-sm);
-    padding: 0 var(--alloy-spacing-scale-3);
-    font-weight: 600;
-    font-size: 12px;
-    cursor: pointer;
-    transition: opacity 0.15s ease;
-  }
 
-  .composer-send-btn:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
 
-  .composer-send-btn:not(:disabled):hover {
-    background: var(--alloy-color-accent-hover);
-  }
 </style>

@@ -215,10 +215,10 @@ async function captureThemes() {
 
         // Get coordinate of timeline viewport to sample canvas background
         const sampleCoord = await page.evaluate(() => {
-          const el = document.querySelector(".timeline-viewport") || document.querySelector(".timeline-pane");
+          const el = document.querySelector(".timeline-pane");
           if (el) {
             const rect = el.getBoundingClientRect();
-            return { x: Math.floor(rect.left + 50), y: Math.floor(rect.top + 50) };
+            return { x: Math.floor(rect.right - 6), y: Math.floor(rect.top + rect.height / 2) };
           }
           return { x: 500, y: 300 };
         });
