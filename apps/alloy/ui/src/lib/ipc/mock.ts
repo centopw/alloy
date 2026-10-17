@@ -748,7 +748,10 @@ export class MockTransport implements Transport {
         };
 
       case 'EnableRecovery':
-        return { type: 'RecoveryEnabled' };
+        return {
+          type: 'RecoveryEnabled',
+          payload: { recovery_key: 'EsTc 1234 abcd 5678 efgh 9012 ijkl 3456 mock' },
+        };
 
       case 'RecoverWithKey':
         return {
@@ -757,7 +760,10 @@ export class MockTransport implements Transport {
         };
 
       case 'ResetRecovery':
-        return { type: 'RecoveryReset' };
+        return {
+          type: 'RecoveryReset',
+          payload: { recovery_key: 'EsTc 6543 dcba 8765 hgfe 2109 lkji 6543 mock' },
+        };
 
       case 'SubscribeSpaces': {
         const subId = `sub_spaces_${++this.subCounter}`;

@@ -339,9 +339,11 @@ export class AlloyClient {
     });
   }
 
-  async enableRecovery() {
+  /** Returns the recovery key in the response payload; show it once. */
+  async enableRecovery(password: string | null = null) {
     return this.transport.invoke({
       action: 'EnableRecovery',
+      params: { password },
     });
   }
 
@@ -352,9 +354,10 @@ export class AlloyClient {
     });
   }
 
-  async resetRecovery() {
+  async resetRecovery(password: string | null = null) {
     return this.transport.invoke({
       action: 'ResetRecovery',
+      params: { password },
     });
   }
 

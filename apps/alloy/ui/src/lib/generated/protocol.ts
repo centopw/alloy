@@ -107,9 +107,14 @@ export type EngineCommand = { action: "DiscoverHomeserver"; params: {
 } } | { action: "CancelVerification"; params: {
 	user_id: UserId,
 	device_id: string,
-} } | { action: "GetRecoveryStatus" } | { action: "EnableRecovery" } | { action: "RecoverWithKey"; params: {
+} } | { action: "GetRecoveryStatus" } | { action: "EnableRecovery"; params: {
+	/**  Account password; needed when cross-signing must be created (UIA). */
+	password: string | null,
+} } | { action: "RecoverWithKey"; params: {
 	recovery_key: string,
-} } | { action: "ResetRecovery" } | { action: "SubscribeSpaces" } | { action: "SubscribeSpaceChildren"; params: {
+} } | { action: "ResetRecovery"; params: {
+	password: string | null,
+} } | { action: "SubscribeSpaces" } | { action: "SubscribeSpaceChildren"; params: {
 	space_id: RoomId,
 } } | { action: "ListThemes" } | { action: "GetTheme"; params: {
 	id: string,
@@ -232,9 +237,15 @@ export type EngineResponse = { type: "HomeserverInfo"; payload: {
 	device_id: string,
 } } | { type: "RecoveryStatusRetrieved"; payload: {
 	state: RecoveryState,
-} } | { type: "RecoveryEnabled" } | { type: "RecoveredFromKey"; payload: {
+} } | 
+/**  The recovery key: show it once, it cannot be retrieved again. */
+{ type: "RecoveryEnabled"; payload: {
+	recovery_key: string,
+} } | { type: "RecoveredFromKey"; payload: {
 	recovered: boolean,
-} } | { type: "RecoveryReset" } | { type: "SpacesSubscribed"; payload: {
+} } | { type: "RecoveryReset"; payload: {
+	recovery_key: string,
+} } | { type: "SpacesSubscribed"; payload: {
 	subscription_id: SubscriptionId,
 } } | { type: "SpaceChildrenSubscribed"; payload: {
 	subscription_id: SubscriptionId,

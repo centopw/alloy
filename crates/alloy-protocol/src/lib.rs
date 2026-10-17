@@ -411,11 +411,16 @@ pub enum EngineCommand {
         device_id: String,
     },
     GetRecoveryStatus,
-    EnableRecovery,
+    EnableRecovery {
+        /// Account password; needed when cross-signing must be created (UIA).
+        password: Option<String>,
+    },
     RecoverWithKey {
         recovery_key: String,
     },
-    ResetRecovery,
+    ResetRecovery {
+        password: Option<String>,
+    },
     // Spaces
     SubscribeSpaces,
     SubscribeSpaceChildren {
@@ -554,11 +559,16 @@ pub enum EngineResponse {
     RecoveryStatusRetrieved {
         state: RecoveryState,
     },
-    RecoveryEnabled,
+    /// The recovery key: show it once, it cannot be retrieved again.
+    RecoveryEnabled {
+        recovery_key: String,
+    },
     RecoveredFromKey {
         recovered: bool,
     },
-    RecoveryReset,
+    RecoveryReset {
+        recovery_key: String,
+    },
     // Spaces
     SpacesSubscribed {
         subscription_id: SubscriptionId,
