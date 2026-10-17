@@ -12,6 +12,14 @@ license = "Apache-2.0"
 rust-version = "1.90"
 repository = "https://github.com/centopw/alloy"
 
+# Keep dev artifacts small: line tables are enough for backtraces; full debuginfo made
+# target dirs grow to tens of GiB.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 
