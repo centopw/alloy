@@ -145,7 +145,7 @@ jobs:
 
       - name: Build Android APK (Unsigned / Debug)
         working-directory: apps/alloy
-        run: pnpm tauri android build --apk --debug
+        run: pnpm tauri android build --apk --debug --target aarch64
 
       - name: Locate and prepare APK
         shell: bash
