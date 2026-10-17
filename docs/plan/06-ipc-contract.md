@@ -192,32 +192,51 @@ Standard error codes:
 
 ## 8. Ownership Map for Future Parallel Streams
 
-| Stream | Owned Files & Directories | Responsibilities |
-|---|---|---|
-| **core-auth** | `crates/alloy-core/src/auth.rs` | OIDC authorization code flow, MAS negotiation, password login fallback, token refresh |
-| **core-rooms-timeline** | `crates/alloy-core/src/rooms.rs`, `crates/alloy-core/src/timeline.rs`, `crates/alloy-core/src/mapping.rs` | Sliding sync RoomListService, TimelineBuilder, send queue local echo, read receipts, reactions |
-| **core-crypto** | `crates/alloy-core/src/crypto.rs` | Vodozemac Megolm/Olm sessions, device SAS verification, secret storage key backup (`m.megolm_backup.v1`) |
-| **core-media** | `crates/alloy-core/src/media.rs` | MSC3916 authenticated media download, encryption/decryption of attachments, disk thumbnail cache |
-| **theme-runtime** | `crates/alloy-theme/**`, `packages/themes/**` | Token schema, CSS variable generator, theme loader, hot reload |
-| **ui-shell-timeline** | `apps/alloy/ui/src/routes/**`, `apps/alloy/ui/src/lib/components/**` | Adaptive shell, virtualized timeline rendering (`virtua`), composer, HUD |
-| **ui-ipc-glue** | `apps/alloy/ui/src/lib/ipc/**` | Transport implementations, reactive runes stores, client helpers |
-| **app-router** | `apps/alloy/src-tauri/src/engine.rs`, `apps/alloy/src-tauri/src/commands.rs` | IPC router dispatching to module handlers |
+| Stream | Core / Engine Paths | UI Paths | Responsibilities |
+|---|---|---|---|
+| **core-auth** | `crates/alloy-core/src/auth.rs`<br>`crates/alloy-engine/src/handlers/auth.rs` | `ui/src/routes/onboarding/**`<br>`ui/src/lib/components/onboarding/**`<br>`ui/src/lib/stores/auth*` | OIDC / MAS flow, password fallback, keychain session storage, account lifecycle |
+| **core-rooms-timeline** | `crates/alloy-core/src/rooms.rs`<br>`crates/alloy-core/src/timeline.rs`<br>`crates/alloy-core/src/mapping.rs`<br>`crates/alloy-engine/src/handlers/rooms.rs`<br>`crates/alloy-engine/src/handlers/timeline.rs` | `ui/src/lib/components/timeline/**`<br>`ui/src/lib/components/composer/**`<br>`ui/src/lib/stores/timeline*`<br>`ui/src/lib/stores/composer*` | Sliding sync RoomListService, room subscriptions, TimelineBuilder, message send queue, reactions, receipts |
+| **core-crypto** | `crates/alloy-core/src/crypto.rs`<br>`crates/alloy-engine/src/handlers/crypto.rs` | `ui/src/lib/stores/verification*` | Vodozemac Megolm/Olm sessions, interactive SAS verification, Megolm key backup recovery (`m.megolm_backup.v1`) |
+| **core-media** | `crates/alloy-core/src/media.rs`<br>`crates/alloy-engine/src/handlers/media.rs` | — | MSC3916 authenticated media download, attachment encryption/decryption, disk thumbnail cache |
+| **core-spaces** | `crates/alloy-engine/src/handlers/spaces.rs` | — | Space hierarchy and space room tree subscriptions |
+| **theme-runtime** | `crates/alloy-theme/**`<br>`packages/themes/**`<br>`crates/alloy-engine/src/handlers/settings.rs` | `ui/src/routes/settings/**`<br>`ui/src/lib/components/settings/**` | Token schema, theme loader, resolver, CSS generation, user settings persistence |
+| **ui-shell** | — | `ui/src/lib/components/shell/**`<br>`ui/src/routes/+page.svelte`<br>`ui/src/routes/+layout.svelte`<br>`ui/src/lib/stores/rooms*` | Adaptive desktop shell layout, room list view, HUD, modal managers |
+| **app-shell** | `apps/alloy/src-tauri/src/lib.rs`<br>`apps/alloy/src-tauri/src/commands.rs` | — | Thin Tauri 2 IPC bindings (`alloy_invoke`, `alloy_subscribe` event forwarder), app bootstrap |
+| **engine-core** | `crates/alloy-engine/src/{lib,context,registry,router,sink,error}.rs` | `ui/src/lib/ipc/**` | Core engine traits, event fan-out, subscription registry, router dispatch, TS transport & mock client |
 
 ---
 
-## 9. Rules for Evolving Protocol v1
+## 9. How a Feature Stream Adds a Command End-to-End
 
-1. **Additive Only**: Within `v0.x`, commands, response variants, event variants, and optional struct fields may only be added. No existing variants or fields may be renamed or removed.
-2. **Specta Derivation**: Every DTO must derive `serde::Serialize`, `serde::Deserialize`, and `specta::Type`.
-3. **Idempotent Regeneration**: Whenever `crates/alloy-protocol/src/lib.rs` is modified, regenerate TypeScript types using:
+When extending Alloy with a new capability in Phase 1b:
+
+1. **Define Protocol Types** (`crates/alloy-protocol/src/lib.rs`):
+   - Add new command variant to `EngineCommand` (with `#[serde(tag = "action", content = "params")]`).
+   - Add new response payload variant to `EngineResponse` (or reuse existing).
+   - Add new event variant to `EngineEvent` if asynchronous/streaming.
+   - Ensure all payload structs derive `specta::Type`.
+
+2. **Regenerate TypeScript Types**:
    ```bash
    cargo run -p alloy-protocol --bin generate-types
    ```
-   Type generation must be clean and idempotent (no git diff after running twice).
-4. **Validation Checklist**:
-   - `cargo fmt --all`
-   - `cargo clippy --workspace --all-targets -- -D warnings`
-   - `cargo test --workspace`
+   Verify `apps/alloy/ui/src/lib/generated/protocol.ts` reflects the new types.
+
+3. **Associate with Command Group** (`crates/alloy-engine/src/router.rs`):
+   - Update `CommandGroup::from_command(&cmd)` to map the new variant to its owning domain enum (`Auth`, `Rooms`, `Timeline`, `Crypto`, `Media`, `Spaces`, or `Settings`).
+
+4. **Implement in Handler** (`crates/alloy-engine/src/handlers/<domain>.rs`):
+   - Replace `Err(EngineError::not_implemented(&name))` with the real implementation for that command variant.
+   - Call into `alloy-core` or `ctx` as needed.
+
+5. **Expose in UI Client** (`apps/alloy/ui/src/lib/ipc/client.ts`):
+   - Add a high-level async helper method on `AlloyClient` wrapping `this.transport.invoke({ action: '...', params: { ... } })`.
+   - Add matching mock simulation in `apps/alloy/ui/src/lib/ipc/mock.ts` for offline frontend testing.
+
+6. **Verification Checklist**:
+   - `cargo fmt -p <your-crate>`
+   - `cargo clippy -p <your-crate> --all-targets -- -D warnings`
+   - `cargo test -p <your-crate>`
    - `pnpm --prefix apps/alloy/ui check`
    - `pnpm --prefix apps/alloy/ui test`
    - `pnpm --prefix apps/alloy/ui build`

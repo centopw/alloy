@@ -1,19 +1,15 @@
 //! Alloy desktop and mobile application shell.
 
 pub mod commands;
-pub mod engine;
 
+use alloy_engine::context::EngineContext;
+use alloy_engine::router::AppEngine;
 use commands::{alloy_invoke, alloy_subscribe};
-use engine::{Engine, RouterEngine};
 use std::sync::Arc;
 use tauri::Manager;
-use tauri::ipc::Channel;
 
 pub struct AppState {
-    pub engine: Arc<dyn Engine>,
-    pub data_dir: std::path::PathBuf,
-    pub secret_store: Box<dyn alloy_storage::SecretStore>,
-    pub subscribers: Arc<tokio::sync::Mutex<Vec<Channel<alloy_protocol::EngineEvent>>>>,
+    pub engine: Arc<AppEngine>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -30,18 +26,13 @@ pub fn run() {
             let _ = std::fs::create_dir_all(&data_dir);
 
             // Configure Keyring secret store
-            let secret_store: Box<dyn alloy_storage::SecretStore> =
-                Box::new(alloy_storage::KeyringSecretStore::new("chat.alloy"));
+            let secret_store: Arc<dyn alloy_storage::SecretStore> =
+                Arc::new(alloy_storage::KeyringSecretStore::new("chat.alloy"));
 
-            let subscribers = Arc::new(tokio::sync::Mutex::new(Vec::new()));
-            let engine = Arc::new(RouterEngine::new());
+            let ctx = EngineContext::new(data_dir, secret_store);
+            let engine = Arc::new(AppEngine::new(ctx));
 
-            app.manage(AppState {
-                engine,
-                data_dir,
-                secret_store,
-                subscribers,
-            });
+            app.manage(AppState { engine });
 
             Ok(())
         })
