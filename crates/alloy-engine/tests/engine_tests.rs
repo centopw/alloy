@@ -1,8 +1,6 @@
 use alloy_engine::context::EngineContext;
 use alloy_engine::router::{AppEngine, Engine};
-use alloy_protocol::{
-    EngineCommand, EngineEvent, EngineResponse, MediaSource, RoomId, SubscriptionId,
-};
+use alloy_protocol::{EngineCommand, EngineEvent, EngineResponse, SubscriptionId};
 use alloy_storage::{InMemorySecretStore, SecretStore};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -78,26 +76,6 @@ async fn test_not_implemented_naming() {
                 homeserver_url: "https://matrix.org".into(),
             },
             "StartOidcLogin",
-        ),
-        (
-            EngineCommand::SendAttachment {
-                room_id: RoomId("!test:alloy.chat".into()),
-                file_path: "/tmp/x".into(),
-                mime_type: None,
-                txn_id: None,
-            },
-            "SendAttachment",
-        ),
-        (
-            EngineCommand::GetMedia {
-                source: MediaSource::Remote {
-                    uri: "mxc://example.com/123".into(),
-                },
-                kind: "thumbnail".into(),
-                width: Some(64),
-                height: Some(64),
-            },
-            "GetMedia",
         ),
         (EngineCommand::SubscribeSpaces, "SubscribeSpaces"),
     ];

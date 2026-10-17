@@ -6,7 +6,7 @@ use alloy_protocol::{EngineCommand, EngineEvent, EngineResponse, SubscriptionId}
 
 /// Handler for timeline/messaging operations (`CommandGroup::Timeline`).
 ///
-/// Owned by stream: `core-rooms-timeline`. Attachments belong to `core-media`.
+/// Owned by stream: `core-rooms-timeline`.
 #[derive(Default)]
 pub struct TimelineHandler;
 
@@ -172,7 +172,6 @@ impl GroupHandler for TimelineHandler {
                 client.set_typing(&room_id, typing).await.map_err(map_err)?;
                 Ok(EngineResponse::TypingStatusSet { room_id })
             }
-            EngineCommand::SendAttachment { .. } => Err(EngineError::not_implemented(&name)),
             _ => Err(EngineError::invalid_argument(format!(
                 "Command '{}' does not belong to Timeline group",
                 name

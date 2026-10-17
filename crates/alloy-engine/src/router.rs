@@ -42,7 +42,6 @@ impl CommandGroup {
             | EngineCommand::ToggleReaction { .. }
             | EngineCommand::RetrySend { .. }
             | EngineCommand::CancelSend { .. }
-            | EngineCommand::SendAttachment { .. }
             | EngineCommand::MarkRead { .. }
             | EngineCommand::SetTyping { .. } => CommandGroup::Timeline,
 
@@ -56,7 +55,9 @@ impl CommandGroup {
             | EngineCommand::RecoverWithKey { .. }
             | EngineCommand::ResetRecovery { .. } => CommandGroup::Crypto,
 
-            EngineCommand::GetMedia { .. } => CommandGroup::Media,
+            EngineCommand::GetMedia { .. } | EngineCommand::SendAttachment { .. } => {
+                CommandGroup::Media
+            }
 
             EngineCommand::SubscribeSpaces | EngineCommand::SubscribeSpaceChildren { .. } => {
                 CommandGroup::Spaces
