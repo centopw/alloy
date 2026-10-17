@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   synapse:
-    image: matrixdotorg/synapse:latest
+    image: matrixdotorg/synapse:v1.163.0
     container_name: alloy-test-synapse
     ports:
       - "8008:8008"
@@ -12,6 +12,8 @@ services:
       SYNAPSE_CONFIG_DIR: /data
       SYNAPSE_SERVER_NAME: localhost
       SYNAPSE_REPORT_STATS: "no"
+      UID: "${ALLOY_UID:-991}"
+      GID: "${ALLOY_GID:-991}"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8008/health"]
       interval: 3s

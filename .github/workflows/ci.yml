@@ -8,7 +8,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  UI_DIR: apps/alloy
+  UI_DIR: apps/alloy/ui
 
 jobs:
   commits:
@@ -60,15 +60,18 @@ jobs:
           components: clippy
           targets: wasm32-wasip2
 
+      - name: Install Tauri system libraries (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev \
+            libayatana-appindicator3-dev librsvg2-dev libssl-dev libxdo-dev patchelf
+
       - name: Cache cargo registry & targets
         uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            .
-            apps/alloy/src-tauri
 
       - name: Clippy (zero warnings policy)
-        run: cargo clippy -D warnings --workspace
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Run workspace tests
         run: cargo test --workspace --locked
@@ -156,9 +159,12 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Setup Android SDK
-        if: steps.check-android.outputs.has_android == 'true'
-        uses: android-actions/setup-android@v3
+      - name: Install Android SDK packages and NDK
+        run: |
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --licenses > /dev/null || true
+          "$SDKM" "platforms;android-35" "build-tools;35.0.0" "ndk;27.0.12077973"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
 
       - name: Install Rust & Android targets
         if: steps.check-android.outputs.has_android == 'true'
@@ -181,16 +187,12 @@ jobs:
       - name: Install UI dependencies
         if: steps.check-android.outputs.has_android == 'true'
         working-directory: ${{ env.UI_DIR }}
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
 
-      - name: Install Tauri CLI
+      - name: Build Android APK (debug, arm64)
         if: steps.check-android.outputs.has_android == 'true'
-        run: cargo install tauri-cli --locked --version '^2'
-
-      - name: Build Android APK
-        if: steps.check-android.outputs.has_android == 'true'
-        working-directory: ${{ env.UI_DIR }}
-        run: cargo tauri android build --apk
+        working-directory: apps/alloy
+        run: pnpm tauri android build --apk --debug --target aarch64
 
   synapse-integration:
     name: Synapse Integration Tests
@@ -217,6 +219,37 @@ jobs:
         env:
           ALLOY_TEST_HS: http://localhost:8008
         run: cargo test -p alloy-core --test synapse_integration -- --nocapture
+
+      - name: Run engine integration tests (auth, rooms, timeline, crypto, media)
+        env:
+          ALLOY_TEST_HS: http://localhost:8008
+        run: cargo test -p alloy-engine -- --nocapture
+
+      - name: Build engine bridge
+        run: cargo build -p alloy-bridge
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/alloy/ui/pnpm-lock.yaml
+
+      - name: Build UI
+        working-directory: apps/alloy/ui
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Full-stack E2E (UI + bridge + Synapse)
+        working-directory: apps/alloy/ui
+        env:
+          ALLOY_TEST_HS: http://localhost:8008
+          ALLOY_BRIDGE_BIN: ${{ github.workspace }}/target/debug/alloy-bridge
+          CHROME_PATH: /usr/bin/google-chrome
+        run: node scripts/e2e-bridge.mjs
 
       - name: Dump Docker logs on failure
         if: failure()

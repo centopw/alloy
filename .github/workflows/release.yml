@@ -34,7 +34,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: apps/alloy/pnpm-lock.yaml
+          cache-dependency-path: apps/alloy/ui/pnpm-lock.yaml
 
       - name: Install Linux system dependencies
         if: matrix.os == 'ubuntu-22.04'
@@ -43,11 +43,11 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
 
       - name: Install UI dependencies
-        working-directory: apps/alloy
+        working-directory: apps/alloy/ui
         run: pnpm install --frozen-lockfile 2>/dev/null || pnpm install
 
       - name: Build UI assets
-        working-directory: apps/alloy
+        working-directory: apps/alloy/ui
         run: pnpm build
 
       - name: Generate SBOM (CycloneDX)
@@ -106,8 +106,12 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Install Android SDK packages and NDK
+        run: |
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --licenses > /dev/null || true
+          "$SDKM" "platforms;android-35" "build-tools;35.0.0" "ndk;27.0.12077973"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
 
       - name: Install Rust toolchain & Android targets
         uses: dtolnay/rust-toolchain@stable
@@ -123,18 +127,15 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: apps/alloy/pnpm-lock.yaml
+          cache-dependency-path: apps/alloy/ui/pnpm-lock.yaml
 
       - name: Install UI dependencies
-        working-directory: apps/alloy
+        working-directory: apps/alloy/ui
         run: pnpm install --frozen-lockfile 2>/dev/null || pnpm install
 
       - name: Build UI assets
-        working-directory: apps/alloy
+        working-directory: apps/alloy/ui
         run: pnpm build
-
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli --locked --version '^2'
 
       - name: Decode Android Keystore
         env:
@@ -146,7 +147,7 @@ jobs:
 
       - name: Build Android APK
         working-directory: apps/alloy
-        run: cargo tauri android build --apk
+        run: pnpm tauri android build --apk
 
       - name: Sign APK with apksigner
         env:

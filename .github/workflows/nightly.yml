@@ -52,7 +52,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: apps/alloy/pnpm-lock.yaml
+          cache-dependency-path: apps/alloy/ui/pnpm-lock.yaml
 
       - name: Embed nightly version metadata
         shell: bash
@@ -71,11 +71,11 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
 
       - name: Install UI dependencies
-        working-directory: apps/alloy
+        working-directory: apps/alloy/ui
         run: pnpm install --frozen-lockfile 2>/dev/null || pnpm install
 
       - name: Build UI assets
-        working-directory: apps/alloy
+        working-directory: apps/alloy/ui
         run: pnpm build
 
       - name: Build Tauri Desktop Bundle (Unsigned)
@@ -109,10 +109,12 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Setup Android SDK and NDK 27
-        uses: android-actions/setup-android@v3
-        with:
-          packages: 'ndk;27.0.12077973 platform-tools platforms;android-34 build-tools;34.0.0'
+      - name: Install Android SDK packages and NDK
+        run: |
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --licenses > /dev/null || true
+          "$SDKM" "platforms;android-35" "build-tools;35.0.0" "ndk;27.0.12077973"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
 
       - name: Install Rust toolchain & Android targets
         uses: dtolnay/rust-toolchain@stable
@@ -128,7 +130,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: apps/alloy/pnpm-lock.yaml
+          cache-dependency-path: apps/alloy/ui/pnpm-lock.yaml
 
       - name: Embed nightly version metadata
         shell: bash
@@ -142,10 +144,10 @@ jobs:
           node scripts/embed-nightly-version.mjs
 
       - name: Install UI dependencies
-        working-directory: apps/alloy
+        working-directory: apps/alloy/ui
         run: pnpm install --frozen-lockfile 2>/dev/null || pnpm install
       - name: Build UI assets
-        working-directory: apps/alloy
+        working-directory: apps/alloy/ui
         run: pnpm build
 
       - name: Build Android APK (Unsigned / Debug)

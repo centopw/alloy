@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e
 
+# Run Synapse as the invoking user so the bind-mounted data dir stays writable on Linux hosts.
+export ALLOY_UID="$(id -u)" ALLOY_GID="$(id -g)"
+SYNAPSE_IMAGE="matrixdotorg/synapse:v1.163.0"
+
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 cd "$DIR"
 
@@ -10,7 +14,8 @@ if [ ! -f "synapse_data/homeserver.yaml" ]; then
     docker run --rm -v "$DIR/synapse_data":/data \
         -e SYNAPSE_SERVER_NAME=localhost \
         -e SYNAPSE_REPORT_STATS=no \
-        matrixdotorg/synapse:latest generate
+        -e UID="$ALLOY_UID" -e GID="$ALLOY_GID" \
+        "$SYNAPSE_IMAGE" generate
     
     cat << 'EOF' >> synapse_data/homeserver.yaml
 

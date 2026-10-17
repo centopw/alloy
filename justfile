@@ -4,7 +4,7 @@
 set shell := ["bash", "-cu"]
 
 # UI workspace directory (apps/alloy by default; apps/alloy/ui configurable)
-UI_DIR := env_var_or_default("UI_DIR", "apps/alloy")
+UI_DIR := env_var_or_default("UI_DIR", "apps/alloy/ui")
 SYNAPSE_COMPOSE := "tests/synapse/docker-compose.yml"
 
 default:
