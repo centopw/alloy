@@ -44,7 +44,7 @@ jobs:
 
       - name: Install UI dependencies
         working-directory: apps/alloy/ui
-        run: pnpm install --frozen-lockfile 2>/dev/null || pnpm install
+        run: pnpm install --frozen-lockfile
 
       - name: Build UI assets
         working-directory: apps/alloy/ui
@@ -131,7 +131,7 @@ jobs:
 
       - name: Install UI dependencies
         working-directory: apps/alloy/ui
-        run: pnpm install --frozen-lockfile 2>/dev/null || pnpm install
+        run: pnpm install --frozen-lockfile
 
       - name: Build UI assets
         working-directory: apps/alloy/ui

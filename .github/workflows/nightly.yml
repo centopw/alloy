@@ -5,6 +5,9 @@ on:
     - cron: '0 2 * * *'  # Daily at 2 AM UTC
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 env:
   CARGO_TERM_COLOR: always
   UI_DIR: apps/alloy
@@ -67,7 +70,7 @@ jobs:
 
       - name: Install UI dependencies
         working-directory: apps/alloy/ui
-        run: pnpm install --frozen-lockfile 2>/dev/null || pnpm install
+        run: pnpm install --frozen-lockfile
 
       - name: Build UI assets
         working-directory: apps/alloy/ui
@@ -135,7 +138,7 @@ jobs:
 
       - name: Install UI dependencies
         working-directory: apps/alloy/ui
-        run: pnpm install --frozen-lockfile 2>/dev/null || pnpm install
+        run: pnpm install --frozen-lockfile
       - name: Build UI assets
         working-directory: apps/alloy/ui
         run: pnpm build
