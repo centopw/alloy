@@ -11,6 +11,7 @@ pub mod timeline;
 pub use alloy_protocol::*;
 pub use alloy_storage::{InMemorySecretStore, SecretStore, StorageError};
 pub use client::*;
+pub use crypto::{ActiveVerification, VerificationCallback, VerificationUpdate};
 pub use mapping::*;
 
 use thiserror::Error;

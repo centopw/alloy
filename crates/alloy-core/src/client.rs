@@ -30,6 +30,12 @@ pub struct AlloyClient {
     pub(crate) secret_store: Box<dyn SecretStore>,
     /// Optional namespace isolating this account's secrets (`alloy:<ns>:...`).
     pub(crate) namespace: Option<String>,
+    /// Latest incoming verification request awaiting adoption.
+    pub(crate) pending_incoming: std::sync::Arc<
+        tokio::sync::Mutex<Option<matrix_sdk::encryption::verification::VerificationRequest>>,
+    >,
+    /// The verification currently in progress (one at a time), see `crypto.rs`.
+    pub(crate) verification: tokio::sync::Mutex<crate::crypto::ActiveVerification>,
     /// Live timelines by room, built lazily by [`AlloyClient::cached_timeline`].
     pub(crate) timelines: tokio::sync::Mutex<
         std::collections::HashMap<String, std::sync::Arc<matrix_sdk_ui::timeline::Timeline>>,
@@ -93,6 +99,8 @@ impl AlloyClient {
             client,
             secret_store,
             namespace,
+            pending_incoming: Default::default(),
+            verification: tokio::sync::Mutex::new(Default::default()),
             timelines: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             sync: tokio::sync::OnceCell::new(),
         })
@@ -146,7 +154,11 @@ impl AlloyClient {
     pub async fn stop_sync(&self) {
         self.timelines.lock().await.clear();
         if let Some(svc) = self.sync.get() {
-            svc.stop().await;
+            // `SyncService::stop` waits for in-flight long-polls and can take very long, so
+            // stop in the background and give it a short grace period only.
+            let svc = svc.clone();
+            let stopper = tokio::spawn(async move { svc.stop().await });
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(2), stopper).await;
         }
     }
 
