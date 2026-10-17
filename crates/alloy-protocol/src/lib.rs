@@ -391,6 +391,9 @@ pub enum EngineCommand {
         kind: String, // "thumbnail" | "file"
         width: Option<u32>,
         height: Option<u32>,
+        /// Used to pick the cache file extension; pass the timeline item's mime type.
+        #[serde(default)]
+        mime_type: Option<String>,
     },
     // Crypto
     RequestSelfVerification,
@@ -522,7 +525,8 @@ pub enum EngineResponse {
     AttachmentSent {
         room_id: RoomId,
         txn_id: String,
-        event_id: EventId,
+        /// Known only once the server confirmed the event; the timeline item carries it later.
+        event_id: Option<EventId>,
     },
     ReadMarked {
         room_id: RoomId,

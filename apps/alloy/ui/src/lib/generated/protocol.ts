@@ -95,6 +95,8 @@ export type EngineCommand = { action: "DiscoverHomeserver"; params: {
 	kind: string,
 	width: number | null,
 	height: number | null,
+	/**  Used to pick the cache file extension; pass the timeline item's mime type. */
+	mime_type?: string | null,
 } } | { action: "RequestSelfVerification" } | { action: "AcceptVerification"; params: {
 	user_id: UserId,
 	device_id: string,
@@ -212,7 +214,8 @@ export type EngineResponse = { type: "HomeserverInfo"; payload: {
 } } | { type: "AttachmentSent"; payload: {
 	room_id: RoomId,
 	txn_id: string,
-	event_id: EventId,
+	/**  Known only once the server confirmed the event; the timeline item carries it later. */
+	event_id: EventId | null,
 } } | { type: "ReadMarked"; payload: {
 	room_id: RoomId,
 } } | { type: "TypingStatusSet"; payload: {
