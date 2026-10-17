@@ -174,10 +174,19 @@ export type EngineResponse = { type: "HomeserverInfo"; payload: {
 	room_id: RoomId,
 } } | { type: "TimelineSubscribed"; payload: {
 	subscription_id: SubscriptionId,
-} } | { type: "MessageSent"; payload: {
+} } | { type: "Paginated"; payload: {
+	room_id: RoomId,
+	/**  True when the start of the room history was reached. */
+	reached_start: boolean,
+} } | 
+/**
+ *  The message was queued; the local echo arrives via `TimelineDiff` and the final
+ *  event id is delivered through the item's `send_state` once sent.
+ */
+{ type: "MessageSent"; payload: {
 	room_id: RoomId,
 	txn_id: string,
-	event_id: EventId,
+	event_id: EventId | null,
 } } | { type: "MessageEdited"; payload: {
 	room_id: RoomId,
 	event_id: EventId,
@@ -261,6 +270,15 @@ export type NotificationCount = {
 	notification_count: number,
 };
 
+/**  Aggregated reactions for one key on a message. */
+export type ReactionSummary = {
+	key: string,
+	count: number,
+	senders: UserId[],
+	/**  Whether the current user reacted with this key. */
+	by_me: boolean,
+};
+
 export type RecoveryState = "Unknown" | "Enabled" | "Disabled" | "Lost";
 
 export type RoomId = string;
@@ -300,10 +318,18 @@ export type TimelineItemContent = { kind: "TextMessage"; data: {
 	formatted_body: string | null,
 	html_sanitized: boolean,
 } } | { kind: "Media"; data: {
+	/**  `mxc://` URI for plain media, or a JSON-encoded encrypted source (starts with `{`). */
 	uri: string,
 	mime_type: string,
 	size_bytes: number,
 	thumbnail_uri: string | null,
+	/**  Caption or file name. */
+	body?: string,
+	/**  `image`, `video`, `audio`, `file` or `sticker`. */
+	media_kind?: string,
+	width?: number | null,
+	height?: number | null,
+	duration_ms?: number | null,
 } } | { kind: "Reaction"; data: {
 	key: string,
 	count: number,
@@ -335,6 +361,12 @@ export type TimelineItemDto = {
 	reply_to: TimelineItemDto | null,
 	thread_summary: ThreadSummary | null,
 	read_receipts: UserId[] | null,
+	sender_display_name?: string | null,
+	sender_avatar_url?: string | null,
+	edited?: boolean,
+	reactions?: ReactionSummary[],
+	/**  Transaction id for local echoes (use with RetrySend/CancelSend). */
+	transaction_id?: string | null,
 };
 
 export type TimelineItemPreview = {

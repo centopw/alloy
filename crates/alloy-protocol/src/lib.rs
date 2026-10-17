@@ -81,11 +81,25 @@ pub enum TimelineItemContent {
         html_sanitized: bool,
     },
     Media {
+        /// `mxc://` URI for plain media, or a JSON-encoded encrypted source (starts with `{`).
         uri: String,
         mime_type: String,
         #[specta(type = Number)]
         size_bytes: u64,
         thumbnail_uri: Option<String>,
+        /// Caption or file name.
+        #[serde(default)]
+        body: String,
+        /// `image`, `video`, `audio`, `file` or `sticker`.
+        #[serde(default)]
+        media_kind: String,
+        #[serde(default)]
+        width: Option<u32>,
+        #[serde(default)]
+        height: Option<u32>,
+        #[serde(default)]
+        #[specta(type = Option<Number>)]
+        duration_ms: Option<u64>,
     },
     Reaction {
         key: String,
@@ -134,6 +148,17 @@ pub struct ThreadSummary {
     pub latest_reply_timestamp: u64,
 }
 
+/// Aggregated reactions for one key on a message.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct ReactionSummary {
+    pub key: String,
+    #[specta(type = Number)]
+    pub count: usize,
+    pub senders: Vec<UserId>,
+    /// Whether the current user reacted with this key.
+    pub by_me: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct TimelineItemDto {
     pub internal_id: String,
@@ -147,6 +172,17 @@ pub struct TimelineItemDto {
     pub reply_to: Option<Box<TimelineItemDto>>,
     pub thread_summary: Option<ThreadSummary>,
     pub read_receipts: Option<Vec<UserId>>,
+    #[serde(default)]
+    pub sender_display_name: Option<String>,
+    #[serde(default)]
+    pub sender_avatar_url: Option<String>,
+    #[serde(default)]
+    pub edited: bool,
+    #[serde(default)]
+    pub reactions: Vec<ReactionSummary>,
+    /// Transaction id for local echoes (use with RetrySend/CancelSend).
+    #[serde(default)]
+    pub transaction_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -444,10 +480,17 @@ pub enum EngineResponse {
     TimelineSubscribed {
         subscription_id: SubscriptionId,
     },
+    Paginated {
+        room_id: RoomId,
+        /// True when the start of the room history was reached.
+        reached_start: bool,
+    },
+    /// The message was queued; the local echo arrives via `TimelineDiff` and the final
+    /// event id is delivered through the item's `send_state` once sent.
     MessageSent {
         room_id: RoomId,
         txn_id: String,
-        event_id: EventId,
+        event_id: Option<EventId>,
     },
     MessageEdited {
         room_id: RoomId,
@@ -610,7 +653,7 @@ pub enum EngineEvent {
     TimelineDiff {
         subscription_id: SubscriptionId,
         room_id: RoomId,
-        diff: VectorDiffDto<TimelineItemDto>,
+        diff: Box<VectorDiffDto<TimelineItemDto>>,
     },
     TypingNotice {
         room_id: RoomId,
@@ -645,6 +688,7 @@ pub fn register_types() -> Types {
         .register::<TimelineItemContent>()
         .register::<EventSendState>()
         .register::<ThreadSummary>()
+        .register::<ReactionSummary>()
         .register::<TimelineItemDto>()
         .register::<VectorDiffDto<RoomSummary>>()
         .register::<VectorDiffDto<TimelineItemDto>>()
