@@ -94,6 +94,8 @@ Parallel streams (after P0 contracts frozen: `alloy-protocol` v0, token schema v
 - **Delivery:** code-signing CI, updater, SBOM, SECURITY.md/CONTRIBUTING.
 - **Exit:** log in, E2EE chat, send/receive/edit/redact/reply/react, media, verify device, dark/light/AMOLED, on macOS+Windows+Linux; signed nightly builds; perf budgets in CI.
 
+**P1 status (2026-10-17): feature-complete on the engine, desktop packaging pending.** Engine: auth (discovery, password, restore, logout), room list, timeline with local echo, edit/redact/reply/react, receipts/typing, recovery + SAS verification, authenticated/encrypted media — all covered by Synapse integration tests (`crates/alloy-engine/tests`). UI: onboarding, adaptive shell, bubbles/gutter timeline, composer, invites, new room, settings, verification dialogs, command palette, per decision 0001. Full-stack proof: `apps/alloy/ui/scripts/e2e-bridge.mjs` (UI + `alloy-bridge` + Synapse). Known gaps for v0.1: OIDC (#65), @mentions/members API, upload progress, room details drawer, a11y audit (#36), signed installers, real-device perf (G1).
+
 ### P2 — Mobile + parity + Tier-A customization (v0.2–0.4)
 - **Mobile:** UI-05 safe areas/gestures, CORE-14/15 `alloy-ffi` UnifiedPush (+ optional FCM) service, UI-08 event wiring; signed APK via GitHub Releases. iOS not in scope (D10).
 - **Features:** CORE-10 reactions/polls, CORE-11 threads (UX-10), CORE-12 spaces, CORE-13 encrypted search, UX-09 QR login + SAS UX, UX-11 voice messages/polls UI, UX-12 Fluent i18n/RTL, a11y pass.
