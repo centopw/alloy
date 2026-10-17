@@ -3,8 +3,8 @@
 root="$(git rev-parse --show-toplevel)"; zero=0000000000000000000000000000000000000000
 while read -r _ local_sha _ remote_sha; do
   [ "$local_sha" = "$zero" ] && continue
-  range=$([ "$remote_sha" = "$zero" ] && echo "$local_sha" || echo "$remote_sha..$local_sha")
-  for c in $(git rev-list "$range"); do
+  if [ "$remote_sha" = "$zero" ]; then commits=$(git rev-list "$local_sha" --not --remotes); else commits=$(git rev-list "$remote_sha..$local_sha"); fi
+  for c in $commits; do
     git log -1 --format=%B "$c" | "$root/scripts/check-commit-msg.sh" - || { echo "bad commit $c" >&2; exit 1; }
   done
 done
