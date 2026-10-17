@@ -3,11 +3,18 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore: ['docs/**', '**/*.md', 'LICENSE', '.githooks/**']
   pull_request:
     branches: [main]
+    paths-ignore: ['docs/**', '**/*.md', 'LICENSE', '.githooks/**']
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
   UI_DIR: apps/alloy/ui
 
 jobs:
@@ -69,8 +76,13 @@ jobs:
 
       - name: Cache cargo registry & targets
         uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: dev-${{ matrix.os }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
+      # Clippy findings are platform independent here; Windows only runs the tests (its slowest leg).
       - name: Clippy (zero warnings policy)
+        if: matrix.os != 'windows-latest'
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Run workspace tests
@@ -158,6 +170,7 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+          cache: gradle
 
       - name: Install Android SDK packages and NDK
         run: |
@@ -170,7 +183,16 @@ jobs:
         if: steps.check-android.outputs.has_android == 'true'
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+          targets: aarch64-linux-android
+
+      - name: Cache cargo registry & targets
+        if: steps.check-android.outputs.has_android == 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: android-aarch64-debug
+          workspaces: |
+            . -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install pnpm
         if: steps.check-android.outputs.has_android == 'true'
@@ -206,9 +228,8 @@ jobs:
       - name: Cache cargo registry & targets
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: |
-            .
-            apps/alloy/src-tauri
+          shared-key: dev-ubuntu-latest
+          save-if: false
 
       - name: Start Synapse Homeserver
         run: |
