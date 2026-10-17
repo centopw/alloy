@@ -30,6 +30,10 @@ pub struct AlloyClient {
     pub(crate) secret_store: Box<dyn SecretStore>,
     /// Optional namespace isolating this account's secrets (`alloy:<ns>:...`).
     pub(crate) namespace: Option<String>,
+    /// Live timelines by room, built lazily by [`AlloyClient::cached_timeline`].
+    pub(crate) timelines: tokio::sync::Mutex<
+        std::collections::HashMap<String, std::sync::Arc<matrix_sdk_ui::timeline::Timeline>>,
+    >,
     /// Background sliding-sync service, created lazily by [`AlloyClient::sync_service`].
     pub(crate) sync:
         tokio::sync::OnceCell<std::sync::Arc<matrix_sdk_ui::sync_service::SyncService>>,
@@ -89,6 +93,7 @@ impl AlloyClient {
             client,
             secret_store,
             namespace,
+            timelines: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             sync: tokio::sync::OnceCell::new(),
         })
     }
@@ -139,6 +144,7 @@ impl AlloyClient {
 
     /// Stop background sync if it was started.
     pub async fn stop_sync(&self) {
+        self.timelines.lock().await.clear();
         if let Some(svc) = self.sync.get() {
             svc.stop().await;
         }
