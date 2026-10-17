@@ -40,6 +40,9 @@ rc_joins:
   local:
     per_second: 1000
     burst_count: 1000
+rc_room_creation:
+  per_second: 1000
+  burst_count: 1000
 rc_invites:
   per_room:
     per_second: 1000
