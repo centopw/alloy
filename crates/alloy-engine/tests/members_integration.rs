@@ -26,6 +26,11 @@ async fn members_and_details_of_a_new_room() {
     .await
     .unwrap();
 
+    // Room state (power levels) reaches the store through sync, which the room list starts.
+    eng.handle(EngineCommand::SubscribeRoomList { filter: None })
+        .await
+        .unwrap();
+
     let room_id = match eng
         .handle(EngineCommand::CreateRoom {
             name: "members-test".into(),
