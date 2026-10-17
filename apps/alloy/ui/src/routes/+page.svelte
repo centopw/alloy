@@ -19,7 +19,7 @@
 
 <style>
   .splash {
-    min-height: 100vh;
+    min-height: 100dvh;
     display: grid;
     place-items: center;
     color: var(--alloy-color-text-secondary);

@@ -7,4 +7,6 @@
     <color name="teal_700">#FF018786</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+    <!-- Dark canvas colour of the app; shown behind the system bars. -->
+    <color name="alloy_window_background">#FF18181B</color>
 </resources>
