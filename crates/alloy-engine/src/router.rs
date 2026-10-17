@@ -32,7 +32,9 @@ impl CommandGroup {
             | EngineCommand::Unsubscribe { .. }
             | EngineCommand::JoinRoom { .. }
             | EngineCommand::LeaveRoom { .. }
-            | EngineCommand::CreateRoom { .. } => CommandGroup::Rooms,
+            | EngineCommand::CreateRoom { .. }
+            | EngineCommand::GetRoomMembers { .. }
+            | EngineCommand::GetRoomDetails { .. } => CommandGroup::Rooms,
 
             EngineCommand::SubscribeTimeline { .. }
             | EngineCommand::PaginateBackwards { .. }

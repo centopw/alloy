@@ -48,6 +48,12 @@ export type EngineCommand = { action: "DiscoverHomeserver"; params: {
 	name: string,
 	encrypted: boolean,
 	invite: UserId[] | null,
+} } | 
+/**  Lists joined and invited members of a room (loads the full member list from the server if needed). */
+{ action: "GetRoomMembers"; params: {
+	room_id: RoomId,
+} } | { action: "GetRoomDetails"; params: {
+	room_id: RoomId,
 } } | { action: "SubscribeTimeline"; params: {
 	room_id: RoomId,
 } } | { action: "PaginateBackwards"; params: {
@@ -146,6 +152,13 @@ export type EngineEvent = { type: "ConnectionStatus"; payload: {
 } } | { type: "TypingNotice"; payload: {
 	room_id: RoomId,
 	users: UserId[],
+} } | 
+/**  Attachment upload progress, keyed by the `txn_id` passed to `SendAttachment`. */
+{ type: "UploadProgress"; payload: {
+	room_id: RoomId,
+	txn_id: string,
+	sent_bytes: number,
+	total_bytes: number,
 } } | { type: "VerificationState"; payload: {
 	user_id: UserId,
 	device_id: string,
@@ -173,6 +186,11 @@ export type EngineResponse = { type: "HomeserverInfo"; payload: {
 	subscription_id: SubscriptionId,
 } } | { type: "Unsubscribed"; payload: {
 	subscription_id: SubscriptionId,
+} } | { type: "RoomMembers"; payload: {
+	room_id: RoomId,
+	members: RoomMemberDto[],
+} } | { type: "RoomDetailsRetrieved"; payload: {
+	details: RoomDetails,
 } } | { type: "RoomJoined"; payload: {
 	room_id: RoomId,
 } } | { type: "RoomLeft"; payload: {
@@ -295,7 +313,31 @@ export type ReactionSummary = {
 
 export type RecoveryState = "Unknown" | "Enabled" | "Disabled" | "Lost";
 
+/**  Static details about a room for the details drawer. */
+export type RoomDetails = {
+	room_id: RoomId,
+	name: string | null,
+	topic: string | null,
+	canonical_alias: string | null,
+	avatar_url: string | null,
+	is_direct: boolean,
+	encrypted: boolean,
+	joined_members: number,
+	invited_members: number,
+};
+
 export type RoomId = string;
+
+/**  One member of a room, as listed by `GetRoomMembers`. */
+export type RoomMemberDto = {
+	user_id: UserId,
+	display_name: string | null,
+	/**  `mxc://` avatar URI, if any; fetch it with `GetMedia`. */
+	avatar_url: string | null,
+	/**  Matrix power level (0 = default member, 50 = moderator, 100 = admin). */
+	power_level: number,
+	membership: RoomMembership,
+};
 
 export type RoomMembership = "Joined" | "Invited" | "Left" | "Banned";
 

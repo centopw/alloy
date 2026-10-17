@@ -41,6 +41,35 @@ pub enum RoomMembership {
     Banned,
 }
 
+/// One member of a room, as listed by `GetRoomMembers`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct RoomMemberDto {
+    pub user_id: UserId,
+    pub display_name: Option<String>,
+    /// `mxc://` avatar URI, if any; fetch it with `GetMedia`.
+    pub avatar_url: Option<String>,
+    /// Matrix power level (0 = default member, 50 = moderator, 100 = admin).
+    #[specta(type = Number)]
+    pub power_level: i64,
+    pub membership: RoomMembership,
+}
+
+/// Static details about a room for the details drawer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct RoomDetails {
+    pub room_id: RoomId,
+    pub name: Option<String>,
+    pub topic: Option<String>,
+    pub canonical_alias: Option<String>,
+    pub avatar_url: Option<String>,
+    pub is_direct: bool,
+    pub encrypted: bool,
+    #[specta(type = Number)]
+    pub joined_members: u64,
+    #[specta(type = Number)]
+    pub invited_members: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct NotificationCount {
     #[specta(type = Number)]
@@ -330,6 +359,13 @@ pub enum EngineCommand {
         encrypted: bool,
         invite: Option<Vec<UserId>>,
     },
+    /// Lists joined and invited members of a room (loads the full member list from the server if needed).
+    GetRoomMembers {
+        room_id: RoomId,
+    },
+    GetRoomDetails {
+        room_id: RoomId,
+    },
     // Timeline
     SubscribeTimeline {
         room_id: RoomId,
@@ -474,6 +510,13 @@ pub enum EngineResponse {
     },
     Unsubscribed {
         subscription_id: SubscriptionId,
+    },
+    RoomMembers {
+        room_id: RoomId,
+        members: Vec<RoomMemberDto>,
+    },
+    RoomDetailsRetrieved {
+        details: RoomDetails,
     },
     RoomJoined {
         room_id: RoomId,
@@ -673,6 +716,15 @@ pub enum EngineEvent {
         room_id: RoomId,
         users: Vec<UserId>,
     },
+    /// Attachment upload progress, keyed by the `txn_id` passed to `SendAttachment`.
+    UploadProgress {
+        room_id: RoomId,
+        txn_id: String,
+        #[specta(type = Number)]
+        sent_bytes: u64,
+        #[specta(type = Number)]
+        total_bytes: u64,
+    },
     VerificationState {
         user_id: UserId,
         device_id: String,
@@ -696,6 +748,8 @@ pub fn register_types() -> Types {
         .register::<SubscriptionId>()
         .register::<ConnectionStatus>()
         .register::<RoomMembership>()
+        .register::<RoomMemberDto>()
+        .register::<RoomDetails>()
         .register::<NotificationCount>()
         .register::<TimelineItemPreview>()
         .register::<RoomSummary>()

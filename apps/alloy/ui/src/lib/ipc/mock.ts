@@ -646,6 +646,37 @@ export class MockTransport implements Transport {
           payload: { room_id: command.params.room_id },
         };
 
+      case 'GetRoomMembers':
+        return {
+          type: 'RoomMembers',
+          payload: {
+            room_id: command.params.room_id,
+            members: [
+              { user_id: '@alice:alloy.chat', display_name: 'Alice', avatar_url: null, power_level: 100, membership: 'Joined' },
+              { user_id: '@bob:alloy.chat', display_name: 'Bob', avatar_url: null, power_level: 50, membership: 'Joined' },
+              { user_id: '@carol:alloy.chat', display_name: null, avatar_url: null, power_level: 0, membership: 'Invited' },
+            ],
+          },
+        };
+
+      case 'GetRoomDetails':
+        return {
+          type: 'RoomDetailsRetrieved',
+          payload: {
+            details: {
+              room_id: command.params.room_id,
+              name: 'General',
+              topic: 'Welcome to Alloy',
+              canonical_alias: '#general:alloy.chat',
+              avatar_url: null,
+              is_direct: false,
+              encrypted: false,
+              joined_members: 2,
+              invited_members: 1,
+            },
+          },
+        };
+
       case 'GetMedia':
         return {
           type: 'MediaRetrieved',
