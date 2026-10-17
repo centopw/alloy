@@ -12,6 +12,7 @@ const UI_ROOT = path.resolve(__dirname, '..', '..', 'src', 'lib');
 const ALLOWED_PATHS = [
   path.resolve(UI_ROOT, 'mock'),
   path.resolve(UI_ROOT, 'ipc', 'mock.ts'),
+  path.resolve(UI_ROOT, 'content', 'emoji.ts'),
   path.resolve(UI_ROOT, 'identity', 'identity.test.ts') // Tests can use emoji as test data
 ];
 

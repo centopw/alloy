@@ -14,9 +14,15 @@ importers:
       '@tauri-apps/api':
         specifier: ^2.2.0
         version: 2.12.4
+      '@tauri-apps/plugin-dialog':
+        specifier: ^2.8.3
+        version: 2.8.3
       '@tauri-apps/plugin-opener':
-        specifier: ^2.2.5
+        specifier: ^2.7.2
         version: 2.7.2
+      dompurify:
+        specifier: ^3.4.17
+        version: 3.4.17
       virtua:
         specifier: ^0.53.5
         version: 0.53.5(svelte@5.57.2)
@@ -33,6 +39,9 @@ importers:
       '@tauri-apps/cli':
         specifier: ^2.2.7
         version: 2.12.3
+      '@types/dompurify':
+        specifier: ^3.2.0
+        version: 3.2.0
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5
@@ -375,6 +384,9 @@ packages:
     engines: {node: '>= 10'}
     hasBin: true
 
+  '@tauri-apps/plugin-dialog@2.8.3':
+    resolution: {integrity: sha512-Hd/yBfk2R5v2MFrz/0VArSXeh8xKLLXGunqSiTtcHKn1zNZwaKujuA0VSwUvNfwC4hDoF1PveS+gBDNe3nHspw==}
+
   '@tauri-apps/plugin-opener@2.7.2':
     resolution: {integrity: sha512-LyybP1VSzTMQiaFYcsbAse47KpivlyXdLZMQzGLEnkgQacGESnpjAfFoQ6h5sqWgAdZDH9szYjPzHMpv0Sz+TQ==}
 
@@ -387,11 +399,18 @@ packages:
   '@types/deep-eql@4.0.2':
     resolution: {integrity: sha512-c9h9dVVMigMPc4bwTvC5dxqtqJZwQPePsWjPlpSOnojbor6pGqdk541lfA7AqFQr5pB1BRdq0juY9db81BwyFw==}
 
+  '@types/dompurify@3.2.0':
+    resolution: {integrity: sha512-Fgg31wv9QbLDA0SpTOXO3MaxySc4DKGLi8sna4/Utjo4r3ZRPdCt4UQee8BWr+Q5z21yifghREPJGYaEOEIACg==}
+    deprecated: This is a stub types definition. dompurify provides its own type definitions, so you do not need this installed.
+
   '@types/estree@1.0.9':
     resolution: {integrity: sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg==}
 
   '@types/node@26.6.5':
     resolution: {integrity: sha512-uMzsv9stDdofIZBx4UGh4Z9ZgXnGC9seRDscilBcTHAeOFk67MZg/k9bWVfO+bk4qZmG+l52hRnLwUiH2LnJTg==}
+
+  '@types/trusted-types@2.0.7':
+    resolution: {integrity: sha512-ScaPdn1dQczgbl0QFTeTOmVHFULt394XJgOQNoyVhZ6r2vLnMLJfBPd53SB52T/3G36VI1/g2MZaX0cwDuXsfw==}
 
   '@vitest/mocker@5.0.4':
     resolution: {integrity: sha512-tqAlrYWce4iUxhr3ncNohejtCTOcHeE8XWrSNZY3OhPoDn01yeGv+gnaBy64ATp7o6pb03eIbBAjzmibpc9vIQ==}
@@ -485,6 +504,9 @@ packages:
 
   devtools-protocol@0.0.1696802:
     resolution: {integrity: sha512-FO5/SENfvc2K8wRnWQflKcwuoTH4dBkXCWTQ9ebIWtuX8JM5+ZvCotaEmkfh21pO7TvIKGTM3hG4xFiq9WTwmg==}
+
+  dompurify@3.4.17:
+    resolution: {integrity: sha512-B/pSlYVHQ58kqISD/yDjuJ1yfzI34m1gF4lAod2bwSRhiN4K5Cl3H8Af7hqB2PmTL911tdEudnnXn5FnhRoz0w==}
 
   emoji-regex@10.6.0:
     resolution: {integrity: sha512-toUI84YS5YmxW219erniWD0CIVOo46xGKColeNQRgOzDorgBi1v4D71/OFzgD9GO2UGKIv1C3Sp8DAn0+j5w7A==}
@@ -1207,6 +1229,10 @@ snapshots:
       '@tauri-apps/cli-win32-ia32-msvc': 2.12.3
       '@tauri-apps/cli-win32-x64-msvc': 2.12.3
 
+  '@tauri-apps/plugin-dialog@2.8.3':
+    dependencies:
+      '@tauri-apps/api': 2.12.4
+
   '@tauri-apps/plugin-opener@2.7.2':
     dependencies:
       '@tauri-apps/api': 2.12.4
@@ -1220,11 +1246,18 @@ snapshots:
 
   '@types/deep-eql@4.0.2': {}
 
+  '@types/dompurify@3.2.0':
+    dependencies:
+      dompurify: 3.4.17
+
   '@types/estree@1.0.9': {}
 
   '@types/node@26.6.5':
     dependencies:
       undici-types: 8.9.0
+
+  '@types/trusted-types@2.0.7':
+    optional: true
 
   '@vitest/mocker@5.0.4(vite@8.3.4(@types/node@26.6.5))':
     dependencies:
@@ -1296,6 +1329,10 @@ snapshots:
   devalue@5.9.4: {}
 
   devtools-protocol@0.0.1696802: {}
+
+  dompurify@3.4.17:
+    optionalDependencies:
+      '@types/trusted-types': 2.0.7
 
   emoji-regex@10.6.0: {}
 

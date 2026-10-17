@@ -284,7 +284,7 @@ export class AlloyClient {
   async getMedia(
     source: MediaSource,
     kind: 'thumbnail' | 'file',
-    opts?: { width?: number | null; height?: number | null }
+    opts?: { width?: number | null; height?: number | null; mime_type?: string | null }
   ) {
     return this.transport.invoke({
       action: 'GetMedia',
@@ -293,6 +293,7 @@ export class AlloyClient {
         kind,
         width: opts?.width ?? null,
         height: opts?.height ?? null,
+        mime_type: opts?.mime_type ?? null,
       },
     });
   }
