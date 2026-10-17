@@ -39,22 +39,33 @@ async fn members_and_details_of_a_new_room() {
         other => panic!("unexpected {other:?}"),
     };
 
-    let members = match eng
-        .handle(EngineCommand::GetRoomMembers {
-            room_id: room_id.clone(),
-        })
-        .await
-        .unwrap()
-    {
-        EngineResponse::RoomMembers {
-            room_id: rid,
-            members,
-        } => {
-            assert_eq!(rid, room_id);
-            members
+    // Power levels arrive with the room state over sync; wait until the creator shows as admin.
+    let members = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        loop {
+            let members = match eng
+                .handle(EngineCommand::GetRoomMembers {
+                    room_id: room_id.clone(),
+                })
+                .await
+                .unwrap()
+            {
+                EngineResponse::RoomMembers {
+                    room_id: rid,
+                    members,
+                } => {
+                    assert_eq!(rid, room_id);
+                    members
+                }
+                other => panic!("unexpected {other:?}"),
+            };
+            if members.iter().any(|m| m.power_level >= 100) {
+                break members;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         }
-        other => panic!("unexpected {other:?}"),
-    };
+    })
+    .await
+    .expect("room creator never showed an admin power level");
     assert_eq!(members.len(), 2, "{members:?}");
     // Highest power level first: alice created the room.
     assert_eq!(members[0].user_id.0, "@alice:localhost");
