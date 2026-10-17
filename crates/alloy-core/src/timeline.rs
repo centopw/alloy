@@ -90,6 +90,16 @@ fn build_content(
 }
 
 impl AlloyClient {
+    /// Make sure the room's encryption state is current before anything is sent, so a freshly
+    /// created or just-joined encrypted room is never written to in plaintext.
+    pub(crate) async fn ensure_encryption_state(&self, room_id: &RoomId) -> AlloyResult<()> {
+        let room = self.room(room_id)?;
+        room.latest_encryption_state()
+            .await
+            .map(|_| ())
+            .map_err(sdk)
+    }
+
     /// Timeline for a room, built once and cached until sync stops / the client is dropped.
     pub async fn cached_timeline(&self, room_id: &RoomId) -> AlloyResult<Arc<Timeline>> {
         let mut map = self.timelines.lock().await;
@@ -148,6 +158,7 @@ impl AlloyClient {
         reply_to: Option<&alloy_protocol::EventId>,
         mentions: Option<&[UserId]>,
     ) -> AlloyResult<String> {
+        self.ensure_encryption_state(room_id).await?;
         let timeline = self.cached_timeline(room_id).await?;
         let content = build_content(body, markdown, mentions);
         let known_txns: std::collections::HashSet<String> = timeline
