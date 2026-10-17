@@ -321,6 +321,44 @@ impl ThemeResolver {
                     out.insert("color.border.prominent".into(), v.clone());
                 }
             }
+            if let Some(u) = &c.user {
+                if let Some(v) = &u.c1 {
+                    out.insert("color.user.1".into(), v.clone());
+                }
+                if let Some(v) = &u.c2 {
+                    out.insert("color.user.2".into(), v.clone());
+                }
+                if let Some(v) = &u.c3 {
+                    out.insert("color.user.3".into(), v.clone());
+                }
+                if let Some(v) = &u.c4 {
+                    out.insert("color.user.4".into(), v.clone());
+                }
+                if let Some(v) = &u.c5 {
+                    out.insert("color.user.5".into(), v.clone());
+                }
+                if let Some(v) = &u.c6 {
+                    out.insert("color.user.6".into(), v.clone());
+                }
+                if let Some(v) = &u.c7 {
+                    out.insert("color.user.7".into(), v.clone());
+                }
+                if let Some(v) = &u.c8 {
+                    out.insert("color.user.8".into(), v.clone());
+                }
+                if let Some(v) = &u.c9 {
+                    out.insert("color.user.9".into(), v.clone());
+                }
+                if let Some(v) = &u.c10 {
+                    out.insert("color.user.10".into(), v.clone());
+                }
+                if let Some(v) = &u.c11 {
+                    out.insert("color.user.11".into(), v.clone());
+                }
+                if let Some(v) = &u.c12 {
+                    out.insert("color.user.12".into(), v.clone());
+                }
+            }
         }
 
         if let Some(typo) = &tokens.typography {
@@ -466,6 +504,31 @@ impl ThemeResolver {
             }
         }
 
+        if let Some(ch) = &tokens.chat {
+            if let Some(bg) = &ch.background {
+                if let Some(v) = &bg.kind {
+                    out.insert("chat.background.kind".into(), v.clone());
+                }
+                if let Some(v) = &bg.value {
+                    out.insert("chat.background.value".into(), v.clone());
+                }
+                if let Some(v) = &bg.opacity {
+                    out.insert("chat.background.opacity".into(), v.clone());
+                }
+            } else {
+                // No background specified, default to none
+                out.insert("chat.background.kind".into(), "none".into());
+                out.insert("chat.background.value".into(), "none".into());
+                out.insert("chat.background.opacity".into(), "1".into());
+            }
+        } else {
+            // No chat token, default all values
+            out.insert("chat.background.kind".into(), "none".into());
+            out.insert("chat.background.value".into(), "none".into());
+            out.insert("chat.background.opacity".into(), "1".into());
+        }
+        out.insert("chat.background".into(), "none".into());
+
         Ok(())
     }
 
@@ -609,6 +672,26 @@ impl ThemeResolver {
             4.5,
             7.0,
         );
+
+        // 9-20. User colors on surface.canvas (AA >= 4.5)
+        for i in 1..=12 {
+            let user_path = format!("color.user.{}", i);
+            check_pair(
+                &format!("user_{}_on_canvas", i),
+                &user_path,
+                "color.surface.canvas",
+                4.5,
+                7.0,
+            );
+            // Also check on bubble.other.background
+            check_pair(
+                &format!("user_{}_on_bubble_other", i),
+                &user_path,
+                "color.bubble.other.background",
+                4.5,
+                7.0,
+            );
+        }
 
         Ok(report)
     }

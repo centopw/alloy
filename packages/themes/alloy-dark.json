@@ -53,6 +53,20 @@
       "border": {
         "subtle": "#27272a",
         "prominent": "#3f3f46"
+      },
+      "user": {
+        "1": "#f87171",
+        "2": "#fb923c",
+        "3": "#fbbf24",
+        "4": "#4ade80",
+        "5": "#2dd4bf",
+        "6": "#38bdf8",
+        "7": "#60a5fa",
+        "8": "#818cf8",
+        "9": "#a78bfa",
+        "10": "#e879f9",
+        "11": "#fb7185",
+        "12": "#22d3ee"
       }
     },
     "typography": {
@@ -139,6 +153,13 @@
     "layout": {
       "message_style": "bubble",
       "avatar_shape": "circle"
+    },
+    "chat": {
+      "background": {
+        "kind": "none",
+        "value": "none",
+        "opacity": "1"
+      }
     }
   }
 }

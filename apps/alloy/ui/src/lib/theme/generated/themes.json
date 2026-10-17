@@ -10,7 +10,7 @@
     "contrast": {
       "passes_aa": true,
       "passes_aaa": false,
-      "checks_count": 8,
+      "checks_count": 32,
       "failures": []
     }
   },
@@ -25,7 +25,7 @@
     "contrast": {
       "passes_aa": true,
       "passes_aaa": false,
-      "checks_count": 8,
+      "checks_count": 32,
       "failures": []
     }
   },
@@ -40,7 +40,7 @@
     "contrast": {
       "passes_aa": true,
       "passes_aaa": false,
-      "checks_count": 8,
+      "checks_count": 32,
       "failures": []
     }
   },
@@ -55,7 +55,7 @@
     "contrast": {
       "passes_aa": true,
       "passes_aaa": false,
-      "checks_count": 8,
+      "checks_count": 32,
       "failures": []
     }
   }

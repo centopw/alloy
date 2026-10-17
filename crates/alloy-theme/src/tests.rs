@@ -263,3 +263,166 @@ fn test_keybindings_loader() {
     assert_eq!(bindings2.len(), 1);
     assert_eq!(bindings2[0].key, "esc");
 }
+
+#[test]
+fn test_user_colors_meet_contrast_requirements() {
+    let resolver = ThemeResolver::new();
+
+    // Test light theme
+    let light = alloy_light();
+    let resolved_light = resolver
+        .resolve(&light)
+        .expect("Light theme should resolve");
+
+    for i in 1..=12 {
+        let color_path = format!("color.user.{}", i);
+        assert!(
+            resolved_light.tokens.contains_key(&color_path),
+            "Light theme should have user color {}",
+            i
+        );
+    }
+
+    // Ensure contrast report for light theme passes AA
+    assert!(
+        resolved_light.contrast_report.passes_aa,
+        "Light theme user colors must pass WCAG AA. Failures: {:?}",
+        resolved_light.contrast_report.failures()
+    );
+
+    // Test dark theme
+    let dark = alloy_dark();
+    let resolved_dark = resolver.resolve(&dark).expect("Dark theme should resolve");
+
+    for i in 1..=12 {
+        let color_path = format!("color.user.{}", i);
+        assert!(
+            resolved_dark.tokens.contains_key(&color_path),
+            "Dark theme should have user color {}",
+            i
+        );
+    }
+
+    // Ensure contrast report for dark theme passes AA
+    assert!(
+        resolved_dark.contrast_report.passes_aa,
+        "Dark theme user colors must pass WCAG AA. Failures: {:?}",
+        resolved_dark.contrast_report.failures()
+    );
+
+    // Test AMOLED theme
+    let amoled = alloy_amoled();
+    let resolved_amoled = resolver
+        .resolve(&amoled)
+        .expect("AMOLED theme should resolve");
+
+    for i in 1..=12 {
+        let color_path = format!("color.user.{}", i);
+        assert!(
+            resolved_amoled.tokens.contains_key(&color_path),
+            "AMOLED theme should have user color {} (inherited from dark)",
+            i
+        );
+    }
+
+    assert!(
+        resolved_amoled.contrast_report.passes_aa,
+        "AMOLED theme user colors must pass WCAG AA. Failures: {:?}",
+        resolved_amoled.contrast_report.failures()
+    );
+}
+
+#[test]
+fn test_chat_background_defaults() {
+    let resolver = ThemeResolver::new();
+    let light = alloy_light();
+    let resolved = resolver
+        .resolve(&light)
+        .expect("Light theme should resolve");
+
+    // Chat background should have all required sub-tokens
+    assert_eq!(
+        resolved.tokens.get("chat.background").map(|s| s.as_str()),
+        Some("none"),
+        "Default chat background kind should be 'none'"
+    );
+    assert_eq!(
+        resolved
+            .tokens
+            .get("chat.background.kind")
+            .map(|s| s.as_str()),
+        Some("none"),
+        "Chat background.kind should default to 'none'"
+    );
+    assert_eq!(
+        resolved
+            .tokens
+            .get("chat.background.value")
+            .map(|s| s.as_str()),
+        Some("none"),
+        "Chat background.value should default to 'none'"
+    );
+    assert_eq!(
+        resolved
+            .tokens
+            .get("chat.background.opacity")
+            .map(|s| s.as_str()),
+        Some("1"),
+        "Chat background.opacity should default to '1'"
+    );
+}
+
+#[test]
+fn test_user_colors_in_css_vars() {
+    let resolver = ThemeResolver::new();
+    let light = alloy_light();
+    let resolved = resolver
+        .resolve(&light)
+        .expect("Light theme should resolve");
+
+    let css_vars = resolved.css_vars();
+
+    // Check that all 12 user colors appear as CSS custom properties
+    for i in 1..=12 {
+        let var_name = format!("--alloy-color-user-{}", i);
+        assert!(
+            css_vars.contains_key(&var_name),
+            "CSS vars should contain {}",
+            var_name
+        );
+    }
+
+    // Check chat background
+    assert!(css_vars.contains_key("--alloy-chat-background"));
+    assert!(css_vars.contains_key("--alloy-chat-background-kind"));
+    assert!(css_vars.contains_key("--alloy-chat-background-value"));
+    assert!(css_vars.contains_key("--alloy-chat-background-opacity"));
+}
+
+#[test]
+fn test_contrast_fails_if_user_palette_entry_drops_below_aa() {
+    let resolver = ThemeResolver::new();
+    let mut theme = alloy_light();
+    theme.id = "bad-palette-test".into();
+
+    // Intentionally set user color 1 to white (#ffffff) which has 1.0:1 contrast against #ffffff canvas!
+    if let Some(color) = &mut theme.tokens.color
+        && let Some(user) = &mut color.user
+    {
+        user.c1 = Some("#ffffff".into());
+    }
+
+    let resolved = resolver
+        .resolve(&theme)
+        .expect("Theme should still resolve");
+    assert!(
+        !resolved.contrast_report.passes_aa,
+        "Contrast report MUST fail AA if any palette entry drops below 4.5:1"
+    );
+
+    let failures = resolved.contrast_report.failures();
+    assert!(
+        failures.iter().any(|f| f.foreground_name == "color.user.1"),
+        "Failures list must contain user color 1 failure"
+    );
+}

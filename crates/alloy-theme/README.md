@@ -88,6 +88,7 @@ All dots (`.`) and underscores (`_`) become hyphens (`-`). All names are lowerca
 | `color.bubble.other.text` | `--alloy-color-bubble-other-text` | Incoming message bubble text |
 | `color.border.subtle` | `--alloy-color-border-subtle` | Pane dividers, thin separators |
 | `color.border.prominent` | `--alloy-color-border-prominent` | Active input borders, card outlines |
+| `color.user.1` .. `color.user.12` | `--alloy-color-user-1` .. `-12` | Sender identity colors (deterministic hash of user id; WCAG AA on surface) |
 
 #### Typography Tokens (`--alloy-typography-*`)
 | Token Path | CSS Custom Property | Example Default |
@@ -149,6 +150,14 @@ All dots (`.`) and underscores (`_`) become hyphens (`-`). All names are lowerca
 | :--- | :--- | :--- |
 | `layout.message_style` | `--alloy-layout-message-style` | `bubble` (modern chat) or `gutter` (IRC/Slack) |
 | `layout.avatar_shape` | `--alloy-layout-avatar-shape` | `circle`, `rounded`, `square` |
+
+#### Chat Presentation Tokens (`--alloy-chat-*`)
+| Token Path | CSS Custom Property | Description |
+| :--- | :--- | :--- |
+| `chat.background` | `--alloy-chat-background` | Background value or `none` |
+| `chat.background.kind` | `--alloy-chat-background-kind` | `none`, `solid`, `gradient`, `pattern` |
+| `chat.background.value` | `--alloy-chat-background-value` | CSS background definition |
+| `chat.background.opacity` | `--alloy-chat-background-opacity` | Opacity value |
 
 ---
 

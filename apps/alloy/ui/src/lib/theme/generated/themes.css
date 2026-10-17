@@ -2,6 +2,10 @@
 /* Run: cargo run -p alloy-theme --bin gen-css */
 
 [data-theme="alloy-amoled"] {
+  --alloy-chat-background: none;
+  --alloy-chat-background-kind: none;
+  --alloy-chat-background-opacity: 1;
+  --alloy-chat-background-value: none;
   --alloy-color-accent-hover: #4f46e5;
   --alloy-color-accent-primary: #5865f2;
   --alloy-color-accent-secondary: #818cf8;
@@ -32,6 +36,18 @@
   --alloy-color-text-on-accent: #ffffff;
   --alloy-color-text-primary: #f4f4f5;
   --alloy-color-text-secondary: #a1a1aa;
+  --alloy-color-user-1: #f87171;
+  --alloy-color-user-10: #e879f9;
+  --alloy-color-user-11: #fb7185;
+  --alloy-color-user-12: #22d3ee;
+  --alloy-color-user-2: #fb923c;
+  --alloy-color-user-3: #fbbf24;
+  --alloy-color-user-4: #4ade80;
+  --alloy-color-user-5: #2dd4bf;
+  --alloy-color-user-6: #38bdf8;
+  --alloy-color-user-7: #60a5fa;
+  --alloy-color-user-8: #818cf8;
+  --alloy-color-user-9: #a78bfa;
   --alloy-elevation-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.6), 0 4px 6px -4px rgba(0, 0, 0, 0.6);
   --alloy-elevation-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -2px rgba(0, 0, 0, 0.5);
   --alloy-elevation-none: none;
@@ -77,6 +93,10 @@
 }
 
 [data-theme="alloy-dark"] {
+  --alloy-chat-background: none;
+  --alloy-chat-background-kind: none;
+  --alloy-chat-background-opacity: 1;
+  --alloy-chat-background-value: none;
   --alloy-color-accent-hover: #4f46e5;
   --alloy-color-accent-primary: #5865f2;
   --alloy-color-accent-secondary: #818cf8;
@@ -107,6 +127,18 @@
   --alloy-color-text-on-accent: #ffffff;
   --alloy-color-text-primary: #f4f4f5;
   --alloy-color-text-secondary: #a1a1aa;
+  --alloy-color-user-1: #f87171;
+  --alloy-color-user-10: #e879f9;
+  --alloy-color-user-11: #fb7185;
+  --alloy-color-user-12: #22d3ee;
+  --alloy-color-user-2: #fb923c;
+  --alloy-color-user-3: #fbbf24;
+  --alloy-color-user-4: #4ade80;
+  --alloy-color-user-5: #2dd4bf;
+  --alloy-color-user-6: #38bdf8;
+  --alloy-color-user-7: #60a5fa;
+  --alloy-color-user-8: #818cf8;
+  --alloy-color-user-9: #a78bfa;
   --alloy-elevation-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.6), 0 4px 6px -4px rgba(0, 0, 0, 0.6);
   --alloy-elevation-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -2px rgba(0, 0, 0, 0.5);
   --alloy-elevation-none: none;
@@ -152,6 +184,10 @@
 }
 
 [data-theme="alloy-light"] {
+  --alloy-chat-background: none;
+  --alloy-chat-background-kind: none;
+  --alloy-chat-background-opacity: 1;
+  --alloy-chat-background-value: none;
   --alloy-color-accent-hover: #4338ca;
   --alloy-color-accent-primary: #4f46e5;
   --alloy-color-accent-secondary: #6366f1;
@@ -182,6 +218,18 @@
   --alloy-color-text-on-accent: #ffffff;
   --alloy-color-text-primary: #18181b;
   --alloy-color-text-secondary: #52525b;
+  --alloy-color-user-1: #b91c1c;
+  --alloy-color-user-10: #a21caf;
+  --alloy-color-user-11: #be123c;
+  --alloy-color-user-12: #0e7490;
+  --alloy-color-user-2: #c2410c;
+  --alloy-color-user-3: #b45309;
+  --alloy-color-user-4: #15803d;
+  --alloy-color-user-5: #0f766e;
+  --alloy-color-user-6: #0369a1;
+  --alloy-color-user-7: #1d4ed8;
+  --alloy-color-user-8: #4338ca;
+  --alloy-color-user-9: #6d28d9;
   --alloy-elevation-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
   --alloy-elevation-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
   --alloy-elevation-none: none;
@@ -227,6 +275,10 @@
 }
 
 [data-theme="midnight-ocean"] {
+  --alloy-chat-background: none;
+  --alloy-chat-background-kind: none;
+  --alloy-chat-background-opacity: 1;
+  --alloy-chat-background-value: none;
   --alloy-color-accent-hover: #0369a1;
   --alloy-color-accent-primary: #0077b6;
   --alloy-color-accent-secondary: #38bdf8;
@@ -257,6 +309,18 @@
   --alloy-color-text-on-accent: #ffffff;
   --alloy-color-text-primary: #f8fafc;
   --alloy-color-text-secondary: #94a3b8;
+  --alloy-color-user-1: #f87171;
+  --alloy-color-user-10: #e879f9;
+  --alloy-color-user-11: #fb7185;
+  --alloy-color-user-12: #22d3ee;
+  --alloy-color-user-2: #fb923c;
+  --alloy-color-user-3: #fbbf24;
+  --alloy-color-user-4: #4ade80;
+  --alloy-color-user-5: #2dd4bf;
+  --alloy-color-user-6: #38bdf8;
+  --alloy-color-user-7: #60a5fa;
+  --alloy-color-user-8: #818cf8;
+  --alloy-color-user-9: #a78bfa;
   --alloy-elevation-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.6), 0 4px 6px -4px rgba(0, 0, 0, 0.6);
   --alloy-elevation-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -2px rgba(0, 0, 0, 0.5);
   --alloy-elevation-none: none;

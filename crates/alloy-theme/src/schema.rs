@@ -225,6 +225,34 @@ pub struct BorderColors {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prominent: Option<String>,
 }
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UserColors {
+    #[serde(rename = "1", skip_serializing_if = "Option::is_none")]
+    pub c1: Option<String>,
+    #[serde(rename = "2", skip_serializing_if = "Option::is_none")]
+    pub c2: Option<String>,
+    #[serde(rename = "3", skip_serializing_if = "Option::is_none")]
+    pub c3: Option<String>,
+    #[serde(rename = "4", skip_serializing_if = "Option::is_none")]
+    pub c4: Option<String>,
+    #[serde(rename = "5", skip_serializing_if = "Option::is_none")]
+    pub c5: Option<String>,
+    #[serde(rename = "6", skip_serializing_if = "Option::is_none")]
+    pub c6: Option<String>,
+    #[serde(rename = "7", skip_serializing_if = "Option::is_none")]
+    pub c7: Option<String>,
+    #[serde(rename = "8", skip_serializing_if = "Option::is_none")]
+    pub c8: Option<String>,
+    #[serde(rename = "9", skip_serializing_if = "Option::is_none")]
+    pub c9: Option<String>,
+    #[serde(rename = "10", skip_serializing_if = "Option::is_none")]
+    pub c10: Option<String>,
+    #[serde(rename = "11", skip_serializing_if = "Option::is_none")]
+    pub c11: Option<String>,
+    #[serde(rename = "12", skip_serializing_if = "Option::is_none")]
+    pub c12: Option<String>,
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -241,6 +269,8 @@ pub struct ColorTokens {
     pub status: Option<StatusColors>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bubble: Option<BubbleColors>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user: Option<UserColors>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub border: Option<BorderColors>,
 }
@@ -434,6 +464,27 @@ pub struct LayoutTokens {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avatar_shape: Option<AvatarShape>,
 }
+// ---------------------------------------------------------------------------
+// Chat
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChatBackgroundTokens {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub opacity: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChatTokens {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub background: Option<ChatBackgroundTokens>,
+}
 
 // ---------------------------------------------------------------------------
 // Combined Tokens & Theme
@@ -456,6 +507,8 @@ pub struct Tokens {
     pub motion: Option<MotionTokens>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub layout: Option<LayoutTokens>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chat: Option<ChatTokens>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

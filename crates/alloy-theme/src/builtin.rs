@@ -55,6 +55,20 @@ pub fn alloy_light() -> Theme {
                         text: Some("#18181b".into()),
                     }),
                 }),
+                user: Some(UserColors {
+                    c1: Some("#b91c1c".into()),
+                    c2: Some("#c2410c".into()),
+                    c3: Some("#b45309".into()),
+                    c4: Some("#15803d".into()),
+                    c5: Some("#0f766e".into()),
+                    c6: Some("#0369a1".into()),
+                    c7: Some("#1d4ed8".into()),
+                    c8: Some("#4338ca".into()),
+                    c9: Some("#6d28d9".into()),
+                    c10: Some("#a21caf".into()),
+                    c11: Some("#be123c".into()),
+                    c12: Some("#0e7490".into()),
+                }),
                 border: Some(BorderColors {
                     subtle: Some("#e4e4e7".into()),
                     prominent: Some("#d4d4d8".into()),
@@ -154,6 +168,13 @@ pub fn alloy_light() -> Theme {
                 message_style: Some(MessageStyle::Bubble),
                 avatar_shape: Some(AvatarShape::Circle),
             }),
+            chat: Some(ChatTokens {
+                background: Some(ChatBackgroundTokens {
+                    kind: Some("none".into()),
+                    value: Some("none".into()),
+                    opacity: Some("1".into()),
+                }),
+            }),
         },
         overrides: None,
     }
@@ -212,6 +233,20 @@ pub fn alloy_dark() -> Theme {
                         background: Some("#27272a".into()),
                         text: Some("#f4f4f5".into()),
                     }),
+                }),
+                user: Some(UserColors {
+                    c1: Some("#f87171".into()),
+                    c2: Some("#fb923c".into()),
+                    c3: Some("#fbbf24".into()),
+                    c4: Some("#4ade80".into()),
+                    c5: Some("#2dd4bf".into()),
+                    c6: Some("#38bdf8".into()),
+                    c7: Some("#60a5fa".into()),
+                    c8: Some("#818cf8".into()),
+                    c9: Some("#a78bfa".into()),
+                    c10: Some("#e879f9".into()),
+                    c11: Some("#fb7185".into()),
+                    c12: Some("#22d3ee".into()),
                 }),
                 border: Some(BorderColors {
                     subtle: Some("#27272a".into()),
@@ -311,6 +346,13 @@ pub fn alloy_dark() -> Theme {
             layout: Some(LayoutTokens {
                 message_style: Some(MessageStyle::Bubble),
                 avatar_shape: Some(AvatarShape::Circle),
+            }),
+            chat: Some(ChatTokens {
+                background: Some(ChatBackgroundTokens {
+                    kind: Some("none".into()),
+                    value: Some("none".into()),
+                    opacity: Some("1".into()),
+                }),
             }),
         },
         overrides: None,
