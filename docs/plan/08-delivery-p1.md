@@ -34,7 +34,16 @@ Adopted from `docs/plan/04-security-delivery.md` and calibrated against the Phas
 |---|---|---|
 | Installer size | macOS arm64 DMG 29 MB, macOS x64 DMG 31 MB, Windows setup 18 MB (MSI 30 MB), Linux deb 34 MB / rpm 34 MB / AppImage 105 MB | within budget (AppImage has no budget; it bundles webkit) |
 | Timeline scroll, 10k events, Android emulator WebView | p50 16.7 ms, p95 20-22 ms, p99 42-49 ms (docs/spikes/android.md) | indicative; real low-end device still required |
-| Cold start, idle memory, time-to-first-room-list | not measured on release builds yet | open: tracked as a perf issue |
+| Cold start (spawn to first window), release build, macOS arm64 | p95 3,443 ms; median 342 ms (n=5: 3,443 / 342 / 320 / 372 / 322 ms) | **fail** on p95 vs <2.0 s (median passes; see limits) |
+| Idle memory (process-tree RSS), release build, macOS arm64 | median 204.5 MB; p95 207.8 MB (n=5: 194.3 / 207.6 / 207.8 / 188.9 / 204.5 MB) | **fail** vs <150 MB |
+| Time-to-first-room-list | not measured on release builds yet | open: tracked as a perf issue |
+
+Method: `node scripts/perf-desktop.mjs <release binary> --runs 5` (`just perf-desktop`), run on the `pnpm tauri build --no-bundle` release binary, macOS 26.6.2 arm64, Node 22.19.0. Each run spawns the app, polls System Events for its first window, then samples process-tree RSS (app, its children, and WebKit XPC helpers started in that run) five times at 1 s intervals starting 10 s after ready; the run's idle value is the median of those samples. Verdicts use p95, the stricter statistic, since the budget does not name one. With 5 runs, p95 equals the maximum.
+
+Limits:
+- Cold start is spawn to first window, not the first interactive render in section 3.1. Each poll is an `osascript` call with a median latency of about 204 ms, so the value is an upper bound at that resolution. Run 1 (3,443 ms) was the first launch right after the build; its cause was not investigated. Runs 2 to 5 (320 to 372 ms) may benefit from the OS disk cache.
+- Idle RSS sums RSS across processes. Pages shared between processes are counted more than once, so this overstates physical memory use. Each run's process tree peaked at 4 processes, 3 of them WebKit helpers in run 1.
+- Measured on one arm64 Mac only. x64, Windows, and Linux are not measured.
 
 ---
 

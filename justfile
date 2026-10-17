@@ -87,3 +87,7 @@ android-debug target="aarch64":
 perf-ui:
     pnpm -C apps/alloy/ui build
     node apps/alloy/ui/scripts/measure-scroll-perf.mjs
+
+# Measure cold start and idle RSS of the release desktop app on macOS (method: docs/plan/08-delivery-p1.md section 2.1)
+perf-desktop binary="target/release/alloy-app" runs="5":
+    node scripts/perf-desktop.mjs {{binary}} --runs {{runs}}
