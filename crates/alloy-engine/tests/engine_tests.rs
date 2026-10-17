@@ -80,10 +80,13 @@ async fn test_not_implemented_naming() {
             "StartOidcLogin",
         ),
         (
-            EngineCommand::SubscribeTimeline {
+            EngineCommand::SendAttachment {
                 room_id: RoomId("!test:alloy.chat".into()),
+                file_path: "/tmp/x".into(),
+                mime_type: None,
+                txn_id: None,
             },
-            "SubscribeTimeline",
+            "SendAttachment",
         ),
         (
             EngineCommand::GetMedia {
