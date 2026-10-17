@@ -5,6 +5,7 @@
 //!
 //! Decoupled from Tauri so it can be unit-tested standalone.
 
+pub mod accounts;
 pub mod context;
 pub mod handlers;
 pub mod registry;

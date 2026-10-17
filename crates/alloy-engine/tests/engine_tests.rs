@@ -41,15 +41,11 @@ async fn test_routing_by_group() {
         "Unsubscribe should route to RoomsHandler"
     );
 
-    // 3. Auth group routes to AuthHandler
-    let auth_res = engine
-        .handle(EngineCommand::DiscoverHomeserver {
-            input: "matrix.org".into(),
-        })
-        .await;
+    // 3. Auth group routes to AuthHandler (no accounts on a fresh data dir)
+    let auth_res = engine.handle(EngineCommand::ListAccounts).await;
     assert!(
-        matches!(auth_res, Err(ref e) if e.code == "not_implemented"),
-        "DiscoverHomeserver should route to AuthHandler and return not_implemented"
+        matches!(auth_res, Ok(EngineResponse::AccountsList { ref accounts }) if accounts.is_empty()),
+        "ListAccounts should route to AuthHandler"
     );
 }
 
@@ -78,10 +74,10 @@ async fn test_not_implemented_naming() {
 
     let cases = [
         (
-            EngineCommand::DiscoverHomeserver {
-                input: "matrix.org".into(),
+            EngineCommand::StartOidcLogin {
+                homeserver_url: "https://matrix.org".into(),
             },
-            "DiscoverHomeserver",
+            "StartOidcLogin",
         ),
         (
             EngineCommand::SubscribeTimeline {

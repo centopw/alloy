@@ -34,6 +34,22 @@ pub trait SecretStore: Send + Sync + 'static {
     async fn has_secret(&self, key: &str) -> Result<bool, StorageError>;
 }
 
+#[async_trait::async_trait]
+impl<T: SecretStore + ?Sized> SecretStore for Arc<T> {
+    async fn set_secret(&self, key: &str, value: &str) -> Result<(), StorageError> {
+        (**self).set_secret(key, value).await
+    }
+    async fn get_secret(&self, key: &str) -> Result<String, StorageError> {
+        (**self).get_secret(key).await
+    }
+    async fn delete_secret(&self, key: &str) -> Result<(), StorageError> {
+        (**self).delete_secret(key).await
+    }
+    async fn has_secret(&self, key: &str) -> Result<bool, StorageError> {
+        (**self).has_secret(key).await
+    }
+}
+
 /// In-memory secret store for testing.
 #[derive(Clone)]
 pub struct InMemorySecretStore {

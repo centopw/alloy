@@ -15,11 +15,21 @@ fn generate_passphrase() -> String {
     base64::engine::general_purpose::STANDARD.encode(random_bytes)
 }
 
+/// Build a secret-store key, optionally namespaced per account.
+pub(crate) fn secret_key(namespace: Option<&str>, name: &str) -> String {
+    match namespace {
+        Some(ns) => format!("alloy:{ns}:{name}"),
+        None => format!("alloy:{name}"),
+    }
+}
+
 /// Lightweight Matrix client wrapper providing room list and timeline streams
 /// via alloy-protocol DTOs.
 pub struct AlloyClient {
     pub(crate) client: Client,
     pub(crate) secret_store: Box<dyn SecretStore>,
+    /// Optional namespace isolating this account's secrets (`alloy:<ns>:...`).
+    pub(crate) namespace: Option<String>,
 }
 
 impl AlloyClient {
@@ -28,6 +38,17 @@ impl AlloyClient {
         homeserver_url: &str,
         data_dir: &Path,
         secret_store: Option<Box<dyn SecretStore>>,
+    ) -> AlloyResult<Self> {
+        Self::open(homeserver_url, data_dir, secret_store, None).await
+    }
+
+    /// Like [`AlloyClient::new`] but isolates secrets under `namespace`
+    /// (one namespace per account when several accounts share a secret store).
+    pub async fn open(
+        homeserver_url: &str,
+        data_dir: &Path,
+        secret_store: Option<Box<dyn SecretStore>>,
+        namespace: Option<&str>,
     ) -> AlloyResult<Self> {
         let homeserver =
             Url::parse(homeserver_url).map_err(|_| AlloyError::InvalidHomeserverUrl)?;
@@ -40,12 +61,13 @@ impl AlloyClient {
         });
 
         // Generate or retrieve passphrase for store encryption
-        let store_passphrase_key = "alloy:store:encryption_passphrase";
-        let passphrase = match secret_store.get_secret(store_passphrase_key).await {
+        let namespace = namespace.map(str::to_owned);
+        let store_passphrase_key = secret_key(namespace.as_deref(), "store:encryption_passphrase");
+        let passphrase = match secret_store.get_secret(&store_passphrase_key).await {
             Ok(pp) => pp,
             Err(_) => {
                 let pp = generate_passphrase();
-                let _ = secret_store.set_secret(store_passphrase_key, &pp).await;
+                let _ = secret_store.set_secret(&store_passphrase_key, &pp).await;
                 pp
             }
         };
@@ -63,6 +85,7 @@ impl AlloyClient {
         Ok(Self {
             client,
             secret_store,
+            namespace,
         })
     }
 
@@ -71,7 +94,7 @@ impl AlloyClient {
         if self.client.user_id().is_some() {
             return Ok(true);
         }
-        match self.secret_store.get_secret("alloy:session").await {
+        match self.secret_store.get_secret(&self.session_key()).await {
             Ok(json) => {
                 let session: matrix_sdk::authentication::matrix::MatrixSession =
                     serde_json::from_str(&json).map_err(|e| AlloyError::Auth(e.to_string()))?;
@@ -83,6 +106,10 @@ impl AlloyClient {
             }
             Err(_) => Ok(false),
         }
+    }
+
+    pub(crate) fn session_key(&self) -> String {
+        secret_key(self.namespace.as_deref(), "session")
     }
 
     /// Get the matrix-sdk Client for advanced operations.
