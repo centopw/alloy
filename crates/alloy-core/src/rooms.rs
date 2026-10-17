@@ -32,7 +32,33 @@ impl AlloyClient {
             .await
             .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
 
-        Ok(RoomId(response.room_id().to_string()))
+        let room_id = RoomId(response.room_id().to_string());
+        if encrypted {
+            self.await_encryption_ready(&room_id).await?;
+        }
+        Ok(room_id)
+    }
+
+    /// Block until a room we just created as encrypted is known to be encrypted locally.
+    ///
+    /// A running sync can briefly report the new room as unencrypted before the
+    /// `m.room.encryption` state arrives; sending in that window would go out in plaintext.
+    async fn await_encryption_ready(&self, room_id: &RoomId) -> AlloyResult<()> {
+        let room = self.room(room_id)?;
+        for _ in 0..150 {
+            if room
+                .latest_encryption_state()
+                .await
+                .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?
+                .is_encrypted()
+            {
+                return Ok(());
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        Err(AlloyError::MatrixSdk(
+            "the new room did not become encrypted; refusing to use it".into(),
+        ))
     }
 
     /// Open and initialize RoomListService (sliding sync).

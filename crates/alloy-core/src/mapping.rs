@@ -18,7 +18,13 @@ fn preview_of(
     let body = match ev {
         AnySyncTimelineEvent::MessageLike(AnySyncMessageLikeEvent::RoomMessage(
             SyncMessageLikeEvent::Original(m),
-        )) => m.content.body().to_owned(),
+        )) => match &m.content.relates_to {
+            // An edit: show the new text, not the "* " fallback body.
+            Some(matrix_sdk::ruma::events::room::message::Relation::Replacement(r)) => {
+                r.new_content.msgtype.body().to_owned()
+            }
+            _ => m.content.body().to_owned(),
+        },
         AnySyncTimelineEvent::MessageLike(AnySyncMessageLikeEvent::RoomEncrypted(_)) => {
             "Encrypted message".to_owned()
         }
