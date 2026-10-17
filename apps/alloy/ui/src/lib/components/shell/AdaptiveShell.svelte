@@ -12,6 +12,7 @@
   import SettingsDialog from '../settings/SettingsDialog.svelte';
   import VerificationDialog from '../settings/VerificationDialog.svelte';
   import Hud from '../dev/Hud.svelte';
+  import { pushBack } from '$lib/platform/backstack';
   import { roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
   import { ui } from '$lib/stores/ui.svelte';
   import { verification } from '$lib/stores/verification.svelte';
@@ -54,10 +55,31 @@
     };
   });
 
+  // On phones the system Back button returns from a chat to the room list instead of leaving the app.
+  let releaseChatBack: (() => void) | null = null;
+
+  function openChat() {
+    pane = 'chat';
+    if (layout === 'narrow' && !releaseChatBack) {
+      releaseChatBack = pushBack(() => {
+        releaseChatBack = null;
+        pane = 'list';
+      });
+    }
+  }
+
+  function backToList() {
+    if (releaseChatBack) {
+      releaseChatBack();
+      releaseChatBack = null;
+    }
+    pane = 'list';
+  }
+
   function pick(roomId: string) {
     roomsStore.select(roomId);
     paletteOpen = false;
-    pane = 'chat';
+    openChat();
   }
 
   function onKeydown(e: KeyboardEvent) {
@@ -82,7 +104,7 @@
 
   <main class="chat">
     {#if active && activeId}
-      <ChatHeader room={active} onback={() => (pane = 'list')} onsearch={() => (paletteOpen = true)} />
+      <ChatHeader room={active} onback={backToList} onsearch={() => (paletteOpen = true)} />
       <Timeline roomId={activeId} title={roomTitle(active)} isDirect={active.is_direct} encrypted={active.encrypted} />
       <UploadStrip roomId={activeId} />
       <Composer roomId={activeId} />

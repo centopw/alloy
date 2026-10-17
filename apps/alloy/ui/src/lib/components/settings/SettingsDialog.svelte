@@ -1,7 +1,8 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { Icon, X } from '$lib/icons';
+  import { Icon, X, ChevronLeft } from '$lib/icons';
   import { session } from '$lib/stores/session.svelte';
+  import { pushBack } from '$lib/platform/backstack';
   import MyAccount from './sections/MyAccount.svelte';
   import Appearance from './sections/Appearance.svelte';
   import Security from './sections/Security.svelte';
@@ -40,6 +41,24 @@
   ];
 
   let section = $state<Section>('account');
+  // Phones show either the section list or one section; wide layouts show both side by side.
+  let mobileView = $state<'nav' | 'content'>('nav');
+
+  function openSection(id: Section) {
+    section = id;
+    mobileView = 'content';
+  }
+
+  // Android Back closes the dialog; inside a section it first returns to the section list.
+  $effect(() => {
+    if (!open) return;
+    mobileView = 'nav';
+    return pushBack(() => onclose());
+  });
+  $effect(() => {
+    if (!open || mobileView !== 'content') return;
+    return pushBack(() => (mobileView = 'nav'));
+  });
   let panel: HTMLElement | undefined = $state();
 
   const FOCUSABLE =
@@ -109,6 +128,7 @@
   >
     <div
       class="panel"
+      data-view={mobileView}
       role="dialog"
       aria-modal="true"
       aria-labelledby="settings-title"
@@ -126,7 +146,7 @@
                 type="button"
                 class="nav-item"
                 aria-current={section === item.id ? 'page' : undefined}
-                onclick={() => (section = item.id)}
+                onclick={() => openSection(item.id)}
               >
                 {item.label}
               </button>
@@ -140,6 +160,9 @@
       </nav>
 
       <div class="content">
+        <button type="button" class="back" aria-label="Back to settings" onclick={() => (mobileView = 'nav')}>
+          <Icon icon={ChevronLeft} size={20} />
+        </button>
         <button type="button" class="close" aria-label="Close settings" onclick={onclose}>
           <Icon icon={X} size={20} />
         </button>
@@ -284,6 +307,46 @@
   .scroll {
     flex: 1;
     overflow-y: auto;
+  }
+  .back {
+    display: none;
+  }
+  @media (max-width: 719px) {
+    .backdrop {
+      padding: 0;
+    }
+    .panel {
+      border-radius: 0;
+    }
+    .nav {
+      width: 100%;
+    }
+    .panel[data-view='nav'] .content {
+      display: none;
+    }
+    .panel[data-view='content'] .nav {
+      display: none;
+    }
+    .back {
+      position: absolute;
+      top: var(--alloy-spacing-scale-3);
+      left: var(--alloy-spacing-scale-3);
+      z-index: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 40px;
+      height: 40px;
+      padding: 0;
+      border: 0;
+      border-radius: var(--alloy-radii-full);
+      background: transparent;
+      color: var(--alloy-color-text-secondary);
+      cursor: pointer;
+    }
+    .column {
+      padding: calc(var(--alloy-spacing-scale-8) * 2.5) var(--alloy-spacing-scale-4) var(--alloy-spacing-scale-6);
+    }
   }
   .column {
     max-width: 640px;

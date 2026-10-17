@@ -3,6 +3,7 @@
   import { tick } from 'svelte';
   import Icon from '$lib/icons/Icon.svelte';
   import { X } from '$lib/icons';
+  import { pushBack } from '$lib/platform/backstack';
 
   interface Props {
     open: boolean;
@@ -15,6 +16,12 @@
 
   let dialog: HTMLDivElement | undefined = $state();
   let opener: HTMLElement | null = null;
+
+  // Android Back closes the dialog.
+  $effect(() => {
+    if (!open) return;
+    return pushBack(() => onclose());
+  });
 
   $effect(() => {
     if (open) {

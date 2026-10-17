@@ -2,6 +2,7 @@
   import { tick } from 'svelte';
   import { Avatar } from '../common';
   import { roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
+  import { pushBack } from '$lib/platform/backstack';
 
   interface Props {
     open: boolean;
@@ -9,6 +10,12 @@
     onpick: (roomId: string) => void;
   }
   let { open, onclose, onpick }: Props = $props();
+
+  // Android Back closes the palette.
+  $effect(() => {
+    if (!open) return;
+    return pushBack(() => onclose());
+  });
 
   let query = $state('');
   let index = $state(0);
