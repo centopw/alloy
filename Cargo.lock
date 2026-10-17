@@ -105,6 +105,7 @@ name = "alloy-app"
 version = "0.1.0"
 dependencies = [
  "alloy-core",
+ "alloy-engine",
  "alloy-protocol",
  "alloy-storage",
  "async-trait",
@@ -138,6 +139,23 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+]
+
+[[package]]
+name = "alloy-engine"
+version = "0.1.0"
+dependencies = [
+ "alloy-core",
+ "alloy-protocol",
+ "alloy-storage",
+ "alloy-theme",
+ "async-trait",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
