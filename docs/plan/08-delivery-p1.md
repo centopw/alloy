@@ -28,6 +28,14 @@ Adopted from `docs/plan/04-security-delivery.md` and calibrated against the Phas
 | **Idle Memory Footprint** | **<150 MB** (Desktop)<br>**<80 MB** (Mobile) | System process monitor (`ps`, `massif`, Android dumpsys meminfo) | Automated Monitoring | Nightly benchmark run |
 | **Binary Size** | **<60 MB** (macOS DMG)<br>**<40 MB** (Android APK)<br>**<75 MB** (Windows Setup) | Build artifact size check (`ls -l`, `cargo-bloat`) | Release Checklist | Release workflow (`release.yml`) |
 
+### 2.1 Measured so far (2026-10-17, nightly run 39040208030)
+
+| Metric | Result | Verdict |
+|---|---|---|
+| Installer size | macOS arm64 DMG 29 MB, macOS x64 DMG 31 MB, Windows setup 18 MB (MSI 30 MB), Linux deb 34 MB / rpm 34 MB / AppImage 105 MB | within budget (AppImage has no budget; it bundles webkit) |
+| Timeline scroll, 10k events, Android emulator WebView | p50 16.7 ms, p95 20-22 ms, p99 42-49 ms (docs/spikes/android.md) | indicative; real low-end device still required |
+| Cold start, idle memory, time-to-first-room-list | not measured on release builds yet | open: tracked as a perf issue |
+
 ---
 
 ## 3. Metric Measurement Methodology
