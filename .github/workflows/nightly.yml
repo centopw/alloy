@@ -54,16 +54,11 @@ jobs:
           cache: pnpm
           cache-dependency-path: apps/alloy/ui/pnpm-lock.yaml
 
-      - name: Embed nightly version metadata
+      - name: Record nightly build metadata
         shell: bash
         run: |
-          GIT_DESCRIBE=$(git describe --tags --always 2>/dev/null || echo "dev")
-          GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "head")
-          NIGHTLY_VERSION="0.1.0-nightly+${GIT_COMMIT}.${GIT_DESCRIBE}"
-          export GIT_DESCRIBE GIT_COMMIT NIGHTLY_VERSION
-          echo "NIGHTLY_VERSION=${NIGHTLY_VERSION}" >> "$GITHUB_ENV"
-          echo "GIT_DESCRIBE=${GIT_DESCRIBE}" >> "$GITHUB_ENV"
-          node scripts/embed-nightly-version.mjs
+          echo "NIGHTLY_VERSION=0.1.0-nightly+$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
+
       - name: Install Linux system dependencies
         if: matrix.platform == 'linux'
         run: |
@@ -132,16 +127,11 @@ jobs:
           cache: pnpm
           cache-dependency-path: apps/alloy/ui/pnpm-lock.yaml
 
-      - name: Embed nightly version metadata
+      - name: Record nightly build metadata
         shell: bash
         run: |
-          GIT_DESCRIBE=$(git describe --tags --always 2>/dev/null || echo "dev")
-          GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "head")
-          NIGHTLY_VERSION="0.1.0-nightly+${GIT_COMMIT}.${GIT_DESCRIBE}"
-          export GIT_DESCRIBE GIT_COMMIT NIGHTLY_VERSION
-          echo "NIGHTLY_VERSION=${NIGHTLY_VERSION}" >> "$GITHUB_ENV"
-          echo "GIT_DESCRIBE=${GIT_DESCRIBE}" >> "$GITHUB_ENV"
-          node scripts/embed-nightly-version.mjs
+          echo "NIGHTLY_VERSION=0.1.0-nightly+$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
+
 
       - name: Install UI dependencies
         working-directory: apps/alloy/ui

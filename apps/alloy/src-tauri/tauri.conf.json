@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "chat.alloy",
   "build": {
-    "beforeDevCommand": "pnpm --prefix apps/alloy/ui dev || pnpm --prefix ui dev || pnpm dev",
+    "beforeDevCommand": "pnpm --prefix ui dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm --prefix apps/alloy/ui build || pnpm --prefix ui build || pnpm build",
+    "beforeBuildCommand": "pnpm --prefix ui build",
     "frontendDist": "../ui/build"
   },
   "app": {
