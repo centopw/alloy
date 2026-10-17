@@ -103,6 +103,16 @@ impl GroupHandler for RoomsHandler {
                 }
                 Ok(EngineResponse::RoomCreated { room_id })
             }
+            EngineCommand::GetRoomMembers { room_id } => {
+                let client = ctx.active_client().await?;
+                let members = client.room_members(&room_id).await.map_err(map_err)?;
+                Ok(EngineResponse::RoomMembers { room_id, members })
+            }
+            EngineCommand::GetRoomDetails { room_id } => {
+                let client = ctx.active_client().await?;
+                let details = client.room_details(&room_id).await.map_err(map_err)?;
+                Ok(EngineResponse::RoomDetailsRetrieved { details })
+            }
             _ => Err(EngineError::invalid_argument(format!(
                 "Command '{}' does not belong to Rooms group",
                 name

@@ -54,6 +54,13 @@ pub struct RoomMemberDto {
     pub membership: RoomMembership,
 }
 
+/// A room and the joined spaces that contain it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct SpaceParentDto {
+    pub room_id: RoomId,
+    pub spaces: Vec<RoomId>,
+}
+
 /// Static details about a room for the details drawer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct RoomDetails {
@@ -461,10 +468,8 @@ pub enum EngineCommand {
         password: Option<String>,
     },
     // Spaces
-    SubscribeSpaces,
-    SubscribeSpaceChildren {
-        space_id: RoomId,
-    },
+    /// Lists, for every joined room that sits in a joined space, its parent spaces.
+    GetSpaceParents,
     // Settings / Theme
     ListThemes,
     GetTheme {
@@ -617,11 +622,8 @@ pub enum EngineResponse {
         recovery_key: String,
     },
     // Spaces
-    SpacesSubscribed {
-        subscription_id: SubscriptionId,
-    },
-    SpaceChildrenSubscribed {
-        subscription_id: SubscriptionId,
+    SpaceParents {
+        parents: Vec<SpaceParentDto>,
     },
     // Settings / Theme
     ThemesList {
@@ -750,6 +752,7 @@ pub fn register_types() -> Types {
         .register::<RoomMembership>()
         .register::<RoomMemberDto>()
         .register::<RoomDetails>()
+        .register::<SpaceParentDto>()
         .register::<NotificationCount>()
         .register::<TimelineItemPreview>()
         .register::<RoomSummary>()

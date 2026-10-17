@@ -1,3 +1,4 @@
+use super::rooms::map_err;
 use crate::context::EngineContext;
 use crate::error::EngineError;
 use crate::router::{CommandGroup, GroupHandler, command_name};
@@ -23,13 +24,15 @@ impl GroupHandler for SpacesHandler {
 
     async fn handle(
         &self,
-        _ctx: &EngineContext,
+        ctx: &EngineContext,
         cmd: EngineCommand,
     ) -> Result<EngineResponse, EngineError> {
         let name = command_name(&cmd);
         match cmd {
-            EngineCommand::SubscribeSpaces | EngineCommand::SubscribeSpaceChildren { .. } => {
-                Err(EngineError::not_implemented(&name))
+            EngineCommand::GetSpaceParents => {
+                let client = ctx.active_client().await?;
+                let parents = client.space_parents().await.map_err(map_err)?;
+                Ok(EngineResponse::SpaceParents { parents })
             }
             _ => Err(EngineError::invalid_argument(format!(
                 "Command '{}' does not belong to Spaces group",

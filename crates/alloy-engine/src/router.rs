@@ -61,9 +61,7 @@ impl CommandGroup {
                 CommandGroup::Media
             }
 
-            EngineCommand::SubscribeSpaces | EngineCommand::SubscribeSpaceChildren { .. } => {
-                CommandGroup::Spaces
-            }
+            EngineCommand::GetSpaceParents => CommandGroup::Spaces,
 
             EngineCommand::ListThemes
             | EngineCommand::GetTheme { .. }

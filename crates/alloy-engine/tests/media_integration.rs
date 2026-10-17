@@ -222,3 +222,72 @@ async fn attachments_roundtrip_plain_and_encrypted() {
         assert_eq!(eng.handle(cmd).await.unwrap_err().code, code);
     }
 }
+
+#[tokio::test]
+async fn upload_emits_progress_ending_at_total() {
+    let Ok(hs) = std::env::var("ALLOY_TEST_HS") else {
+        eprintln!("skipping: ALLOY_TEST_HS not set");
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = EngineContext::new(
+        dir.path().to_path_buf(),
+        Arc::new(InMemorySecretStore::new()),
+    );
+    let eng = AppEngine::new(ctx.clone());
+    eng.handle(EngineCommand::LoginPassword {
+        homeserver_url: hs,
+        username: "alice".into(),
+        password: "testpassword123!".into(),
+    })
+    .await
+    .unwrap();
+    let room_id: RoomId = match eng
+        .handle(EngineCommand::CreateRoom {
+            name: "upload-progress".into(),
+            encrypted: false,
+            invite: None,
+        })
+        .await
+        .unwrap()
+    {
+        EngineResponse::RoomCreated { room_id } => room_id,
+        other => panic!("unexpected {other:?}"),
+    };
+
+    let file = dir.path().join("big.bin");
+    std::fs::write(&file, vec![7u8; 2 * 1024 * 1024]).unwrap();
+    let mut rx = ctx.sink.subscribe();
+    let sent = eng
+        .handle(EngineCommand::SendAttachment {
+            room_id: room_id.clone(),
+            file_path: file.to_string_lossy().into_owned(),
+            mime_type: Some("application/octet-stream".into()),
+            txn_id: Some("upload-test-1".into()),
+        })
+        .await
+        .unwrap();
+    match sent {
+        EngineResponse::AttachmentSent { txn_id, .. } => assert_eq!(txn_id, "upload-test-1"),
+        other => panic!("unexpected {other:?}"),
+    }
+
+    let mut last = None;
+    while let Ok(ev) = rx.try_recv() {
+        if let EngineEvent::UploadProgress {
+            room_id: r,
+            txn_id,
+            sent_bytes,
+            total_bytes,
+        } = ev
+        {
+            assert_eq!(r, room_id);
+            assert_eq!(txn_id, "upload-test-1");
+            assert!(sent_bytes <= total_bytes);
+            last = Some((sent_bytes, total_bytes));
+        }
+    }
+    let (sent_bytes, total_bytes) = last.expect("no UploadProgress event was emitted");
+    assert_eq!(sent_bytes, total_bytes);
+    assert!(total_bytes >= 2 * 1024 * 1024);
+}

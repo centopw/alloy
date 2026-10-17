@@ -2,8 +2,12 @@ use super::rooms::map_err;
 use crate::context::EngineContext;
 use crate::error::EngineError;
 use crate::router::{CommandGroup, GroupHandler, command_name};
-use alloy_protocol::{EngineCommand, EngineResponse, MediaSource};
+use alloy_protocol::{EngineCommand, EngineEvent, EngineResponse, MediaSource};
 use std::path::PathBuf;
+use std::time::Duration;
+
+/// Minimum spacing between `UploadProgress` events for one upload.
+const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Handler for media operations (`CommandGroup::Media`).
 ///
@@ -87,13 +91,36 @@ impl GroupHandler for MediaHandler {
                     return Err(EngineError::not_found(format!("file {file_path}")));
                 }
                 let client = ctx.active_client().await?;
+                let txn_id = txn_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+                let sink = ctx.sink.clone();
+                let (event_room, event_txn) = (room_id.clone(), txn_id.clone());
+                let mut last_emit: Option<std::time::Instant> = None;
                 client
-                    .send_attachment(&room_id, &path, mime_type.as_deref())
+                    .send_attachment(
+                        &room_id,
+                        &path,
+                        mime_type.as_deref(),
+                        Some(&txn_id),
+                        move |sent, total| {
+                            // At most one event per interval, but never drop the final one.
+                            let done = sent >= total;
+                            let due = last_emit.is_none_or(|t| t.elapsed() >= PROGRESS_INTERVAL);
+                            if done || due {
+                                last_emit = Some(std::time::Instant::now());
+                                sink.emit(EngineEvent::UploadProgress {
+                                    room_id: event_room.clone(),
+                                    txn_id: event_txn.clone(),
+                                    sent_bytes: sent,
+                                    total_bytes: total,
+                                });
+                            }
+                        },
+                    )
                     .await
                     .map_err(map_err)?;
                 Ok(EngineResponse::AttachmentSent {
                     room_id,
-                    txn_id: txn_id.unwrap_or_default(),
+                    txn_id,
                     event_id: None,
                 })
             }

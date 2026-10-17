@@ -2,14 +2,114 @@
 
 use crate::mapping;
 use crate::{AlloyClient, AlloyError, AlloyResult};
-use alloy_protocol::{RoomId, RoomSummary, VectorDiffDto};
+use alloy_protocol::{
+    RoomDetails, RoomId, RoomMemberDto, RoomMembership, RoomSummary, SpaceParentDto, UserId,
+    VectorDiffDto,
+};
 use futures::StreamExt;
+use matrix_sdk::RoomMemberships;
 use matrix_sdk::ruma::RoomId as RumaRoomId;
 use matrix_sdk::ruma::events::InitialStateEvent;
 use matrix_sdk::ruma::events::room::encryption::RoomEncryptionEventContent;
+use matrix_sdk::ruma::events::room::member::MembershipState;
+use matrix_sdk::ruma::events::room::power_levels::UserPowerLevel;
 use matrix_sdk_ui::room_list_service::RoomListService;
 
+/// Power level reported for users with unlimited power (room creators in v12+ rooms).
+/// `Number.MAX_SAFE_INTEGER`, so it survives a round trip through JavaScript.
+const INFINITE_POWER_LEVEL: i64 = 9_007_199_254_740_991;
+
 impl AlloyClient {
+    /// List joined and invited members, loading the full list from the server when
+    /// lazy loading left it incomplete. Sorted by power level (desc), then name.
+    pub async fn room_members(&self, room_id: &RoomId) -> AlloyResult<Vec<RoomMemberDto>> {
+        let room = self.room(room_id)?;
+        let members = room
+            .members(RoomMemberships::JOIN | RoomMemberships::INVITE)
+            .await
+            .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
+        let mut out: Vec<RoomMemberDto> = members
+            .iter()
+            .map(|m| RoomMemberDto {
+                user_id: UserId(m.user_id().to_string()),
+                display_name: m.display_name().map(str::to_owned),
+                avatar_url: m.avatar_url().map(|u| u.to_string()),
+                power_level: match m.power_level() {
+                    UserPowerLevel::Int(level) => i64::from(level),
+                    _ => INFINITE_POWER_LEVEL,
+                },
+                membership: match m.membership() {
+                    MembershipState::Invite => RoomMembership::Invited,
+                    _ => RoomMembership::Joined,
+                },
+            })
+            .collect();
+        out.sort_by_cached_key(|m| {
+            let label = m
+                .display_name
+                .clone()
+                .unwrap_or_else(|| m.user_id.0.clone())
+                .to_lowercase();
+            (std::cmp::Reverse(m.power_level), label)
+        });
+        Ok(out)
+    }
+
+    /// For each joined room contained in a joined space, the ids of those spaces.
+    pub async fn space_parents(&self) -> AlloyResult<Vec<SpaceParentDto>> {
+        let service = self
+            .spaces
+            .get_or_init(|| async {
+                std::sync::Arc::new(
+                    matrix_sdk_ui::spaces::SpaceService::new(self.client.clone()).await,
+                )
+            })
+            .await
+            .clone();
+        let mut out = Vec::new();
+        for room in self.client.joined_rooms() {
+            if room.is_space() {
+                continue;
+            }
+            let parents = service.joined_parent_ids_of_child(room.room_id()).await;
+            if !parents.is_empty() {
+                out.push(SpaceParentDto {
+                    room_id: RoomId(room.room_id().to_string()),
+                    spaces: parents.iter().map(|p| RoomId(p.to_string())).collect(),
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    /// Static room facts for the details drawer.
+    pub async fn room_details(&self, room_id: &RoomId) -> AlloyResult<RoomDetails> {
+        let room = self.room(room_id)?;
+        // Count from the member list: the cached room-info counters lag right after creation.
+        let members = room
+            .members(RoomMemberships::JOIN | RoomMemberships::INVITE)
+            .await
+            .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
+        let invited = members
+            .iter()
+            .filter(|m| matches!(m.membership(), MembershipState::Invite))
+            .count() as u64;
+        Ok(RoomDetails {
+            room_id: room_id.clone(),
+            name: room
+                .cached_display_name()
+                .map(|n| n.to_string())
+                .or_else(|| room.name()),
+            topic: room.topic(),
+            canonical_alias: room.canonical_alias().map(|a| a.to_string()),
+            avatar_url: room.avatar_url().map(|u| u.to_string()),
+            is_direct: room.direct_targets_length() > 0,
+            encrypted: room.encryption_state().is_encrypted(),
+            joined_members: members.len() as u64 - invited,
+            invited_members: invited,
+        })
+    }
+
     /// Create a new room, optionally with encryption.
     pub async fn create_room(&self, name: &str, encrypted: bool) -> AlloyResult<RoomId> {
         use matrix_sdk::ruma::api::client::room::create_room::v3::Request;

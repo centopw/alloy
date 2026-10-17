@@ -109,8 +109,7 @@ Commands are serialized with `#[serde(tag = "action", content = "params")]`.
 | | `EnableRecovery` | *(none)* | `RecoveryEnabled` | Enables server-side Megolm key backup |
 | | `RecoverWithKey` | `{ recovery_key }` | `RecoveredFromKey { recovered }` | Restores keys from base58 recovery key |
 | | `ResetRecovery` | *(none)* | `RecoveryReset` | Resets/rotates server-side secret storage |
-| **Spaces** | `SubscribeSpaces` | *(none)* | `SpacesSubscribed { subscription_id }` | Subscribes to space hierarchy |
-| | `SubscribeSpaceChildren` | `{ space_id }` | `SpaceChildrenSubscribed { subscription_id }` | Subscribes to rooms in a space |
+| **Spaces** | `GetSpaceParents` | *(none)* | `SpaceParents { parents: [{ room_id, spaces }] }` | Joined spaces containing each joined room (spaces themselves arrive in the room list with `is_space`) |
 | **Theme / Settings** | `ListThemes` | *(none)* | `ThemesList { themes }` | Lists available themes (dark, light, amoled, etc.) |
 | | `GetTheme` | `{ id }` | `ThemeCss { css }` | Returns resolved CSS custom properties |
 | | `SetActiveTheme` | `{ id }` | `ThemeSetActive` | Sets active theme |

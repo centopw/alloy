@@ -99,12 +99,15 @@ impl AlloyClient {
     }
 
     /// Upload a local file as a message attachment (encrypted automatically in encrypted rooms).
-    /// Returns when the upload and send finished.
+    /// Returns when the upload and send finished. `on_progress(sent, total)` is called with the
+    /// bytes of the request body transferred so far while the upload runs.
     pub async fn send_attachment(
         &self,
         room_id: &RoomId,
         file_path: &Path,
         mime_type: Option<&str>,
+        txn_id: Option<&str>,
+        mut on_progress: impl FnMut(u64, u64) + Send + 'static,
     ) -> AlloyResult<()> {
         let mime: mime::Mime = match mime_type {
             Some(m) => m
@@ -114,14 +117,21 @@ impl AlloyClient {
         };
         self.ensure_encryption_state(room_id).await?;
         let timeline = self.cached_timeline(room_id).await?;
-        timeline
-            .send_attachment(
-                file_path,
-                mime,
-                matrix_sdk_ui::timeline::AttachmentConfig::default(),
-            )
-            .await
-            .map_err(sdk)
+        let mut config = matrix_sdk_ui::timeline::AttachmentConfig::default();
+        if let Some(txn) = txn_id {
+            config.txn_id = Some(matrix_sdk::ruma::OwnedTransactionId::from(txn));
+        }
+        let upload = timeline.send_attachment(file_path, mime, config);
+        let mut progress = upload.subscribe_to_send_progress();
+        let forward = tokio::spawn(async move {
+            while let Some(p) = progress.next().await {
+                on_progress(p.current as u64, p.total as u64);
+            }
+        });
+        let result = upload.await.map_err(sdk);
+        // The progress stream ends once the upload future (and its observable) is dropped.
+        let _ = forward.await;
+        result
     }
 }
 

@@ -122,9 +122,9 @@ export type EngineCommand = { action: "DiscoverHomeserver"; params: {
 	recovery_key: string,
 } } | { action: "ResetRecovery"; params: {
 	password: string | null,
-} } | { action: "SubscribeSpaces" } | { action: "SubscribeSpaceChildren"; params: {
-	space_id: RoomId,
-} } | { action: "ListThemes" } | { action: "GetTheme"; params: {
+} } | 
+/**  Lists, for every joined room that sits in a joined space, its parent spaces. */
+{ action: "GetSpaceParents" } | { action: "ListThemes" } | { action: "GetTheme"; params: {
 	id: string,
 } } | { action: "SetActiveTheme"; params: {
 	id: string,
@@ -266,10 +266,8 @@ export type EngineResponse = { type: "HomeserverInfo"; payload: {
 	recovered: boolean,
 } } | { type: "RecoveryReset"; payload: {
 	recovery_key: string,
-} } | { type: "SpacesSubscribed"; payload: {
-	subscription_id: SubscriptionId,
-} } | { type: "SpaceChildrenSubscribed"; payload: {
-	subscription_id: SubscriptionId,
+} } | { type: "SpaceParents"; payload: {
+	parents: SpaceParentDto[],
 } } | { type: "ThemesList"; payload: {
 	themes: ([string, string])[],
 } } | { type: "ThemeCss"; payload: {
@@ -359,6 +357,12 @@ export type SasEmoji = {
 	emoji: string,
 	decimal: number,
 	description: string,
+};
+
+/**  A room and the joined spaces that contain it. */
+export type SpaceParentDto = {
+	room_id: RoomId,
+	spaces: RoomId[],
 };
 
 export type SubscriptionId = string;

@@ -70,15 +70,12 @@ async fn test_error_propagation() {
 async fn test_not_implemented_naming() {
     let (engine, _tmp) = create_test_engine();
 
-    let cases = [
-        (
-            EngineCommand::StartOidcLogin {
-                homeserver_url: "https://matrix.org".into(),
-            },
-            "StartOidcLogin",
-        ),
-        (EngineCommand::SubscribeSpaces, "SubscribeSpaces"),
-    ];
+    let cases = [(
+        EngineCommand::StartOidcLogin {
+            homeserver_url: "https://matrix.org".into(),
+        },
+        "StartOidcLogin",
+    )];
 
     for (cmd, expected_name) in cases {
         let res = engine.handle(cmd).await;

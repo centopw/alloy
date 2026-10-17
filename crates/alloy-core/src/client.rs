@@ -43,6 +43,8 @@ pub struct AlloyClient {
     /// Background sliding-sync service, created lazily by [`AlloyClient::sync_service`].
     pub(crate) sync:
         tokio::sync::OnceCell<std::sync::Arc<matrix_sdk_ui::sync_service::SyncService>>,
+    /// Space hierarchy graph, created lazily by `AlloyClient::space_parents`.
+    pub(crate) spaces: tokio::sync::OnceCell<std::sync::Arc<matrix_sdk_ui::spaces::SpaceService>>,
 }
 
 impl AlloyClient {
@@ -103,6 +105,7 @@ impl AlloyClient {
             verification: tokio::sync::Mutex::new(Default::default()),
             timelines: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             sync: tokio::sync::OnceCell::new(),
+            spaces: tokio::sync::OnceCell::new(),
         })
     }
 
