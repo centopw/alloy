@@ -96,7 +96,10 @@
 
   {#if membersMode !== 'none' && activeId}
     <div class="members">
-      <MembersPanel roomId={activeId} />
+      <MembersPanel
+        roomId={activeId}
+        onclose={membersMode === 'overlay' ? () => (ui.membersOpen = false) : undefined}
+      />
     </div>
   {/if}
 </div>
@@ -112,8 +115,11 @@
     position: relative;
     display: grid;
     grid-template-columns: 312px minmax(0, 1fr);
-    height: 100vh;
+    height: 100dvh;
     overflow: hidden;
+    /* Keep content clear of the status bar, gesture bar and display cutouts on phones. */
+    padding: var(--alloy-safe-area-top) var(--alloy-safe-area-right) var(--alloy-safe-area-bottom)
+      var(--alloy-safe-area-left);
     background: var(--alloy-color-surface-canvas);
     color: var(--alloy-color-text-primary);
   }

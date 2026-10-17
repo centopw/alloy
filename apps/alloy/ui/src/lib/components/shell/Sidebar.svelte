@@ -191,6 +191,11 @@
   .search input:focus {
     outline: none;
   }
+  @media (max-width: 899px) {
+    .search kbd {
+      display: none;
+    }
+  }
   .search kbd {
     font-size: var(--alloy-typography-size-xs);
     color: var(--alloy-color-text-muted);

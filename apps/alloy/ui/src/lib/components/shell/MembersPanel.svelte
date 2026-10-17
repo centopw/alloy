@@ -1,14 +1,18 @@
 <script lang="ts">
   import { Avatar, Button, UserName } from '../common';
+  import Icon from '$lib/icons/Icon.svelte';
+  import { X } from '$lib/icons';
   import { membersStore, memberLabel } from '$lib/stores/members.svelte';
   import { errorMessage } from '$lib/stores/errors';
   import type { RoomMemberDto } from '$lib/generated/index.js';
 
   interface Props {
     roomId: string;
+    /** Shown as a close button when the panel overlays the chat instead of having its own column. */
+    onclose?: () => void;
   }
 
-  let { roomId }: Props = $props();
+  let { roomId, onclose }: Props = $props();
 
   let loading = $state(true);
   let loadError = $state<string | null>(null);
@@ -73,6 +77,14 @@
 {/snippet}
 
 <div class="members-panel" role="complementary" aria-label="Members">
+  {#if onclose}
+    <header class="bar">
+      <h2>Members</h2>
+      <button type="button" class="close" aria-label="Close members" onclick={() => onclose?.()}>
+        <Icon icon={X} size={20} />
+      </button>
+    </header>
+  {/if}
   {#if loadError}
     <div class="notice" role="alert">
       <p>Could not load room details: {loadError}</p>
@@ -111,6 +123,35 @@
 </div>
 
 <style>
+  .bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
+    border-bottom: 1px solid var(--alloy-color-border-subtle);
+  }
+  .bar h2 {
+    margin: 0;
+    font-size: var(--alloy-typography-size-base);
+  }
+  .close {
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    border: 0;
+    border-radius: var(--alloy-radii-full);
+    background: transparent;
+    color: var(--alloy-color-text-secondary);
+    cursor: pointer;
+  }
+  .close:hover {
+    background: var(--alloy-color-surface-hover);
+  }
+  .close:focus-visible {
+    outline: 2px solid var(--alloy-color-accent-primary);
+    outline-offset: 2px;
+  }
   .members-panel {
     display: flex;
     flex-direction: column;

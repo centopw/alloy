@@ -3,7 +3,7 @@ class UiStore {
   /** Developer HUD overlay (dev builds only). */
   hudVisible = $state(false);
   /** Members panel on the right of the conversation. */
-  membersOpen = $state(true);
+  membersOpen = $state(typeof window === 'undefined' || window.innerWidth >= 1100);
   /** Which room-sidebar scope is selected: the home view or one space id. */
   scope = $state<'home' | string>('home');
 }
