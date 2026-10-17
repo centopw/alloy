@@ -46,7 +46,7 @@ class RoomsStore {
 
   /** Start streaming the room list (call after login/restore). */
   async start() {
-    await this.stop();
+    void this.stop();
     this.loaded = false;
     const batcher = new FrameBatcher<RoomDiffEvent>((events) => {
       for (const e of events) applyDiff(this.rooms, e.payload.diff);
@@ -72,10 +72,10 @@ class RoomsStore {
     this.sub = null;
     this.batcher?.clear();
     this.batcher = null;
-    if (id) await client.unsubscribe(id).catch(() => {});
     this.rooms.length = 0;
     this.activeRoomId = null;
     this.lastActive = null;
+    if (id) await client.unsubscribe(id).catch(() => {});
   }
 
   select(roomId: string | null) {

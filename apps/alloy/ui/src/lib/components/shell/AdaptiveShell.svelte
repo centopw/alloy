@@ -7,6 +7,7 @@
   import CommandPalette from './CommandPalette.svelte';
   import Timeline from '../timeline/Timeline.svelte';
   import Composer from '../composer/Composer.svelte';
+  import NewRoomDialog from './NewRoomDialog.svelte';
   import SettingsDialog from '../settings/SettingsDialog.svelte';
   import VerificationDialog from '../settings/VerificationDialog.svelte';
   import Hud from '../dev/Hud.svelte';
@@ -16,6 +17,7 @@
 
   let paletteOpen = $state(false);
   let settingsOpen = $state(false);
+  let newRoomOpen = $state(false);
   let pane = $state<'list' | 'chat'>('list');
   let hudVisible = $state(false);
 
@@ -67,7 +69,7 @@
   </nav>
 
   <div class="list-pane">
-    <RoomList onselect={pick} onsearchfocus={() => {}} />
+    <RoomList onselect={pick} onnew={() => (newRoomOpen = true)} />
   </div>
 
   <main class="chat-pane">
@@ -88,6 +90,7 @@
 </div>
 
 <CommandPalette open={paletteOpen} onclose={() => (paletteOpen = false)} onpick={pick} />
+<NewRoomDialog open={newRoomOpen} onclose={() => (newRoomOpen = false)} onopened={pick} />
 <SettingsDialog open={settingsOpen} onclose={() => (settingsOpen = false)} />
 <VerificationDialog />
 {#if import.meta.env.DEV}<Hud bind:visible={hudVisible} />{/if}

@@ -1,7 +1,8 @@
 <script lang="ts">
   import { Avatar, Badge, SegmentedControl } from '../common';
   import Icon from '$lib/icons/Icon.svelte';
-  import { Search } from '$lib/icons';
+  import { Search, Plus } from '$lib/icons';
+  import { client } from '$lib/ipc';
   import { roomsStore, roomTitle, type RoomFilter } from '$lib/stores/rooms.svelte';
   import { formatListTime } from '$lib/content/format';
   import { session } from '$lib/stores/session.svelte';
@@ -9,8 +10,28 @@
   interface Props {
     onselect?: (roomId: string) => void;
     onsearchfocus?: () => void;
+    onnew?: () => void;
   }
-  let { onselect, onsearchfocus }: Props = $props();
+  let { onselect, onsearchfocus, onnew }: Props = $props();
+
+  let inviteBusy = $state<string | null>(null);
+
+  async function answerInvite(roomId: string, accept: boolean) {
+    inviteBusy = roomId;
+    try {
+      if (accept) {
+        await client.joinRoom(roomId);
+        roomsStore.select(roomId);
+        onselect?.(roomId);
+      } else {
+        await client.leaveRoom(roomId);
+      }
+    } catch {
+      /* the room list stream reflects the real state; nothing to roll back */
+    } finally {
+      inviteBusy = null;
+    }
+  }
 
   const filters = [
     { value: 'all', label: 'All' },
@@ -39,6 +60,9 @@
       onfocus={onsearchfocus}
     />
     <kbd>Ctrl K</kbd>
+    <button type="button" class="new" aria-label="New conversation" title="New conversation" onclick={onnew}>
+      <Icon icon={Plus} size={20} />
+    </button>
   </div>
 
   <div class="chips">
@@ -54,6 +78,19 @@
     {#each roomsStore.visible as r (r.id)}
       {@const unread = r.unread_notifications.notification_count}
       <li>
+        {#if r.membership === 'Invited'}
+          <div class="room invite">
+            <Avatar userId={r.id} displayName={roomTitle(r)} size="lg" />
+            <div class="text">
+              <span class="title">{roomTitle(r)}</span>
+              <span class="preview">Invitation</span>
+              <div class="invite-actions">
+                <button type="button" disabled={inviteBusy === r.id} onclick={() => answerInvite(r.id, true)}>Accept</button>
+                <button type="button" class="decline" disabled={inviteBusy === r.id} onclick={() => answerInvite(r.id, false)}>Decline</button>
+              </div>
+            </div>
+          </div>
+        {:else}
         <button
           type="button"
           class="room"
@@ -78,6 +115,7 @@
             </div>
           </div>
         </button>
+        {/if}
       </li>
     {:else}
       <li class="empty">
@@ -118,6 +156,42 @@
     color: var(--alloy-color-text-primary);
     font: inherit;
     padding: 8px 0;
+  }
+  .new {
+    border: 0;
+    background: transparent;
+    color: inherit;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--alloy-radii-full);
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+  }
+  .new:hover {
+    background: var(--alloy-color-surface-hover);
+    color: var(--alloy-color-text-primary);
+  }
+  .invite {
+    cursor: default;
+  }
+  .invite-actions {
+    display: flex;
+    gap: var(--alloy-spacing-scale-2);
+    margin-top: 4px;
+  }
+  .invite-actions button {
+    font: inherit;
+    border: 0;
+    border-radius: var(--alloy-radii-md);
+    padding: 4px 12px;
+    cursor: pointer;
+    background: var(--alloy-color-accent-primary);
+    color: var(--alloy-color-text-on-accent);
+  }
+  .invite-actions .decline {
+    background: var(--alloy-color-surface-subtle);
+    color: var(--alloy-color-text-primary);
   }
   kbd {
     font: inherit;

@@ -57,6 +57,8 @@ await fetch(`${HS}/_matrix/client/v3/rooms/${encodeURIComponent(room.room_id)}/s
   body: JSON.stringify({ msgtype: 'm.text', body: 'Hi from bob' }),
 });
 
+const invited = await api('/createRoom', { name: 'Invite me', invite: [u.id] }, v.token);
+
 // --- services: bridge + static UI server
 const dataDir = fs.mkdtempSync(join(os.tmpdir(), 'alloy-e2e-'));
 const bridge = spawn(BRIDGE_BIN, ['--port', String(BRIDGE_PORT), '--data-dir', dataDir], { stdio: ['ignore', 'pipe', 'inherit'] });
@@ -140,6 +142,23 @@ try {
     row.querySelector('button[aria-label=Delete]').click();
   });
   await page.waitForFunction(() => document.body.innerText.includes('Message deleted'), { timeout: 30000 });
+
+  step('invitation: accept it from the room list');
+  await page.waitForFunction(() => [...document.querySelectorAll('.room.invite')].some((e) => e.textContent.includes('Invite me')), { timeout: 30000 });
+  await page.evaluate(() => [...document.querySelectorAll('.room.invite')].find((e) => e.textContent.includes('Invite me')).querySelector('button').click());
+  await page.waitForFunction(() => [...document.querySelectorAll('button.room')].some((e) => e.textContent.includes('Invite me')), { timeout: 30000 });
+
+  step('create an encrypted room from the UI and send a message in it');
+  await page.click('button[aria-label="New conversation"]');
+  await page.waitForSelector('[role=dialog] input[type=text]');
+  await page.type('[role=dialog] input[type=text]', 'Created in UI');
+  await page.evaluate(() => [...document.querySelectorAll('[role=dialog] button')].find((b) => b.textContent.trim() === 'Create').click());
+  await page.waitForFunction(() => document.querySelector('.head h2')?.textContent === 'Created in UI' && document.body.innerText.includes('End-to-end encrypted'), { timeout: 60000 });
+  await page.click('textarea[aria-label=Message]');
+  await page.type('textarea[aria-label=Message]', 'secret hello');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => document.querySelector('.row.own [aria-label="Sent"], .row.own [aria-label="Seen"]'), { timeout: 60000 });
+  await page.screenshot({ path: resolve(shots, 'e2e-3-encrypted-room.png') });
 
   step('settings open and sign out returns to onboarding');
   await page.click('.account');

@@ -23,8 +23,9 @@ class TimelineStore {
 
   /** Open a room (closing the previous one). Pass null to just close. */
   async open(roomId: string | null) {
-    await this.close();
-    if (!roomId) return;
+    const closing = this.close();
+    if (!roomId) return closing;
+    void closing;
     this.roomId = roomId;
     this.loading = true;
     this.error = null;
@@ -48,6 +49,8 @@ class TimelineStore {
   }
 
   async close() {
+    // Reset all state synchronously: a concurrent `open()` for another room must never see (or
+    // be clobbered by) the previous room's teardown, which awaits the network.
     this.unlisten?.();
     this.unlisten = null;
     const id = this.sub?.subscriptionId;
@@ -55,13 +58,13 @@ class TimelineStore {
     this.sub = null;
     this.batcher?.clear();
     this.batcher = null;
-    if (id) await client.unsubscribe(id).catch(() => {});
     this.items.length = 0;
     this.roomId = null;
     this.reachedStart = false;
     this.replyTo = null;
     this.editing = null;
     this.lastReceiptEvent = null;
+    if (id) await client.unsubscribe(id).catch(() => {});
   }
 
   /** Load older history. */
