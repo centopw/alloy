@@ -96,7 +96,7 @@ impl GroupHandler for AuthHandler {
                 {
                     let _ = std::fs::remove_dir_all(index.store_dir(&old.store_id));
                 }
-                *ctx.client.write().await = Some(client);
+                ctx.set_client(Some(client)).await;
                 ctx.sink.emit(EngineEvent::AuthState {
                     account: Some(account.clone()),
                 });
@@ -111,7 +111,7 @@ impl GroupHandler for AuthHandler {
                     return Err(EngineError::auth_failed("no stored session; log in again"));
                 }
                 let account = entry.to_account();
-                *ctx.client.write().await = Some(client);
+                ctx.set_client(Some(client)).await;
                 ctx.sink.emit(EngineEvent::AuthState {
                     account: Some(account.clone()),
                 });
@@ -121,15 +121,17 @@ impl GroupHandler for AuthHandler {
                 let entry = index
                     .get(&account_id.0)
                     .ok_or_else(|| EngineError::not_found(format!("account {}", account_id.0)))?;
-                let mut guard = ctx.client.write().await;
-                let active = guard.as_ref().and_then(|c| c.user_id()) == Some(&account_id.0);
-                if active && let Some(client) = guard.as_ref() {
+                let active_client = ctx
+                    .client
+                    .read()
+                    .await
+                    .clone()
+                    .filter(|c| c.user_id() == Some(account_id.0.as_str()));
+                if let Some(client) = active_client {
+                    client.stop_sync().await;
                     client.logout().await.map_err(map_err)?;
+                    ctx.set_client(None).await;
                 }
-                if active {
-                    *guard = None;
-                }
-                drop(guard);
                 let _ = index.remove(&account_id.0);
                 let _ = std::fs::remove_dir_all(index.store_dir(&entry.store_id));
                 ctx.sink.emit(EngineEvent::AuthState { account: None });

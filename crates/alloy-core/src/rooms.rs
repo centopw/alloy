@@ -79,6 +79,18 @@ impl AlloyClient {
         Ok(())
     }
 
+    /// Join a room by ID or alias (`#room:server`). Returns the joined room id.
+    pub async fn join_room_by_id_or_alias(&self, id_or_alias: &str) -> AlloyResult<RoomId> {
+        let parsed = matrix_sdk::ruma::RoomOrAliasId::parse(id_or_alias)
+            .map_err(|e| AlloyError::InvalidRoomId(e.to_string()))?;
+        let room = self
+            .client
+            .join_room_by_id_or_alias(&parsed, &[])
+            .await
+            .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
+        Ok(RoomId(room.room_id().to_string()))
+    }
+
     /// Invite a user to a room.
     pub async fn invite_user(&self, room_id: &RoomId, user_id: &str) -> AlloyResult<()> {
         let parsed_room_id =
@@ -96,5 +108,70 @@ impl AlloyClient {
             .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
 
         Ok(())
+    }
+}
+
+impl AlloyClient {
+    /// Start sync (if needed) and drive the recency-sorted room list, calling `on_diffs`
+    /// for every batch of DTO diffs (the first batch is the initial state).
+    ///
+    /// Runs until the returned future is dropped/aborted or the stream ends, so callers
+    /// spawn it as a task and cancel it to unsubscribe. `name_filter` fuzzy-matches room names.
+    pub async fn run_room_list(
+        &self,
+        name_filter: Option<&str>,
+        page_size: usize,
+        mut on_diffs: impl FnMut(Vec<VectorDiffDto<RoomSummary>>) + Send,
+    ) -> AlloyResult<()> {
+        use matrix_sdk_ui::room_list_service::filters;
+        let sync = self.sync_service().await?;
+        let rls = sync.room_list_service();
+        let list = rls
+            .all_rooms()
+            .await
+            .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
+        let (stream, controller) = list.entries_with_dynamic_adapters(page_size);
+        match name_filter.map(str::trim).filter(|f| !f.is_empty()) {
+            Some(f) => {
+                controller.set_filter(Box::new(filters::new_filter_fuzzy_match_room_name(f)))
+            }
+            None => controller.set_filter(Box::new(filters::new_filter_non_left())),
+        };
+        futures::pin_mut!(stream);
+        while let Some(diffs) = stream.next().await {
+            on_diffs(
+                diffs
+                    .into_iter()
+                    .map(|d| d.map(|item| item.into_inner()))
+                    .map(mapping::map_room_vector_diff)
+                    .collect(),
+            );
+        }
+        Ok(())
+    }
+
+    /// Leave a room.
+    pub async fn leave_room(&self, room_id: &RoomId) -> AlloyResult<()> {
+        let room = self.room(room_id)?;
+        room.leave()
+            .await
+            .map_err(|e| AlloyError::MatrixSdk(e.to_string()))
+    }
+
+    /// Send a typing notice.
+    pub async fn set_typing(&self, room_id: &RoomId, typing: bool) -> AlloyResult<()> {
+        let room = self.room(room_id)?;
+        room.typing_notice(typing)
+            .await
+            .map_err(|e| AlloyError::MatrixSdk(e.to_string()))
+    }
+
+    /// Look up a known room.
+    pub(crate) fn room(&self, room_id: &RoomId) -> AlloyResult<matrix_sdk::Room> {
+        let parsed =
+            RumaRoomId::parse(&room_id.0).map_err(|e| AlloyError::InvalidRoomId(e.to_string()))?;
+        self.client
+            .get_room(&parsed)
+            .ok_or_else(|| AlloyError::RoomNotFound(room_id.0.clone()))
     }
 }

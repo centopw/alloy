@@ -30,6 +30,9 @@ pub struct AlloyClient {
     pub(crate) secret_store: Box<dyn SecretStore>,
     /// Optional namespace isolating this account's secrets (`alloy:<ns>:...`).
     pub(crate) namespace: Option<String>,
+    /// Background sliding-sync service, created lazily by [`AlloyClient::sync_service`].
+    pub(crate) sync:
+        tokio::sync::OnceCell<std::sync::Arc<matrix_sdk_ui::sync_service::SyncService>>,
 }
 
 impl AlloyClient {
@@ -86,6 +89,7 @@ impl AlloyClient {
             client,
             secret_store,
             namespace,
+            sync: tokio::sync::OnceCell::new(),
         })
     }
 
@@ -110,6 +114,34 @@ impl AlloyClient {
 
     pub(crate) fn session_key(&self) -> String {
         secret_key(self.namespace.as_deref(), "session")
+    }
+
+    /// Start (once) the background sync service and return it. Requires a logged-in client.
+    pub async fn sync_service(
+        &self,
+    ) -> AlloyResult<std::sync::Arc<matrix_sdk_ui::sync_service::SyncService>> {
+        if self.client.user_id().is_none() {
+            return Err(AlloyError::NotLoggedIn);
+        }
+        let svc = self
+            .sync
+            .get_or_try_init(|| async {
+                let svc = matrix_sdk_ui::sync_service::SyncService::builder(self.client.clone())
+                    .build()
+                    .await
+                    .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
+                svc.start().await;
+                Ok::<_, AlloyError>(std::sync::Arc::new(svc))
+            })
+            .await?;
+        Ok(svc.clone())
+    }
+
+    /// Stop background sync if it was started.
+    pub async fn stop_sync(&self) {
+        if let Some(svc) = self.sync.get() {
+            svc.stop().await;
+        }
     }
 
     /// Get the matrix-sdk Client for advanced operations.
