@@ -1,9 +1,10 @@
+import { invoke } from '@tauri-apps/api/core';
+
 /** Pick a file to attach. Returns its absolute path (Tauri) or null when cancelled/unsupported. */
 export async function pickFile(): Promise<string | null> {
   if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) return null;
-  const { open } = await import('@tauri-apps/plugin-dialog');
-  const res = await open({ multiple: false, directory: false });
-  return typeof res === 'string' ? res : null;
+  // The dialog runs in Rust so Android content:// picks are copied into the app cache.
+  return invoke<string | null>('pick_attachment');
 }
 
 /** Whether attaching files is possible in this runtime. */

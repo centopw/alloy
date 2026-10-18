@@ -1,6 +1,7 @@
 //! Alloy desktop and mobile application shell.
 
 pub mod commands;
+mod pick;
 
 use alloy_engine::context::EngineContext;
 use alloy_engine::router::AppEngine;
@@ -17,6 +18,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .setup(|app| {
             let data_dir = app
                 .path()
@@ -43,7 +45,11 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![alloy_invoke, alloy_subscribe])
+        .invoke_handler(tauri::generate_handler![
+            alloy_invoke,
+            alloy_subscribe,
+            pick::pick_attachment
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
