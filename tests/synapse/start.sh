@@ -25,6 +25,13 @@ enable_registration_without_verification: true
 experimental_features:
   msc4186_enabled: true
 
+# Let any test user publish rooms to the public directory (directory_integration test).
+room_list_publication_rules:
+  - user_id: "*"
+    alias: "*"
+    room_id: "*"
+    action: allow
+
 rc_login:
   address:
     per_second: 1000

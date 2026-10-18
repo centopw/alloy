@@ -136,6 +136,7 @@ async fn send_edit_react_redact_and_paginate() {
             reply_to: None,
             mentions: None,
             txn_id: None,
+            in_thread_root: None,
         })
         .await
         .unwrap()
@@ -162,6 +163,7 @@ async fn send_edit_react_redact_and_paginate() {
         reply_to: Some(first_id.clone()),
         mentions: None,
         txn_id: None,
+        in_thread_root: None,
     })
     .await
     .unwrap();
@@ -270,6 +272,7 @@ async fn send_edit_react_redact_and_paginate() {
             reply_to: None,
             mentions: None,
             txn_id: None,
+            in_thread_root: None,
         })
         .await
         .unwrap_err();

@@ -179,6 +179,14 @@ export class AlloyClient {
     });
   }
 
+  /** Streams one thread (root plus replies) as diffs under the returned subscription id. */
+  async subscribeThread(room_id: RoomId, thread_root_event_id: EventId) {
+    return this.transport.invoke({
+      action: 'SubscribeThread',
+      params: { room_id, thread_root_event_id },
+    });
+  }
+
   async paginateBackwards(room_id: RoomId, count: number) {
     return this.transport.invoke({
       action: 'PaginateBackwards',
@@ -194,6 +202,7 @@ export class AlloyClient {
       reply_to?: EventId | null;
       mentions?: UserId[] | null;
       txn_id?: string | null;
+      in_thread_root?: EventId | null;
     }
   ) {
     return this.transport.invoke({
@@ -205,6 +214,7 @@ export class AlloyClient {
         reply_to: opts?.reply_to ?? null,
         mentions: opts?.mentions ?? null,
         txn_id: opts?.txn_id ?? null,
+        in_thread_root: opts?.in_thread_root ?? null,
       },
     });
   }

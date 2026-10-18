@@ -54,8 +54,24 @@ export type EngineCommand = { action: "DiscoverHomeserver"; params: {
 	room_id: RoomId,
 } } | { action: "GetRoomDetails"; params: {
 	room_id: RoomId,
+} } | 
+/**
+ *  Searches the public room directory. `query` matches names, topics and aliases; `since` is the
+ *  `next_batch` token of a previous page; `server` defaults to the active homeserver.
+ */
+{ action: "SearchPublicRooms"; params: {
+	account_id: AccountId,
+	query: string | null,
+	server: string | null,
+	since: string | null,
+	limit: number,
 } } | { action: "SubscribeTimeline"; params: {
 	room_id: RoomId,
+} } | 
+/**  Streams the timeline of one thread (the root event and its replies). */
+{ action: "SubscribeThread"; params: {
+	room_id: RoomId,
+	thread_root_event_id: EventId,
 } } | { action: "PaginateBackwards"; params: {
 	room_id: RoomId,
 	count: number,
@@ -66,6 +82,8 @@ export type EngineCommand = { action: "DiscoverHomeserver"; params: {
 	reply_to: EventId | null,
 	mentions: UserId[] | null,
 	txn_id: string | null,
+	/**  When set, the message is posted into this thread instead of the main timeline. */
+	in_thread_root: EventId | null,
 } } | { action: "EditMessage"; params: {
 	room_id: RoomId,
 	event_id: EventId,
@@ -191,6 +209,12 @@ export type EngineResponse = { type: "HomeserverInfo"; payload: {
 	members: RoomMemberDto[],
 } } | { type: "RoomDetailsRetrieved"; payload: {
 	details: RoomDetails,
+} } | 
+/**  One page of public room directory results for `SearchPublicRooms`. */
+{ type: "PublicRooms"; payload: {
+	rooms: PublicRoomDto[],
+	next_batch: string | null,
+	total_estimate: number,
 } } | { type: "RoomJoined"; payload: {
 	room_id: RoomId,
 } } | { type: "RoomLeft"; payload: {
@@ -298,6 +322,23 @@ export type MediaSource = { kind: "Remote"; data: {
 export type NotificationCount = {
 	highlight_count: number,
 	notification_count: number,
+};
+
+/**  One room listed in a homeserver's public room directory. */
+export type PublicRoomDto = {
+	room_id: RoomId,
+	/**  Canonical alias such as `#general:example.org`, if the room has one. */
+	alias: string | null,
+	name: string | null,
+	topic: string | null,
+	/**  `mxc://` avatar URI, if any; fetch it with `GetMedia`. */
+	avatar_url: string | null,
+	num_joined_members: number,
+	/**  Whether guests may read the room without joining. */
+	world_readable: boolean,
+	guest_can_join: boolean,
+	/**  Whether the active account is already joined to this room. */
+	joined: boolean,
 };
 
 /**  Aggregated reactions for one key on a message. */

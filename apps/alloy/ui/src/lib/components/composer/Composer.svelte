@@ -1,5 +1,6 @@
 <script lang="ts">
   import { timelineStore } from '$lib/stores/timeline.svelte';
+  import { threadStore } from '$lib/stores/thread.svelte';
   import { roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
   import { client } from '$lib/ipc';
   import Icon from '$lib/icons/Icon.svelte';
@@ -22,8 +23,10 @@
 
   interface Props {
     roomId: string;
+    /** Set inside a thread panel: sends go into that thread and room reply/edit state is ignored. */
+    threadRoot?: string | null;
   }
-  let { roomId }: Props = $props();
+  let { roomId, threadRoot = null }: Props = $props();
   const pickerId = $props.id();
 
   let text = $state('');
@@ -38,8 +41,8 @@
   let typing = false;
   let typingTimer: ReturnType<typeof setTimeout> | undefined;
 
-  const replying = $derived(timelineStore.replyTo);
-  const editing = $derived(timelineStore.editing);
+  const replying = $derived(threadRoot ? null : timelineStore.replyTo);
+  const editing = $derived(threadRoot ? null : timelineStore.editing);
   const composing = $derived(!!(replying || editing));
   const canSend = $derived(text.trim().length > 0);
   const roomName = $derived.by(() => {
@@ -144,7 +147,8 @@
     clearTimeout(typingTimer);
     setTyping(false);
     await tickResize();
-    await timelineStore.send(body, mentions);
+    if (threadRoot) await threadStore.send(body, mentions);
+    else await timelineStore.send(body, mentions);
   }
 
   async function tickResize() {
@@ -229,7 +233,7 @@
   {/if}
 
   <div class="field">
-    {#if canPickFiles()}
+    {#if canPickFiles() && !threadRoot}
       <button type="button" class="round" aria-label="Attach file" title="Attach file" onclick={attach}>
         <Icon icon={Plus} size={20} />
       </button>

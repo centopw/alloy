@@ -77,6 +77,25 @@ pub struct RoomDetails {
     pub invited_members: u64,
 }
 
+/// One room listed in a homeserver's public room directory.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct PublicRoomDto {
+    pub room_id: RoomId,
+    /// Canonical alias such as `#general:example.org`, if the room has one.
+    pub alias: Option<String>,
+    pub name: Option<String>,
+    pub topic: Option<String>,
+    /// `mxc://` avatar URI, if any; fetch it with `GetMedia`.
+    pub avatar_url: Option<String>,
+    #[specta(type = Number)]
+    pub num_joined_members: u64,
+    /// Whether guests may read the room without joining.
+    pub world_readable: bool,
+    pub guest_can_join: bool,
+    /// Whether the active account is already joined to this room.
+    pub joined: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct NotificationCount {
     #[specta(type = Number)]
@@ -373,9 +392,23 @@ pub enum EngineCommand {
     GetRoomDetails {
         room_id: RoomId,
     },
+    /// Searches the public room directory. `query` matches names, topics and aliases; `since` is the
+    /// `next_batch` token of a previous page; `server` defaults to the active homeserver.
+    SearchPublicRooms {
+        account_id: AccountId,
+        query: Option<String>,
+        server: Option<String>,
+        since: Option<String>,
+        limit: u32,
+    },
     // Timeline
     SubscribeTimeline {
         room_id: RoomId,
+    },
+    /// Streams the timeline of one thread (the root event and its replies).
+    SubscribeThread {
+        room_id: RoomId,
+        thread_root_event_id: EventId,
     },
     PaginateBackwards {
         room_id: RoomId,
@@ -389,6 +422,8 @@ pub enum EngineCommand {
         reply_to: Option<EventId>,
         mentions: Option<Vec<UserId>>,
         txn_id: Option<String>,
+        /// When set, the message is posted into this thread instead of the main timeline.
+        in_thread_root: Option<EventId>,
     },
     EditMessage {
         room_id: RoomId,
@@ -522,6 +557,13 @@ pub enum EngineResponse {
     },
     RoomDetailsRetrieved {
         details: RoomDetails,
+    },
+    /// One page of public room directory results for `SearchPublicRooms`.
+    PublicRooms {
+        rooms: Vec<PublicRoomDto>,
+        next_batch: Option<String>,
+        #[specta(type = Number)]
+        total_estimate: Option<u64>,
     },
     RoomJoined {
         room_id: RoomId,

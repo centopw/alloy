@@ -3,8 +3,8 @@
 use crate::mapping;
 use crate::{AlloyClient, AlloyError, AlloyResult};
 use alloy_protocol::{
-    RoomDetails, RoomId, RoomMemberDto, RoomMembership, RoomSummary, SpaceParentDto, UserId,
-    VectorDiffDto,
+    PublicRoomDto, RoomDetails, RoomId, RoomMemberDto, RoomMembership, RoomSummary, SpaceParentDto,
+    UserId, VectorDiffDto,
 };
 use futures::StreamExt;
 use matrix_sdk::RoomMemberships;
@@ -299,5 +299,89 @@ impl AlloyClient {
         self.client
             .get_room(&parsed)
             .ok_or_else(|| AlloyError::RoomNotFound(room_id.0.clone()))
+    }
+}
+
+/// One page of public room directory results.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublicRoomsPage {
+    pub rooms: Vec<PublicRoomDto>,
+    /// Pagination token for the next page, if the directory has more rooms.
+    pub next_batch: Option<String>,
+    /// Server's estimate of the total number of matching rooms.
+    pub total_estimate: Option<u64>,
+}
+
+impl AlloyClient {
+    /// Searches the public room directory of `server` (the active homeserver when `None`).
+    ///
+    /// `query` matches room names, topics and aliases; a blank query lists the directory unfiltered.
+    /// `since` is the `next_batch` token of a previous page.
+    pub async fn search_public_rooms(
+        &self,
+        query: Option<&str>,
+        server: Option<&str>,
+        since: Option<&str>,
+        limit: u32,
+    ) -> AlloyResult<PublicRoomsPage> {
+        use matrix_sdk::ruma::api::client::directory::get_public_rooms_filtered::v3::Request;
+        use matrix_sdk::ruma::directory::Filter;
+        use matrix_sdk::ruma::{OwnedServerName, UInt};
+
+        let mut filter = Filter::new();
+        filter.generic_search_term = query
+            .map(str::trim)
+            .filter(|q| !q.is_empty())
+            .map(str::to_owned);
+
+        let mut request = Request::new();
+        request.filter = filter;
+        request.limit = Some(UInt::from(limit));
+        request.since = since
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned);
+        request.server = server
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| {
+                OwnedServerName::try_from(s)
+                    .map_err(|e| AlloyError::MatrixSdk(format!("invalid server name {s:?}: {e}")))
+            })
+            .transpose()?;
+
+        let response = self
+            .client
+            .public_rooms_filtered(request)
+            .await
+            .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
+
+        let rooms = response
+            .chunk
+            .into_iter()
+            .map(|chunk| {
+                let joined = self
+                    .client
+                    .get_room(&chunk.room_id)
+                    .is_some_and(|room| room.state() == matrix_sdk::RoomState::Joined);
+                PublicRoomDto {
+                    room_id: RoomId(chunk.room_id.to_string()),
+                    alias: chunk.canonical_alias.map(|alias| alias.to_string()),
+                    name: chunk.name,
+                    topic: chunk.topic,
+                    avatar_url: chunk.avatar_url.map(|uri| uri.to_string()),
+                    num_joined_members: u64::from(chunk.num_joined_members),
+                    world_readable: chunk.world_readable,
+                    guest_can_join: chunk.guest_can_join,
+                    joined,
+                }
+            })
+            .collect();
+
+        Ok(PublicRoomsPage {
+            rooms,
+            next_batch: response.next_batch,
+            total_estimate: response.total_room_count_estimate.map(u64::from),
+        })
     }
 }

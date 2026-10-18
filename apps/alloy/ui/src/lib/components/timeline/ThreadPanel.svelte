@@ -1,0 +1,105 @@
+<script lang="ts">
+  import Icon from '$lib/icons/Icon.svelte';
+  import { X } from '$lib/icons';
+  import MessageRow from './MessageRow.svelte';
+  import Composer from '../composer/Composer.svelte';
+  import { threadStore, threadReplies, threadRootItem } from '$lib/stores/thread.svelte';
+
+  interface Props {
+    onclose: () => void;
+  }
+  let { onclose }: Props = $props();
+
+  const rootId = $derived(threadStore.rootEventId ?? '');
+  const root = $derived(threadRootItem(threadStore.items, rootId));
+  const replies = $derived(threadReplies(threadStore.items, rootId));
+</script>
+
+<aside class="thread" aria-label="Thread">
+  <header>
+    <h2>Thread</h2>
+    <button type="button" class="round" aria-label="Close thread" title="Close thread" onclick={onclose}>
+      <Icon icon={X} size={20} />
+    </button>
+  </header>
+
+  <div class="messages">
+    {#if root}
+      <MessageRow item={root} prev={null} inThread />
+    {/if}
+    {#each replies as item, i (item.internal_id)}
+      <MessageRow {item} prev={i === 0 ? root : replies[i - 1]} inThread />
+    {/each}
+    {#if threadStore.loading && !root}
+      <p class="status">Loading thread…</p>
+    {:else if root && replies.length === 0}
+      <p class="status">No replies yet.</p>
+    {/if}
+    {#if threadStore.error}
+      <p class="status error" role="alert">{threadStore.error}</p>
+    {/if}
+  </div>
+
+  {#if threadStore.roomId}
+    <Composer roomId={threadStore.roomId} threadRoot={threadStore.rootEventId} />
+  {/if}
+</aside>
+
+<style>
+  .thread {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--alloy-color-surface-panel);
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--alloy-spacing-scale-2);
+    padding: var(--alloy-spacing-scale-3) var(--alloy-spacing-scale-4);
+    border-bottom: 1px solid var(--alloy-color-border-subtle);
+  }
+  h2 {
+    margin: 0;
+    font-size: var(--alloy-typography-size-sm);
+    color: var(--alloy-color-text-primary);
+  }
+
+  .round {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: none;
+    border-radius: var(--alloy-radii-full);
+    background: transparent;
+    color: var(--alloy-color-text-secondary);
+    cursor: pointer;
+  }
+  .round:hover {
+    background: var(--alloy-color-surface-hover);
+    color: var(--alloy-color-text-primary);
+  }
+
+  .messages {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: var(--alloy-spacing-scale-2) 0;
+  }
+
+  .status {
+    margin: var(--alloy-spacing-scale-3) var(--alloy-spacing-scale-4);
+    font-size: var(--alloy-typography-size-xs);
+    color: var(--alloy-color-text-muted);
+  }
+  .status.error {
+    color: var(--alloy-color-status-error);
+  }
+</style>

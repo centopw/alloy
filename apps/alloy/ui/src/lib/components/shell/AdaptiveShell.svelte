@@ -1,25 +1,29 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import SpaceRail from './SpaceRail.svelte';
   import Sidebar from './Sidebar.svelte';
   import ChatHeader from './ChatHeader.svelte';
   import MembersPanel from './MembersPanel.svelte';
   import CommandPalette from './CommandPalette.svelte';
   import Timeline from '../timeline/Timeline.svelte';
+  import ThreadPanel from '../timeline/ThreadPanel.svelte';
   import Composer from '../composer/Composer.svelte';
   import UploadStrip from '../composer/UploadStrip.svelte';
   import NewRoomDialog from './NewRoomDialog.svelte';
+  import DirectoryDialog from './DirectoryDialog.svelte';
   import SettingsDialog from '../settings/SettingsDialog.svelte';
   import VerificationDialog from '../settings/VerificationDialog.svelte';
   import Hud from '../dev/Hud.svelte';
   import { pushBack } from '$lib/platform/backstack';
   import { roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
   import { ui } from '$lib/stores/ui.svelte';
+  import { threadStore } from '$lib/stores/thread.svelte';
   import { verification } from '$lib/stores/verification.svelte';
 
   let paletteOpen = $state(false);
   let settingsOpen = $state(false);
   let newRoomOpen = $state(false);
+  let directoryOpen = $state(false);
   let pane = $state<'list' | 'chat'>('list');
   let hudVisible = $state(false);
   let innerWidth = $state(1280);
@@ -34,10 +38,17 @@
   // when the open room changes, so the timeline is not reopened on each unread/preview update.
   const activeId = $derived(roomsStore.active?.id ?? null);
 
+  // An open thread takes the side column (wide) or the full overlay (below 1100) and hides the
+  // members panel while it is open.
+  const threadOpen = $derived(Boolean(threadStore.roomId && threadStore.rootEventId));
+  const threadMode = $derived<'column' | 'overlay' | 'none'>(
+    !threadOpen ? 'none' : layout === 'wide' ? 'column' : 'overlay'
+  );
+
   // Wide: members sit in their own column. Medium: a rounded overlay over the chat.
   // Narrow: the same overlay, shown only while a chat is open (the list pane has no chat).
   const membersMode = $derived<'column' | 'overlay' | 'none'>(
-    !activeId || !ui.membersOpen
+    !activeId || !ui.membersOpen || threadOpen
       ? 'none'
       : layout === 'wide'
         ? 'column'
@@ -53,6 +64,21 @@
     return () => {
       void roomsStore.stop();
     };
+  });
+
+  // A thread belongs to the room it was opened in. Untracked so the effect runs only when the
+  // active room changes, not on every thread state update.
+  $effect(() => {
+    const roomId = activeId;
+    untrack(() => {
+      if (threadStore.roomId !== null && threadStore.roomId !== roomId) void threadStore.close();
+    });
+  });
+
+  // On phones an open thread takes a Back entry, so Back closes the thread before the chat.
+  $effect(() => {
+    if (!threadOpen || layout !== 'narrow') return;
+    return pushBack(() => threadStore.close());
   });
 
   // On phones the system Back button returns from a chat to the room list instead of leaving the app.
@@ -96,10 +122,10 @@
 
 <svelte:window onkeydown={onKeydown} bind:innerWidth />
 
-<div class="shell" data-layout={layout} data-pane={pane} data-members={membersMode}>
+<div class="shell" data-layout={layout} data-pane={pane} data-members={membersMode} data-thread={threadMode}>
   <div class="nav">
     <SpaceRail onnew={() => (newRoomOpen = true)} />
-    <Sidebar onselect={pick} onnew={() => (newRoomOpen = true)} onsettings={() => (settingsOpen = true)} />
+    <Sidebar onselect={pick} onnew={() => (newRoomOpen = true)} onbrowse={() => (directoryOpen = true)} onsettings={() => (settingsOpen = true)} />
   </div>
 
   <main class="chat">
@@ -124,10 +150,16 @@
       />
     </div>
   {/if}
+  {#if threadMode !== 'none'}
+    <div class="thread-host">
+      <ThreadPanel onclose={() => void threadStore.close()} />
+    </div>
+  {/if}
 </div>
 
 <CommandPalette open={paletteOpen} onclose={() => (paletteOpen = false)} onpick={pick} />
 <NewRoomDialog open={newRoomOpen} onclose={() => (newRoomOpen = false)} onopened={pick} />
+<DirectoryDialog open={directoryOpen} onclose={() => (directoryOpen = false)} onjoined={pick} />
 <SettingsDialog open={settingsOpen} onclose={() => (settingsOpen = false)} />
 <VerificationDialog />
 {#if import.meta.env.DEV}<Hud bind:visible={hudVisible} />{/if}
@@ -183,6 +215,28 @@
     width: 240px;
     border: 1px solid var(--alloy-color-border-subtle);
     border-radius: var(--alloy-radii-lg);
+  }
+
+  .thread-host {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .shell[data-thread='column'] {
+    grid-template-columns: 312px minmax(0, 1fr) 360px;
+  }
+  .shell[data-thread='column'] .thread-host {
+    border-left: 1px solid var(--alloy-color-border-subtle);
+  }
+  .shell[data-thread='overlay'] .thread-host {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    padding: var(--alloy-safe-area-top) var(--alloy-safe-area-right) var(--alloy-safe-area-bottom)
+      var(--alloy-safe-area-left);
+    background: var(--alloy-color-surface-canvas);
   }
 
   .empty {

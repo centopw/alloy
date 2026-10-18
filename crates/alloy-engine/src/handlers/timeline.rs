@@ -2,7 +2,12 @@ use super::rooms::map_err;
 use crate::context::EngineContext;
 use crate::error::EngineError;
 use crate::router::{CommandGroup, GroupHandler, command_name};
-use alloy_protocol::{EngineCommand, EngineEvent, EngineResponse, SubscriptionId};
+use alloy_core::AlloyClient;
+use alloy_protocol::{
+    EngineCommand, EngineEvent, EngineResponse, EventId, RoomId, SubscriptionId, TimelineItemDto,
+    VectorDiffDto,
+};
+use std::sync::Arc;
 
 /// Handler for timeline/messaging operations (`CommandGroup::Timeline`).
 ///
@@ -33,32 +38,21 @@ impl GroupHandler for TimelineHandler {
                 let client = ctx.active_client().await?;
                 // Fail fast on unknown rooms instead of inside the spawned task.
                 client.cached_timeline(&room_id).await.map_err(map_err)?;
-                let subscription_id = SubscriptionId(uuid::Uuid::new_v4().to_string());
-                let sink = ctx.sink.clone();
-                let sid = subscription_id.clone();
-                let rid = room_id.clone();
-                let task = tokio::spawn(async move {
-                    let res = client
-                        .run_timeline(&rid, |diffs| {
-                            for diff in diffs {
-                                sink.emit(EngineEvent::TimelineDiff {
-                                    subscription_id: sid.clone(),
-                                    room_id: rid.clone(),
-                                    diff: Box::new(diff),
-                                });
-                            }
-                        })
-                        .await;
-                    if let Err(e) = res {
-                        sink.emit(EngineEvent::ToastNotice {
-                            message: format!("Timeline stopped: {e}"),
-                            level: "error".into(),
-                        });
-                    }
-                });
-                ctx.subscriptions
-                    .register(subscription_id.clone(), task.abort_handle())
-                    .await;
+                let subscription_id = spawn_subscription(ctx, client, room_id, None).await;
+                Ok(EngineResponse::TimelineSubscribed { subscription_id })
+            }
+            EngineCommand::SubscribeThread {
+                room_id,
+                thread_root_event_id,
+            } => {
+                let client = ctx.active_client().await?;
+                // Fail fast on unknown rooms or roots instead of inside the spawned task.
+                client
+                    .cached_thread_timeline(&room_id, &thread_root_event_id)
+                    .await
+                    .map_err(map_err)?;
+                let subscription_id =
+                    spawn_subscription(ctx, client, room_id, Some(thread_root_event_id)).await;
                 Ok(EngineResponse::TimelineSubscribed { subscription_id })
             }
             EngineCommand::PaginateBackwards { room_id, count } => {
@@ -80,6 +74,7 @@ impl GroupHandler for TimelineHandler {
                 reply_to,
                 mentions,
                 txn_id: _,
+                in_thread_root,
             } => {
                 if body.trim().is_empty() {
                     return Err(EngineError::invalid_argument("empty message"));
@@ -92,6 +87,7 @@ impl GroupHandler for TimelineHandler {
                         markdown.unwrap_or(false),
                         reply_to.as_ref(),
                         mentions.as_deref(),
+                        in_thread_root.as_ref(),
                     )
                     .await
                     .map_err(map_err)?;
@@ -178,4 +174,46 @@ impl GroupHandler for TimelineHandler {
             ))),
         }
     }
+}
+
+/// Spawn a task that streams a room timeline, or one thread of it, as `TimelineDiff` events and
+/// register it for cancellation. Thread diffs carry their own subscription id, so the UI keeps
+/// them apart from the room timeline.
+async fn spawn_subscription(
+    ctx: &EngineContext,
+    client: Arc<AlloyClient>,
+    room_id: RoomId,
+    thread_root: Option<EventId>,
+) -> SubscriptionId {
+    let subscription_id = SubscriptionId(uuid::Uuid::new_v4().to_string());
+    let sink = ctx.sink.clone();
+    let sid = subscription_id.clone();
+    let rid = room_id.clone();
+    let task = tokio::spawn(async move {
+        let emit_sink = sink.clone();
+        let emit_rid = rid.clone();
+        let on_diffs = move |diffs: Vec<VectorDiffDto<TimelineItemDto>>| {
+            for diff in diffs {
+                emit_sink.emit(EngineEvent::TimelineDiff {
+                    subscription_id: sid.clone(),
+                    room_id: emit_rid.clone(),
+                    diff: Box::new(diff),
+                });
+            }
+        };
+        let res = match &thread_root {
+            Some(root) => client.run_thread_timeline(&rid, root, on_diffs).await,
+            None => client.run_timeline(&rid, on_diffs).await,
+        };
+        if let Err(e) = res {
+            sink.emit(EngineEvent::ToastNotice {
+                message: format!("Timeline stopped: {e}"),
+                level: "error".into(),
+            });
+        }
+    });
+    ctx.subscriptions
+        .register(subscription_id.clone(), task.abort_handle())
+        .await;
+    subscription_id
 }

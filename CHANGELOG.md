@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Threads: thread panel with a thread-scoped composer, summary chips on thread roots, `SubscribeThread` and `in_thread_root` in the engine protocol (#27).
+- Public room directory: browse and join rooms through `SearchPublicRooms` (#28).
+
+### Fixed
+- Android: attachments picked from content:// URIs are copied to the app cache before upload (#72); the device behaviour is unverified.
+- Android: sessions are kept across restarts (secrets file in app-private storage; the keyring has no Android backend).
+- Android: content respects status/gesture bars and the soft keyboard; Back closes dialogs, settings sections and chats before leaving the app.
+- Phones: settings is a section list that drills into one section; the members panel starts closed on narrow screens and can be closed.
+
+### Changed
+- Android nightly and release builds ship a stripped, signed release APK (72 MB) instead of a debug APK (453 MB).
+
 ## 0.1.0 (pre-release)
 
 First functioning desktop build. Installers are unsigned; the Android APK is debug-signed arm64 until a release keystore is configured.

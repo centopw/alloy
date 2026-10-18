@@ -39,3 +39,5 @@ export { Users } from '@lucide/svelte';
 export { UserPlus } from '@lucide/svelte';
 export { Bell } from '@lucide/svelte';
 export { LogOut } from '@lucide/svelte';
+export { MessageSquare } from '@lucide/svelte';
+export { Compass } from '@lucide/svelte';

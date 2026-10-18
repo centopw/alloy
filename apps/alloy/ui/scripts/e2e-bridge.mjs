@@ -57,6 +57,8 @@ await fetch(`${HS}/_matrix/client/v3/rooms/${encodeURIComponent(room.room_id)}/s
   body: JSON.stringify({ msgtype: 'm.text', body: 'Hi from bob' }),
 });
 
+const dirName = `dir-e2e-${Date.now()}`;
+await api('/createRoom', { name: dirName, visibility: 'public', preset: 'public_chat' }, v.token);
 const invited = await api('/createRoom', { name: 'Invite me', invite: [u.id] }, v.token);
 
 // --- services: bridge + static UI server
@@ -126,6 +128,16 @@ try {
   await page.evaluate(() => document.querySelector('.picker button').click());
   await page.waitForFunction(() => document.querySelector('.chip.mine'), { timeout: 30000 });
 
+  step('reply in a thread from the panel');
+  await bobRow.asElement().hover();
+  await page.evaluate((row) => row.querySelector('button[aria-label="Reply in thread"]').click(), bobRow);
+  await page.waitForSelector('aside[aria-label=Thread] textarea[aria-label=Message]', { visible: true, timeout: 30000 });
+  await page.type('aside[aria-label=Thread] textarea[aria-label=Message]', 'in the thread');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => document.querySelector('aside[aria-label=Thread]')?.innerText.includes('in the thread'), { timeout: 30000 });
+  await page.click('aside[aria-label=Thread] button[aria-label="Close thread"]');
+  await page.waitForFunction(() => !document.querySelector('aside[aria-label=Thread]'), { timeout: 10000 });
+
   step('edit then delete own message');
   await page.evaluate(() => {
     const row = [...document.querySelectorAll('.row.own')].find((r) => r.textContent.includes('Hello'));
@@ -159,6 +171,14 @@ try {
   await page.keyboard.press('Enter');
   await page.waitForFunction(() => (() => { const rows = [...document.querySelectorAll('.row.own')]; return rows.length > 0 && rows.every((r) => !r.querySelector('.state, .failed-actions')); })(), { timeout: 60000 });
   await page.screenshot({ path: resolve(shots, 'e2e-3-encrypted-room.png') });
+
+  step('browse the public room directory');
+  await page.click('button[aria-label="Browse public rooms"]');
+  await page.waitForSelector('input[aria-label="Search public rooms"]', { visible: true });
+  await page.type('input[aria-label="Search public rooms"]', dirName);
+  await page.waitForFunction((name) => document.querySelector('.results li')?.innerText.includes(name), { timeout: 30000 }, dirName);
+  await page.click('button[aria-label="Close"]');
+  await page.waitForFunction(() => !document.querySelector('input[aria-label="Search public rooms"]'), { timeout: 10000 });
 
   step('settings open and sign out returns to onboarding');
   await page.click('button[aria-label="User settings"]');

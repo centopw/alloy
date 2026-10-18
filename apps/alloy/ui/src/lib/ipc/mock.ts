@@ -391,6 +391,37 @@ export class MockTransport implements Transport {
         };
       }
 
+      case 'SubscribeThread': {
+        const roomId = command.params.room_id;
+        const root = command.params.thread_root_event_id;
+        const subId = `sub_th_${++this.subCounter}`;
+        // Thread subscriptions use a composite key, so room-level diffs skip them.
+        this.timelineSubscriptions.set(subId, `${roomId}|thread|${root}`);
+
+        const items = (this.timelineByRoom.get(roomId) ?? []).filter(
+          (i) => i.event_id === root || i.reply_to?.event_id === root,
+        );
+
+        setTimeout(() => {
+          this.emit({
+            type: 'TimelineDiff',
+            payload: {
+              subscription_id: subId,
+              room_id: roomId,
+              diff: {
+                type: 'Reset',
+                content: { values: [...items] },
+              },
+            },
+          });
+        }, 10);
+
+        return {
+          type: 'TimelineSubscribed',
+          payload: { subscription_id: subId },
+        };
+      }
+
       case 'PaginateBackwards': {
         const roomId = command.params.room_id;
         const currentItems = this.timelineByRoom.get(roomId) ?? [];
@@ -437,6 +468,11 @@ export class MockTransport implements Transport {
         const roomId = command.params.room_id;
         const txnId = command.params.txn_id ?? `txn_${Date.now()}`;
         const internalId = `local_${txnId}`;
+        const threadRoot = command.params.in_thread_root ?? null;
+        const threadKey = threadRoot ? `${roomId}|thread|${threadRoot}` : null;
+        const rootItem = threadRoot
+          ? ((this.timelineByRoom.get(roomId) ?? []).find((i) => i.event_id === threadRoot) ?? null)
+          : null;
 
         const localEcho: TimelineItemDto = {
           internal_id: internalId,
@@ -453,7 +489,7 @@ export class MockTransport implements Transport {
           },
           send_state: { status: 'Sending', data: { transaction_id: txnId } },
           is_own: true,
-          reply_to: null,
+          reply_to: rootItem,
           thread_summary: null,
           read_receipts: null,
         };
@@ -464,7 +500,7 @@ export class MockTransport implements Transport {
 
         // Emit local echo PushBack
         for (const [subId, rId] of this.timelineSubscriptions.entries()) {
-          if (rId === roomId) {
+          if (threadKey ? rId === threadKey : rId === roomId) {
             this.emit({
               type: 'TimelineDiff',
               payload: {
@@ -821,6 +857,31 @@ export class MockTransport implements Transport {
 
       case 'SetActiveTheme':
         return { type: 'ThemeSetActive' };
+
+      case 'SearchPublicRooms': {
+        const q = (command.params.query ?? '').trim().toLowerCase();
+        const catalogue = [
+          { name: 'Matrix HQ', topic: 'Chat about Matrix', members: 1200 },
+          { name: 'Alloy Users', topic: 'Questions and feedback', members: 42 },
+        ];
+        const rooms = catalogue
+          .filter((r) => r.name.toLowerCase().includes(q))
+          .map((r) => ({
+            room_id: `!${r.name.replace(/\W+/g, '').toLowerCase()}:alloy.chat`,
+            alias: `#${r.name.replace(/\W+/g, '-').toLowerCase()}:alloy.chat`,
+            name: r.name,
+            topic: r.topic,
+            avatar_url: null,
+            num_joined_members: r.members,
+            world_readable: false,
+            guest_can_join: false,
+            joined: false,
+          }));
+        return {
+          type: 'PublicRooms',
+          payload: { rooms, next_batch: null, total_estimate: rooms.length },
+        };
+      }
 
       case 'GetSettings':
         return {

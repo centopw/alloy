@@ -4,11 +4,20 @@ use crate::{AlloyClient, AlloyError, AlloyResult};
 use alloy_protocol::RoomId;
 use matrix_sdk::ruma::RoomId as RumaRoomId;
 use matrix_sdk::ruma::events::room::message::RoomMessageEventContent;
-use matrix_sdk_ui::timeline::Timeline;
+use matrix_sdk_ui::timeline::{Timeline, TimelineFocus};
 
 impl AlloyClient {
     /// Open a room's timeline.
     pub async fn timeline(&self, room_id: &RoomId) -> AlloyResult<Timeline> {
+        self.build_timeline(room_id, None).await
+    }
+
+    /// Build a room timeline, or one focused on a thread when `focus` is set.
+    async fn build_timeline(
+        &self,
+        room_id: &RoomId,
+        focus: Option<TimelineFocus>,
+    ) -> AlloyResult<Timeline> {
         let parsed_id =
             RumaRoomId::parse(&room_id.0).map_err(|e| AlloyError::InvalidRoomId(e.to_string()))?;
 
@@ -17,7 +26,11 @@ impl AlloyClient {
             .get_room(&parsed_id)
             .ok_or_else(|| AlloyError::RoomNotFound(room_id.0.clone()))?;
 
-        let timeline = matrix_sdk_ui::timeline::TimelineBuilder::new(&room)
+        let mut builder = matrix_sdk_ui::timeline::TimelineBuilder::new(&room);
+        if let Some(focus) = focus {
+            builder = builder.with_focus(focus);
+        }
+        let timeline = builder
             .build()
             .await
             .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
@@ -111,14 +124,53 @@ impl AlloyClient {
         Ok(timeline)
     }
 
+    /// Timeline focused on one thread, cached alongside the room timelines under a composite key
+    /// (room ids start with `!`, so the `|thread|` key cannot collide with a room key).
+    pub async fn cached_thread_timeline(
+        &self,
+        room_id: &RoomId,
+        root: &alloy_protocol::EventId,
+    ) -> AlloyResult<Arc<Timeline>> {
+        let key = format!("{}|thread|{}", room_id.0, root.0);
+        let mut map = self.timelines.lock().await;
+        if let Some(t) = map.get(&key) {
+            return Ok(t.clone());
+        }
+        let focus = TimelineFocus::Thread {
+            root_event_id: event_id(root)?,
+        };
+        let timeline = Arc::new(self.build_timeline(room_id, Some(focus)).await?);
+        map.insert(key, timeline.clone());
+        Ok(timeline)
+    }
+
     /// Drive a room timeline, calling `on_diffs` for every batch (first batch is a `Reset`
     /// with the current items). Runs until aborted; spawn and cancel to unsubscribe.
     pub async fn run_timeline(
         &self,
         room_id: &RoomId,
-        mut on_diffs: impl FnMut(Vec<VectorDiffDto<TimelineItemDto>>) + Send,
+        on_diffs: impl FnMut(Vec<VectorDiffDto<TimelineItemDto>>) + Send,
     ) -> AlloyResult<()> {
         let timeline = self.cached_timeline(room_id).await?;
+        self.drive_timeline(timeline, on_diffs).await
+    }
+
+    /// Drive one thread's timeline with the same batching as [`Self::run_timeline`].
+    pub async fn run_thread_timeline(
+        &self,
+        room_id: &RoomId,
+        root: &alloy_protocol::EventId,
+        on_diffs: impl FnMut(Vec<VectorDiffDto<TimelineItemDto>>) + Send,
+    ) -> AlloyResult<()> {
+        let timeline = self.cached_thread_timeline(room_id, root).await?;
+        self.drive_timeline(timeline, on_diffs).await
+    }
+
+    async fn drive_timeline(
+        &self,
+        timeline: Arc<Timeline>,
+        mut on_diffs: impl FnMut(Vec<VectorDiffDto<TimelineItemDto>>) + Send,
+    ) -> AlloyResult<()> {
         let me = self.client.user_id().map(|u| u.to_string());
         let map = move |it: &Arc<matrix_sdk_ui::timeline::TimelineItem>| {
             mapping::timeline_item_to_dto(it, me.as_deref())
@@ -149,7 +201,8 @@ impl AlloyClient {
     }
 
     /// Send a text message through the send queue (local echo appears in the timeline stream).
-    /// Returns the transaction id of the local echo.
+    /// Returns the transaction id of the local echo. With `in_thread_root` set, the message is
+    /// posted into that thread; otherwise it goes to the room timeline.
     pub async fn send_text(
         &self,
         room_id: &RoomId,
@@ -157,9 +210,13 @@ impl AlloyClient {
         markdown: bool,
         reply_to: Option<&alloy_protocol::EventId>,
         mentions: Option<&[UserId]>,
+        in_thread_root: Option<&alloy_protocol::EventId>,
     ) -> AlloyResult<String> {
         self.ensure_encryption_state(room_id).await?;
-        let timeline = self.cached_timeline(room_id).await?;
+        let timeline = match in_thread_root {
+            Some(root) => self.cached_thread_timeline(room_id, root).await?,
+            None => self.cached_timeline(room_id).await?,
+        };
         let content = build_content(body, markdown, mentions);
         let known_txns: std::collections::HashSet<String> = timeline
             .items()
@@ -168,7 +225,10 @@ impl AlloyClient {
             .filter_map(|i| i.as_event())
             .filter_map(|e| e.transaction_id().map(|t| t.to_string()))
             .collect();
-        let handle = match reply_to {
+        // In a threaded timeline the SDK adds the thread relation to replies, so the thread
+        // root is the default parent for a thread message without an explicit reply target.
+        let reply_parent = reply_to.or(in_thread_root);
+        let handle = match reply_parent {
             Some(parent) => timeline
                 .send_reply(content, event_id(parent)?)
                 .await

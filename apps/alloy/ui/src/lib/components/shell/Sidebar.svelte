@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Avatar, Badge } from '../common';
   import Icon from '$lib/icons/Icon.svelte';
-  import { Lock, Plus, Search } from '$lib/icons';
+  import { Compass, Lock, Plus, Search } from '$lib/icons';
   import { client } from '$lib/ipc';
   import { roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
   import { ui } from '$lib/stores/ui.svelte';
@@ -10,9 +10,10 @@
   interface Props {
     onselect?: (roomId: string) => void;
     onnew?: () => void;
+    onbrowse?: () => void;
     onsettings?: () => void;
   }
-  let { onselect, onnew, onsettings }: Props = $props();
+  let { onselect, onnew, onbrowse, onsettings }: Props = $props();
 
   let inviteBusy = $state<string | null>(null);
 
@@ -68,6 +69,9 @@
 <section class="sidebar" aria-label="Rooms">
   <header class="head">
     <h2 class="scope" title={scopeTitle}>{scopeTitle}</h2>
+    <button type="button" class="icon" aria-label="Browse public rooms" title="Browse public rooms" onclick={() => onbrowse?.()}>
+      <Icon icon={Compass} size={20} />
+    </button>
     <button type="button" class="icon" aria-label="New room" title="New room" onclick={() => onnew?.()}>
       <Icon icon={Plus} size={20} />
     </button>

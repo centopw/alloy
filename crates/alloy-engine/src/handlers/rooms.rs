@@ -113,6 +113,35 @@ impl GroupHandler for RoomsHandler {
                 let details = client.room_details(&room_id).await.map_err(map_err)?;
                 Ok(EngineResponse::RoomDetailsRetrieved { details })
             }
+            EngineCommand::SearchPublicRooms {
+                account_id,
+                query,
+                server,
+                since,
+                limit,
+            } => {
+                let client = ctx.active_client().await?;
+                if client.user_id() != Some(account_id.0.as_str()) {
+                    return Err(EngineError::not_found(format!(
+                        "account {} is not active",
+                        account_id.0
+                    )));
+                }
+                let page = client
+                    .search_public_rooms(
+                        query.as_deref(),
+                        server.as_deref(),
+                        since.as_deref(),
+                        limit,
+                    )
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::PublicRooms {
+                    rooms: page.rooms,
+                    next_batch: page.next_batch,
+                    total_estimate: page.total_estimate,
+                })
+            }
             _ => Err(EngineError::invalid_argument(format!(
                 "Command '{}' does not belong to Rooms group",
                 name

@@ -2,8 +2,9 @@
   import type { TimelineItemDto } from '$lib/generated';
   import { Avatar, UserName } from '../common';
   import Icon from '$lib/icons/Icon.svelte';
-  import { Reply, Pencil, Trash2, Smile, Ellipsis, Copy } from '$lib/icons';
+  import { Reply, Pencil, Trash2, Smile, Ellipsis, Copy, MessageSquare } from '$lib/icons';
   import { timelineStore } from '$lib/stores/timeline.svelte';
+  import { threadStore } from '$lib/stores/thread.svelte';
   import { sanitizeHtml } from '$lib/content/html';
   import { formatDay, formatTime } from '$lib/content/format';
   import { QUICK_REACTIONS } from '$lib/content/emoji';
@@ -14,8 +15,10 @@
   interface Props {
     item: TimelineItemDto;
     prev: TimelineItemDto | null;
+    /** Rendered inside the thread panel: room-level reply and thread actions are hidden. */
+    inThread?: boolean;
   }
-  let { item, prev }: Props = $props();
+  let { item, prev, inThread = false }: Props = $props();
 
   // Same sender within this window continues the previous message as a compact row.
   const GROUP_MS = 7 * 60_000;
@@ -53,6 +56,11 @@
     morePos = { x: Math.max(8, Math.min(r.right - 160, window.innerWidth - 168)), y: r.bottom + 6 };
     picker = false;
     more = !more;
+  }
+
+  function openThread() {
+    const roomId = timelineStore.roomId;
+    if (roomId && item.event_id) void threadStore.open(roomId, item.event_id);
   }
 
   const html = $derived(
@@ -156,6 +164,12 @@
         </div>
       {/if}
 
+      {#if item.thread_summary && !inThread}
+        <button type="button" class="thread-chip" onclick={openThread} aria-label="Open thread, {item.thread_summary.reply_count} {item.thread_summary.reply_count === 1 ? 'reply' : 'replies'}">
+          <Icon icon={MessageSquare} size={16} />
+          <span>{item.thread_summary.reply_count} {item.thread_summary.reply_count === 1 ? 'reply' : 'replies'}</span>
+        </button>
+      {/if}
       {#if (item.reactions ?? []).length > 0}
         <div class="reactions">
           {#each item.reactions ?? [] as r (r.key)}
@@ -179,9 +193,16 @@
         <button type="button" aria-label="React" title="React" onclick={togglePicker}>
           <Icon icon={Smile} size={16} />
         </button>
-        <button type="button" aria-label="Reply" title="Reply" onclick={() => timelineStore.startReply(item)}>
-          <Icon icon={Reply} size={16} />
-        </button>
+        {#if !inThread}
+          <button type="button" aria-label="Reply" title="Reply" onclick={() => timelineStore.startReply(item)}>
+            <Icon icon={Reply} size={16} />
+          </button>
+        {/if}
+        {#if item.event_id && !inThread}
+          <button type="button" aria-label="Reply in thread" title="Reply in thread" onclick={openThread}>
+            <Icon icon={MessageSquare} size={16} />
+          </button>
+        {/if}
         {#if canEdit}
           <button type="button" aria-label="Edit" title="Edit" onclick={() => timelineStore.startEdit(item)}>
             <Icon icon={Pencil} size={16} />
@@ -389,6 +410,27 @@
     padding: 2px 0;
     font: inherit;
     text-decoration: underline;
+  }
+  .thread-chip {
+    display: inline-flex;
+    gap: var(--alloy-spacing-scale-1);
+    align-items: center;
+    margin-top: var(--alloy-spacing-scale-1);
+    padding: 2px var(--alloy-spacing-scale-2);
+    border: 0;
+    border-radius: var(--alloy-radii-md);
+    background: transparent;
+    color: var(--alloy-color-accent-primary);
+    font: inherit;
+    font-size: var(--alloy-typography-size-sm);
+    cursor: pointer;
+  }
+  .thread-chip:hover {
+    background: var(--alloy-color-surface-hover);
+  }
+  .thread-chip:focus-visible {
+    outline: 2px solid var(--alloy-color-accent-primary);
+    outline-offset: 1px;
   }
   .reactions {
     display: flex;

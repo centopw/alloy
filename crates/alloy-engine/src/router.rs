@@ -34,9 +34,11 @@ impl CommandGroup {
             | EngineCommand::LeaveRoom { .. }
             | EngineCommand::CreateRoom { .. }
             | EngineCommand::GetRoomMembers { .. }
-            | EngineCommand::GetRoomDetails { .. } => CommandGroup::Rooms,
+            | EngineCommand::GetRoomDetails { .. }
+            | EngineCommand::SearchPublicRooms { .. } => CommandGroup::Rooms,
 
             EngineCommand::SubscribeTimeline { .. }
+            | EngineCommand::SubscribeThread { .. }
             | EngineCommand::PaginateBackwards { .. }
             | EngineCommand::SendText { .. }
             | EngineCommand::EditMessage { .. }
