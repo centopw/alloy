@@ -6,7 +6,9 @@
   import { timelineStore } from '$lib/stores/timeline.svelte';
   import { threadStore } from '$lib/stores/thread.svelte';
   import { sanitizeHtml } from '$lib/content/html';
-  import { formatDay, formatTime } from '$lib/content/format';
+  import { formatDay, formatTime, isEmojiOnly } from '$lib/content/format';
+  import { isHiddenState, stateEventSummary } from '$lib/content/stateEvents';
+  import { prefs } from '$lib/stores/prefs.svelte';
   import { QUICK_REACTIONS } from '$lib/content/emoji';
   import { interceptLinks } from '$lib/platform/links';
   import { portal } from '$lib/platform/portal';
@@ -26,17 +28,34 @@
 
   // Same sender within this window continues the previous message as a compact row.
   const GROUP_MS = 7 * 60_000;
+  // A removed placeholder hidden by prefs neither joins nor breaks a group.
   const isMessage = (i: TimelineItemDto | null) =>
-    !!i && ['TextMessage', 'Media', 'Poll', 'Redacted', 'UnableToDecrypt'].includes(i.content.kind);
+    !!i &&
+    ['TextMessage', 'Media', 'Poll', 'Redacted', 'UnableToDecrypt'].includes(i.content.kind) &&
+    !(i.content.kind === 'Redacted' && !prefs.showRemovedPlaceholder);
 
   const kind = $derived(item.content.kind);
+  /** Rows the prefs hide entirely: removed placeholders and state events switched off. */
+  const hidden = $derived(
+    (item.content.kind === 'Redacted' && !prefs.showRemovedPlaceholder) ||
+      (item.content.kind === 'RoomState' && isHiddenState(item.content.data.state_type, prefs))
+  );
   const grouped = $derived(
     isMessage(item) &&
       isMessage(prev) &&
       prev!.sender === item.sender &&
       item.timestamp_millis - prev!.timestamp_millis < GROUP_MS
   );
-  const time = $derived(formatTime(item.timestamp_millis));
+  const layout = $derived(prefs.messageLayout);
+  const time = $derived(formatTime(item.timestamp_millis, prefs.timeFormat));
+  const avatarSize = $derived(layout === 'bubbles' ? 28 : 40);
+  /** IRC always shows the name column; bubbles omit the head on your own messages. */
+  const showHead = $derived(layout === 'irc' || (!grouped && !(layout === 'bubbles' && item.is_own)));
+  /** A short run of emoji renders large when the pref is on. */
+  const jumbo = $derived(
+    item.content.kind === 'TextMessage' && prefs.bigEmoji && isEmojiOnly(item.content.data.body)
+  );
+  const stateSummary = $derived(item.content.kind === 'RoomState' ? stateEventSummary(item.content.data) : null);
   const senderName = $derived(item.sender_display_name ?? item.sender);
   const failed = $derived(item.send_state.status === 'Failed');
   const sending = $derived(item.send_state.status === 'Sending');
@@ -117,109 +136,116 @@
   }
 </script>
 
-{#if item.content.kind === 'DayDivider'}
+{#if !hidden}
+  {#if item.content.kind === 'DayDivider'}
   <div class="divider"><span>{formatDay(item.content.data.timestamp_millis)}</span></div>
 {:else if item.content.kind === 'RoomState'}
   <div class="system">
-    {item.content.data.state_type === 'membership' ? 'Membership changed' : 'Room updated'}
+    {stateSummary ?? (item.content.data.state_type === 'membership' ? 'Membership changed' : 'Room updated')}
   </div>
 {:else if item.content.kind === 'Virtual'}
   <div class="spacer"></div>
 {:else}
-  <div class="row" class:grouped class:own={item.is_own} data-event-id={item.event_id ?? undefined} bind:this={rowEl} use:contextmenu={menuItems}>
+  <div class="row" class:grouped class:own={item.is_own} class:jumbo data-layout={layout} data-event-id={item.event_id ?? undefined} bind:this={rowEl} use:contextmenu={menuItems}>
     <div class="gutter">
-      {#if grouped}
+      {#if layout === 'irc' || (layout === 'modern' && grouped)}
         <span class="gutter-time">{time}</span>
-      {:else}
+      {:else if layout === 'modern' || (!grouped && !item.is_own)}
         <button type="button" class="avatar-btn" aria-label="Show profile of {senderName}" onclick={openSenderProfile}>
           <Avatar
             userId={item.sender}
             displayName={senderName}
             src={item.sender_avatar_url ?? null}
-            size={40}
+            size={avatarSize}
           />
         </button>
       {/if}
     </div>
 
     <div class="stack">
-      {#if item.reply_to}
-        <div class="reply">
-          <UserName userId={item.reply_to.sender} displayName={item.reply_to.sender_display_name} roomId={timelineStore.roomId} interactive />
-          <span class="reply-body">{quote(item.reply_to)}</span>
-        </div>
-      {/if}
-
-      {#if !grouped}
+      {#if showHead}
         <div class="head">
           <UserName userId={item.sender} displayName={item.sender_display_name} roomId={timelineStore.roomId} interactive />
           <span class="ts">{time}</span>
         </div>
       {/if}
 
-      {#if item.content.kind === 'TextMessage'}
-        {#if html}
-          <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-          <div class="body html" onclick={interceptLinks} onauxclick={interceptLinks}>{@html html}{#if item.edited}<span class="edited">(edited)</span>{/if}</div>
+      <div class="bubble">
+        {#if item.reply_to}
+          <div class="reply">
+            <UserName userId={item.reply_to.sender} displayName={item.reply_to.sender_display_name} roomId={timelineStore.roomId} interactive />
+            <span class="reply-body">{quote(item.reply_to)}</span>
+          </div>
+        {/if}
+
+        {#if item.content.kind === 'TextMessage'}
+          {#if html}
+            <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+            <div class="body html" onclick={interceptLinks} onauxclick={interceptLinks}>{@html html}{#if item.edited}<span class="edited">(edited)</span>{/if}</div>
+          {:else}
+            <div class="body">{item.content.data.body}{#if item.edited}<span class="edited">(edited)</span>{/if}</div>
+          {/if}
+        {:else if item.content.kind === 'Media'}
+          <div class="block">
+            <MediaView
+              uri={item.content.data.uri}
+              mimeType={item.content.data.mime_type}
+              body={item.content.data.body ?? ''}
+              mediaKind={item.content.data.media_kind ?? 'file'}
+              sizeBytes={item.content.data.size_bytes}
+              width={item.content.data.width}
+              height={item.content.data.height}
+              thumbnailUri={item.content.data.thumbnail_uri}
+            />
+            {#if item.content.data.media_kind === 'image' && item.content.data.body}
+              <div class="body caption">{item.content.data.body}{#if item.edited}<span class="edited">(edited)</span>{/if}</div>
+            {/if}
+          </div>
+        {:else if item.content.kind === 'Redacted'}
+          <div class="body muted">Message deleted</div>
+        {:else if item.content.kind === 'UnableToDecrypt'}
+          <div class="body muted">Waiting for this message. Verify this device to read it.</div>
+        {:else if item.content.kind === 'Poll'}
+          <div class="block"><PollView {item} poll={item.content.data} /></div>
         {:else}
-          <div class="body">{item.content.data.body}{#if item.edited}<span class="edited">(edited)</span>{/if}</div>
+          <div class="body muted">This message type is not supported yet.</div>
         {/if}
-      {:else if item.content.kind === 'Media'}
-        <MediaView
-          uri={item.content.data.uri}
-          mimeType={item.content.data.mime_type}
-          body={item.content.data.body ?? ''}
-          mediaKind={item.content.data.media_kind ?? 'file'}
-          sizeBytes={item.content.data.size_bytes}
-          width={item.content.data.width}
-          height={item.content.data.height}
-          thumbnailUri={item.content.data.thumbnail_uri}
-        />
-        {#if item.content.data.media_kind === 'image' && item.content.data.body}
-          <div class="body caption">{item.content.data.body}{#if item.edited}<span class="edited">(edited)</span>{/if}</div>
+
+        {#if item.is_own && sending}
+          <div class="state">Sending</div>
+        {:else if failed}
+          <div class="failed-actions">
+            <span class="err">Failed to send</span>
+            <button type="button" onclick={() => timelineStore.retry(item)}>Retry</button>
+            <button type="button" onclick={() => timelineStore.cancel(item)}>Discard</button>
+          </div>
         {/if}
-      {:else if item.content.kind === 'Redacted'}
-        <div class="body muted">Message deleted</div>
-      {:else if item.content.kind === 'UnableToDecrypt'}
-        <div class="body muted">Waiting for this message. Verify this device to read it.</div>
-      {:else if item.content.kind === 'Poll'}
-        <PollView {item} poll={item.content.data} />
-      {:else}
-        <div class="body muted">This message type is not supported yet.</div>
-      {/if}
 
-      {#if item.is_own && sending}
-        <div class="state">Sending</div>
-      {:else if failed}
-        <div class="failed-actions">
-          <span class="err">Failed to send</span>
-          <button type="button" onclick={() => timelineStore.retry(item)}>Retry</button>
-          <button type="button" onclick={() => timelineStore.cancel(item)}>Discard</button>
-        </div>
-      {/if}
+        {#if item.thread_summary && !inThread}
+          <button type="button" class="thread-chip" onclick={openThread} aria-label="Open thread, {item.thread_summary.reply_count} {item.thread_summary.reply_count === 1 ? 'reply' : 'replies'}">
+            <Icon icon={MessageSquare} size={16} />
+            <span>{item.thread_summary.reply_count} {item.thread_summary.reply_count === 1 ? 'reply' : 'replies'}</span>
+          </button>
+        {/if}
+        {#if (item.reactions ?? []).length > 0}
+          <div class="reactions">
+            {#each item.reactions ?? [] as r (r.key)}
+              <button
+                type="button"
+                class="chip"
+                class:mine={r.by_me}
+                onclick={() => react(r.key)}
+                aria-pressed={r.by_me}
+                aria-label="{r.key} {r.count}"
+              >
+                <span>{r.key}</span><span class="count">{r.count}</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
 
-      {#if item.thread_summary && !inThread}
-        <button type="button" class="thread-chip" onclick={openThread} aria-label="Open thread, {item.thread_summary.reply_count} {item.thread_summary.reply_count === 1 ? 'reply' : 'replies'}">
-          <Icon icon={MessageSquare} size={16} />
-          <span>{item.thread_summary.reply_count} {item.thread_summary.reply_count === 1 ? 'reply' : 'replies'}</span>
-        </button>
-      {/if}
-      {#if (item.reactions ?? []).length > 0}
-        <div class="reactions">
-          {#each item.reactions ?? [] as r (r.key)}
-            <button
-              type="button"
-              class="chip"
-              class:mine={r.by_me}
-              onclick={() => react(r.key)}
-              aria-pressed={r.by_me}
-              aria-label="{r.key} {r.count}"
-            >
-              <span>{r.key}</span><span class="count">{r.count}</span>
-            </button>
-          {/each}
-        </div>
-      {/if}
+        <span class="bubble-time">{time}</span>
+      </div>
     </div>
 
     {#if canAct}
@@ -260,6 +286,7 @@
 
     {/if}
   </div>
+{/if}
 {/if}
 
 <style>
@@ -322,6 +349,7 @@
     gap: var(--alloy-spacing-scale-2);
     min-width: 0;
     margin-bottom: 2px;
+    order: -1;
     padding-left: var(--alloy-spacing-scale-4);
     font-size: var(--alloy-typography-size-sm);
   }
@@ -588,5 +616,101 @@
   }
   .spacer {
     height: 1px;
+  }
+
+  /* Message layouts. Modern is the default; IRC and bubbles are chosen with prefs.messageLayout. */
+  .bubble {
+    display: contents;
+  }
+  .bubble-time {
+    display: none;
+  }
+  .block {
+    min-width: 0;
+  }
+  .row.jumbo .body {
+    font-size: 2.5em;
+    line-height: 1.2;
+  }
+
+  .row[data-layout='irc'] {
+    --irc-name-width: 9rem;
+  }
+  .row[data-layout='irc'] .gutter {
+    width: 4.5rem;
+  }
+  .row[data-layout='irc'] .gutter-time {
+    padding-top: 0;
+    opacity: 1;
+  }
+  .row[data-layout='irc'] .stack {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: baseline;
+  }
+  .row[data-layout='irc'] .head {
+    flex: 0 0 var(--irc-name-width);
+    min-width: 0;
+    overflow: hidden;
+    padding-right: var(--alloy-spacing-scale-2);
+  }
+  .row[data-layout='irc'] .ts {
+    display: none;
+  }
+  .row[data-layout='irc'] .body {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .row[data-layout='irc'] .reply,
+  .row[data-layout='irc'] .block,
+  .row[data-layout='irc'] .state,
+  .row[data-layout='irc'] .failed-actions,
+  .row[data-layout='irc'] .thread-chip,
+  .row[data-layout='irc'] .reactions {
+    flex: 0 0 calc(100% - var(--irc-name-width));
+    margin-left: var(--irc-name-width);
+    min-width: 0;
+  }
+
+  .row[data-layout='bubbles'] .gutter {
+    width: 36px;
+  }
+  .row.own[data-layout='bubbles'] .gutter {
+    display: none;
+  }
+  .row[data-layout='bubbles'] .stack {
+    align-items: flex-start;
+  }
+  .row.own[data-layout='bubbles'] .stack {
+    align-items: flex-end;
+  }
+  .row[data-layout='bubbles'] .bubble {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-width: 70%;
+    padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
+    border-radius: var(--alloy-radii-lg);
+    background: var(--alloy-color-surface-subtle);
+  }
+  .row.own[data-layout='bubbles'] .bubble {
+    background: var(--alloy-color-accent-subtle);
+  }
+  .row.grouped[data-layout='bubbles']:not(.own) .bubble {
+    border-top-left-radius: var(--alloy-radii-sm);
+  }
+  .row.grouped.own[data-layout='bubbles'] .bubble {
+    border-top-right-radius: var(--alloy-radii-sm);
+  }
+  .row[data-layout='bubbles']:hover .bubble-time,
+  .row[data-layout='bubbles']:focus-within .bubble-time {
+    display: block;
+    text-align: right;
+    font-size: var(--alloy-typography-size-xs);
+    color: var(--alloy-color-text-muted);
+  }
+  .row.jumbo[data-layout='bubbles'] .bubble {
+    padding: 0;
+    background: none;
   }
 </style>

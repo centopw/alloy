@@ -3,12 +3,16 @@
   import { Icon, X, ChevronLeft } from '$lib/icons';
   import { session } from '$lib/stores/session.svelte';
   import { pushBack } from '$lib/platform/backstack';
-  import MyAccount from './sections/MyAccount.svelte';
-  import Appearance from './sections/Appearance.svelte';
-  import Security from './sections/Security.svelte';
-  import Notifications from './sections/Notifications.svelte';
-  import Advanced from './sections/Advanced.svelte';
-  import About from './sections/About.svelte';
+import Account from './sections/Account.svelte';
+import Devices from './sections/Devices.svelte';
+import Appearance from './sections/Appearance.svelte';
+import Notifications from './sections/Notifications.svelte';
+import Preferences from './sections/Preferences.svelte';
+import Keyboard from './sections/Keyboard.svelte';
+import SidebarPrefs from './sections/SidebarPrefs.svelte';
+import SecurityPrivacy from './sections/SecurityPrivacy.svelte';
+import Encryption from './sections/Encryption.svelte';
+import HelpAbout from './sections/HelpAbout.svelte';
 
   interface Props {
     open: boolean;
@@ -16,14 +20,26 @@
   }
   let { open, onclose }: Props = $props();
 
-  type Section = 'account' | 'appearance' | 'security' | 'notifications' | 'advanced' | 'about';
+  type Section =
+    | 'account'
+    | 'devices'
+    | 'appearance'
+    | 'notifications'
+    | 'preferences'
+    | 'keyboard'
+    | 'sidebar'
+    | 'security-privacy'
+    | 'encryption'
+    | 'help-about';
 
   const GROUPS: { label: string; items: { id: Section; label: string }[] }[] = [
     {
       label: 'User settings',
       items: [
-        { id: 'account', label: 'My Account' },
-        { id: 'security', label: 'Security' },
+        { id: 'account', label: 'Account' },
+        { id: 'devices', label: 'Devices' },
+        { id: 'security-privacy', label: 'Security & Privacy' },
+        { id: 'encryption', label: 'Encryption' },
       ],
     },
     {
@@ -31,12 +47,14 @@
       items: [
         { id: 'appearance', label: 'Appearance' },
         { id: 'notifications', label: 'Notifications' },
-        { id: 'advanced', label: 'Advanced' },
+        { id: 'preferences', label: 'Preferences' },
+        { id: 'keyboard', label: 'Keyboard' },
+        { id: 'sidebar', label: 'Sidebar' },
       ],
     },
     {
       label: 'Info',
-      items: [{ id: 'about', label: 'About' }],
+      items: [{ id: 'help-about', label: 'Help & About' }],
     },
   ];
 
@@ -175,17 +193,25 @@
         <div class="scroll">
           <div class="column">
             {#if section === 'account'}
-              <MyAccount />
+              <Account {onclose} />
+            {:else if section === 'devices'}
+              <Devices {onclose} />
             {:else if section === 'appearance'}
               <Appearance />
-            {:else if section === 'security'}
-              <Security {onclose} />
             {:else if section === 'notifications'}
               <Notifications />
-            {:else if section === 'advanced'}
-              <Advanced />
+            {:else if section === 'preferences'}
+              <Preferences />
+            {:else if section === 'keyboard'}
+              <Keyboard />
+            {:else if section === 'sidebar'}
+              <SidebarPrefs />
+            {:else if section === 'security-privacy'}
+              <SecurityPrivacy />
+            {:else if section === 'encryption'}
+              <Encryption {onclose} />
             {:else}
-              <About />
+              <HelpAbout />
             {/if}
           </div>
         </div>

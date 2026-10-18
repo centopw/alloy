@@ -22,6 +22,9 @@
   import { ui } from '$lib/stores/ui.svelte';
   import { threadStore } from '$lib/stores/thread.svelte';
   import { verification } from '$lib/stores/verification.svelte';
+  import { prefs, installPrefsEffects } from '$lib/stores/prefs.svelte';
+  import { notifier } from '$lib/stores/notifier.svelte';
+  import { notificationSettings } from '$lib/stores/notificationSettings.svelte';
 
   let paletteOpen = $state(false);
   let settingsOpen = $state(false);
@@ -69,11 +72,17 @@
   const sideLayout = $derived<'column' | 'overlay' | 'none'>(threadMode !== 'none' ? threadMode : infoMode);
 
   onMount(() => {
+    const teardownPrefs = installPrefsEffects();
+    void prefs.load();
     verification.listen();
     void roomsStore.start();
     void verification.refreshRecovery();
+    void notificationSettings.load();
+    notifier.start();
     return () => {
+      notifier.stop();
       void roomsStore.stop();
+      teardownPrefs();
     };
   });
 

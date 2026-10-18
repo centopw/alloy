@@ -2,7 +2,8 @@
   import { client } from '$lib/ipc';
   import { formatBytes } from '$lib/content/format';
   import { localFileUrl } from '$lib/platform/files';
-  import MediaViewer from './MediaViewer.svelte';
+  import { prefs } from '$lib/stores/prefs.svelte';
+  import MediaViewer, { fetchMediaFile } from './MediaViewer.svelte';
 
   interface Props {
     uri: string;
@@ -39,6 +40,42 @@
   const hasThumb = $derived(thumbSource !== null && !failed);
   const aspect = $derived(width && height ? `${width} / ${height}` : '4 / 3');
 
+  /** GIFs stay on their first frame unless autoplay is on; the viewer still plays them. */
+  const still = $derived(visual && mimeType === 'image/gif' && !prefs.autoplayMedia);
+  let playUrl = $state<string | null>(null);
+  let canvasEl = $state<HTMLCanvasElement | undefined>();
+  const inlineVideo = $derived(video && prefs.autoplayMedia && playUrl !== null);
+
+  // Autoplay is best-effort: if the file cannot be fetched, the poster stays and the viewer still opens.
+  $effect(() => {
+    if (!video || !prefs.autoplayMedia) return;
+    let cancelled = false;
+    playUrl = null;
+    fetchMediaFile(uri, mimeType)
+      .then((url) => {
+        if (!cancelled) playUrl = url;
+      })
+      .catch(() => {
+        if (!cancelled) playUrl = null;
+      });
+    return () => {
+      cancelled = true;
+    };
+  });
+
+  $effect(() => {
+    const source = src;
+    const canvas = canvasEl;
+    if (!still || source === null || !canvas) return;
+    const frame = new Image();
+    frame.onload = () => {
+      canvas.width = frame.naturalWidth;
+      canvas.height = frame.naturalHeight;
+      canvas.getContext('2d')?.drawImage(frame, 0, 0);
+    };
+    frame.src = source;
+  });
+
   $effect(() => {
     const source = thumbSource;
     if (source === null) return;
@@ -67,14 +104,19 @@
 </script>
 
 {#snippet frameContent()}
-  {#if src}
+  {#if inlineVideo}
+    <!-- svelte-ignore a11y_media_has_caption -->
+    <video src={playUrl} autoplay muted loop playsinline aria-label={body || 'Video'}></video>
+  {:else if src && still}
+    <canvas bind:this={canvasEl} aria-label={body || 'Animated image, paused'}></canvas>
+  {:else if src}
     <img {src} alt={body} loading="lazy" />
   {:else}
     <div class="placeholder" aria-busy="true"></div>
   {/if}
 {/snippet}
 
-{#if hasThumb}
+{#if hasThumb || inlineVideo}
   {#if openable}
     <button
       class="frame frame-open"
@@ -137,7 +179,9 @@
     outline: 2px solid var(--alloy-color-accent-primary);
     outline-offset: 2px;
   }
-  img {
+  img,
+  video,
+  canvas {
     width: 100%;
     height: 100%;
     object-fit: cover;

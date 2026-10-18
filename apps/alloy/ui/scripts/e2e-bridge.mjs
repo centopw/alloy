@@ -259,6 +259,33 @@ try {
   await new Promise((r) => setTimeout(r, 600));
   await uxShot(page, 'settings');
   await page.waitForSelector('[role=dialog]');
+
+  step('settings change real behaviour: message layout, font size, join/leave events');
+  const openPage = async (label) => {
+    await page.evaluate((l) => [...document.querySelectorAll('[role=dialog] nav button, [role=dialog] button')].find((b) => b.textContent.trim() === l).click(), label);
+    await new Promise((r) => setTimeout(r, 500));
+  };
+  await openPage('Appearance');
+  await page.evaluate(() => [...document.querySelectorAll('[role=dialog] label')].find((l) => l.textContent.includes('Bubbles')).click());
+  await page.waitForFunction(() => document.documentElement.getAttribute('data-message-layout') === 'bubbles', { timeout: 5000 });
+  await page.evaluate(() => { const sel = [...document.querySelectorAll('[role=dialog] select')].find((s) => [...s.options].some((o) => o.value === '120')); sel.value = '120'; sel.dispatchEvent(new Event('change', { bubbles: true })); });
+  await page.waitForFunction(() => document.documentElement.style.fontSize === '120%', { timeout: 5000 });
+  await uxShot(page, 'settings-appearance');
+  await openPage('Preferences');
+  await uxShot(page, 'settings-preferences');
+  await openPage('Notifications');
+  await page.waitForFunction(() => document.querySelector('[role=dialog]').innerText.includes('Direct chats'), { timeout: 15000 });
+  await uxShot(page, 'settings-notifications');
+  await openPage('Devices');
+  await page.waitForFunction(() => document.querySelector('[role=dialog]').innerText.includes('This device'), { timeout: 15000 });
+  await uxShot(page, 'settings-devices');
+  await openPage('Encryption');
+  await page.waitForFunction(() => document.querySelector('[role=dialog]').innerText.includes('Session'), { timeout: 15000 });
+  await openPage('Keyboard');
+  await uxShot(page, 'settings-keyboard');
+  await openPage('Account');
+  await page.waitForFunction(() => document.querySelector('[role=dialog] input')?.value?.length > 0, { timeout: 15000 });
+  await uxShot(page, 'settings-account');
   await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Sign out').click());
   await page.waitForSelector('input[placeholder*="matrix.org"]', { timeout: 30000 });
   console.log('E2E OK');

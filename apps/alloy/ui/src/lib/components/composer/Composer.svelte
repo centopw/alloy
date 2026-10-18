@@ -3,6 +3,7 @@
   import { threadStore } from '$lib/stores/thread.svelte';
   import { roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
   import { client } from '$lib/ipc';
+  import { prefs } from '$lib/stores/prefs.svelte';
   import Icon from '$lib/icons/Icon.svelte';
   import { ChartBar, Plus, Smile, X } from '$lib/icons';
   import { canPickFiles, pickFile } from '$lib/platform/files';
@@ -52,9 +53,11 @@
     return active && active.id === roomId ? roomTitle(active) : null;
   });
   // Textarea placeholders wrap instead of truncating, so long room names are cut here.
-  const placeholder = $derived(
-    roomName ? `Message ${roomName.length > 28 ? `${roomName.slice(0, 27)}…` : roomName}` : 'Message'
-  );
+  // With Enter as a newline, the placeholder states the send shortcut.
+  const placeholder = $derived.by(() => {
+    const base = roomName ? `Message ${roomName.length > 28 ? `${roomName.slice(0, 27)}…` : roomName}` : 'Message';
+    return prefs.enterToSend ? base : `${base}. Ctrl+Enter or Cmd+Enter to send`;
+  });
   const mentionKey = (m: ActiveMention) => `${m.start}:${m.query}`;
   const candidates = $derived(
     mention ? rankMembers(membersStore.membersOf(roomId), mention.query, MENTION_LIMIT) : []
@@ -86,14 +89,28 @@
     untrack(() => void membersStore.loadMembers(roomId).catch(() => {}));
   });
 
+  // Typing notices follow the sendTyping preference. When it is off nothing is sent, and any
+  // local typing timer or flag is dropped without a network call.
   function setTyping(on: boolean) {
+    if (!prefs.sendTyping) return;
     if (typing === on) return;
     typing = on;
     void client.setTyping(roomId, on).catch(() => {});
   }
 
+  function cancelTypingLocal() {
+    clearTimeout(typingTimer);
+    typingTimer = undefined;
+    typing = false;
+  }
+
+  $effect(() => {
+    if (!prefs.sendTyping) cancelTypingLocal();
+  });
+
   function onInput() {
     resize();
+    if (!prefs.sendTyping) return;
     if (!text.trim()) return setTyping(false);
     setTyping(true);
     clearTimeout(typingTimer);
@@ -184,7 +201,8 @@
         return;
       }
     }
-    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+    // Enter sends by default. With enterToSend off, Enter inserts a newline and Ctrl/Cmd+Enter sends.
+    if (e.key === 'Enter' && !e.isComposing && (prefs.enterToSend ? !e.shiftKey : e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       void submit();
     } else if (e.key === 'Escape') {
@@ -257,7 +275,7 @@
       bind:value={text}
       rows="1"
       {placeholder}
-      aria-label="Message"
+      aria-label={prefs.enterToSend ? 'Message' : 'Message. Press Ctrl+Enter or Cmd+Enter to send'}
       data-shortcut="Enter"
       role="combobox"
       aria-autocomplete="list"

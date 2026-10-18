@@ -2,6 +2,8 @@ import { client, applyDiff } from '../ipc/index.js';
 import type { EngineEvent, RoomSummary } from '../generated/index.js';
 import { FrameBatcher, Subscription } from './subscription.js';
 import { expect } from './errors.js';
+import { prefs } from './prefs.svelte.js';
+import { roomNotify } from './roomNotify.svelte.js';
 import { ui } from './ui.svelte.js';
 
 export type RoomFilter = 'all' | 'unread' | 'direct' | 'rooms';
@@ -30,10 +32,13 @@ class RoomsStore {
     const q = this.query.trim().toLowerCase();
     // A scope whose space is gone (left, or list reset) falls back to Home.
     const inScope = ui.scope !== 'home' && this.rooms.some((r) => r.id === ui.scope && r.is_space);
+    // Home without "show all rooms" lists only rooms that belong to no joined space.
+    const homeOnly = ui.scope === 'home' && !prefs.homeShowAllRooms;
     return this.rooms.filter((r) => {
       if (r.membership !== 'Joined' && r.membership !== 'Invited') return false;
       if (r.is_space) return false;
       if (inScope && !(this.spaceParents[r.id] ?? []).includes(ui.scope)) return false;
+      if (homeOnly && (this.spaceParents[r.id] ?? []).length > 0) return false;
       if (this.filter === 'unread' && r.unread_notifications.notification_count === 0) return false;
       if (this.filter === 'direct' && !r.is_direct) return false;
       if (this.filter === 'rooms' && r.is_direct) return false;
@@ -98,7 +103,7 @@ class RoomsStore {
     this.spacesKey = '';
     this.spaceParents = {};
     this.unlisten?.();
-    this.unlisten = null;
+    roomNotify.clear();
     const id = this.sub?.subscriptionId;
     this.sub?.close();
     this.sub = null;

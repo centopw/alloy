@@ -12,6 +12,12 @@ import type {
   RoomMemberDto,
   RoomMembership,
   UserProfileDto,
+  NotificationLevel,
+  NotificationSettingsDto,
+  OwnProfileDto,
+  DeviceDto,
+  SessionInfoDto,
+  EngineError,
 } from '../generated/index.js';
 import type { Transport, EventHandler, Unsubscribe } from './transport.js';
 
@@ -22,6 +28,47 @@ const MOCK_ACCOUNT: Account = {
   avatar_url: null,
   homeserver_url: 'https://matrix.alloy.chat',
 };
+
+const MOCK_DEVICE_ID = 'MOCKDEVICE';
+
+const MOCK_DEVICES: DeviceDto[] = [
+  {
+    device_id: MOCK_DEVICE_ID,
+    display_name: 'Alloy Desktop (macOS)',
+    last_seen_ts: 1_792_314_000_000,
+    last_seen_ip: '192.0.2.14',
+    is_current: true,
+    verified: true,
+  },
+  {
+    device_id: 'MOCKPHONE01',
+    display_name: 'Alloy Android',
+    last_seen_ts: 1_792_268_100_000,
+    last_seen_ip: '203.0.113.42',
+    is_current: false,
+    verified: false,
+  },
+  {
+    device_id: 'MOCKLAPTOP02',
+    display_name: 'Old ThinkPad (Firefox)',
+    last_seen_ts: 1_788_090_120_000,
+    last_seen_ip: null,
+    is_current: false,
+    verified: true,
+  },
+];
+
+const MOCK_SESSION_INFO: SessionInfoDto = {
+  device_id: MOCK_DEVICE_ID,
+  ed25519_key: 'Hq3sZ0tYvW8kXb1RmN5pLc7dAeF2gJu4oIy6TrBwCxE',
+  curve25519_key: 'Qm8fLr2NdV6wYc0ZkH4sTa9BpXe1UjG7oRi3KlWvCyA',
+  cross_signing_ready: true,
+  backup_enabled: true,
+};
+
+function invalidArgument(message: string): EngineError {
+  return { code: 'invalid_argument', message };
+}
 
 const MOCK_MEMBERS: RoomMemberDto[] = [
   { user_id: '@alice:alloy.chat', display_name: 'Alice', avatar_url: null, power_level: 100, membership: 'Joined' },
@@ -188,6 +235,28 @@ export class MockTransport implements Transport {
   private topics = new Map<string, string>();
   private notes = new Map<string, string>();
   private dmRooms = new Map<string, string>([['@bob:alloy.chat', '!bob:alloy.chat']]);
+  private notificationSettings: NotificationSettingsDto = {
+    one_to_one: 'All',
+    group: 'Mentions',
+    room_mention: true,
+    user_mention: true,
+    invite: true,
+  };
+  private roomNotificationLevels = new Map<string, NotificationLevel>();
+  private ownProfile: OwnProfileDto = {
+    user_id: MOCK_ACCOUNT.user_id,
+    display_name: MOCK_ACCOUNT.display_name,
+    avatar_url: MOCK_ACCOUNT.avatar_url,
+    device_id: MOCK_DEVICE_ID,
+    homeserver: MOCK_ACCOUNT.homeserver_url,
+  };
+  private mediaCacheBytes = 42_991_616;
+
+  /** Default level for a room, by its direct flag: one-to-one or group. */
+  private defaultRoomLevel(roomId: string): NotificationLevel {
+    const room = this.rooms.find((r) => r.id === roomId);
+    return room?.is_direct ? this.notificationSettings.one_to_one : this.notificationSettings.group;
+  }
 
   /** Applies a patch to a known room and pushes a Set diff to every room-list subscriber. */
   private patchRoom(roomId: string, patch: Partial<RoomSummary>): void {
@@ -1048,7 +1117,7 @@ export class MockTransport implements Transport {
       case 'RequestSelfVerification':
         return {
           type: 'VerificationRequested',
-          payload: { user_id: MOCK_ACCOUNT.user_id, device_id: 'DEVICE_MOCK' },
+          payload: { user_id: MOCK_ACCOUNT.user_id, device_id: MOCK_DEVICE_ID },
         };
 
       case 'AcceptVerification':
@@ -1220,6 +1289,83 @@ export class MockTransport implements Transport {
           type: 'SettingSet',
           payload: { key: command.params.key },
         };
+
+      case 'GetNotificationSettings':
+        return {
+          type: 'NotificationSettings',
+          payload: { settings: { ...this.notificationSettings } },
+        };
+
+      case 'SetDefaultNotificationLevel':
+        if (command.params.one_to_one) {
+          this.notificationSettings.one_to_one = command.params.level;
+        } else {
+          this.notificationSettings.group = command.params.level;
+        }
+        return { type: 'Unit' };
+
+      case 'SetMentionRules': {
+        const { room_mention, user_mention, invite } = command.params;
+        if (room_mention !== null) this.notificationSettings.room_mention = room_mention;
+        if (user_mention !== null) this.notificationSettings.user_mention = user_mention;
+        if (invite !== null) this.notificationSettings.invite = invite;
+        return { type: 'Unit' };
+      }
+
+      case 'GetRoomNotificationLevel': {
+        const roomId = command.params.room_id;
+        const explicit = this.roomNotificationLevels.get(roomId);
+        return {
+          type: 'RoomNotificationLevel',
+          payload: {
+            room_id: roomId,
+            level: explicit ?? this.defaultRoomLevel(roomId),
+            is_default: explicit === undefined,
+          },
+        };
+      }
+
+      case 'SetRoomNotificationLevel': {
+        const roomId = command.params.room_id;
+        const level = command.params.level;
+        if (level === null) {
+          this.roomNotificationLevels.delete(roomId);
+        } else {
+          this.roomNotificationLevels.set(roomId, level);
+        }
+        return { type: 'Unit' };
+      }
+
+      case 'GetOwnProfile':
+        return { type: 'OwnProfile', payload: { profile: { ...this.ownProfile } } };
+
+      case 'SetDisplayName': {
+        const name = command.params.name.trim();
+        if (name === '') {
+          throw invalidArgument('display name must not be empty');
+        }
+        this.ownProfile = { ...this.ownProfile, display_name: name };
+        return { type: 'Unit' };
+      }
+
+      case 'SetOwnAvatar':
+        this.ownProfile = {
+          ...this.ownProfile,
+          avatar_url: command.params.file_path ? 'mxc://alloy.chat/mock-own-avatar' : null,
+        };
+        return { type: 'Unit' };
+
+      case 'ListDevices':
+        return { type: 'Devices', payload: { devices: MOCK_DEVICES.map((d) => ({ ...d })) } };
+
+      case 'GetSessionInfo':
+        return { type: 'SessionInfo', payload: { info: { ...MOCK_SESSION_INFO } } };
+
+      case 'ClearMediaCache': {
+        const freed = this.mediaCacheBytes;
+        this.mediaCacheBytes = 0;
+        return { type: 'MediaCacheCleared', payload: { freed_bytes: freed } };
+      }
 
       default: {
         const _exhaustive: never = command;

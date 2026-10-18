@@ -5,6 +5,9 @@
   import type { TimelineItemDto } from '$lib/generated';
   import { timelineStore } from '$lib/stores/timeline.svelte';
   import { membersStore } from '$lib/stores/members.svelte';
+  import { prefs } from '$lib/stores/prefs.svelte';
+  import { isHiddenState } from '$lib/content/stateEvents';
+  import TypingIndicator from './TypingIndicator.svelte';
   import Icon from '$lib/icons/Icon.svelte';
   import { ArrowDown } from '$lib/icons';
   import MessageRow from './MessageRow.svelte';
@@ -21,8 +24,17 @@
   let atBottom = $state(true);
   let shift = $state(false);
 
-  // Virtual items (read marker, timeline start) carry no content worth a row.
-  const rows = $derived(timelineStore.items.filter((i) => i.content.kind !== 'Virtual'));
+  // Virtual items (read marker, timeline start) carry no content worth a row. Hidden state events
+  // and removed messages are dropped here, before virtualization, so VList indices match rows.
+  const rows = $derived(
+    timelineStore.items.filter((i) => {
+      const c = i.content;
+      if (c.kind === 'Virtual') return false;
+      if (c.kind === 'RoomState') return !isHiddenState(c.data.state_type, prefs);
+      if (c.kind === 'Redacted') return prefs.showRemovedPlaceholder;
+      return true;
+    }),
+  );
 
   // Only `roomId` may retrigger this: the store reads/writes its own state while opening.
   $effect(() => {
@@ -49,10 +61,12 @@
     const len = rows.length;
     const prepended = lastFirst !== null && first !== lastFirst && len > lastLen && rows.some((r) => r.internal_id === lastFirst);
     const appended = len > lastLen && !prepended;
+    // A new message from the signed-in user jumps to the bottom when that preference is on, even if the user had scrolled up.
+    const ownSend = appended && rows[len - 1]?.is_own === true && prefs.jumpToBottomOnSend;
     if (prepended) {
       shift = true;
       void tick().then(() => requestAnimationFrame(() => (shift = false)));
-    } else if ((appended && atBottom) || (lastLen === 0 && len > 0)) {
+    } else if (ownSend || (appended && atBottom) || (lastLen === 0 && len > 0)) {
       void tick().then(() => vlist?.scrollToIndex(len - 1, { align: 'end' }));
     }
     lastFirst = first;
@@ -109,6 +123,7 @@
       <div class="toast" role="alert">{timelineStore.error}</div>
     {/if}
   </div>
+  <TypingIndicator {roomId} />
 </section>
 
 <style>

@@ -1,8 +1,9 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { Avatar, Badge } from '../common';
   import ConfirmDialog from '../common/ConfirmDialog.svelte';
   import Icon from '$lib/icons/Icon.svelte';
-  import { Check, CheckCheck, Compass, Copy, ExternalLink, ImagePlus, Info, Link, LogOut, Lock, Pencil, Plus, Search, StickyNote, X } from '$lib/icons';
+  import { Check, CheckCheck, Compass, Copy, ExternalLink, ImagePlus, Info, Link, LogOut, Lock, Pencil, Plus, Search, StickyNote, X, BellOff } from '$lib/icons';
   import { client } from '$lib/ipc';
   import { contextmenu } from '$lib/platform/contextmenu';
   import { pickFile } from '$lib/platform/files';
@@ -11,6 +12,9 @@
   import { expect } from '$lib/stores/errors';
   import { roomInfo } from '$lib/stores/roomInfo.svelte';
   import { roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
+  import { prefs } from '$lib/stores/prefs.svelte';
+  import { roomNotify } from '$lib/stores/roomNotify.svelte';
+  import type { NotificationLevel } from '$lib/generated';
   import { ui } from '$lib/stores/ui.svelte';
   import RenameRoomDialog from './RenameRoomDialog.svelte';
   import UpdateBanner from './UpdateBanner.svelte';
@@ -90,13 +94,31 @@
     if (pendingLeave) await leaveRoom(pendingLeave.id);
   }
 
+  /** One level choice of a room's Notifications group; the level in effect is marked "(current)". */
+  function notifyItem(r: RoomItem, label: string, target: NotificationLevel | null): MenuItem {
+    const isDefault = roomNotify.isDefault(r.id);
+    const current = target === null ? isDefault === true : isDefault === false && roomNotify.levelOf(r.id) === target;
+    return {
+      id: `notify-${target ?? 'default'}`,
+      label: current ? `${label} (current)` : label,
+      disabled: roomNotify.saving(r.id),
+      onselect: () => void roomNotify.set(r.id, target),
+    };
+  }
+
   function roomItems(r: RoomItem): MenuItem[] {
     void roomInfo.load(r.id);
+    void roomNotify.load(r.id);
     const d = roomInfo.details(r.id);
     const unread = r.unread_notifications.notification_count;
     return [
       { id: 'open', label: 'Open', icon: ExternalLink, onselect: () => openRoom(r.id) },
       { id: 'mark-read', label: 'Mark as read', icon: CheckCheck, disabled: unread === 0, onselect: () => void markRead(r.id) },
+      { separator: true },
+      notifyItem(r, 'Use default', null),
+      notifyItem(r, 'All messages', 'All'),
+      notifyItem(r, 'Mentions and keywords only', 'Mentions'),
+      notifyItem(r, 'Mute', 'Mute'),
       { separator: true },
       { id: 'details', label: 'Room details', icon: Info, onselect: () => showRoomInfo(r.id) },
       { id: 'rename', label: 'Rename room', icon: Pencil, disabled: d !== null && !d.can_set_name, onselect: () => (renameRoomId = r.id) },
@@ -128,9 +150,21 @@
   const scopeTitle = $derived(scopeSpace ? roomTitle(scopeSpace) : 'Home');
 
   const invites = $derived(roomsStore.visible.filter((r) => r.membership === 'Invited'));
-  const rooms = $derived(roomsStore.visible.filter((r) => r.membership !== 'Invited' && !r.is_direct));
-  const direct = $derived(roomsStore.visible.filter((r) => r.membership !== 'Invited' && r.is_direct));
-  const nothing = $derived(invites.length + rooms.length + direct.length === 0);
+  const joined = $derived(roomsStore.visible.filter((r) => r.membership !== 'Invited'));
+  // With sections, direct messages get their own People section when roomListPeople is on; otherwise they sit with Rooms.
+  const rooms = $derived(joined.filter((r) => !prefs.roomListPeople || !r.is_direct));
+  const direct = $derived(prefs.roomListPeople ? joined.filter((r) => r.is_direct) : []);
+  // Without sections: invites first, then every joined room in the engine's activity order.
+  const flat = $derived([...invites, ...joined]);
+  const nothing = $derived(roomsStore.visible.length === 0);
+
+  // The muted icon and the menu's current choice read these levels, so load them for the visible joined rooms.
+  $effect(() => {
+    const ids = roomsStore.visible.filter((r) => r.membership === 'Joined').map((r) => r.id);
+    untrack(() => {
+      for (const id of ids) void roomNotify.load(id);
+    });
+  });
   const leaveMessage = $derived(
     pendingLeave ? `You will leave ${pendingLeave.title}. You need a new invitation to join again.` : '',
   );
@@ -139,11 +173,13 @@
 {#snippet roomRow(r: RoomItem)}
   {@const unread = r.unread_notifications.notification_count}
   {@const active = r.id === roomsStore.activeRoomId}
+  {@const muted = roomNotify.isMuted(r.id)}
   <button
     type="button"
     class="row"
     class:active
-    class:unread={unread > 0}
+    class:unread={unread > 0 && !muted}
+    class:muted
     aria-current={active ? 'true' : undefined}
     use:contextmenu={() => roomItems(r)}
     onclick={() => openRoom(r.id)}
@@ -151,14 +187,42 @@
     <span class="fixed">
       <Avatar userId={r.id} displayName={roomTitle(r)} src={r.avatar_url} size="sm" shape={r.is_direct ? 'circle' : 'rounded'} />
     </span>
-    <span class="title">{roomTitle(r)}</span>
+    <span class="text">
+      <span class="title">{roomTitle(r)}</span>
+      {#if prefs.roomListPreviews && r.latest_event}
+        <span class="preview">{r.latest_event.body}</span>
+      {/if}
+    </span>
     {#if r.encrypted}
       <span class="fixed"><Icon icon={Lock} size={16} label="Encrypted" /></span>
     {/if}
+    {#if muted}
+      <span class="fixed"><Icon icon={BellOff} size={16} label="Notifications muted" /></span>
+    {/if}
     {#if unread > 0}
-      <span class="fixed"><Badge count={unread} /></span>
+      {#if muted}
+        <span class="fixed"><span class="dot" aria-hidden="true"></span></span>
+      {:else}
+        <span class="fixed"><Badge count={unread} /></span>
+      {/if}
     {/if}
   </button>
+{/snippet}
+
+{#snippet inviteRow(r: RoomItem)}
+  <div class="row invite" use:contextmenu={() => inviteItems(r)}>
+    <span class="fixed">
+      <Avatar userId={r.id} displayName={roomTitle(r)} src={r.avatar_url} size="sm" shape={r.is_direct ? 'circle' : 'rounded'} />
+    </span>
+    <div class="text">
+      <span class="title">{roomTitle(r)}</span>
+      <span class="sub">Invitation</span>
+      <div class="invite-actions">
+        <button type="button" disabled={inviteBusy === r.id} onclick={() => answerInvite(r.id, true)}>Accept</button>
+        <button type="button" class="decline" disabled={inviteBusy === r.id} onclick={() => answerInvite(r.id, false)}>Decline</button>
+      </div>
+    </div>
+  </div>
 {/snippet}
 
 <section class="sidebar" aria-label="Rooms">
@@ -179,48 +243,44 @@
   </div>
 
   <div class="groups">
-    {#if invites.length > 0}
-      <section class="group" aria-label="Invites">
-        <h3>Invites</h3>
-        <ul>
-          {#each invites as r (r.id)}
-            <li>
-              <div class="row invite" use:contextmenu={() => inviteItems(r)}>
-                <span class="fixed">
-                  <Avatar userId={r.id} displayName={roomTitle(r)} src={r.avatar_url} size="sm" shape={r.is_direct ? 'circle' : 'rounded'} />
-                </span>
-                <div class="text">
-                  <span class="title">{roomTitle(r)}</span>
-                  <span class="sub">Invitation</span>
-                  <div class="invite-actions">
-                    <button type="button" disabled={inviteBusy === r.id} onclick={() => answerInvite(r.id, true)}>Accept</button>
-                    <button type="button" class="decline" disabled={inviteBusy === r.id} onclick={() => answerInvite(r.id, false)}>Decline</button>
-                  </div>
-                </div>
-              </div>
-            </li>
-          {/each}
-        </ul>
-      </section>
-    {/if}
+    {#if prefs.roomListSections}
+      {#if invites.length > 0}
+        <section class="group" aria-label="Invites">
+          <h3>Invites</h3>
+          <ul>
+            {#each invites as r (r.id)}
+              <li>{@render inviteRow(r)}</li>
+            {/each}
+          </ul>
+        </section>
+      {/if}
 
-    {#if rooms.length > 0}
-      <section class="group" aria-label="Rooms">
-        <h3>Rooms</h3>
-        <ul>
-          {#each rooms as r (r.id)}
-            <li>{@render roomRow(r)}</li>
-          {/each}
-        </ul>
-      </section>
-    {/if}
+      {#if rooms.length > 0}
+        <section class="group" aria-label="Rooms">
+          <h3>Rooms</h3>
+          <ul>
+            {#each rooms as r (r.id)}
+              <li>{@render roomRow(r)}</li>
+            {/each}
+          </ul>
+        </section>
+      {/if}
 
-    {#if direct.length > 0}
-      <section class="group" aria-label="Direct messages">
-        <h3>Direct messages</h3>
+      {#if direct.length > 0}
+        <section class="group" aria-label="People">
+          <h3>People</h3>
+          <ul>
+            {#each direct as r (r.id)}
+              <li>{@render roomRow(r)}</li>
+            {/each}
+          </ul>
+        </section>
+      {/if}
+    {:else if flat.length > 0}
+      <section class="group" aria-label="Room list">
         <ul>
-          {#each direct as r (r.id)}
-            <li>{@render roomRow(r)}</li>
+          {#each flat as r (r.id)}
+            <li>{#if r.membership === 'Invited'}{@render inviteRow(r)}{:else}{@render roomRow(r)}{/if}</li>
           {/each}
         </ul>
       </section>
@@ -394,6 +454,26 @@
   .sub {
     font-size: var(--alloy-typography-size-xs);
     color: var(--alloy-color-text-muted);
+  }
+  .text > .title {
+    flex: none;
+  }
+  .preview {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--alloy-typography-size-xs);
+    color: var(--alloy-color-text-muted);
+  }
+  .row.muted {
+    color: var(--alloy-color-text-muted);
+  }
+  .dot {
+    width: var(--alloy-spacing-scale-2);
+    height: var(--alloy-spacing-scale-2);
+    margin: 0 var(--alloy-spacing-scale-1);
+    border-radius: var(--alloy-radii-full);
+    background: var(--alloy-color-text-muted);
   }
   .invite-actions {
     display: flex;

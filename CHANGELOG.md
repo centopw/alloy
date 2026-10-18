@@ -1,8 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.1.3 (pre-release)
 
 ### Added
+- Settings that configure behaviour (ADR 0004): Account (display name, avatar), Devices, Security & Privacy (typing notifications, clear media cache), Encryption (session keys, recovery), Appearance (message layout Modern/Bubbles/IRC, font size, time format, big emoji, theme), Notifications (server push rules, desktop notifications, per-room levels), Preferences (Enter to send, typing, join/leave and profile events, autoplay, open at login), Keyboard reference, Sidebar (previews, sections, People, Home scope).
+- Desktop and Android notifications when a room that notifies gets new messages.
+- Typing indicator, readable state events ("alice joined", "bob renamed the room").
+- Room notification level in the room menu (default, all, mentions, mute).
 - Room info panel (click the room title): name, topic and picture editing when permitted, a private per-room note, and Media, Files, Links and Members tabs (#28).
 - Profile card for any user: from names, avatars, members and `matrix.to` mention links, with Message and Copy ID.
 - Right-click menus on rooms (open, mark read, details, rename, picture, note, copy link/ID, leave), messages and members; long-press and the Menu key also open them.
@@ -10,7 +14,11 @@
 - Tooltips for every labelled control, shown on hover and keyboard focus, enforced by a static audit test.
 - Engine commands: `SetRoomName/Topic/Avatar`, `GetRoomNote/SetRoomNote`, `MarkRoomRead`, `GetUserProfile`, `StartDirectMessage`, `GetRoomMedia`.
 
+### Changed
+- Settings pages are reorganised after Element's: User settings, App settings, Info.
+
 ### Fixed
+- Android: entering a server and pressing Continue no longer closes the app. The HTTP stack's platform certificate verifier aborted the process on Android; Alloy now trusts the system certificate store directly (also used by the update check).
 - Senders no longer show as raw Matrix IDs: room members are fetched for every timeline and names fall back to the ID's local part.
 - One layout rhythm (16px gutters, 48px headers) across chat, sidebar, panels, composer and settings; settings title rows line up.
 - Public room directory rows keep the Join button aligned when a room name is long; the rail's Home entry is an icon; the search hint shows Cmd K on macOS.
