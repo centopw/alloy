@@ -2,6 +2,7 @@
 
 pub mod commands;
 mod pick;
+mod update;
 
 use alloy_engine::context::EngineContext;
 use alloy_engine::router::AppEngine;
@@ -40,7 +41,12 @@ fn open_secret_store(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(desktop)]
+    let builder = builder
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(update::PendingUpdate::default());
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -65,7 +71,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             alloy_invoke,
             alloy_subscribe,
-            pick::pick_attachment
+            pick::pick_attachment,
+            update::check_update,
+            update::install_update
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

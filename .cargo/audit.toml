@@ -1,0 +1,21 @@
+# Mirrors [advisories] in deny.toml: same exceptions, same reasons. Warnings (unmaintained,
+# unsound, yanked) fail the audit so new ones are noticed.
+[advisories]
+ignore = [
+    "RUSTSEC-2026-0367", # zip via tauri-plugin-updater; signature-verified packages, Windows only
+    "RUSTSEC-2026-0368", # zip, same
+    "RUSTSEC-2026-0369", # zip, same
+    "RUSTSEC-2026-0319", # anymap2 via matrix-sdk 0.19.1
+    "RUSTSEC-2024-0388", # derivative via wasm_evt_listener (wasm32 only)
+    "RUSTSEC-2024-0370", # proc-macro-error via gtk3-rs (tauri/wry on Linux)
+    "RUSTSEC-2024-0429", # glib 0.18 unsoundness via tauri/wry on Linux; API not used
+    "RUSTSEC-2026-0370", # zvariant (zbus family, Linux D-Bus)
+    "RUSTSEC-2026-0371", # zbus_names
+    "RUSTSEC-2026-0372", # zvariant_derive
+]
+
+[output]
+deny = ["warnings"]
+format = "terminal"
+quiet = false
+show_tree = true

@@ -3,12 +3,14 @@
 ## Unreleased
 
 ### Added
+- In-app updates: desktop apps download, verify (minisign) and install new releases from Settings > About or the startup banner; Android tells you a newer release exists and opens its page (#51).
 - Threads: thread panel with a thread-scoped composer, summary chips on thread roots, `SubscribeThread` and `in_thread_root` in the engine protocol (#27).
 - Public room directory: browse and join rooms through `SearchPublicRooms` (#28).
 
 - Polls (MSC3381): create, vote, end and live results in the timeline (#30).
 
 ### Security
+- Dependency advisories: `cargo update` cleared the yanked `inout`; `deny.toml` and `.cargo/audit.toml` now check unmaintained and unsound crates too, with every accepted exception listed with its reason (transitive crates from tauri, matrix-sdk, keyring and tauri-plugin-updater), so any new advisory fails CI.
 Findings from the threat-model review (#37):
 - Desktop secrets were never persisted: the `keyring` crate had no backend enabled and used an in-memory mock. macOS, Windows and Linux backends are now enabled and the store fails closed; Linux falls back to an owner-only file when no Secret Service is running.
 - A transient keychain error no longer overwrites the store passphrase; secrets are removed on logout, failed login and account replacement; the secrets file is created 0600 from the start.

@@ -57,39 +57,45 @@ This is injected into `apps/alloy/src-tauri/tauri.conf.json` by `scripts/embed-n
 
 ---
 
-## 3. Tauri Updater & Signature Keys
+## 3. In-app updates (OTA)
 
-Alloy uses Tauri's built-in updater plugin with minisign cryptography.
+**Desktop** (macOS, Windows, Linux) uses Tauri's updater plugin. The app checks about 8 seconds
+after start (and from Settings > About) and shows a banner; "Update" downloads the package,
+verifies its minisign signature against the public key compiled into the app, installs it and
+restarts. Updates only ever come from tagged releases (`v*`), never from nightlies.
 
-### Key Pair Generation
-To generate a new updater signing key pair:
-```bash
-pnpm tauri signer generate -w ~/.tauri/alloy.key
-```
-This command outputs:
-1. **Public Key:** Base64 minisign public key string.
-2. **Private Key:** Saved to `~/.tauri/alloy.key` (or output path).
+**Android** cannot replace its own APK, so the app only tells the user a newer release exists
+and opens the release page (`check_update` reads the GitHub releases list). Silent in-place
+updates need a store (Play, F-Droid) or a privileged installer. Updating the sideloaded APK also
+requires the same signing key every time, see section 5.
 
-### Public Key Configuration
-*(Note: Documented here for reference. Do not manually modify during frozen contract phases).*
-The public key is configured in `apps/alloy/src-tauri/tauri.conf.json` under `plugins.updater`:
-```json
-{
-  "plugins": {
-    "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDYwOEU0RjY5NzU1MjcxRUUKUl...<PUBKEY>...",
-      "endpoints": [
-        "https://github.com/alloy-chat/alloy/releases/latest/download/latest.json"
-      ]
-    }
-  }
-}
-```
+### How the feed works
+1. Pushing a `v*` tag runs `release.yml`. `tauri-action` builds each platform, signs the
+   updater packages with `TAURI_SIGNING_PRIVATE_KEY` and uploads them plus a merged `latest.json`
+   to that release.
+2. `publish-update-feed` copies `latest.json` to the fixed `updater-feed` release.
+   The app reads `https://github.com/centopw/alloy/releases/download/updater-feed/latest.json`.
+   (GitHub's `releases/latest/download/` URL skips pre-releases, so it cannot be used while
+   releases are pre-releases.)
+3. `version` in `apps/alloy/src-tauri/tauri.conf.json` must be bumped to the tag's version before
+   tagging, otherwise installed apps see no newer version.
 
-### Private Key Deployment
-The private key and its passphrase are added to GitHub Repository Secrets:
-- `TAURI_SIGNING_PRIVATE_KEY` (content of `alloy.key`)
-- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (passphrase set during generation)
+### Keys
+- The key pair was generated with `pnpm tauri signer generate -w ~/.alloy-updater/alloy.key`.
+  The public key is in `tauri.conf.json` (`plugins.updater.pubkey`).
+- The private key and its password are GitHub secrets `TAURI_SIGNING_PRIVATE_KEY` and
+  `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. **Back up `~/.alloy-updater/` somewhere safe.** If the
+  private key is lost, installed apps can never be updated again (they only trust that key);
+  users would have to reinstall a build that carries a new public key.
+- Rotating the key means shipping one release signed with the old key that contains the new
+  public key.
+
+### Testing an update locally
+Build two versions with `TAURI_CONFIG` overriding `version` and pointing
+`plugins.updater.endpoints` at a local server (`dangerousInsecureTransportProtocol: true`), serve a
+`latest.json` whose signature is the `.sig` of the newer `.app.tar.gz`, and start the older app.
+This was done on macOS arm64 (0.1.0 to 0.1.1): manifest fetched, package downloaded, signature
+verified, bundle replaced, app restarted as 0.1.1.
 
 ---
 

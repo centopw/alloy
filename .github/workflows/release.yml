@@ -142,6 +142,28 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "${{ github.ref_name }}" alloy-sbom-${{ matrix.platform }}.json --clobber
 
+  # GitHub's `releases/latest` skips pre-releases, so the app reads its update manifest from a
+  # fixed tag instead. Only the tauri-action job's latest.json is published, after every desktop
+  # platform has uploaded its bundle (tauri-action merges the platforms into that file).
+  publish-update-feed:
+    name: Publish update manifest
+    needs: build-tauri
+    runs-on: ubuntu-latest
+    steps:
+      - name: Copy latest.json to the updater-feed release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release download "$TAG" -R "$REPO" -p latest.json -O latest.json
+          jq -e '.version and (.platforms | length > 0)' latest.json
+          gh release view updater-feed -R "$REPO" >/dev/null 2>&1 || \
+            gh release create updater-feed -R "$REPO" --prerelease \
+              --title "Update feed" \
+              --notes "Machine-readable update manifest read by the app. Do not delete."
+          gh release upload updater-feed latest.json -R "$REPO" --clobber
+
   build-android:
     name: Build Signed Android APK
     runs-on: ubuntu-latest

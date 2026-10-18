@@ -3,11 +3,36 @@
 
 [advisories]
 # Advisory database: https://github.com/rustsec/advisory-db
-# Deny vulnerabilities by default; unmaintained advisories in transitive
-# dependencies (e.g. anymap2 in matrix-sdk, proc-macro-error in gtk) are not blocked.
-yanked = "warn"
-unmaintained = "none"
-ignore = []
+# Everything is checked, including unmaintained crates and unsound code. Each exception below is
+# a transitive dependency we cannot change from this repository, with the reason it is accepted
+# and what has to happen upstream to drop it. Any new advisory fails CI. Keep this list in sync
+# with .cargo/audit.toml (cargo-audit reads that file).
+yanked = "deny"
+unmaintained = "all"
+unsound = "all"
+ignore = [
+    # zip 4.x, pulled in by tauri-plugin-updater (latest 2.x). The flaws are in `extract()`
+    # (SUID bits, symlink escapes). The updater only extracts a package after its minisign
+    # signature has verified, and only on Windows (the macOS and Linux paths use tar). Exploiting
+    # it needs our updater signing key. Drop when tauri-plugin-updater moves to zip >= 9.
+    { id = "RUSTSEC-2026-0367", reason = "zip via tauri-plugin-updater; extracts only signature-verified packages, Windows only" },
+    { id = "RUSTSEC-2026-0368", reason = "zip via tauri-plugin-updater; extracts only signature-verified packages, Windows only" },
+    { id = "RUSTSEC-2026-0369", reason = "zip via tauri-plugin-updater; extracts only signature-verified packages, Windows only" },
+    # matrix-sdk 0.19.1 (latest) depends on anymap2; no replacement upstream yet.
+    { id = "RUSTSEC-2026-0319", reason = "anymap2 via matrix-sdk 0.19.1; used for a type map, no fix upstream" },
+    # RUSTSEC-2024-0388 (derivative via matrix-sdk's wasm-only wasm_evt_listener) is not in this
+    # graph, so only .cargo/audit.toml, which scans the whole lockfile, lists it.
+    # gtk3-rs 0.18 stack used by tauri/wry on Linux. Fixed only by moving to gtk4, which is a
+    # tauri/wry decision. Alloy does not call glib::VariantStrIter.
+    { id = "RUSTSEC-2024-0370", reason = "proc-macro-error via gtk3-rs (tauri/wry on Linux); build-time only" },
+    { id = "RUSTSEC-2024-0429", reason = "glib 0.18 VariantStrIter unsoundness via tauri/wry on Linux; API not used" },
+    # zbus/zvariant family flagged unmaintained. zbus 5 comes from tauri-plugin-opener (Linux),
+    # zbus 4 from keyring's Secret Service backend (Linux). Neither has a maintained successor
+    # we could switch to without replacing the platform keychain integration.
+    { id = "RUSTSEC-2026-0370", reason = "zvariant via tauri-plugin-opener and keyring (Linux D-Bus)" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names via tauri-plugin-opener and keyring (Linux D-Bus)" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive via tauri-plugin-opener and keyring (Linux D-Bus)" },
+]
 
 [licenses]
 # All Alloy dependencies must be compatible with Apache-2.0

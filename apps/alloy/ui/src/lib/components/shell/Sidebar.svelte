@@ -5,6 +5,7 @@
   import { client } from '$lib/ipc';
   import { roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
   import { ui } from '$lib/stores/ui.svelte';
+  import UpdateBanner from './UpdateBanner.svelte';
   import UserPanel from './UserPanel.svelte';
 
   interface Props {
@@ -136,6 +137,7 @@
     {/if}
   </div>
 
+  <UpdateBanner />
   <UserPanel onsettings={() => onsettings?.()} />
 </section>
 
