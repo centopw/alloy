@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.1.1 (pre-release)
+
+First build with in-app updates: installs of 0.1.0 have no updater and need a manual install of this version.
 
 ### Added
 - In-app updates: desktop apps download, verify (minisign) and install new releases from Settings > About or the startup banner; Android tells you a newer release exists and opens its page (#51).
