@@ -51,7 +51,10 @@
     const active = roomsStore.active;
     return active && active.id === roomId ? roomTitle(active) : null;
   });
-  const placeholder = $derived(roomName ? `Message ${roomName}` : 'Message');
+  // Textarea placeholders wrap instead of truncating, so long room names are cut here.
+  const placeholder = $derived(
+    roomName ? `Message ${roomName.length > 28 ? `${roomName.slice(0, 27)}…` : roomName}` : 'Message'
+  );
   const mentionKey = (m: ActiveMention) => `${m.start}:${m.query}`;
   const candidates = $derived(
     mention ? rankMembers(membersStore.membersOf(roomId), mention.query, MENTION_LIMIT) : []
