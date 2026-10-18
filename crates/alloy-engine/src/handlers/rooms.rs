@@ -2,7 +2,8 @@ use crate::context::EngineContext;
 use crate::error::EngineError;
 use crate::router::{CommandGroup, GroupHandler, command_name};
 use alloy_core::AlloyError;
-use alloy_protocol::{EngineCommand, EngineEvent, EngineResponse, SubscriptionId};
+use alloy_protocol::{EngineCommand, EngineEvent, EngineResponse, RoomId, SubscriptionId};
+use std::path::PathBuf;
 
 /// Handler for room operations and subscriptions (`CommandGroup::Rooms`).
 ///
@@ -25,6 +26,17 @@ pub(crate) fn map_err(e: AlloyError) -> EngineError {
         AlloyError::MatrixSdk(m) => EngineError::network_error(m),
         other => EngineError::internal_error(other.to_string()),
     }
+}
+
+/// Longest room note the handler accepts, in characters.
+const MAX_NOTE_CHARS: usize = 4000;
+
+/// Error for a room setting the active account lacks the power level to change.
+fn not_allowed(room_id: &RoomId, setting: &str) -> EngineError {
+    EngineError::forbidden(format!(
+        "you cannot change the {setting} of room {}",
+        room_id.0
+    ))
 }
 
 #[async_trait::async_trait]
@@ -141,6 +153,113 @@ impl GroupHandler for RoomsHandler {
                     next_batch: page.next_batch,
                     total_estimate: page.total_estimate,
                 })
+            }
+            EngineCommand::SetRoomName { room_id, name } => {
+                let client = ctx.active_client().await?;
+                if !client
+                    .room_admin_rights(&room_id)
+                    .await
+                    .map_err(map_err)?
+                    .can_set_name
+                {
+                    return Err(not_allowed(&room_id, "name"));
+                }
+                client
+                    .set_room_name(&room_id, &name)
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::Unit)
+            }
+            EngineCommand::SetRoomTopic { room_id, topic } => {
+                let client = ctx.active_client().await?;
+                if !client
+                    .room_admin_rights(&room_id)
+                    .await
+                    .map_err(map_err)?
+                    .can_set_topic
+                {
+                    return Err(not_allowed(&room_id, "topic"));
+                }
+                client
+                    .set_room_topic(&room_id, &topic)
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::Unit)
+            }
+            EngineCommand::SetRoomAvatar { room_id, file_path } => {
+                let client = ctx.active_client().await?;
+                if !client
+                    .room_admin_rights(&room_id)
+                    .await
+                    .map_err(map_err)?
+                    .can_set_avatar
+                {
+                    return Err(not_allowed(&room_id, "avatar"));
+                }
+                let path = match file_path {
+                    Some(file_path) => {
+                        let path = PathBuf::from(&file_path);
+                        if !ctx.attachment_path_allowed(&path) {
+                            return Err(EngineError::forbidden(format!(
+                                "attachment {file_path} is not registered for sending"
+                            )));
+                        }
+                        if !path.is_file() {
+                            return Err(EngineError::not_found(format!("file {file_path}")));
+                        }
+                        Some(path)
+                    }
+                    None => None,
+                };
+                client
+                    .set_room_avatar(&room_id, path.as_deref())
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::Unit)
+            }
+            EngineCommand::GetRoomNote { room_id } => {
+                let client = ctx.active_client().await?;
+                let note = client.get_room_note(&room_id).await.map_err(map_err)?;
+                Ok(EngineResponse::RoomNote { room_id, note })
+            }
+            EngineCommand::SetRoomNote { room_id, note } => {
+                if note.chars().count() > MAX_NOTE_CHARS {
+                    return Err(EngineError::invalid_argument(format!(
+                        "room note exceeds {MAX_NOTE_CHARS} characters"
+                    )));
+                }
+                let client = ctx.active_client().await?;
+                client
+                    .set_room_note(&room_id, &note)
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::Unit)
+            }
+            EngineCommand::MarkRoomRead { room_id } => {
+                let client = ctx.active_client().await?;
+                client.mark_room_read(&room_id).await.map_err(map_err)?;
+                Ok(EngineResponse::Unit)
+            }
+            EngineCommand::GetUserProfile { user_id, room_id } => {
+                let client = ctx.active_client().await?;
+                let profile = client
+                    .get_user_profile(&user_id, room_id.as_ref())
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::UserProfile { profile })
+            }
+            EngineCommand::StartDirectMessage { user_id } => {
+                let client = ctx.active_client().await?;
+                if client.user_id() == Some(user_id.0.as_str()) {
+                    return Err(EngineError::invalid_argument(
+                        "cannot start a direct message with yourself".to_owned(),
+                    ));
+                }
+                let (room_id, created) = client
+                    .start_direct_message(&user_id)
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::DirectMessageRoom { room_id, created })
             }
             _ => Err(EngineError::invalid_argument(format!(
                 "Command '{}' does not belong to Rooms group",

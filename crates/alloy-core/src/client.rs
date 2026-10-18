@@ -78,6 +78,9 @@ pub struct AlloyClient {
         tokio::sync::OnceCell<std::sync::Arc<matrix_sdk_ui::sync_service::SyncService>>,
     /// Space hierarchy graph, created lazily by `AlloyClient::space_parents`.
     pub(crate) spaces: tokio::sync::OnceCell<std::sync::Arc<matrix_sdk_ui::spaces::SpaceService>>,
+    /// Direct-message room id per target user (`user_id` -> `room_id`), kept for the
+    /// session so repeated `start_direct_message` calls never open a second room.
+    pub(crate) direct_rooms: tokio::sync::Mutex<std::collections::HashMap<String, String>>,
 }
 
 impl AlloyClient {
@@ -143,6 +146,7 @@ impl AlloyClient {
             timelines: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             sync: tokio::sync::OnceCell::new(),
             spaces: tokio::sync::OnceCell::new(),
+            direct_rooms: tokio::sync::Mutex::new(std::collections::HashMap::new()),
         })
     }
 

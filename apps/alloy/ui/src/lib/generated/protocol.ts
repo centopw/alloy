@@ -65,6 +65,55 @@ export type EngineCommand = { action: "DiscoverHomeserver"; params: {
 	server: string | null,
 	since: string | null,
 	limit: number,
+} } | 
+/**  Renames a room (needs the power level to change the name). */
+{ action: "SetRoomName"; params: {
+	room_id: RoomId,
+	name: string,
+} } | { action: "SetRoomTopic"; params: {
+	room_id: RoomId,
+	topic: string,
+} } | 
+/**
+ *  Sets the room avatar from a file the user picked (same path rules as `SendAttachment`);
+ *  `None` removes it.
+ */
+{ action: "SetRoomAvatar"; params: {
+	room_id: RoomId,
+	file_path: string | null,
+} } | 
+/**  Reads the private note the active account keeps about a room (account data, never shared). */
+{ action: "GetRoomNote"; params: {
+	room_id: RoomId,
+} } | 
+/**  Stores the private note; an empty note deletes it. */
+{ action: "SetRoomNote"; params: {
+	room_id: RoomId,
+	note: string,
+} } | 
+/**  Marks the whole room as read (read receipt at the latest event and clears the unread flag). */
+{ action: "MarkRoomRead"; params: {
+	room_id: RoomId,
+} } | 
+/**  Looks up a user's profile, with membership and power level when a room is given. */
+{ action: "GetUserProfile"; params: {
+	user_id: UserId,
+	room_id: RoomId | null,
+} } | 
+/**  Opens the direct-message room with a user, creating it (and inviting them) if none exists. */
+{ action: "StartDirectMessage"; params: {
+	user_id: UserId,
+} } | 
+/**
+ *  Lists shared media, files or links of a room, newest first. `from` is the `next_batch` of
+ *  the previous page. Pages may hold fewer than `limit` items; keep paging while `next_batch`
+ *  is set.
+ */
+{ action: "GetRoomMedia"; params: {
+	room_id: RoomId,
+	kind: RoomMediaKind,
+	from: string | null,
+	limit: number,
 } } | { action: "SubscribeTimeline"; params: {
 	room_id: RoomId,
 } } | 
@@ -228,6 +277,22 @@ export type EngineResponse = { type: "HomeserverInfo"; payload: {
 	rooms: PublicRoomDto[],
 	next_batch: string | null,
 	total_estimate: number,
+} } | 
+/**  The private note of a room (empty when none is set). */
+{ type: "RoomNote"; payload: {
+	room_id: RoomId,
+	note: string,
+} } | { type: "UserProfile"; payload: {
+	profile: UserProfileDto,
+} } | 
+/**  The direct-message room opened by `StartDirectMessage`. */
+{ type: "DirectMessageRoom"; payload: {
+	room_id: RoomId,
+	created: boolean,
+} } | { type: "RoomMedia"; payload: {
+	room_id: RoomId,
+	items: RoomMediaItem[],
+	next_batch: string | null,
 } } | { type: "RoomJoined"; payload: {
 	room_id: RoomId,
 } } | { type: "RoomLeft"; payload: {
@@ -381,9 +446,43 @@ export type RoomDetails = {
 	encrypted: boolean,
 	joined_members: number,
 	invited_members: number,
+	/**  What the active account may change, from the room's power levels. */
+	can_set_name?: boolean,
+	can_set_topic?: boolean,
+	can_set_avatar?: boolean,
 };
 
 export type RoomId = string;
+
+/**  One shared item in a room: a media or file message, or a message with links. */
+export type RoomMediaItem = {
+	event_id: EventId,
+	sender: UserId,
+	sender_display_name: string | null,
+	timestamp_millis: number,
+	/**  `image`, `video`, `audio`, `file` or `link`. */
+	kind: string,
+	/**  Caption or file name, or the message text for links. */
+	body: string,
+	/**  `mxc://` URI, or a JSON-encoded encrypted source (starts with `{`); `None` for links. */
+	uri: string | null,
+	thumbnail_uri: string | null,
+	mime_type: string | null,
+	size_bytes: number | null,
+	width: number | null,
+	height: number | null,
+	/**  `http(s)` links found in the message (only for `link` items). */
+	urls?: string[],
+};
+
+/**  Which kind of shared content `GetRoomMedia` lists. */
+export type RoomMediaKind = 
+/**  Images and videos. */
+"Media" | 
+/**  Other files and audio. */
+"Files" | 
+/**  Messages containing web links. */
+"Links";
 
 /**  One member of a room, as listed by `GetRoomMembers`. */
 export type RoomMemberDto = {
@@ -500,6 +599,20 @@ export type TimelineItemPreview = {
 };
 
 export type UserId = string;
+
+/**  Profile of one user, optionally as seen in a room. */
+export type UserProfileDto = {
+	user_id: UserId,
+	display_name: string | null,
+	/**  `mxc://` avatar URI, fetch it with `GetMedia`. */
+	avatar_url: string | null,
+	/**  `join`, `invite`, `leave`, `ban` or `knock` in the given room, if a room was given. */
+	membership: string | null,
+	power_level: number | null,
+	/**  An existing direct-message room with this user. */
+	dm_room_id: RoomId | null,
+	is_me: boolean,
+};
 
 export type VectorDiffDto<T> = { type: "Append"; content: {
 	values: T[],

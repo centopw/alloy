@@ -35,7 +35,15 @@ impl CommandGroup {
             | EngineCommand::CreateRoom { .. }
             | EngineCommand::GetRoomMembers { .. }
             | EngineCommand::GetRoomDetails { .. }
-            | EngineCommand::SearchPublicRooms { .. } => CommandGroup::Rooms,
+            | EngineCommand::SearchPublicRooms { .. }
+            | EngineCommand::SetRoomName { .. }
+            | EngineCommand::SetRoomTopic { .. }
+            | EngineCommand::SetRoomAvatar { .. }
+            | EngineCommand::GetRoomNote { .. }
+            | EngineCommand::SetRoomNote { .. }
+            | EngineCommand::MarkRoomRead { .. }
+            | EngineCommand::GetUserProfile { .. }
+            | EngineCommand::StartDirectMessage { .. } => CommandGroup::Rooms,
 
             EngineCommand::SubscribeTimeline { .. }
             | EngineCommand::SubscribeThread { .. }
@@ -62,9 +70,9 @@ impl CommandGroup {
             | EngineCommand::RecoverWithKey { .. }
             | EngineCommand::ResetRecovery { .. } => CommandGroup::Crypto,
 
-            EngineCommand::GetMedia { .. } | EngineCommand::SendAttachment { .. } => {
-                CommandGroup::Media
-            }
+            EngineCommand::GetMedia { .. }
+            | EngineCommand::SendAttachment { .. }
+            | EngineCommand::GetRoomMedia { .. } => CommandGroup::Media,
 
             EngineCommand::GetSpaceParents => CommandGroup::Spaces,
 

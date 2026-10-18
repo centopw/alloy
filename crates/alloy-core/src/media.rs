@@ -165,7 +165,7 @@ impl AlloyClient {
     }
 }
 
-fn mime_guess_from_path(path: &Path) -> mime::Mime {
+pub(crate) fn mime_guess_from_path(path: &Path) -> mime::Mime {
     match path
         .extension()
         .and_then(|e| e.to_str())

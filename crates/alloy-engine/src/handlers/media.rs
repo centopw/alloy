@@ -121,6 +121,23 @@ impl GroupHandler for MediaHandler {
                     event_id: None,
                 })
             }
+            EngineCommand::GetRoomMedia {
+                room_id,
+                kind,
+                from,
+                limit,
+            } => {
+                let client = ctx.active_client().await?;
+                let (items, next_batch) = client
+                    .room_media(&room_id, kind, from.as_deref(), limit)
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::RoomMedia {
+                    room_id,
+                    items,
+                    next_batch,
+                })
+            }
             _ => Err(EngineError::invalid_argument(format!(
                 "Command '{}' does not belong to Media group",
                 name

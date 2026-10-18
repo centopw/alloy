@@ -75,6 +75,65 @@ pub struct RoomDetails {
     pub joined_members: u64,
     #[specta(type = Number)]
     pub invited_members: u64,
+    /// What the active account may change, from the room's power levels.
+    #[serde(default)]
+    pub can_set_name: bool,
+    #[serde(default)]
+    pub can_set_topic: bool,
+    #[serde(default)]
+    pub can_set_avatar: bool,
+}
+
+/// Which kind of shared content `GetRoomMedia` lists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub enum RoomMediaKind {
+    /// Images and videos.
+    Media,
+    /// Other files and audio.
+    Files,
+    /// Messages containing web links.
+    Links,
+}
+
+/// One shared item in a room: a media or file message, or a message with links.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct RoomMediaItem {
+    pub event_id: EventId,
+    pub sender: UserId,
+    pub sender_display_name: Option<String>,
+    #[specta(type = Number)]
+    pub timestamp_millis: u64,
+    /// `image`, `video`, `audio`, `file` or `link`.
+    pub kind: String,
+    /// Caption or file name, or the message text for links.
+    pub body: String,
+    /// `mxc://` URI, or a JSON-encoded encrypted source (starts with `{`); `None` for links.
+    pub uri: Option<String>,
+    pub thumbnail_uri: Option<String>,
+    pub mime_type: Option<String>,
+    #[specta(type = Option<Number>)]
+    pub size_bytes: Option<u64>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    /// `http(s)` links found in the message (only for `link` items).
+    #[serde(default)]
+    pub urls: Vec<String>,
+}
+
+/// Profile of one user, optionally as seen in a room.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct UserProfileDto {
+    pub user_id: UserId,
+    pub display_name: Option<String>,
+    /// `mxc://` avatar URI, fetch it with `GetMedia`.
+    pub avatar_url: Option<String>,
+    /// `join`, `invite`, `leave`, `ban` or `knock` in the given room, if a room was given.
+    pub membership: Option<String>,
+    #[specta(type = Option<Number>)]
+    pub power_level: Option<i64>,
+    /// An existing direct-message room with this user.
+    pub dm_room_id: Option<RoomId>,
+    pub is_me: bool,
 }
 
 /// One room listed in a homeserver's public room directory.
@@ -413,6 +472,52 @@ pub enum EngineCommand {
         since: Option<String>,
         limit: u32,
     },
+    /// Renames a room (needs the power level to change the name).
+    SetRoomName {
+        room_id: RoomId,
+        name: String,
+    },
+    SetRoomTopic {
+        room_id: RoomId,
+        topic: String,
+    },
+    /// Sets the room avatar from a file the user picked (same path rules as `SendAttachment`);
+    /// `None` removes it.
+    SetRoomAvatar {
+        room_id: RoomId,
+        file_path: Option<String>,
+    },
+    /// Reads the private note the active account keeps about a room (account data, never shared).
+    GetRoomNote {
+        room_id: RoomId,
+    },
+    /// Stores the private note; an empty note deletes it.
+    SetRoomNote {
+        room_id: RoomId,
+        note: String,
+    },
+    /// Marks the whole room as read (read receipt at the latest event and clears the unread flag).
+    MarkRoomRead {
+        room_id: RoomId,
+    },
+    /// Looks up a user's profile, with membership and power level when a room is given.
+    GetUserProfile {
+        user_id: UserId,
+        room_id: Option<RoomId>,
+    },
+    /// Opens the direct-message room with a user, creating it (and inviting them) if none exists.
+    StartDirectMessage {
+        user_id: UserId,
+    },
+    /// Lists shared media, files or links of a room, newest first. `from` is the `next_batch` of
+    /// the previous page. Pages may hold fewer than `limit` items; keep paging while `next_batch`
+    /// is set.
+    GetRoomMedia {
+        room_id: RoomId,
+        kind: RoomMediaKind,
+        from: Option<String>,
+        limit: u32,
+    },
     // Timeline
     SubscribeTimeline {
         room_id: RoomId,
@@ -592,6 +697,24 @@ pub enum EngineResponse {
         next_batch: Option<String>,
         #[specta(type = Number)]
         total_estimate: Option<u64>,
+    },
+    /// The private note of a room (empty when none is set).
+    RoomNote {
+        room_id: RoomId,
+        note: String,
+    },
+    UserProfile {
+        profile: UserProfileDto,
+    },
+    /// The direct-message room opened by `StartDirectMessage`.
+    DirectMessageRoom {
+        room_id: RoomId,
+        created: bool,
+    },
+    RoomMedia {
+        room_id: RoomId,
+        items: Vec<RoomMediaItem>,
+        next_batch: Option<String>,
     },
     RoomJoined {
         room_id: RoomId,
@@ -829,6 +952,9 @@ pub fn register_types() -> Types {
         .register::<RoomMembership>()
         .register::<RoomMemberDto>()
         .register::<RoomDetails>()
+        .register::<RoomMediaKind>()
+        .register::<RoomMediaItem>()
+        .register::<UserProfileDto>()
         .register::<SpaceParentDto>()
         .register::<NotificationCount>()
         .register::<TimelineItemPreview>()

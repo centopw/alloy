@@ -163,11 +163,11 @@ where
     }
 }
 
-fn millis(ts: matrix_sdk::ruma::MilliSecondsSinceUnixEpoch) -> u64 {
+pub(crate) fn millis(ts: matrix_sdk::ruma::MilliSecondsSinceUnixEpoch) -> u64 {
     u64::from(ts.0)
 }
 
-fn media_source_string(source: &MediaSource) -> String {
+pub(crate) fn media_source_string(source: &MediaSource) -> String {
     match source {
         MediaSource::Plain(uri) => uri.to_string(),
         MediaSource::Encrypted(file) => serde_json::to_string(file).unwrap_or_default(),

@@ -154,6 +154,12 @@ impl AlloyClient {
             return Ok(t.clone());
         }
         let timeline = Arc::new(self.timeline(room_id).await?);
+        // Load the room's members in the background so sender display names resolve for
+        // every item; the SDK records failures as `TimelineDetails::Error` on the items.
+        let loading = timeline.clone();
+        tokio::spawn(async move {
+            loading.fetch_members().await;
+        });
         map.insert(room_id.0.clone(), timeline.clone());
         Ok(timeline)
     }

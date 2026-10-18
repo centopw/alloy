@@ -5,6 +5,7 @@ pub mod client;
 pub mod crypto;
 pub mod mapping;
 pub mod media;
+pub mod room_media;
 pub mod rooms;
 pub mod timeline;
 
