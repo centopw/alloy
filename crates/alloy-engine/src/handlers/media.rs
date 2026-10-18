@@ -138,6 +138,12 @@ impl GroupHandler for MediaHandler {
                     next_batch,
                 })
             }
+            EngineCommand::ClearMediaCache => {
+                let freed_bytes = alloy_core::media::clear_media_cache(&ctx.data_dir)
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::MediaCacheCleared { freed_bytes })
+            }
             _ => Err(EngineError::invalid_argument(format!(
                 "Command '{}' does not belong to Media group",
                 name

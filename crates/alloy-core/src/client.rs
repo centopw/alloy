@@ -81,6 +81,11 @@ pub struct AlloyClient {
     /// Direct-message room id per target user (`user_id` -> `room_id`), kept for the
     /// session so repeated `start_direct_message` calls never open a second room.
     pub(crate) direct_rooms: tokio::sync::Mutex<std::collections::HashMap<String, String>>,
+    /// Push-rule state shared by all notification calls, created on first use. Its sync
+    /// handler keeps the rules current and writes update them directly, so it must live
+    /// as long as the client.
+    pub(crate) notification_settings:
+        tokio::sync::OnceCell<matrix_sdk::notification_settings::NotificationSettings>,
 }
 
 impl AlloyClient {
@@ -130,7 +135,10 @@ impl AlloyClient {
         // Configure SQLite store with encryption
         let store_config = SqliteStoreConfig::new(&state_store_path).passphrase(Some(&passphrase));
 
+        let http =
+            crate::tls::matrix_http_client().map_err(|e| AlloyError::HttpClient(e.to_string()))?;
         let client = Client::builder()
+            .http_client(http)
             .homeserver_url(homeserver)
             .sqlite_store_with_config_and_cache_path(store_config, None::<&Path>)
             .build()
@@ -147,6 +155,7 @@ impl AlloyClient {
             sync: tokio::sync::OnceCell::new(),
             spaces: tokio::sync::OnceCell::new(),
             direct_rooms: tokio::sync::Mutex::new(std::collections::HashMap::new()),
+            notification_settings: tokio::sync::OnceCell::new(),
         })
     }
 

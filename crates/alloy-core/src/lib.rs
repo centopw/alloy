@@ -1,13 +1,16 @@
 #![recursion_limit = "256"]
 
+pub mod account;
 pub mod auth;
 pub mod client;
 pub mod crypto;
 pub mod mapping;
 pub mod media;
+pub mod notifications;
 pub mod room_media;
 pub mod rooms;
 pub mod timeline;
+pub mod tls;
 
 pub use alloy_protocol::*;
 pub use alloy_storage::{InMemorySecretStore, SecretStore, StorageError};
@@ -21,6 +24,8 @@ use thiserror::Error;
 pub enum AlloyError {
     #[error("Matrix SDK error: {0}")]
     MatrixSdk(String),
+    #[error("HTTP client error: {0}")]
+    HttpClient(String),
     #[error("Storage error: {0}")]
     Storage(#[from] StorageError),
     #[error("URL error: {0}")]

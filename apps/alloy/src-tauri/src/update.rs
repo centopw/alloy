@@ -113,18 +113,19 @@ mod platform {
     pub async fn check(app: &AppHandle) -> Result<UpdateInfo, String> {
         let current = parse_version(&app.package_info().version.to_string())
             .ok_or_else(|| "unreadable app version".to_string())?;
-        let releases: Vec<Release> = reqwest::Client::builder()
-            .user_agent(concat!("alloy/", env!("CARGO_PKG_VERSION")))
-            .build()
-            .map_err(|e| e.to_string())?
-            .get(RELEASES)
-            .send()
-            .await
-            .and_then(|r| r.error_for_status())
-            .map_err(|e| e.to_string())?
-            .json()
-            .await
-            .map_err(|e| e.to_string())?;
+        let releases: Vec<Release> = alloy_core::tls::with_system_roots(
+            reqwest::Client::builder().user_agent(concat!("alloy/", env!("CARGO_PKG_VERSION"))),
+        )
+        .build()
+        .map_err(|e| e.to_string())?
+        .get(RELEASES)
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
         // Releases are pre-releases for now, so the newest tagged one counts.
         let newest = releases
             .into_iter()

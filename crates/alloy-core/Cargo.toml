@@ -25,6 +25,8 @@ base64 = "0.22"
 rand = "0.8"
 mime = "0.3"
 sha2 = "0.10"
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+rustls = { version = "0.23", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 tokio = { version = "1.0", features = ["full"] }

@@ -4,6 +4,10 @@ use crate::error::EngineError;
 use crate::router::{CommandGroup, GroupHandler, command_name};
 use alloy_core::{AlloyClient, AlloyError, auth::discover_homeserver, delete_account_secrets};
 use alloy_protocol::{EngineCommand, EngineEvent, EngineResponse};
+use std::path::PathBuf;
+
+/// Matrix display names are capped at 255 characters.
+const MAX_DISPLAY_NAME_CHARS: usize = 255;
 
 /// Handler for authentication commands (`CommandGroup::Auth`).
 ///
@@ -187,6 +191,57 @@ impl GroupHandler for AuthHandler {
             }),
             EngineCommand::StartOidcLogin { .. } | EngineCommand::CompleteOidcLogin { .. } => {
                 Err(EngineError::not_implemented(&name))
+            }
+            EngineCommand::GetOwnProfile => {
+                let client = ctx.active_client().await?;
+                let profile = client.own_profile().await.map_err(map_err)?;
+                Ok(EngineResponse::OwnProfile { profile })
+            }
+            EngineCommand::SetDisplayName { name } => {
+                let name = name.trim();
+                if name.is_empty() {
+                    return Err(EngineError::invalid_argument(
+                        "display name must not be empty",
+                    ));
+                }
+                if name.chars().count() > MAX_DISPLAY_NAME_CHARS {
+                    return Err(EngineError::invalid_argument(format!(
+                        "display name must be at most {MAX_DISPLAY_NAME_CHARS} characters"
+                    )));
+                }
+                let client = ctx.active_client().await?;
+                client.set_display_name(name).await.map_err(map_err)?;
+                Ok(EngineResponse::Unit)
+            }
+            EngineCommand::SetOwnAvatar { file_path } => {
+                let client = ctx.active_client().await?;
+                let path = file_path.map(PathBuf::from);
+                if let Some(path) = &path {
+                    if !ctx.attachment_path_allowed(path) {
+                        return Err(EngineError::forbidden(format!(
+                            "attachment {} is not registered for sending",
+                            path.display()
+                        )));
+                    }
+                    if !path.is_file() {
+                        return Err(EngineError::not_found(format!("file {}", path.display())));
+                    }
+                }
+                client
+                    .set_own_avatar(path.as_deref())
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::Unit)
+            }
+            EngineCommand::ListDevices => {
+                let client = ctx.active_client().await?;
+                let devices = client.list_devices().await.map_err(map_err)?;
+                Ok(EngineResponse::Devices { devices })
+            }
+            EngineCommand::GetSessionInfo => {
+                let client = ctx.active_client().await?;
+                let info = client.session_info().await.map_err(map_err)?;
+                Ok(EngineResponse::SessionInfo { info })
             }
             _ => Err(EngineError::invalid_argument(format!(
                 "Command '{}' does not belong to Auth group",

@@ -26,7 +26,12 @@ impl CommandGroup {
             | EngineCommand::CompleteOidcLogin { .. }
             | EngineCommand::RestoreSession { .. }
             | EngineCommand::Logout { .. }
-            | EngineCommand::ListAccounts => CommandGroup::Auth,
+            | EngineCommand::ListAccounts
+            | EngineCommand::GetOwnProfile
+            | EngineCommand::SetDisplayName { .. }
+            | EngineCommand::SetOwnAvatar { .. }
+            | EngineCommand::ListDevices
+            | EngineCommand::GetSessionInfo => CommandGroup::Auth,
 
             EngineCommand::SubscribeRoomList { .. }
             | EngineCommand::Unsubscribe { .. }
@@ -43,7 +48,12 @@ impl CommandGroup {
             | EngineCommand::SetRoomNote { .. }
             | EngineCommand::MarkRoomRead { .. }
             | EngineCommand::GetUserProfile { .. }
-            | EngineCommand::StartDirectMessage { .. } => CommandGroup::Rooms,
+            | EngineCommand::StartDirectMessage { .. }
+            | EngineCommand::GetNotificationSettings
+            | EngineCommand::SetDefaultNotificationLevel { .. }
+            | EngineCommand::SetMentionRules { .. }
+            | EngineCommand::GetRoomNotificationLevel { .. }
+            | EngineCommand::SetRoomNotificationLevel { .. } => CommandGroup::Rooms,
 
             EngineCommand::SubscribeTimeline { .. }
             | EngineCommand::SubscribeThread { .. }
@@ -72,7 +82,8 @@ impl CommandGroup {
 
             EngineCommand::GetMedia { .. }
             | EngineCommand::SendAttachment { .. }
-            | EngineCommand::GetRoomMedia { .. } => CommandGroup::Media,
+            | EngineCommand::GetRoomMedia { .. }
+            | EngineCommand::ClearMediaCache => CommandGroup::Media,
 
             EngineCommand::GetSpaceParents => CommandGroup::Spaces,
 

@@ -1,6 +1,7 @@
 //! Alloy desktop and mobile application shell.
 
 pub mod commands;
+mod notify;
 mod pick;
 mod update;
 
@@ -45,11 +46,16 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .manage(update::PendingUpdate::default());
     builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let data_dir = app
                 .path()
@@ -73,7 +79,11 @@ pub fn run() {
             alloy_subscribe,
             pick::pick_attachment,
             update::check_update,
-            update::install_update
+            update::install_update,
+            notify::notify_permission,
+            notify::notify_message,
+            notify::autostart_get,
+            notify::autostart_set
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

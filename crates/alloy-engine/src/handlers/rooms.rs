@@ -2,7 +2,9 @@ use crate::context::EngineContext;
 use crate::error::EngineError;
 use crate::router::{CommandGroup, GroupHandler, command_name};
 use alloy_core::AlloyError;
-use alloy_protocol::{EngineCommand, EngineEvent, EngineResponse, RoomId, SubscriptionId};
+use alloy_protocol::{
+    EngineCommand, EngineEvent, EngineResponse, NotificationLevel, RoomId, SubscriptionId,
+};
 use std::path::PathBuf;
 
 /// Handler for room operations and subscriptions (`CommandGroup::Rooms`).
@@ -260,6 +262,56 @@ impl GroupHandler for RoomsHandler {
                     .await
                     .map_err(map_err)?;
                 Ok(EngineResponse::DirectMessageRoom { room_id, created })
+            }
+            EngineCommand::GetNotificationSettings => {
+                let client = ctx.active_client().await?;
+                let settings = client.get_notification_settings().await.map_err(map_err)?;
+                Ok(EngineResponse::NotificationSettings { settings })
+            }
+            EngineCommand::SetDefaultNotificationLevel { one_to_one, level } => {
+                if level == NotificationLevel::Mute {
+                    return Err(EngineError::invalid_argument(
+                        "a default notification level cannot be Mute; use All or Mentions",
+                    ));
+                }
+                let client = ctx.active_client().await?;
+                client
+                    .set_default_notification_level(one_to_one, level)
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::Unit)
+            }
+            EngineCommand::SetMentionRules {
+                room_mention,
+                user_mention,
+                invite,
+            } => {
+                let client = ctx.active_client().await?;
+                client
+                    .set_mention_rules(room_mention, user_mention, invite)
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::Unit)
+            }
+            EngineCommand::GetRoomNotificationLevel { room_id } => {
+                let client = ctx.active_client().await?;
+                let state = client
+                    .get_room_notification_level(&room_id)
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::RoomNotificationLevel {
+                    room_id,
+                    level: state.level,
+                    is_default: state.is_default,
+                })
+            }
+            EngineCommand::SetRoomNotificationLevel { room_id, level } => {
+                let client = ctx.active_client().await?;
+                client
+                    .set_room_notification_level(&room_id, level)
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::Unit)
             }
             _ => Err(EngineError::invalid_argument(format!(
                 "Command '{}' does not belong to Rooms group",

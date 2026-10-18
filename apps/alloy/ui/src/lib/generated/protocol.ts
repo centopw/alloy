@@ -22,6 +22,17 @@ export type ConnectionStatus = "Disconnected" | "Connecting" | "Syncing" | "Conn
 	next_retry_millis: number,
 } } | "Terminated";
 
+/**  One login session (device) of the account. */
+export type DeviceDto = {
+	device_id: string,
+	display_name: string | null,
+	last_seen_ts: number | null,
+	last_seen_ip: string | null,
+	is_current: boolean,
+	/**  Cross-signing verified. */
+	verified: boolean,
+};
+
 export type EngineCommand = { action: "DiscoverHomeserver"; params: {
 	input: string,
 } } | { action: "LoginPassword"; params: {
@@ -114,7 +125,43 @@ export type EngineCommand = { action: "DiscoverHomeserver"; params: {
 	kind: RoomMediaKind,
 	from: string | null,
 	limit: number,
-} } | { action: "SubscribeTimeline"; params: {
+} } | 
+/**  Reads the account-wide notification rules. */
+{ action: "GetNotificationSettings" } | 
+/**  Sets the default level for one-to-one or group rooms (encrypted and not). */
+{ action: "SetDefaultNotificationLevel"; params: {
+	one_to_one: boolean,
+	level: NotificationLevel,
+} } | 
+/**  Toggles mention rules; a `None` field is left unchanged. */
+{ action: "SetMentionRules"; params: {
+	room_mention: boolean | null,
+	user_mention: boolean | null,
+	invite: boolean | null,
+} } | 
+/**  Reads the level of one room and whether it follows the default. */
+{ action: "GetRoomNotificationLevel"; params: {
+	room_id: RoomId,
+} } | 
+/**  Sets one room's level; `None` restores the default. */
+{ action: "SetRoomNotificationLevel"; params: {
+	room_id: RoomId,
+	level: NotificationLevel | null,
+} } | 
+/**  Reads the signed-in user's profile. */
+{ action: "GetOwnProfile" } | { action: "SetDisplayName"; params: {
+	name: string,
+} } | 
+/**  Sets the user's avatar from a picked file (same path rules as `SendAttachment`); `None` removes it. */
+{ action: "SetOwnAvatar"; params: {
+	file_path: string | null,
+} } | 
+/**  Lists the account's sessions. */
+{ action: "ListDevices" } | 
+/**  This session's cryptographic identity. */
+{ action: "GetSessionInfo" } | 
+/**  Deletes cached downloaded media (it is fetched again when needed). */
+{ action: "ClearMediaCache" } | { action: "SubscribeTimeline"; params: {
 	room_id: RoomId,
 } } | 
 /**  Streams the timeline of one thread (the root event and its replies). */
@@ -293,6 +340,23 @@ export type EngineResponse = { type: "HomeserverInfo"; payload: {
 	room_id: RoomId,
 	items: RoomMediaItem[],
 	next_batch: string | null,
+} } | { type: "NotificationSettings"; payload: {
+	settings: NotificationSettingsDto,
+} } | { type: "RoomNotificationLevel"; payload: {
+	room_id: RoomId,
+	level: NotificationLevel,
+	/**  The room follows the account default. */
+	is_default: boolean,
+} } | { type: "OwnProfile"; payload: {
+	profile: OwnProfileDto,
+} } | { type: "Devices"; payload: {
+	devices: DeviceDto[],
+} } | { type: "SessionInfo"; payload: {
+	info: SessionInfoDto,
+} } | 
+/**  Bytes freed by `ClearMediaCache`. */
+{ type: "MediaCacheCleared"; payload: {
+	freed_bytes: number,
 } } | { type: "RoomJoined"; payload: {
 	room_id: RoomId,
 } } | { type: "RoomLeft"; payload: {
@@ -398,6 +462,39 @@ export type MediaSource = { kind: "Remote"; data: {
 export type NotificationCount = {
 	highlight_count: number,
 	notification_count: number,
+};
+
+/**  How loudly a room (or a kind of room) notifies, as stored in the account's push rules. */
+export type NotificationLevel = 
+/**  Every message notifies. */
+"All" | 
+/**  Only mentions and keywords notify. */
+"Mentions" | 
+/**  Nothing notifies. */
+"Mute";
+
+/**  Account-wide notification rules (server-side push rules, shared by all devices). */
+export type NotificationSettingsDto = {
+	/**  Default for one-to-one rooms (encrypted and not). */
+	one_to_one: NotificationLevel,
+	/**  Default for group rooms (encrypted and not). */
+	group: NotificationLevel,
+	/**  `@room` mentions notify. */
+	room_mention: boolean,
+	/**  Mentions of the user's ID or display name notify. */
+	user_mention: boolean,
+	/**  Calls and invitations notify. */
+	invite: boolean,
+};
+
+/**  The signed-in user's own profile and device. */
+export type OwnProfileDto = {
+	user_id: UserId,
+	display_name: string | null,
+	/**  `mxc://` avatar URI, fetch it with `GetMedia`. */
+	avatar_url: string | null,
+	device_id: string,
+	homeserver: string,
 };
 
 /**  One answer of a poll. `votes` is zero while results are hidden. */
@@ -515,6 +612,16 @@ export type SasEmoji = {
 	emoji: string,
 	decimal: number,
 	description: string,
+};
+
+/**  Cryptographic identity of this session, for comparing out of band. */
+export type SessionInfoDto = {
+	device_id: string,
+	/**  Unpadded base64 Ed25519 fingerprint key. */
+	ed25519_key: string | null,
+	curve25519_key: string | null,
+	cross_signing_ready: boolean,
+	backup_enabled: boolean,
 };
 
 /**  A room and the joined spaces that contain it. */

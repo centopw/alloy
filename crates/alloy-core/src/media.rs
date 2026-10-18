@@ -68,14 +68,42 @@ fn create_private_dir(dir: &Path) -> std::io::Result<()> {
     builder.create(dir)
 }
 
-/// Delete the on-disk media cache under `data_dir`. Cached media is decrypted and the cache is
-/// shared by every account on this device, so logout clears it.
-pub async fn clear_media_cache(data_dir: &Path) -> AlloyResult<()> {
-    match tokio::fs::remove_dir_all(data_dir.join("media_cache")).await {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e.into()),
+/// Delete the on-disk media cache under `data_dir` and return the number of bytes freed. Cached
+/// media is decrypted and the cache is shared by every account on this device, so logout clears
+/// it. A missing cache frees 0 bytes.
+pub async fn clear_media_cache(data_dir: &Path) -> AlloyResult<u64> {
+    let dir = data_dir.join("media_cache");
+    tokio::task::spawn_blocking(move || -> std::io::Result<u64> {
+        let freed = dir_size(&dir)?;
+        match std::fs::remove_dir_all(&dir) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+            _ => Ok(freed),
+        }
+    })
+    .await
+    .map_err(std::io::Error::other)?
+    .map_err(Into::into)
+}
+
+/// Total size in bytes of the files under `dir`. Symlinks count as their own size and are not
+/// followed; a missing directory counts as 0.
+fn dir_size(dir: &Path) -> std::io::Result<u64> {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(e) => return Err(e),
+    };
+    let mut total = 0;
+    for entry in entries {
+        let entry = entry?;
+        let metadata = entry.metadata()?;
+        total += if metadata.is_dir() {
+            dir_size(&entry.path())?
+        } else {
+            metadata.len()
+        };
     }
+    Ok(total)
 }
 
 impl AlloyClient {

@@ -121,12 +121,15 @@ use alloy_protocol::{
     EventId, EventSendState, PollAnswerDto, ReactionSummary, ThreadSummary, TimelineItemContent,
     TimelineItemDto,
 };
+use matrix_sdk::ruma::events::StateEventContentChange;
 use matrix_sdk::ruma::events::poll::start::PollKind;
 use matrix_sdk::ruma::events::room::MediaSource;
 use matrix_sdk::ruma::events::room::message::MessageType;
 use matrix_sdk_ui::timeline::{
-    EmbeddedEvent, EventSendState as SdkSendState, EventTimelineItem, MsgLikeKind, TimelineDetails,
-    TimelineItem, TimelineItemContent as SdkContent, VirtualTimelineItem,
+    AnyOtherStateEventContentChange, EmbeddedEvent, EventSendState as SdkSendState,
+    EventTimelineItem, MemberProfileChange, MembershipChange, MsgLikeKind, OtherState, Profile,
+    RoomMembershipChange, TimelineDetails, TimelineItem, TimelineItemContent as SdkContent,
+    VirtualTimelineItem,
 };
 
 /// Generic eyeball-im diff mapper.
@@ -278,7 +281,13 @@ fn map_message_type(msgtype: &MessageType) -> TimelineItemContent {
     }
 }
 
-fn map_content(content: &SdkContent, my_user_id: Option<&str>) -> (TimelineItemContent, bool) {
+fn map_content(
+    content: &SdkContent,
+    sender: &matrix_sdk::ruma::UserId,
+    sender_profile: &TimelineDetails<Profile>,
+    my_user_id: Option<&str>,
+) -> (TimelineItemContent, bool) {
+    let actor = display_or_localpart(profile_display_name(sender_profile), sender);
     match content {
         SdkContent::MsgLike(m) => match &m.kind {
             MsgLikeKind::Message(msg) => (map_message_type(msg.msgtype()), msg.is_edited()),
@@ -376,9 +385,21 @@ fn map_content(content: &SdkContent, my_user_id: Option<&str>) -> (TimelineItemC
                 false,
             ),
         },
-        other => (
+        SdkContent::MembershipChange(m) => (
+            room_state("membership", membership_summary(m, &actor, sender)),
+            false,
+        ),
+        SdkContent::ProfileChange(p) => (
+            room_state("profile", profile_summary(p, &actor, sender)),
+            false,
+        ),
+        SdkContent::OtherState(s) => {
+            let (state_type, summary) = other_state_summary(s, &actor);
+            (room_state(state_type, summary), false)
+        }
+        _ => (
             TimelineItemContent::RoomState {
-                state_type: state_label(other).into(),
+                state_type: "unsupported".into(),
                 content_json: String::new(),
             },
             false,
@@ -386,12 +407,307 @@ fn map_content(content: &SdkContent, my_user_id: Option<&str>) -> (TimelineItemC
     }
 }
 
-fn state_label(c: &SdkContent) -> &'static str {
-    match c {
-        SdkContent::MembershipChange(_) => "membership",
-        SdkContent::ProfileChange(_) => "profile",
-        SdkContent::OtherState(_) => "state",
-        _ => "unsupported",
+fn room_state(state_type: &str, summary: String) -> TimelineItemContent {
+    TimelineItemContent::RoomState {
+        state_type: state_type.into(),
+        content_json: serde_json::json!({ "summary": summary }).to_string(),
+    }
+}
+
+fn profile_display_name(details: &TimelineDetails<Profile>) -> Option<&str> {
+    match details {
+        TimelineDetails::Ready(p) => p.display_name.as_deref(),
+        _ => None,
+    }
+}
+
+fn non_blank(s: Option<&str>) -> Option<&str> {
+    s.map(str::trim).filter(|s| !s.is_empty())
+}
+
+/// Display name when present and non-blank, otherwise the user's localpart.
+fn display_or_localpart(name: Option<&str>, user: &matrix_sdk::ruma::UserId) -> String {
+    non_blank(name)
+        .map(str::to_owned)
+        .unwrap_or_else(|| user.localpart().to_owned())
+}
+
+/// Collapses all whitespace runs (including newlines) into single spaces.
+fn one_line(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Truncates to at most `max` characters, counting the trailing ellipsis.
+fn truncate_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_owned();
+    }
+    let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
+    out.push('…');
+    out
+}
+
+/// Names used by the summary sentences. Free of SDK types so the wording is unit-testable.
+struct Actors<'a> {
+    actor: &'a str,
+    target: &'a str,
+    same_user: bool,
+}
+
+impl Actors<'_> {
+    /// "their" when the actor is the target, otherwise "{target}'s".
+    fn possessive(&self) -> String {
+        if self.same_user {
+            "their".to_owned()
+        } else {
+            format!("{}'s", self.target)
+        }
+    }
+
+    /// "themselves" when the actor is the target, otherwise the target name.
+    fn object(&self) -> &str {
+        if self.same_user {
+            "themselves"
+        } else {
+            self.target
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MembershipAction {
+    Joined,
+    Left,
+    Invited,
+    InvitationDeclined,
+    InvitationRevoked,
+    Kicked,
+    Banned,
+    Unbanned,
+    KickedAndBanned,
+    Knocked,
+    KnockAccepted,
+    KnockRetracted,
+    KnockDenied,
+    Unknown,
+}
+
+fn membership_action(change: Option<MembershipChange>) -> MembershipAction {
+    match change {
+        Some(MembershipChange::Joined | MembershipChange::InvitationAccepted) => {
+            MembershipAction::Joined
+        }
+        Some(MembershipChange::Left) => MembershipAction::Left,
+        Some(MembershipChange::Invited) => MembershipAction::Invited,
+        Some(MembershipChange::InvitationRejected) => MembershipAction::InvitationDeclined,
+        Some(MembershipChange::InvitationRevoked) => MembershipAction::InvitationRevoked,
+        Some(MembershipChange::Kicked) => MembershipAction::Kicked,
+        Some(MembershipChange::Banned) => MembershipAction::Banned,
+        Some(MembershipChange::Unbanned) => MembershipAction::Unbanned,
+        Some(MembershipChange::KickedAndBanned) => MembershipAction::KickedAndBanned,
+        Some(MembershipChange::Knocked) => MembershipAction::Knocked,
+        Some(MembershipChange::KnockAccepted) => MembershipAction::KnockAccepted,
+        Some(MembershipChange::KnockRetracted) => MembershipAction::KnockRetracted,
+        Some(MembershipChange::KnockDenied) => MembershipAction::KnockDenied,
+        Some(
+            MembershipChange::None | MembershipChange::Error | MembershipChange::NotImplemented,
+        )
+        | None => MembershipAction::Unknown,
+    }
+}
+
+const MAX_REASON_CHARS: usize = 80;
+
+/// Reason text appended to membership sentences, only when it is short and non-blank.
+fn short_reason(reason: Option<&str>) -> Option<String> {
+    let reason = one_line(reason?);
+    (!reason.is_empty() && reason.chars().count() <= MAX_REASON_CHARS).then_some(reason)
+}
+
+fn membership_sentence(
+    actors: &Actors<'_>,
+    action: MembershipAction,
+    reason: Option<&str>,
+) -> String {
+    let who = actors.actor;
+    let object = actors.object();
+    let sentence = match action {
+        MembershipAction::Joined => format!("{who} joined the room"),
+        MembershipAction::Left => format!("{who} left the room"),
+        MembershipAction::Invited => format!("{who} invited {object}"),
+        MembershipAction::InvitationDeclined => format!("{who} declined the invitation"),
+        MembershipAction::InvitationRevoked => {
+            format!("{who} withdrew the invitation for {object}")
+        }
+        MembershipAction::Kicked => format!("{who} kicked {object}"),
+        MembershipAction::Banned => format!("{who} banned {object}"),
+        MembershipAction::Unbanned => format!("{who} unbanned {object}"),
+        MembershipAction::KickedAndBanned => format!("{who} kicked and banned {object}"),
+        MembershipAction::Knocked => format!("{who} requested to join the room"),
+        MembershipAction::KnockAccepted => {
+            format!("{who} accepted the request to join from {object}")
+        }
+        MembershipAction::KnockRetracted => {
+            format!("{who} withdrew their request to join the room")
+        }
+        MembershipAction::KnockDenied => {
+            format!("{who} denied the request to join from {object}")
+        }
+        MembershipAction::Unknown => format!("{who} changed {} profile", actors.possessive()),
+    };
+    match short_reason(reason) {
+        Some(r) => format!("{sentence} (reason: {r})"),
+        None => sentence,
+    }
+}
+
+fn membership_summary(
+    m: &RoomMembershipChange,
+    actor: &str,
+    sender: &matrix_sdk::ruma::UserId,
+) -> String {
+    let target_id = m.user_id();
+    let target = display_or_localpart(m.display_name().as_deref(), target_id);
+    let reason = match m.content() {
+        StateEventContentChange::Original { content, .. } => content.reason.as_deref(),
+        StateEventContentChange::Redacted(_) => None,
+    };
+    membership_sentence(
+        &Actors {
+            actor,
+            target: &target,
+            same_user: target_id == sender,
+        },
+        membership_action(m.change()),
+        reason,
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DisplayNameChange<'a> {
+    Set(&'a str),
+    Removed,
+}
+
+/// A display name change from old to new; `None` when neither side has a usable name.
+fn display_name_change<'a>(
+    old: Option<&'a str>,
+    new: Option<&'a str>,
+) -> Option<DisplayNameChange<'a>> {
+    match (non_blank(new), non_blank(old)) {
+        (Some(new), _) => Some(DisplayNameChange::Set(new)),
+        (None, Some(_)) => Some(DisplayNameChange::Removed),
+        (None, None) => None,
+    }
+}
+
+fn profile_sentence(
+    actors: &Actors<'_>,
+    name: Option<DisplayNameChange<'_>>,
+    avatar_changed: bool,
+) -> String {
+    let who = actors.actor;
+    let poss = actors.possessive();
+    match (name, avatar_changed) {
+        (Some(DisplayNameChange::Set(n)), true) => format!(
+            "{who} changed {poss} display name to {} and {poss} profile picture",
+            one_line(n)
+        ),
+        (Some(DisplayNameChange::Set(n)), false) => {
+            format!("{who} changed {poss} display name to {}", one_line(n))
+        }
+        (Some(DisplayNameChange::Removed), true) => {
+            format!("{who} removed {poss} display name and changed {poss} profile picture")
+        }
+        (Some(DisplayNameChange::Removed), false) => {
+            format!("{who} removed {poss} display name")
+        }
+        (None, true) => format!("{who} changed {poss} profile picture"),
+        (None, false) => format!("{who} changed {poss} profile"),
+    }
+}
+
+fn profile_summary(
+    p: &MemberProfileChange,
+    actor: &str,
+    sender: &matrix_sdk::ruma::UserId,
+) -> String {
+    let target_id = p.user_id();
+    let name_change = p.displayname_change();
+    let target = display_or_localpart(
+        name_change.and_then(|c| non_blank(c.new.as_deref()).or(non_blank(c.old.as_deref()))),
+        target_id,
+    );
+    let name = name_change.and_then(|c| display_name_change(c.old.as_deref(), c.new.as_deref()));
+    profile_sentence(
+        &Actors {
+            actor,
+            target: &target,
+            same_user: target_id == sender,
+        },
+        name,
+        p.avatar_url_change().is_some(),
+    )
+}
+
+fn room_name_sentence(actor: &str, name: &str) -> String {
+    let name = one_line(name);
+    if name.is_empty() {
+        format!("{actor} removed the room name")
+    } else {
+        format!("{actor} renamed the room to {name}")
+    }
+}
+
+const MAX_TOPIC_CHARS: usize = 120;
+
+fn topic_sentence(actor: &str, topic: &str) -> String {
+    let topic = one_line(topic);
+    if topic.is_empty() {
+        format!("{actor} removed the topic")
+    } else {
+        format!(
+            "{actor} changed the topic to {}",
+            truncate_chars(&topic, MAX_TOPIC_CHARS)
+        )
+    }
+}
+
+fn avatar_sentence(actor: &str, removed: bool) -> String {
+    if removed {
+        format!("{actor} removed the room picture")
+    } else {
+        format!("{actor} changed the room picture")
+    }
+}
+
+fn encryption_sentence(actor: &str) -> String {
+    format!("{actor} turned on end-to-end encryption")
+}
+
+fn other_state_sentence(actor: &str) -> String {
+    format!("{actor} updated the room settings")
+}
+
+/// Room-level state summary. Redacted or unrecognised state falls back to a generic sentence.
+fn other_state_summary(s: &OtherState, actor: &str) -> (&'static str, String) {
+    match s.content() {
+        AnyOtherStateEventContentChange::RoomName(StateEventContentChange::Original {
+            content,
+            ..
+        }) => ("name", room_name_sentence(actor, &content.name)),
+        AnyOtherStateEventContentChange::RoomTopic(StateEventContentChange::Original {
+            content,
+            ..
+        }) => ("topic", topic_sentence(actor, &content.topic)),
+        AnyOtherStateEventContentChange::RoomAvatar(StateEventContentChange::Original {
+            content,
+            ..
+        }) => ("avatar", avatar_sentence(actor, content.url.is_none())),
+        AnyOtherStateEventContentChange::RoomEncryption(StateEventContentChange::Original {
+            ..
+        }) => ("encryption", encryption_sentence(actor)),
+        _ => ("state", other_state_sentence(actor)),
     }
 }
 
@@ -432,7 +748,7 @@ fn profile_parts(
 }
 
 fn embedded_to_dto(id: &str, e: &EmbeddedEvent, my_user_id: Option<&str>) -> TimelineItemDto {
-    let (content, edited) = map_content(&e.content, my_user_id);
+    let (content, edited) = map_content(&e.content, &e.sender, &e.sender_profile, my_user_id);
     let (name, avatar) = profile_parts(&e.sender_profile);
     TimelineItemDto {
         internal_id: id.to_owned(),
@@ -493,7 +809,7 @@ fn event_to_dto(
     ev: &EventTimelineItem,
     my_user_id: Option<&str>,
 ) -> TimelineItemDto {
-    let (content, edited) = map_content(ev.content(), my_user_id);
+    let (content, edited) = map_content(ev.content(), ev.sender(), ev.sender_profile(), my_user_id);
     let (name, avatar) = profile_parts(ev.sender_profile());
     let (reactions, reply_to, thread_summary) = match ev.content() {
         SdkContent::MsgLike(m) => (
@@ -545,5 +861,273 @@ fn event_to_dto(
         edited,
         reactions,
         transaction_id: ev.transaction_id().map(|t| t.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn alice_self() -> Actors<'static> {
+        Actors {
+            actor: "Alice",
+            target: "Alice",
+            same_user: true,
+        }
+    }
+
+    fn alice_on_bob() -> Actors<'static> {
+        Actors {
+            actor: "Alice",
+            target: "Bob",
+            same_user: false,
+        }
+    }
+
+    fn parts(content: TimelineItemContent) -> (String, String) {
+        match content {
+            TimelineItemContent::RoomState {
+                state_type,
+                content_json,
+            } => (state_type, content_json),
+            _ => panic!("expected RoomState"),
+        }
+    }
+
+    #[test]
+    fn display_name_falls_back_to_localpart() {
+        let user = matrix_sdk::ruma::UserId::parse("@alice:example.org").unwrap();
+        assert_eq!(display_or_localpart(None, &user), "alice");
+        assert_eq!(display_or_localpart(Some("   "), &user), "alice");
+        assert_eq!(display_or_localpart(Some(" Alice A "), &user), "Alice A");
+    }
+
+    #[test]
+    fn membership_sentences_put_the_actor_first() {
+        let s = membership_sentence;
+        assert_eq!(
+            s(&alice_self(), MembershipAction::Joined, None),
+            "Alice joined the room"
+        );
+        assert_eq!(
+            s(&alice_self(), MembershipAction::Left, None),
+            "Alice left the room"
+        );
+        assert_eq!(
+            s(&alice_on_bob(), MembershipAction::Invited, None),
+            "Alice invited Bob"
+        );
+        assert_eq!(
+            s(&alice_on_bob(), MembershipAction::InvitationDeclined, None),
+            "Alice declined the invitation"
+        );
+        assert_eq!(
+            s(&alice_on_bob(), MembershipAction::InvitationRevoked, None),
+            "Alice withdrew the invitation for Bob"
+        );
+        assert_eq!(
+            s(&alice_on_bob(), MembershipAction::Unbanned, None),
+            "Alice unbanned Bob"
+        );
+        assert_eq!(
+            s(&alice_on_bob(), MembershipAction::KickedAndBanned, None),
+            "Alice kicked and banned Bob"
+        );
+        assert_eq!(
+            s(&alice_on_bob(), MembershipAction::KnockAccepted, None),
+            "Alice accepted the request to join from Bob"
+        );
+        assert_eq!(
+            s(&alice_on_bob(), MembershipAction::KnockDenied, None),
+            "Alice denied the request to join from Bob"
+        );
+        assert_eq!(
+            s(&alice_self(), MembershipAction::Knocked, None),
+            "Alice requested to join the room"
+        );
+        assert_eq!(
+            s(&alice_self(), MembershipAction::KnockRetracted, None),
+            "Alice withdrew their request to join the room"
+        );
+    }
+
+    #[test]
+    fn membership_reason_is_appended_only_when_short() {
+        let s = membership_sentence;
+        assert_eq!(
+            s(
+                &alice_on_bob(),
+                MembershipAction::Kicked,
+                Some("  spam\n here ")
+            ),
+            "Alice kicked Bob (reason: spam here)"
+        );
+        let max = "x".repeat(MAX_REASON_CHARS);
+        assert!(s(&alice_on_bob(), MembershipAction::Kicked, Some(&max)).ends_with("x)"));
+        let too_long = "x".repeat(MAX_REASON_CHARS + 1);
+        assert_eq!(
+            s(&alice_on_bob(), MembershipAction::Kicked, Some(&too_long)),
+            "Alice kicked Bob"
+        );
+        assert_eq!(
+            s(&alice_on_bob(), MembershipAction::Banned, Some("   ")),
+            "Alice banned Bob"
+        );
+    }
+
+    #[test]
+    fn membership_fallback_describes_a_profile_change() {
+        assert_eq!(
+            membership_sentence(&alice_self(), MembershipAction::Unknown, None),
+            "Alice changed their profile"
+        );
+        assert_eq!(
+            membership_sentence(&alice_on_bob(), MembershipAction::Unknown, None),
+            "Alice changed Bob's profile"
+        );
+    }
+
+    #[test]
+    fn membership_action_maps_sdk_changes() {
+        assert_eq!(
+            membership_action(Some(MembershipChange::InvitationAccepted)),
+            MembershipAction::Joined
+        );
+        assert_eq!(
+            membership_action(Some(MembershipChange::InvitationRejected)),
+            MembershipAction::InvitationDeclined
+        );
+        assert_eq!(
+            membership_action(Some(MembershipChange::KickedAndBanned)),
+            MembershipAction::KickedAndBanned
+        );
+        assert_eq!(
+            membership_action(Some(MembershipChange::NotImplemented)),
+            MembershipAction::Unknown
+        );
+        assert_eq!(membership_action(None), MembershipAction::Unknown);
+    }
+
+    #[test]
+    fn display_name_change_distinguishes_set_removed_and_unchanged() {
+        assert_eq!(
+            display_name_change(Some("Old"), Some("New")),
+            Some(DisplayNameChange::Set("New"))
+        );
+        assert_eq!(
+            display_name_change(Some("Old"), None),
+            Some(DisplayNameChange::Removed)
+        );
+        assert_eq!(
+            display_name_change(Some("Old"), Some("  ")),
+            Some(DisplayNameChange::Removed)
+        );
+        assert_eq!(display_name_change(None, None), None);
+    }
+
+    #[test]
+    fn profile_sentences_cover_name_and_avatar_changes() {
+        let s = profile_sentence;
+        assert_eq!(
+            s(&alice_self(), Some(DisplayNameChange::Set("Ali")), false),
+            "Alice changed their display name to Ali"
+        );
+        assert_eq!(
+            s(
+                &alice_on_bob(),
+                Some(DisplayNameChange::Set("Bobby")),
+                false
+            ),
+            "Alice changed Bob's display name to Bobby"
+        );
+        assert_eq!(
+            s(&alice_self(), Some(DisplayNameChange::Removed), false),
+            "Alice removed their display name"
+        );
+        assert_eq!(
+            s(&alice_self(), None, true),
+            "Alice changed their profile picture"
+        );
+        assert_eq!(
+            s(&alice_self(), Some(DisplayNameChange::Set("Ali")), true),
+            "Alice changed their display name to Ali and their profile picture"
+        );
+        assert_eq!(
+            s(&alice_self(), Some(DisplayNameChange::Removed), true),
+            "Alice removed their display name and changed their profile picture"
+        );
+        assert_eq!(s(&alice_self(), None, false), "Alice changed their profile");
+        assert_eq!(
+            s(&alice_on_bob(), None, false),
+            "Alice changed Bob's profile"
+        );
+    }
+
+    #[test]
+    fn room_name_and_topic_sentences() {
+        assert_eq!(
+            room_name_sentence("Alice", "Lounge"),
+            "Alice renamed the room to Lounge"
+        );
+        assert_eq!(
+            room_name_sentence("Alice", "  "),
+            "Alice removed the room name"
+        );
+        assert_eq!(
+            topic_sentence("Alice", "Weekly\n\n  sync"),
+            "Alice changed the topic to Weekly sync"
+        );
+        assert_eq!(topic_sentence("Alice", ""), "Alice removed the topic");
+    }
+
+    #[test]
+    fn long_topics_are_truncated_with_an_ellipsis() {
+        let topic = "word ".repeat(60);
+        let sentence = topic_sentence("Alice", &topic);
+        let shown = sentence
+            .strip_prefix("Alice changed the topic to ")
+            .unwrap();
+        assert_eq!(shown.chars().count(), MAX_TOPIC_CHARS);
+        assert!(shown.ends_with('…'));
+    }
+
+    #[test]
+    fn truncate_counts_the_ellipsis() {
+        assert_eq!(truncate_chars("abc", 3), "abc");
+        assert_eq!(truncate_chars("abcd", 3), "ab…");
+    }
+
+    #[test]
+    fn avatar_encryption_and_other_state_sentences() {
+        assert_eq!(
+            avatar_sentence("Alice", false),
+            "Alice changed the room picture"
+        );
+        assert_eq!(
+            avatar_sentence("Alice", true),
+            "Alice removed the room picture"
+        );
+        assert_eq!(
+            encryption_sentence("Alice"),
+            "Alice turned on end-to-end encryption"
+        );
+        assert_eq!(
+            other_state_sentence("Alice"),
+            "Alice updated the room settings"
+        );
+    }
+
+    #[test]
+    fn room_state_carries_the_summary_as_json() {
+        let (state_type, json) = parts(room_state(
+            "name",
+            "Alice renamed the room to Lounge".into(),
+        ));
+        assert_eq!(state_type, "name");
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({ "summary": "Alice renamed the room to Lounge" })
+        );
     }
 }

@@ -38,7 +38,10 @@ pub async fn discover_homeserver(input: &str) -> AlloyResult<HomeserverDiscovery
         let typed = url::Url::parse(input).map_err(|_| AlloyError::InvalidHomeserverUrl)?;
         require_secure_homeserver(&typed)?;
     }
+    let http =
+        crate::tls::matrix_http_client().map_err(|e| AlloyError::HttpClient(e.to_string()))?;
     let client = matrix_sdk::Client::builder()
+        .http_client(http)
         .server_name_or_homeserver_url(input)
         .build()
         .await

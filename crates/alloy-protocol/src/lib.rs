@@ -84,6 +84,67 @@ pub struct RoomDetails {
     pub can_set_avatar: bool,
 }
 
+/// How loudly a room (or a kind of room) notifies, as stored in the account's push rules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub enum NotificationLevel {
+    /// Every message notifies.
+    All,
+    /// Only mentions and keywords notify.
+    Mentions,
+    /// Nothing notifies.
+    Mute,
+}
+
+/// Account-wide notification rules (server-side push rules, shared by all devices).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct NotificationSettingsDto {
+    /// Default for one-to-one rooms (encrypted and not).
+    pub one_to_one: NotificationLevel,
+    /// Default for group rooms (encrypted and not).
+    pub group: NotificationLevel,
+    /// `@room` mentions notify.
+    pub room_mention: bool,
+    /// Mentions of the user's ID or display name notify.
+    pub user_mention: bool,
+    /// Calls and invitations notify.
+    pub invite: bool,
+}
+
+/// The signed-in user's own profile and device.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct OwnProfileDto {
+    pub user_id: UserId,
+    pub display_name: Option<String>,
+    /// `mxc://` avatar URI, fetch it with `GetMedia`.
+    pub avatar_url: Option<String>,
+    pub device_id: String,
+    pub homeserver: String,
+}
+
+/// One login session (device) of the account.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct DeviceDto {
+    pub device_id: String,
+    pub display_name: Option<String>,
+    #[specta(type = Option<Number>)]
+    pub last_seen_ts: Option<u64>,
+    pub last_seen_ip: Option<String>,
+    pub is_current: bool,
+    /// Cross-signing verified.
+    pub verified: bool,
+}
+
+/// Cryptographic identity of this session, for comparing out of band.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct SessionInfoDto {
+    pub device_id: String,
+    /// Unpadded base64 Ed25519 fingerprint key.
+    pub ed25519_key: Option<String>,
+    pub curve25519_key: Option<String>,
+    pub cross_signing_ready: bool,
+    pub backup_enabled: bool,
+}
+
 /// Which kind of shared content `GetRoomMedia` lists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub enum RoomMediaKind {
@@ -518,6 +579,43 @@ pub enum EngineCommand {
         from: Option<String>,
         limit: u32,
     },
+    /// Reads the account-wide notification rules.
+    GetNotificationSettings,
+    /// Sets the default level for one-to-one or group rooms (encrypted and not).
+    SetDefaultNotificationLevel {
+        one_to_one: bool,
+        level: NotificationLevel,
+    },
+    /// Toggles mention rules; a `None` field is left unchanged.
+    SetMentionRules {
+        room_mention: Option<bool>,
+        user_mention: Option<bool>,
+        invite: Option<bool>,
+    },
+    /// Reads the level of one room and whether it follows the default.
+    GetRoomNotificationLevel {
+        room_id: RoomId,
+    },
+    /// Sets one room's level; `None` restores the default.
+    SetRoomNotificationLevel {
+        room_id: RoomId,
+        level: Option<NotificationLevel>,
+    },
+    /// Reads the signed-in user's profile.
+    GetOwnProfile,
+    SetDisplayName {
+        name: String,
+    },
+    /// Sets the user's avatar from a picked file (same path rules as `SendAttachment`); `None` removes it.
+    SetOwnAvatar {
+        file_path: Option<String>,
+    },
+    /// Lists the account's sessions.
+    ListDevices,
+    /// This session's cryptographic identity.
+    GetSessionInfo,
+    /// Deletes cached downloaded media (it is fetched again when needed).
+    ClearMediaCache,
     // Timeline
     SubscribeTimeline {
         room_id: RoomId,
@@ -715,6 +813,29 @@ pub enum EngineResponse {
         room_id: RoomId,
         items: Vec<RoomMediaItem>,
         next_batch: Option<String>,
+    },
+    NotificationSettings {
+        settings: NotificationSettingsDto,
+    },
+    RoomNotificationLevel {
+        room_id: RoomId,
+        level: NotificationLevel,
+        /// The room follows the account default.
+        is_default: bool,
+    },
+    OwnProfile {
+        profile: OwnProfileDto,
+    },
+    Devices {
+        devices: Vec<DeviceDto>,
+    },
+    SessionInfo {
+        info: SessionInfoDto,
+    },
+    /// Bytes freed by `ClearMediaCache`.
+    MediaCacheCleared {
+        #[specta(type = Number)]
+        freed_bytes: u64,
     },
     RoomJoined {
         room_id: RoomId,
@@ -953,6 +1074,11 @@ pub fn register_types() -> Types {
         .register::<RoomMemberDto>()
         .register::<RoomDetails>()
         .register::<RoomMediaKind>()
+        .register::<NotificationLevel>()
+        .register::<NotificationSettingsDto>()
+        .register::<OwnProfileDto>()
+        .register::<DeviceDto>()
+        .register::<SessionInfoDto>()
         .register::<RoomMediaItem>()
         .register::<UserProfileDto>()
         .register::<SpaceParentDto>()
