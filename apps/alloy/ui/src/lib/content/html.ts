@@ -11,6 +11,8 @@ export function sanitizeHtml(html: string): string {
     ALLOWED_TAGS,
     ALLOWED_ATTR: ['href', 'title', 'class', 'start'],
     ALLOWED_URI_REGEXP: /^(?:https?:|mailto:)/i,
+    ALLOW_DATA_ATTR: false,
+    ALLOW_ARIA_ATTR: false,
     FORBID_ATTR: ['style', 'onerror', 'onclick'],
   });
 }

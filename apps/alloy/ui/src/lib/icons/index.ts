@@ -41,3 +41,4 @@ export { Bell } from '@lucide/svelte';
 export { LogOut } from '@lucide/svelte';
 export { MessageSquare } from '@lucide/svelte';
 export { Compass } from '@lucide/svelte';
+export { ChartBar } from '@lucide/svelte';

@@ -89,7 +89,7 @@ Three-layer approach (2026 standard practice):
 - **macOS/iOS:** Leverage file-level encryption via APFS or Keychain; no additional layer needed if using SQLCipher.
 - **Android:** SQLCipher + device encryption; consider requesting `WRITE_SECURE_SETTINGS` for app-level secrets (use sparingly).
 - **Linux/Windows:** Rely on SQLCipher + OS user isolation; consider per-profile encryption directories.
-- **CSP/IPC hardening (if WebView):** Not needed for Tauri 2.x desktop (uses system webkit); avoid inline scripts. Tighten CSP headers if any web shell emerges.
+- **CSP/IPC hardening (WebView):** Alloy runs in the Tauri 2 WebView, so the CSP is enforced. The configured policy sets `default-src 'none'`, `script-src 'self'`, `frame-src 'none'`, `base-uri 'none'`, `form-action 'none'`, and `object-src 'none'`; `app.security.freezePrototype` is enabled. Capabilities are minimal (`core:default` plus `opener:allow-open-url` and `opener:allow-default-urls`, limited to http/https/mailto/tel). Message HTML goes through a DOMPurify allowlist with `data-*`/`aria-*` attributes disabled. Avoid inline scripts and widen the CSP only with a reviewed reason.
 
 ### Update & Code Signing
 

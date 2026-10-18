@@ -42,14 +42,6 @@ impl GroupHandler for MediaHandler {
                 height,
                 mime_type,
             } => match source {
-                MediaSource::Local { file_path } => {
-                    if !PathBuf::from(&file_path).is_file() {
-                        return Err(EngineError::not_found(format!("file {file_path}")));
-                    }
-                    Ok(EngineResponse::MediaRetrieved {
-                        local_path: file_path,
-                    })
-                }
                 MediaSource::Remote { uri } => {
                     let thumbnail = match (kind.as_str(), width, height) {
                         ("thumbnail", Some(w), Some(h)) if w > 0 && h > 0 => Some((w, h)),
@@ -87,6 +79,11 @@ impl GroupHandler for MediaHandler {
                 txn_id,
             } => {
                 let path = PathBuf::from(&file_path);
+                if !ctx.attachment_path_allowed(&path) {
+                    return Err(EngineError::forbidden(format!(
+                        "attachment {file_path} is not registered for sending"
+                    )));
+                }
                 if !path.is_file() {
                     return Err(EngineError::not_found(format!("file {file_path}")));
                 }

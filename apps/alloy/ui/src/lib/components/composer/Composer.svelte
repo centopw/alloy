@@ -4,10 +4,10 @@
   import { roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
   import { client } from '$lib/ipc';
   import Icon from '$lib/icons/Icon.svelte';
-  import { Plus, Smile, X } from '$lib/icons';
+  import { ChartBar, Plus, Smile, X } from '$lib/icons';
   import { canPickFiles, pickFile } from '$lib/platform/files';
   import { EMOJI_PICKER } from '$lib/content/emoji';
-  import { tick } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import type { RoomMemberDto } from '$lib/generated/index.js';
   import { membersStore, memberLabel } from '$lib/stores/members.svelte';
   import {
@@ -20,6 +20,7 @@
     type MentionRecord
   } from '$lib/stores/mentions';
   import MentionPicker from './MentionPicker.svelte';
+  import PollDialog from './PollDialog.svelte';
 
   interface Props {
     roomId: string;
@@ -33,6 +34,7 @@
   let field: HTMLTextAreaElement | undefined = $state();
   let emojiOpen = $state(false);
   let mention = $state<ActiveMention | null>(null);
+  let pollOpen = $state(false);
   // Key (`start:query`) of a mention dismissed with Escape; it reopens once the query changes.
   let mentionDismissed = $state<string | null>(null);
   let mentionIndex = $state(0);
@@ -77,7 +79,8 @@
     mentionDismissed = null;
     mentionRecords = [];
     // Without loaded members the picker stays empty; sending is unaffected.
-    void membersStore.loadMembers(roomId).catch(() => {});
+    // Untracked: the cache read inside must not make members arriving later wipe the draft.
+    untrack(() => void membersStore.loadMembers(roomId).catch(() => {}));
   });
 
   function setTyping(on: boolean) {
@@ -237,6 +240,12 @@
       <button type="button" class="round" aria-label="Attach file" title="Attach file" onclick={attach}>
         <Icon icon={Plus} size={20} />
       </button>
+    {/if}
+    {#if !threadRoot}
+      <button type="button" class="round" aria-label="Create poll" title="Create poll" onclick={() => (pollOpen = true)}>
+        <Icon icon={ChartBar} size={20} />
+      </button>
+      <PollDialog open={pollOpen} onclose={() => (pollOpen = false)} />
     {/if}
 
     <textarea

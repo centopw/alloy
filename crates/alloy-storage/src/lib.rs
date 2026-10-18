@@ -129,19 +129,41 @@ impl FileSecretStore {
     }
 
     /// Write through a temp file and rename so a crash never leaves a truncated file.
+    ///
+    /// The temp file is created exclusively with owner-only permissions, so the secrets are never
+    /// readable by other users, not even briefly between create and chmod.
     fn save(&self, map: &HashMap<String, String>) -> Result<(), StorageError> {
         let text = serde_json::to_string(map)
             .map_err(|e| StorageError::DatabaseError(format!("encode secrets: {e}")))?;
         let tmp = self.path.with_extension("tmp");
-        std::fs::write(&tmp, text)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
+        // A temp file left by a crashed write must not block this one or keep its old contents.
+        match std::fs::remove_file(&tmp) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
         }
-        std::fs::rename(&tmp, &self.path)?;
-        Ok(())
+        let result =
+            write_private(&tmp, text.as_bytes()).and_then(|()| std::fs::rename(&tmp, &self.path));
+        if result.is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
+        Ok(result?)
     }
+}
+
+/// Creates `path` exclusively with owner-only permissions (0600 on unix), writes `bytes`, and fsyncs.
+pub fn write_private(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
 }
 
 #[async_trait::async_trait]
@@ -175,56 +197,112 @@ impl SecretStore for FileSecretStore {
     }
 }
 
-/// OS Keychain-backed secret store using `keyring` crate.
-#[cfg(feature = "keyring")]
+/// OS keychain-backed secret store using the `keyring` crate.
+///
+/// Only compiled on desktop targets whose keyring backend is enabled in `Cargo.toml`. Constructing
+/// it verifies that the platform keychain really persists data, so a missing backend fails closed
+/// instead of silently falling back to keyring's in-memory mock.
+#[cfg(all(
+    feature = "keyring",
+    any(target_os = "linux", target_os = "macos", target_os = "windows")
+))]
 pub struct KeyringSecretStore {
     service: String,
 }
 
-#[cfg(feature = "keyring")]
+#[cfg(all(
+    feature = "keyring",
+    any(target_os = "linux", target_os = "macos", target_os = "windows")
+))]
+const KEYCHAIN_PROBE_KEY: &str = "__alloy_keychain_probe__";
+#[cfg(all(
+    feature = "keyring",
+    any(target_os = "linux", target_os = "macos", target_os = "windows")
+))]
+const KEYCHAIN_PROBE_VALUE: &str = "probe";
+
+#[cfg(all(
+    feature = "keyring",
+    any(target_os = "linux", target_os = "macos", target_os = "windows")
+))]
 impl KeyringSecretStore {
-    pub fn new(service: &str) -> Self {
-        Self {
+    /// Opens the keychain for `service`, failing if it cannot persist secrets.
+    ///
+    /// The probe writes through one `Entry` and reads through a fresh one. Keyring's mock backend
+    /// keeps credentials only inside a single `Entry`, so a mock is rejected here.
+    pub fn new(service: &str) -> Result<Self, StorageError> {
+        let store = Self {
             service: service.to_string(),
+        };
+        store.probe()?;
+        Ok(store)
+    }
+
+    fn probe(&self) -> Result<(), StorageError> {
+        self.get_entry(KEYCHAIN_PROBE_KEY)?
+            .set_password(KEYCHAIN_PROBE_VALUE)
+            .map_err(keyring_error)?;
+        let read = self
+            .get_entry(KEYCHAIN_PROBE_KEY)?
+            .get_password()
+            .map_err(keyring_error)?;
+        self.get_entry(KEYCHAIN_PROBE_KEY)?
+            .delete_credential()
+            .map_err(keyring_error)?;
+        if read != KEYCHAIN_PROBE_VALUE {
+            return Err(StorageError::KeyringError(
+                "keychain did not persist a probe secret".to_string(),
+            ));
         }
+        Ok(())
     }
 
     fn get_entry(&self, key: &str) -> Result<keyring::Entry, StorageError> {
-        keyring::Entry::new(&self.service, key)
-            .map_err(|e| StorageError::KeyringError(e.to_string()))
+        keyring::Entry::new(&self.service, key).map_err(keyring_error)
     }
 }
 
-#[cfg(feature = "keyring")]
+#[cfg(all(
+    feature = "keyring",
+    any(target_os = "linux", target_os = "macos", target_os = "windows")
+))]
+fn keyring_error(e: keyring::Error) -> StorageError {
+    StorageError::KeyringError(e.to_string())
+}
+
+#[cfg(all(
+    feature = "keyring",
+    any(target_os = "linux", target_os = "macos", target_os = "windows")
+))]
 #[async_trait::async_trait]
 impl SecretStore for KeyringSecretStore {
     async fn set_secret(&self, key: &str, value: &str) -> Result<(), StorageError> {
-        let entry = self.get_entry(key)?;
-        entry
+        self.get_entry(key)?
             .set_password(value)
-            .map_err(|e| StorageError::KeyringError(e.to_string()))
+            .map_err(keyring_error)
     }
 
     async fn get_secret(&self, key: &str) -> Result<String, StorageError> {
-        let entry = self.get_entry(key)?;
-        entry
-            .get_password()
-            .map_err(|e| StorageError::KeyringError(e.to_string()))
+        match self.get_entry(key)?.get_password() {
+            Ok(value) => Ok(value),
+            Err(keyring::Error::NoEntry) => Err(StorageError::SecretNotFound(key.to_string())),
+            Err(e) => Err(keyring_error(e)),
+        }
     }
 
+    /// Deleting an absent secret succeeds, so account cleanup can run unconditionally.
     async fn delete_secret(&self, key: &str) -> Result<(), StorageError> {
-        let entry = self.get_entry(key)?;
-        entry
-            .delete_credential()
-            .map_err(|e| StorageError::KeyringError(e.to_string()))
+        match self.get_entry(key)?.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(keyring_error(e)),
+        }
     }
 
     async fn has_secret(&self, key: &str) -> Result<bool, StorageError> {
-        let entry = self.get_entry(key)?;
-        match entry.get_password() {
+        match self.get_entry(key)?.get_password() {
             Ok(_) => Ok(true),
             Err(keyring::Error::NoEntry) => Ok(false),
-            Err(e) => Err(StorageError::KeyringError(e.to_string())),
+            Err(e) => Err(keyring_error(e)),
         }
     }
 }
@@ -252,6 +330,10 @@ mod tests {
             reopened.get_secret("b").await,
             Err(StorageError::SecretNotFound(_))
         ));
+        assert!(
+            !dir.join("secrets.tmp").exists(),
+            "temp file must not outlive a save"
+        );
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -263,6 +345,31 @@ mod tests {
             );
         }
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(all(
+        feature = "keyring",
+        any(target_os = "linux", target_os = "macos", target_os = "windows")
+    ))]
+    #[tokio::test]
+    async fn keyring_round_trips_across_instances() {
+        let service = format!("chat.alloy.test.{}", std::process::id());
+        let store = match KeyringSecretStore::new(&service) {
+            Ok(store) => store,
+            Err(e) => {
+                eprintln!("skipping keyring round-trip test, no usable keychain: {e}");
+                return;
+            }
+        };
+        store.set_secret("round-trip", "v1").await.unwrap();
+        let reopened = KeyringSecretStore::new(&service).unwrap();
+        assert_eq!(reopened.get_secret("round-trip").await.unwrap(), "v1");
+        reopened.delete_secret("round-trip").await.unwrap();
+        reopened.delete_secret("round-trip").await.unwrap();
+        assert!(matches!(
+            store.get_secret("round-trip").await,
+            Err(StorageError::SecretNotFound(_))
+        ));
     }
 
     #[tokio::test]

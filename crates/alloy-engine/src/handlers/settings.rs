@@ -18,30 +18,43 @@ impl SettingsHandler {
         Self
     }
 
-    /// Locates the workspace `packages/themes` directory.
-    fn find_themes_dir(&self) -> Option<PathBuf> {
-        // 1. Check ALLOY_THEMES_DIR environment variable
+    /// Returns the directory that holds user theme files.
+    ///
+    /// Release builds read only `<data_dir>/themes`, so files placed in a working directory or
+    /// named by an environment variable cannot inject CSS. Debug builds also honour the
+    /// development locations from `dev_themes_dir`.
+    fn themes_dir(ctx: &EngineContext) -> Option<PathBuf> {
+        if let Some(dev) = Self::dev_themes_dir() {
+            return Some(dev);
+        }
+        let dir = ctx.data_dir.join("themes");
+        dir.is_dir().then_some(dir)
+    }
+
+    /// Development-only theme locations: `ALLOY_THEMES_DIR`, then `packages/themes` in the
+    /// current directory or an ancestor.
+    #[cfg(debug_assertions)]
+    fn dev_themes_dir() -> Option<PathBuf> {
         if let Ok(dir) = std::env::var("ALLOY_THEMES_DIR") {
             let path = PathBuf::from(dir);
-            if path.exists() {
+            if path.is_dir() {
                 return Some(path);
             }
         }
-
-        // 2. Try to find `packages/themes` relative to current directory or ancestors
         let mut current = std::env::current_dir().ok()?;
         loop {
             let themes_path = current.join("packages/themes");
-            if themes_path.exists() && themes_path.is_dir() {
+            if themes_path.is_dir() {
                 return Some(themes_path);
             }
-
             if !current.pop() {
-                break;
+                return None;
             }
         }
+    }
 
-        // 3. Not found, built-in themes always available
+    #[cfg(not(debug_assertions))]
+    fn dev_themes_dir() -> Option<PathBuf> {
         None
     }
 
@@ -51,28 +64,71 @@ impl SettingsHandler {
             .is_some_and(|ext| ext == "json" || ext == "jsonc")
     }
 
+    /// Theme ids become registry keys and CSS selector fragments, so keep them to a plain slug.
+    fn is_valid_theme_id(id: &str) -> bool {
+        !id.is_empty()
+            && id.len() <= 64
+            && id
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    }
+
+    /// Rejects CSS values that could end their declaration or load external resources.
+    fn is_safe_css_value(value: &str) -> bool {
+        if value.is_empty() || value.len() > 256 {
+            return false;
+        }
+        if value
+            .chars()
+            .any(|c| c.is_control() || matches!(c, ';' | '{' | '}' | '<' | '>' | '\\'))
+        {
+            return false;
+        }
+        let lower = value.to_ascii_lowercase();
+        !["url(", "@import", "expression("]
+            .iter()
+            .any(|bad| lower.contains(bad))
+    }
+
+    /// Loads every readable theme file in the themes directory. Files with an invalid id or
+    /// that fail to parse are skipped with a warning.
+    fn load_workspace_themes(ctx: &EngineContext) -> Vec<alloy_theme::Theme> {
+        let Some(themes_dir) = Self::themes_dir(ctx) else {
+            return Vec::new();
+        };
+        let Ok(entries) = fs::read_dir(&themes_dir) else {
+            return Vec::new();
+        };
+        entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| Self::is_theme_file(path))
+            .filter_map(|path| match ThemeLoader::load_from_path(&path) {
+                Ok(theme) if Self::is_valid_theme_id(&theme.id) => Some(theme),
+                Ok(theme) => {
+                    tracing::warn!(path = %path.display(), id = %theme.id, "skipping theme with invalid id");
+                    None
+                }
+                Err(e) => {
+                    tracing::warn!(path = %path.display(), error = %e, "skipping unreadable theme");
+                    None
+                }
+            })
+            .collect()
+    }
+
     /// Lists all available themes (built-in + workspace themes).
-    async fn list_themes(&self) -> Result<Vec<(String, String)>, EngineError> {
+    async fn list_themes(&self, ctx: &EngineContext) -> Result<Vec<(String, String)>, EngineError> {
         let mut themes = vec![
             ("alloy-light".into(), "Alloy Light".into()),
             ("alloy-dark".into(), "Alloy Dark".into()),
             ("alloy-amoled".into(), "Alloy AMOLED".into()),
         ];
 
-        // Load any workspace themes from packages/themes/
-        if let Some(themes_dir) = self.find_themes_dir()
-            && let Ok(entries) = fs::read_dir(&themes_dir)
-        {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if Self::is_theme_file(&path)
-                    && let Ok(theme) = ThemeLoader::load_from_path(&path)
-                {
-                    // Avoid duplicates if a workspace theme overrides a builtin
-                    if !themes.iter().any(|(id, _)| id == &theme.id) {
-                        themes.push((theme.id, theme.name));
-                    }
-                }
+        for theme in Self::load_workspace_themes(ctx) {
+            // Avoid duplicates if a workspace theme overrides a builtin
+            if !themes.iter().any(|(id, _)| id == &theme.id) {
+                themes.push((theme.id, theme.name));
             }
         }
 
@@ -81,32 +137,30 @@ impl SettingsHandler {
     }
 
     /// Resolves a theme and returns its CSS variables scoped.
-    async fn get_theme(&self, id: &str) -> Result<String, EngineError> {
-        let mut resolver = ThemeResolver::new();
-
-        // Load and register all workspace themes
-        if let Some(themes_dir) = self.find_themes_dir()
-            && let Ok(entries) = fs::read_dir(&themes_dir)
-        {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if Self::is_theme_file(&path)
-                    && let Ok(theme) = ThemeLoader::load_from_path(&path)
-                {
-                    resolver.register(theme);
-                }
-            }
+    async fn get_theme(&self, ctx: &EngineContext, id: &str) -> Result<String, EngineError> {
+        if !Self::is_valid_theme_id(id) {
+            return Err(EngineError::invalid_argument(format!(
+                "Invalid theme id '{}'",
+                id
+            )));
         }
+
+        let workspace = Self::load_workspace_themes(ctx);
+        let mut resolver = ThemeResolver::new();
+        for theme in &workspace {
+            resolver.register(theme.clone());
+        }
+
         // Resolve the requested theme
-        let theme = if id == "alloy-light" {
-            alloy_theme::alloy_light()
-        } else if id == "alloy-dark" {
-            alloy_theme::alloy_dark()
-        } else if id == "alloy-amoled" {
-            alloy_theme::alloy_amoled()
-        } else {
-            // Try to find in workspace themes
-            self.find_workspace_theme(id)?
+        let theme = match id {
+            "alloy-light" => alloy_theme::alloy_light(),
+            "alloy-dark" => alloy_theme::alloy_dark(),
+            "alloy-amoled" => alloy_theme::alloy_amoled(),
+            _ => workspace
+                .iter()
+                .find(|theme| theme.id == id)
+                .cloned()
+                .ok_or_else(|| EngineError::not_found(format!("Theme '{}' not found", id)))?,
         };
 
         let resolved = resolver.resolve(&theme).map_err(|e| {
@@ -116,31 +170,17 @@ impl SettingsHandler {
         // Format CSS scoped by theme ID, matching gen-css style
         let mut css = format!("[data-theme=\"{}\"] {{\n", resolved.id);
         for (var_name, value) in resolved.css_vars() {
+            if !Self::is_safe_css_value(&value) {
+                return Err(EngineError::invalid_argument(format!(
+                    "Theme '{}' has an unsafe value for {}",
+                    id, var_name
+                )));
+            }
             css.push_str(&format!("  {}: {};\n", var_name, value));
         }
         css.push_str("}\n");
 
         Ok(css)
-    }
-
-    /// Searches workspace themes directory for a specific theme by ID.
-    fn find_workspace_theme(&self, id: &str) -> Result<alloy_theme::Theme, EngineError> {
-        self.find_themes_dir()
-            .and_then(|themes_dir| {
-                fs::read_dir(&themes_dir).ok().and_then(|entries| {
-                    entries.flatten().find_map(|entry| {
-                        let path = entry.path();
-                        if Self::is_theme_file(&path) {
-                            ThemeLoader::load_from_path(&path)
-                                .ok()
-                                .filter(|theme| theme.id == id)
-                        } else {
-                            None
-                        }
-                    })
-                })
-            })
-            .ok_or_else(|| EngineError::not_found(format!("Theme '{}' not found", id)))
     }
 
     /// Gets settings.json from data_dir, or returns empty object if not present.
@@ -197,16 +237,16 @@ impl GroupHandler for SettingsHandler {
         let name = command_name(&cmd);
         match cmd {
             EngineCommand::ListThemes => {
-                let themes = self.list_themes().await?;
+                let themes = self.list_themes(ctx).await?;
                 Ok(EngineResponse::ThemesList { themes })
             }
             EngineCommand::GetTheme { id } => {
-                let css = self.get_theme(&id).await?;
+                let css = self.get_theme(ctx, &id).await?;
                 Ok(EngineResponse::ThemeCss { css })
             }
             EngineCommand::SetActiveTheme { id } => {
                 // Validate that the theme exists
-                let _ = self.get_theme(&id).await?;
+                let _ = self.get_theme(ctx, &id).await?;
 
                 // Store in settings
                 let mut settings = self.get_settings_file(ctx)?;

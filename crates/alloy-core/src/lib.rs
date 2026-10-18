@@ -34,6 +34,8 @@ pub enum AlloyError {
     RoomNotFound(String),
     #[error("Invalid homeserver URL")]
     InvalidHomeserverUrl,
+    #[error("Insecure homeserver URL: plain HTTP is only allowed for localhost")]
+    InsecureHomeserverUrl,
     #[error("Invalid room ID: {0}")]
     InvalidRoomId(String),
     #[error("Base64 error: {0}")]

@@ -245,6 +245,33 @@ export class AlloyClient {
     });
   }
 
+  async sendPoll(
+    room_id: RoomId,
+    question: string,
+    answers: string[],
+    disclosed: boolean,
+    max_selections: number
+  ) {
+    return this.transport.invoke({
+      action: 'SendPoll',
+      params: { room_id, question, answers, disclosed, max_selections },
+    });
+  }
+
+  async respondToPoll(room_id: RoomId, poll_event_id: EventId, answer_ids: string[]) {
+    return this.transport.invoke({
+      action: 'RespondToPoll',
+      params: { room_id, poll_event_id, answer_ids },
+    });
+  }
+
+  async endPoll(room_id: RoomId, poll_event_id: EventId) {
+    return this.transport.invoke({
+      action: 'EndPoll',
+      params: { room_id, poll_event_id },
+    });
+  }
+
   async retrySend(room_id: RoomId, txn_id: string) {
     return this.transport.invoke({
       action: 'RetrySend',

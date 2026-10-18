@@ -168,6 +168,63 @@ impl GroupHandler for TimelineHandler {
                 client.set_typing(&room_id, typing).await.map_err(map_err)?;
                 Ok(EngineResponse::TypingStatusSet { room_id })
             }
+            EngineCommand::SendPoll {
+                room_id,
+                question,
+                answers,
+                disclosed,
+                max_selections,
+            } => {
+                if question.trim().is_empty() {
+                    return Err(EngineError::invalid_argument("empty poll question"));
+                }
+                if !(2..=20).contains(&answers.len()) {
+                    return Err(EngineError::invalid_argument(
+                        "a poll needs between 2 and 20 answers",
+                    ));
+                }
+                if answers.iter().any(|a| a.trim().is_empty()) {
+                    return Err(EngineError::invalid_argument("empty poll answer"));
+                }
+                if max_selections == 0 || (max_selections as usize) > answers.len() {
+                    return Err(EngineError::invalid_argument(
+                        "max selections must be between 1 and the number of answers",
+                    ));
+                }
+                let client = ctx.active_client().await?;
+                let txn_id = client
+                    .send_poll(&room_id, &question, &answers, disclosed, max_selections)
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::MessageSent {
+                    room_id,
+                    txn_id,
+                    event_id: None,
+                })
+            }
+            EngineCommand::RespondToPoll {
+                room_id,
+                poll_event_id,
+                answer_ids,
+            } => {
+                let client = ctx.active_client().await?;
+                client
+                    .respond_to_poll(&room_id, &poll_event_id, &answer_ids)
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::Unit)
+            }
+            EngineCommand::EndPoll {
+                room_id,
+                poll_event_id,
+            } => {
+                let client = ctx.active_client().await?;
+                client
+                    .end_poll(&room_id, &poll_event_id)
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::Unit)
+            }
             _ => Err(EngineError::invalid_argument(format!(
                 "Command '{}' does not belong to Timeline group",
                 name

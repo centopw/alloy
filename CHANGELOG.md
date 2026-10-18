@@ -6,6 +6,18 @@
 - Threads: thread panel with a thread-scoped composer, summary chips on thread roots, `SubscribeThread` and `in_thread_root` in the engine protocol (#27).
 - Public room directory: browse and join rooms through `SearchPublicRooms` (#28).
 
+- Polls (MSC3381): create, vote, end and live results in the timeline (#30).
+
+### Security
+Findings from the threat-model review (#37):
+- Desktop secrets were never persisted: the `keyring` crate had no backend enabled and used an in-memory mock. macOS, Windows and Linux backends are now enabled and the store fails closed; Linux falls back to an owner-only file when no Secret Service is running.
+- A transient keychain error no longer overwrites the store passphrase; secrets are removed on logout, failed login and account replacement; the secrets file is created 0600 from the start.
+- `SendAttachment` only accepts files the user picked (path allowlist); the unused local `GetMedia` source is gone.
+- The dev bridge requires a token and a loopback Origin.
+- Plain-http homeservers are refused except loopback and the Android emulator host.
+- Decrypted media cache is cleared on logout and created owner-only.
+- CSP gains `base-uri`/`form-action`/`object-src`; opener permissions are minimal; Android backups are disabled; release builds no longer read themes from the working directory; the HTML sanitizer drops `data-*`/`aria-*` and has tests.
+
 ### Fixed
 - Android: attachments picked from content:// URIs are copied to the app cache before upload (#72); the device behaviour is unverified.
 - Android: sessions are kept across restarts (secrets file in app-private storage; the keyring has no Android backend).

@@ -9,6 +9,7 @@
 import puppeteer from 'puppeteer-core';
 import http from 'node:http';
 import fs from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { resolve, dirname, extname, join } from 'node:path';
@@ -63,7 +64,11 @@ const invited = await api('/createRoom', { name: 'Invite me', invite: [u.id] }, 
 
 // --- services: bridge + static UI server
 const dataDir = fs.mkdtempSync(join(os.tmpdir(), 'alloy-e2e-'));
-const bridge = spawn(BRIDGE_BIN, ['--port', String(BRIDGE_PORT), '--data-dir', dataDir], { stdio: ['ignore', 'pipe', 'inherit'] });
+const BRIDGE_TOKEN = randomBytes(24).toString('hex');
+const bridge = spawn(BRIDGE_BIN, ['--port', String(BRIDGE_PORT), '--data-dir', dataDir], {
+  stdio: ['ignore', 'pipe', 'inherit'],
+  env: { ...process.env, ALLOY_BRIDGE_TOKEN: BRIDGE_TOKEN },
+});
 await new Promise((ok, fail) => {
   bridge.stdout.on('data', (d) => String(d).includes('listening') && ok());
   bridge.on('exit', (c) => fail(new Error(`bridge exited ${c}`)));
@@ -92,7 +97,7 @@ try {
     cdp.on('Network.webSocketFrameSent', (e) => console.log('>>', e.response.payloadData.slice(0, 300)));
     cdp.on('Network.webSocketFrameReceived', (e) => { const d = e.response.payloadData; if (!d.includes('RoomListDiff')) console.log('<<', d.slice(0, 600)); });
   }
-  await page.goto(`http://localhost:${UI_PORT}/?engine=ws://127.0.0.1:${BRIDGE_PORT}`, { waitUntil: 'networkidle0' });
+  await page.goto(`http://localhost:${UI_PORT}/?engine=ws://127.0.0.1:${BRIDGE_PORT}&token=${BRIDGE_TOKEN}`, { waitUntil: 'networkidle0' });
 
   step('onboarding: discover server, sign in');
   await page.waitForSelector('input[placeholder*="matrix.org"]');

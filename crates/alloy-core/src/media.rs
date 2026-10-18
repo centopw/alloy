@@ -56,6 +56,28 @@ fn cache_name(key: &str, ext: &str) -> String {
     format!("{hex}.{ext}")
 }
 
+/// Create `dir` and missing parents, readable only by the current user on unix.
+fn create_private_dir(dir: &Path) -> std::io::Result<()> {
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(dir)
+}
+
+/// Delete the on-disk media cache under `data_dir`. Cached media is decrypted and the cache is
+/// shared by every account on this device, so logout clears it.
+pub async fn clear_media_cache(data_dir: &Path) -> AlloyResult<()> {
+    match tokio::fs::remove_dir_all(data_dir.join("media_cache")).await {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e.into()),
+    }
+}
+
 impl AlloyClient {
     /// Download media (or a server-side thumbnail) into `cache_dir` and return the local path.
     ///
@@ -90,11 +112,19 @@ impl AlloyClient {
             .get_media_content(&MediaRequestParameters { source, format }, true)
             .await
             .map_err(sdk)?;
-        tokio::fs::create_dir_all(cache_dir).await?;
-        // Write atomically so a crash never leaves a truncated cache entry.
         let tmp = path.with_extension("part");
-        tokio::fs::write(&tmp, &bytes).await?;
-        tokio::fs::rename(&tmp, &path).await?;
+        let (dir, target) = (cache_dir.to_owned(), path.clone());
+        // Written atomically so a crash never leaves a truncated cache entry. The directory and the
+        // files are owner-only because the cache holds decrypted media.
+        tokio::task::spawn_blocking(move || -> std::io::Result<()> {
+            create_private_dir(&dir)?;
+            // A `.part` file left by a crash would make the exclusive create fail.
+            let _ = std::fs::remove_file(&tmp);
+            alloy_storage::write_private(&tmp, &bytes)?;
+            std::fs::rename(&tmp, &target)
+        })
+        .await
+        .map_err(std::io::Error::other)??;
         Ok(path)
     }
 

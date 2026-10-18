@@ -47,7 +47,10 @@ impl CommandGroup {
             | EngineCommand::RetrySend { .. }
             | EngineCommand::CancelSend { .. }
             | EngineCommand::MarkRead { .. }
-            | EngineCommand::SetTyping { .. } => CommandGroup::Timeline,
+            | EngineCommand::SetTyping { .. }
+            | EngineCommand::SendPoll { .. }
+            | EngineCommand::RespondToPoll { .. }
+            | EngineCommand::EndPoll { .. } => CommandGroup::Timeline,
 
             EngineCommand::RequestSelfVerification
             | EngineCommand::AcceptVerification { .. }

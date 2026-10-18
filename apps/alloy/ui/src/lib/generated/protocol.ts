@@ -97,6 +97,19 @@ export type EngineCommand = { action: "DiscoverHomeserver"; params: {
 	room_id: RoomId,
 	event_id: EventId,
 	key: string,
+} } | { action: "SendPoll"; params: {
+	room_id: RoomId,
+	question: string,
+	answers: string[],
+	disclosed: boolean,
+	max_selections: number,
+} } | { action: "RespondToPoll"; params: {
+	room_id: RoomId,
+	poll_event_id: EventId,
+	answer_ids: string[],
+} } | { action: "EndPoll"; params: {
+	room_id: RoomId,
+	poll_event_id: EventId,
 } } | { action: "RetrySend"; params: {
 	room_id: RoomId,
 	txn_id: string,
@@ -315,13 +328,18 @@ export type EventSendState = { status: "Sending"; data: {
 
 export type MediaSource = { kind: "Remote"; data: {
 	uri: string,
-} } | { kind: "Local"; data: {
-	file_path: string,
 } };
 
 export type NotificationCount = {
 	highlight_count: number,
 	notification_count: number,
+};
+
+/**  One answer of a poll. `votes` is zero while results are hidden. */
+export type PollAnswerDto = {
+	id: string,
+	text: string,
+	votes: number,
 };
 
 /**  One room listed in a homeserver's public room directory. */
@@ -437,8 +455,13 @@ export type TimelineItemContent = { kind: "TextMessage"; data: {
 	senders: UserId[],
 } } | { kind: "Poll"; data: {
 	question: string,
-	answers: string[],
+	answers: PollAnswerDto[],
+	disclosed: boolean,
+	max_selections: number,
+	total_votes: number,
+	has_ended: boolean,
 	end_time: number | null,
+	my_votes: string[],
 } } | { kind: "CallInvite"; data: {
 	call_id: string,
 	is_video: boolean,

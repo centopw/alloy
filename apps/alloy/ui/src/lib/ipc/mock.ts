@@ -91,6 +91,17 @@ const MOCK_SAS_EMOJIS: SasEmoji[] = [
   { emoji: '🐘', decimal: 7890, description: 'Elephant' },
 ];
 
+interface MockPoll {
+  question: string;
+  answers: { id: string; text: string }[];
+  disclosed: boolean;
+  maxSelections: number;
+  hasEnded: boolean;
+  endTime: number | null;
+  myVotes: string[];
+  tallies: Map<string, number>;
+}
+
 /**
  * In-memory Mock Transport for UI development and unit testing.
  * Provides realistic fake Matrix sliding-sync diffs, local echo state transitions,
@@ -103,6 +114,51 @@ export class MockTransport implements Transport {
   private roomSubscriptions = new Set<string>();
   private timelineSubscriptions = new Map<string, string>(); // sub_id -> room_id
   private subCounter = 0;
+  private polls = new Map<string, MockPoll>();
+
+  /** Builds the poll content as the engine maps it: counts stay hidden until the poll ends when undisclosed. */
+  private pollItemContent(eventId: string): TimelineItemDto['content'] {
+    const poll = this.polls.get(eventId);
+    if (!poll) throw new Error(`unknown poll ${eventId}`);
+    const reveal = poll.disclosed || poll.hasEnded;
+    const answers = poll.answers.map((a) => ({
+      id: a.id,
+      text: a.text,
+      votes: reveal ? (poll.tallies.get(a.id) ?? 0) : 0,
+    }));
+    return {
+      kind: 'Poll',
+      data: {
+        question: poll.question,
+        answers,
+        disclosed: poll.disclosed,
+        max_selections: poll.maxSelections,
+        total_votes: answers.reduce((sum, a) => sum + a.votes, 0),
+        has_ended: poll.hasEnded,
+        end_time: poll.endTime,
+        my_votes: [...poll.myVotes],
+      },
+    };
+  }
+
+  private emitPollUpdate(roomId: string, eventId: string) {
+    const items = this.timelineByRoom.get(roomId) ?? [];
+    const idx = items.findIndex((i) => i.event_id === eventId);
+    if (idx === -1) return;
+    items[idx] = { ...items[idx], content: this.pollItemContent(eventId) };
+    for (const [subId, rId] of this.timelineSubscriptions.entries()) {
+      if (rId === roomId) {
+        this.emit({
+          type: 'TimelineDiff',
+          payload: {
+            subscription_id: subId,
+            room_id: roomId,
+            diff: { type: 'Set', content: { index: idx, value: items[idx] } },
+          },
+        });
+      }
+    }
+  }
 
   constructor() {
     this.seedTimelines();
@@ -638,6 +694,80 @@ export class MockTransport implements Transport {
             added: true,
           },
         };
+      }
+
+      case 'SendPoll': {
+        const roomId = command.params.room_id;
+        const eventId = `$poll_${Date.now()}:alloy.chat`;
+        this.polls.set(eventId, {
+          question: command.params.question.trim(),
+          answers: command.params.answers.map((text, i) => ({ id: String(i), text: text.trim() })),
+          disclosed: command.params.disclosed,
+          maxSelections: command.params.max_selections,
+          hasEnded: false,
+          endTime: null,
+          myVotes: [],
+          tallies: new Map(),
+        });
+        const item: TimelineItemDto = {
+          internal_id: `local_${eventId}`,
+          event_id: eventId,
+          sender: MOCK_ACCOUNT.user_id,
+          timestamp_millis: Date.now(),
+          content: this.pollItemContent(eventId),
+          send_state: { status: 'Sent', data: { event_id: eventId } },
+          is_own: true,
+          reply_to: null,
+          thread_summary: null,
+          read_receipts: null,
+        };
+        const items = this.timelineByRoom.get(roomId) ?? [];
+        items.push(item);
+        this.timelineByRoom.set(roomId, items);
+        for (const [subId, rId] of this.timelineSubscriptions.entries()) {
+          if (rId === roomId) {
+            this.emit({
+              type: 'TimelineDiff',
+              payload: {
+                subscription_id: subId,
+                room_id: roomId,
+                diff: { type: 'PushBack', content: { value: item } },
+              },
+            });
+          }
+        }
+        return {
+          type: 'MessageSent',
+          payload: { room_id: roomId, txn_id: `poll_${Date.now()}`, event_id: null },
+        };
+      }
+
+      case 'RespondToPoll': {
+        const poll = this.polls.get(command.params.poll_event_id);
+        if (poll && !poll.hasEnded) {
+          for (const id of poll.myVotes) {
+            poll.tallies.set(id, Math.max(0, (poll.tallies.get(id) ?? 0) - 1));
+          }
+          const picked = [...new Set(command.params.answer_ids)]
+            .filter((id) => poll.answers.some((a) => a.id === id))
+            .slice(0, poll.maxSelections);
+          for (const id of picked) {
+            poll.tallies.set(id, (poll.tallies.get(id) ?? 0) + 1);
+          }
+          poll.myVotes = picked;
+          this.emitPollUpdate(command.params.room_id, command.params.poll_event_id);
+        }
+        return { type: 'Unit' };
+      }
+
+      case 'EndPoll': {
+        const poll = this.polls.get(command.params.poll_event_id);
+        if (poll && !poll.hasEnded) {
+          poll.hasEnded = true;
+          poll.endTime = Date.now();
+          this.emitPollUpdate(command.params.room_id, command.params.poll_event_id);
+        }
+        return { type: 'Unit' };
       }
 
       case 'RetrySend':

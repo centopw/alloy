@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Legacy (Android 11 and below) full-backup rules. Alloy app data is not
+     eligible for backup; see data_extraction_rules.xml for Android 12+. -->
+<full-backup-content>
+    <exclude domain="root" path="." />
+</full-backup-content>

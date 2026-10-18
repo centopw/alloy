@@ -6,10 +6,13 @@ use std::io;
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
+use alloy_engine::{Engine, EngineContext};
 use percent_encoding::percent_decode_str;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::{DialogExt, FilePath};
 use tauri_plugin_fs::{FsExt, OpenOptions};
+
+use crate::AppState;
 
 /// Subdirectory of the app cache dir that holds copies of picked files.
 const PICKS_DIR: &str = "picks";
@@ -34,6 +37,8 @@ pub async fn pick_attachment(app: AppHandle) -> Result<Option<String>, String> {
 }
 
 fn pick_blocking(app: &AppHandle) -> Result<Option<String>, String> {
+    let state = app.state::<AppState>();
+    let ctx = state.engine.context();
     let picks_root = app
         .path()
         .app_cache_dir()
@@ -45,20 +50,32 @@ fn pick_blocking(app: &AppHandle) -> Result<Option<String>, String> {
         return Ok(None);
     };
     match picked {
-        FilePath::Path(path) => path
-            .into_os_string()
-            .into_string()
-            .map(Some)
-            .map_err(|_| "picked file path is not valid UTF-8".to_owned()),
-        uri @ FilePath::Url(_) => copy_into_pick_dir(app, &picks_root, uri).map(Some),
+        FilePath::Path(path) => {
+            // The user picked this file explicitly, so the engine may send exactly this file.
+            ctx.allow_attachment_path(&path)
+                .map_err(|e| format!("picked file is not readable: {e}"))?;
+            path.into_os_string()
+                .into_string()
+                .map(Some)
+                .map_err(|_| "picked file path is not valid UTF-8".to_owned())
+        }
+        uri @ FilePath::Url(_) => copy_into_pick_dir(app, ctx, &picks_root, uri).map(Some),
     }
 }
 
 /// Copies a picked URI into a fresh, uniquely named directory and returns the copy's path.
-fn copy_into_pick_dir(app: &AppHandle, picks_root: &Path, uri: FilePath) -> Result<String, String> {
+fn copy_into_pick_dir(
+    app: &AppHandle,
+    ctx: &EngineContext,
+    picks_root: &Path,
+    uri: FilePath,
+) -> Result<String, String> {
     let name = file_name_from_uri(&uri);
     let dir = picks_root.join(uuid::Uuid::new_v4().to_string());
     std::fs::create_dir_all(&dir).map_err(|e| format!("failed to create pick directory: {e}"))?;
+    // Copies live only under the pick cache, so the engine may read anything beneath it.
+    ctx.allow_attachment_root(picks_root)
+        .map_err(|e| format!("failed to register pick directory: {e}"))?;
     let dest = dir.join(&name);
 
     if let Err(err) = copy_uri_to(app, uri, &dest) {
@@ -127,7 +144,16 @@ fn file_name_from_uri(uri: &FilePath) -> String {
 
 fn sanitize_file_name(raw: &str) -> String {
     let last = raw.rsplit(['/', '\\']).next().unwrap_or_default();
-    let cleaned: String = last.chars().filter(|c| !c.is_control()).collect();
+    let cleaned: String = last
+        .chars()
+        .filter(|c| {
+            !c.is_control()
+                && !matches!(
+                    *c,
+                    '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'
+                )
+        })
+        .collect();
     let trimmed = cleaned.trim();
     if trimmed.is_empty() || trimmed == "." || trimmed == ".." {
         return FALLBACK_NAME.to_owned();
@@ -155,6 +181,10 @@ mod tests {
             "report.pdf"
         );
         assert_eq!(sanitize_file_name("..\\..\\evil.sh"), "evil.sh");
+        assert_eq!(
+            sanitize_file_name("invoice\u{202E}fdp.exe"),
+            "invoicefdp.exe"
+        );
     }
 
     #[test]

@@ -14,8 +14,6 @@
 
 <script lang="ts">
   import { Modal } from '../common';
-  import { Download } from '$lib/icons';
-  import Icon from '$lib/icons/Icon.svelte';
 
   interface Props {
     open: boolean;
@@ -51,11 +49,6 @@
     };
   });
 
-  async function download() {
-    if (src === null) return;
-    const { openExternal } = await import('$lib/platform/links');
-    await openExternal(src);
-  }
 </script>
 
 <Modal {open} {title} {onclose} width="min(960px, 94vw)">
@@ -73,12 +66,6 @@
       <img {src} alt={title} />
     {/if}
 
-    <div class="actions">
-      <button class="download" type="button" disabled={src === null} onclick={download}>
-        <Icon icon={Download} size={16} />
-        Download
-      </button>
-    </div>
   </div>
 </Modal>
 
@@ -108,37 +95,5 @@
     margin: 0;
     color: var(--alloy-color-text-secondary);
     font-size: var(--alloy-typography-size-sm);
-  }
-
-  .actions {
-    align-self: flex-end;
-  }
-
-  .download {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--alloy-spacing-scale-2);
-    padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
-    border: 1px solid var(--alloy-color-border-subtle);
-    border-radius: var(--alloy-radii-md);
-    background: var(--alloy-color-surface-elevated);
-    color: var(--alloy-color-text-primary);
-    font: inherit;
-    font-size: var(--alloy-typography-size-sm);
-    cursor: pointer;
-  }
-
-  .download:hover:not(:disabled) {
-    background: var(--alloy-color-surface-hover);
-  }
-
-  .download:disabled {
-    cursor: default;
-    color: var(--alloy-color-text-muted);
-  }
-
-  .download:focus-visible {
-    outline: 2px solid var(--alloy-border-focus);
-    outline-offset: 2px;
   }
 </style>

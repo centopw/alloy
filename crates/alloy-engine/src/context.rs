@@ -2,9 +2,18 @@ use crate::registry::SubscriptionRegistry;
 use crate::sink::EventSink;
 use alloy_core::AlloyClient;
 use alloy_storage::SecretStore;
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::io;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use tokio::sync::RwLock;
+
+/// Files and directories `SendAttachment` may read. Paths are canonical.
+#[derive(Default)]
+struct AttachmentAllowlist {
+    files: HashSet<PathBuf>,
+    roots: Vec<PathBuf>,
+}
 
 /// Shared engine context passed to command handlers.
 #[derive(Clone)]
@@ -16,6 +25,8 @@ pub struct EngineContext {
     pub subscriptions: SubscriptionRegistry,
     /// Start sync, recovery and verification watchers after login (disable for headless use).
     pub background: bool,
+    attachments: Arc<Mutex<AttachmentAllowlist>>,
+    unrestricted_attachments: bool,
 }
 
 impl EngineContext {
@@ -27,6 +38,8 @@ impl EngineContext {
             secrets,
             subscriptions: SubscriptionRegistry::new(),
             background: true,
+            attachments: Arc::new(Mutex::new(AttachmentAllowlist::default())),
+            unrestricted_attachments: false,
         }
     }
 
@@ -34,6 +47,45 @@ impl EngineContext {
     pub fn without_background(mut self) -> Self {
         self.background = false;
         self
+    }
+
+    /// Accept any attachment path in `SendAttachment`. Headless tests only; the default is strict.
+    pub fn allow_unrestricted_attachment_paths(mut self) -> Self {
+        self.unrestricted_attachments = true;
+        self
+    }
+
+    /// Let `SendAttachment` read exactly this file. Fails if the file does not exist.
+    pub fn allow_attachment_path(&self, path: &Path) -> io::Result<()> {
+        let canonical = path.canonicalize()?;
+        self.allowlist().files.insert(canonical);
+        Ok(())
+    }
+
+    /// Let `SendAttachment` read any file under this directory. Fails if the directory does not exist.
+    pub fn allow_attachment_root(&self, root: &Path) -> io::Result<()> {
+        let canonical = root.canonicalize()?;
+        self.allowlist().roots.push(canonical);
+        Ok(())
+    }
+
+    /// Whether `SendAttachment` may read `path`: a registered file, or a file under a registered root.
+    /// Symlinks are resolved first, so a link cannot escape a registered root.
+    pub fn attachment_path_allowed(&self, path: &Path) -> bool {
+        if self.unrestricted_attachments {
+            return true;
+        }
+        let Ok(canonical) = path.canonicalize() else {
+            return false;
+        };
+        let list = self.allowlist();
+        list.files.contains(&canonical) || list.roots.iter().any(|root| canonical.starts_with(root))
+    }
+
+    fn allowlist(&self) -> MutexGuard<'_, AttachmentAllowlist> {
+        self.attachments
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
     }
 }
 

@@ -118,8 +118,10 @@ pub fn map_room_vector_diff(
 // ---------------------------------------------------------------------------
 
 use alloy_protocol::{
-    EventId, EventSendState, ReactionSummary, ThreadSummary, TimelineItemContent, TimelineItemDto,
+    EventId, EventSendState, PollAnswerDto, ReactionSummary, ThreadSummary, TimelineItemContent,
+    TimelineItemDto,
 };
+use matrix_sdk::ruma::events::poll::start::PollKind;
 use matrix_sdk::ruma::events::room::MediaSource;
 use matrix_sdk::ruma::events::room::message::MessageType;
 use matrix_sdk_ui::timeline::{
@@ -276,7 +278,7 @@ fn map_message_type(msgtype: &MessageType) -> TimelineItemContent {
     }
 }
 
-fn map_content(content: &SdkContent) -> (TimelineItemContent, bool) {
+fn map_content(content: &SdkContent, my_user_id: Option<&str>) -> (TimelineItemContent, bool) {
     match content {
         SdkContent::MsgLike(m) => match &m.kind {
             MsgLikeKind::Message(msg) => (map_message_type(msg.msgtype()), msg.is_edited()),
@@ -308,11 +310,53 @@ fn map_content(content: &SdkContent) -> (TimelineItemContent, bool) {
             }
             MsgLikeKind::Poll(p) => {
                 let r = p.results();
+                let has_ended = r.end_time.is_some();
+                // Undisclosed polls hide counts until they end. `my_votes` is the caller's own
+                // choice, so it stays visible either way.
+                let reveal = matches!(r.kind, PollKind::Disclosed) || has_ended;
+                let mut voters = std::collections::HashSet::new();
+                for list in r.votes.values() {
+                    voters.extend(list.iter().map(String::as_str));
+                }
+                let my_votes: Vec<String> = r
+                    .answers
+                    .iter()
+                    .filter(|a| {
+                        my_user_id.is_some_and(|me| {
+                            r.votes
+                                .get(&a.id)
+                                .is_some_and(|list| list.iter().any(|v| v.as_str() == me))
+                        })
+                    })
+                    .map(|a| a.id.clone())
+                    .collect();
+                let answers: Vec<PollAnswerDto> = r
+                    .answers
+                    .iter()
+                    .map(|a| PollAnswerDto {
+                        id: a.id.clone(),
+                        text: a.text.clone(),
+                        votes: match r.votes.get(&a.id) {
+                            Some(list) if reveal => u32::try_from(list.len()).unwrap_or(u32::MAX),
+                            _ => 0,
+                        },
+                    })
+                    .collect();
+                let total_votes = if reveal {
+                    u32::try_from(voters.len()).unwrap_or(u32::MAX)
+                } else {
+                    0
+                };
                 (
                     TimelineItemContent::Poll {
                         question: r.question,
-                        answers: r.answers.into_iter().map(|a| a.text).collect(),
+                        answers,
+                        disclosed: matches!(r.kind, PollKind::Disclosed),
+                        max_selections: u32::try_from(r.max_selections).unwrap_or(u32::MAX),
+                        total_votes,
+                        has_ended,
                         end_time: r.end_time.map(|t| u64::from(t.0)),
+                        my_votes,
                     },
                     false,
                 )
@@ -387,8 +431,8 @@ fn profile_parts(
     }
 }
 
-fn embedded_to_dto(id: &str, e: &EmbeddedEvent) -> TimelineItemDto {
-    let (content, edited) = map_content(&e.content);
+fn embedded_to_dto(id: &str, e: &EmbeddedEvent, my_user_id: Option<&str>) -> TimelineItemDto {
+    let (content, edited) = map_content(&e.content, my_user_id);
     let (name, avatar) = profile_parts(&e.sender_profile);
     TimelineItemDto {
         internal_id: id.to_owned(),
@@ -449,7 +493,7 @@ fn event_to_dto(
     ev: &EventTimelineItem,
     my_user_id: Option<&str>,
 ) -> TimelineItemDto {
-    let (content, edited) = map_content(ev.content());
+    let (content, edited) = map_content(ev.content(), my_user_id);
     let (name, avatar) = profile_parts(ev.sender_profile());
     let (reactions, reply_to, thread_summary) = match ev.content() {
         SdkContent::MsgLike(m) => (
@@ -465,9 +509,11 @@ fn event_to_dto(
                 })
                 .collect(),
             m.in_reply_to.as_ref().and_then(|r| match &r.event {
-                TimelineDetails::Ready(e) => {
-                    Some(Box::new(embedded_to_dto(r.event_id.as_str(), e)))
-                }
+                TimelineDetails::Ready(e) => Some(Box::new(embedded_to_dto(
+                    r.event_id.as_str(),
+                    e,
+                    my_user_id,
+                ))),
                 _ => None,
             }),
             m.thread_summary.as_ref().map(|t| ThreadSummary {

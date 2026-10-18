@@ -127,6 +127,14 @@ pub struct RoomSummary {
     pub low_priority: Option<bool>,
 }
 
+/// One answer of a poll. `votes` is zero while results are hidden.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct PollAnswerDto {
+    pub id: String,
+    pub text: String,
+    pub votes: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(tag = "kind", content = "data")]
 pub enum TimelineItemContent {
@@ -164,9 +172,14 @@ pub enum TimelineItemContent {
     },
     Poll {
         question: String,
-        answers: Vec<String>,
+        answers: Vec<PollAnswerDto>,
+        disclosed: bool,
+        max_selections: u32,
+        total_votes: u32,
+        has_ended: bool,
         #[specta(type = Option<Number>)]
         end_time: Option<u64>,
+        my_votes: Vec<String>,
     },
     CallInvite {
         call_id: String,
@@ -337,7 +350,6 @@ pub enum RecoveryState {
 #[serde(tag = "kind", content = "data")]
 pub enum MediaSource {
     Remote { uri: String },
-    Local { file_path: String },
 }
 
 // === Commands ===
@@ -440,6 +452,22 @@ pub enum EngineCommand {
         room_id: RoomId,
         event_id: EventId,
         key: String,
+    },
+    SendPoll {
+        room_id: RoomId,
+        question: String,
+        answers: Vec<String>,
+        disclosed: bool,
+        max_selections: u32,
+    },
+    RespondToPoll {
+        room_id: RoomId,
+        poll_event_id: EventId,
+        answer_ids: Vec<String>,
+    },
+    EndPoll {
+        room_id: RoomId,
+        poll_event_id: EventId,
     },
     RetrySend {
         room_id: RoomId,
@@ -724,6 +752,13 @@ impl EngineError {
     pub fn invalid_argument(msg: impl Into<String>) -> Self {
         Self {
             code: "invalid_argument".to_string(),
+            message: msg.into(),
+        }
+    }
+
+    pub fn forbidden(msg: impl Into<String>) -> Self {
+        Self {
+            code: "forbidden".to_string(),
             message: msg.into(),
         }
     }

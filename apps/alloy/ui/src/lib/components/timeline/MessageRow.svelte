@@ -11,6 +11,7 @@
   import { interceptLinks } from '$lib/platform/links';
   import { portal } from '$lib/platform/portal';
   import MediaView from './MediaView.svelte';
+  import PollView from './PollView.svelte';
 
   interface Props {
     item: TimelineItemDto;
@@ -23,7 +24,7 @@
   // Same sender within this window continues the previous message as a compact row.
   const GROUP_MS = 7 * 60_000;
   const isMessage = (i: TimelineItemDto | null) =>
-    !!i && ['TextMessage', 'Media', 'Redacted', 'UnableToDecrypt'].includes(i.content.kind);
+    !!i && ['TextMessage', 'Media', 'Poll', 'Redacted', 'UnableToDecrypt'].includes(i.content.kind);
 
   const kind = $derived(item.content.kind);
   const grouped = $derived(
@@ -128,7 +129,7 @@
       {#if item.content.kind === 'TextMessage'}
         {#if html}
           <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-          <div class="body html" onclick={interceptLinks}>{@html html}{#if item.edited}<span class="edited">(edited)</span>{/if}</div>
+          <div class="body html" onclick={interceptLinks} onauxclick={interceptLinks}>{@html html}{#if item.edited}<span class="edited">(edited)</span>{/if}</div>
         {:else}
           <div class="body">{item.content.data.body}{#if item.edited}<span class="edited">(edited)</span>{/if}</div>
         {/if}
@@ -150,6 +151,8 @@
         <div class="body muted">Message deleted</div>
       {:else if item.content.kind === 'UnableToDecrypt'}
         <div class="body muted">Waiting for this message. Verify this device to read it.</div>
+      {:else if item.content.kind === 'Poll'}
+        <PollView {item} poll={item.content.data} />
       {:else}
         <div class="body muted">This message type is not supported yet.</div>
       {/if}

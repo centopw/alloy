@@ -13,6 +13,31 @@ pub struct AppState {
     pub engine: Arc<AppEngine>,
 }
 
+/// Picks where account secrets live. Desktop uses the OS keyring, probed at startup so a keyring
+/// without a working backend fails instead of holding secrets only in memory. Linux without a
+/// running Secret Service falls back to the owner-only file, with a warning. Android and iOS have
+/// no keyring backend and always use the owner-only file.
+fn open_secret_store(
+    data_dir: &std::path::Path,
+) -> Result<Arc<dyn alloy_storage::SecretStore>, alloy_storage::StorageError> {
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    {
+        match alloy_storage::KeyringSecretStore::new("chat.alloy") {
+            Ok(store) => return Ok(Arc::new(store)),
+            Err(e) if cfg!(target_os = "linux") => {
+                tracing::warn!(
+                    error = %e,
+                    "OS keyring unavailable; storing secrets in an owner-only file"
+                );
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(Arc::new(alloy_storage::FileSecretStore::new(
+        data_dir.join("secrets.json"),
+    )))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -28,15 +53,7 @@ pub fn run() {
             // Create data dir if not exists
             let _ = std::fs::create_dir_all(&data_dir);
 
-            // Desktop keeps secrets in the OS keyring. Android has no keyring backend, so it uses
-            // an owner-only file in the app-private data directory.
-            #[cfg(not(target_os = "android"))]
-            let secret_store: Arc<dyn alloy_storage::SecretStore> =
-                Arc::new(alloy_storage::KeyringSecretStore::new("chat.alloy"));
-            #[cfg(target_os = "android")]
-            let secret_store: Arc<dyn alloy_storage::SecretStore> = Arc::new(
-                alloy_storage::FileSecretStore::new(data_dir.join("secrets.json")),
-            );
+            let secret_store = open_secret_store(&data_dir)?;
 
             let ctx = EngineContext::new(data_dir, secret_store);
             let engine = Arc::new(AppEngine::new(ctx));

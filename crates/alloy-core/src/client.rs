@@ -1,6 +1,6 @@
 //! Core AlloyClient and client session management.
 
-use alloy_storage::SecretStore;
+use alloy_storage::{SecretStore, StorageError};
 use base64::Engine;
 use matrix_sdk::Client;
 use matrix_sdk_sqlite::SqliteStoreConfig;
@@ -21,6 +21,39 @@ pub(crate) fn secret_key(namespace: Option<&str>, name: &str) -> String {
         Some(ns) => format!("alloy:{ns}:{name}"),
         None => format!("alloy:{name}"),
     }
+}
+
+/// Hosts allowed to use plain `http`: loopback and the Android emulator's host alias.
+/// `Url::host_str` keeps the brackets around IPv6 literals.
+const CLEARTEXT_HOSTS: [&str; 4] = ["localhost", "127.0.0.1", "[::1]", "10.0.2.2"];
+
+/// Accept `https` homeservers, and `http` only for local development hosts. Access tokens and
+/// passwords must never travel in cleartext to a remote server.
+pub(crate) fn require_secure_homeserver(url: &Url) -> AlloyResult<()> {
+    match url.scheme() {
+        "https" => Ok(()),
+        "http" => match url.host_str() {
+            Some(host) if CLEARTEXT_HOSTS.contains(&host) => Ok(()),
+            _ => Err(AlloyError::InsecureHomeserverUrl),
+        },
+        _ => Err(AlloyError::InvalidHomeserverUrl),
+    }
+}
+
+/// Every secret an account stores. Keyring backends cannot enumerate keys, so they are named here.
+const ACCOUNT_SECRET_NAMES: [&str; 2] = ["session", "store:encryption_passphrase"];
+
+/// Delete every secret stored for one account (see [`secret_key`]).
+///
+/// Deleting an absent secret succeeds, so this is safe for accounts whose login never completed.
+pub async fn delete_account_secrets(
+    store: &dyn SecretStore,
+    namespace: Option<&str>,
+) -> AlloyResult<()> {
+    for name in ACCOUNT_SECRET_NAMES {
+        store.delete_secret(&secret_key(namespace, name)).await?;
+    }
+    Ok(())
 }
 
 /// Lightweight Matrix client wrapper providing room list and timeline streams
@@ -67,6 +100,7 @@ impl AlloyClient {
     ) -> AlloyResult<Self> {
         let homeserver =
             Url::parse(homeserver_url).map_err(|_| AlloyError::InvalidHomeserverUrl)?;
+        require_secure_homeserver(&homeserver)?;
 
         let state_store_path = data_dir.join("matrix");
         tokio::fs::create_dir_all(&state_store_path).await?;
@@ -75,16 +109,19 @@ impl AlloyClient {
             Box::new(alloy_storage::InMemorySecretStore::new()) as Box<dyn SecretStore>
         });
 
-        // Generate or retrieve passphrase for store encryption
+        // Generate the store passphrase on first use only. Any other lookup failure (keychain locked,
+        // backend unavailable) must not replace it: the SQLite store encrypted with the old passphrase
+        // would become unreadable and its data silently lost.
         let namespace = namespace.map(str::to_owned);
         let store_passphrase_key = secret_key(namespace.as_deref(), "store:encryption_passphrase");
         let passphrase = match secret_store.get_secret(&store_passphrase_key).await {
             Ok(pp) => pp,
-            Err(_) => {
+            Err(StorageError::SecretNotFound(_)) => {
                 let pp = generate_passphrase();
-                let _ = secret_store.set_secret(&store_passphrase_key, &pp).await;
+                secret_store.set_secret(&store_passphrase_key, &pp).await?;
                 pp
             }
+            Err(e) => return Err(e.into()),
         };
 
         // Configure SQLite store with encryption
@@ -130,6 +167,11 @@ impl AlloyClient {
 
     pub(crate) fn session_key(&self) -> String {
         secret_key(self.namespace.as_deref(), "session")
+    }
+
+    /// Delete every secret this account stores from the secret store.
+    pub(crate) async fn delete_local_secrets(&self) -> AlloyResult<()> {
+        delete_account_secrets(self.secret_store.as_ref(), self.namespace.as_deref()).await
     }
 
     /// Start (once) the background sync service and return it. Requires a logged-in client.

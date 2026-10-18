@@ -3,6 +3,7 @@
 //! Owned by stream core-auth. OIDC (MAS) login is tracked separately and is not
 //! implemented here.
 
+use crate::client::require_secure_homeserver;
 use crate::{AlloyClient, AlloyError, AlloyResult};
 
 /// Result of probing a homeserver address or server name.
@@ -33,12 +34,18 @@ pub async fn discover_homeserver(input: &str) -> AlloyResult<HomeserverDiscovery
     if input.is_empty() {
         return Err(AlloyError::InvalidHomeserverUrl);
     }
+    if input.contains("://") {
+        let typed = url::Url::parse(input).map_err(|_| AlloyError::InvalidHomeserverUrl)?;
+        require_secure_homeserver(&typed)?;
+    }
     let client = matrix_sdk::Client::builder()
         .server_name_or_homeserver_url(input)
         .build()
         .await
         .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
     let url = client.homeserver();
+    // `.well-known` can redirect to any URL, so the resolved homeserver is checked too.
+    require_secure_homeserver(&url)?;
     let name = url.host_str().unwrap_or(input).to_owned();
     let supports_oidc = client.oauth().server_metadata().await.is_ok();
     let supports_password = client
@@ -112,14 +119,19 @@ impl AlloyClient {
         })
     }
 
-    /// Log out on the server and delete the stored session.
+    /// Log out on the server and delete every local secret for this account.
+    ///
+    /// Local secrets are deleted even when the server call fails, so a failed logout never leaves
+    /// a usable access token on this device. The remote error, if any, is still returned.
     pub async fn logout(&self) -> AlloyResult<()> {
-        self.client
+        let remote = self
+            .client
             .matrix_auth()
             .logout()
             .await
-            .map_err(|e| AlloyError::Auth(e.to_string()))?;
-        let _ = self.secret_store.delete_secret(&self.session_key()).await;
-        Ok(())
+            .map_err(|e| AlloyError::Auth(e.to_string()));
+        let local = self.delete_local_secrets().await;
+        remote.map(|_| ())?;
+        local
     }
 }

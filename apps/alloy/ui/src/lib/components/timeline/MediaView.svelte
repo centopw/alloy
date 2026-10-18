@@ -2,9 +2,7 @@
   import { client } from '$lib/ipc';
   import { formatBytes } from '$lib/content/format';
   import { localFileUrl } from '$lib/platform/files';
-  import { Download } from '$lib/icons';
-  import Icon from '$lib/icons/Icon.svelte';
-  import MediaViewer, { fetchMediaFile } from './MediaViewer.svelte';
+  import MediaViewer from './MediaViewer.svelte';
 
   interface Props {
     uri: string;
@@ -66,11 +64,6 @@
     };
   });
 
-  async function download() {
-    const url = await fetchMediaFile(uri, mimeType);
-    const { openExternal } = await import('$lib/platform/links');
-    await openExternal(url);
-  }
 </script>
 
 {#snippet frameContent()}
@@ -98,17 +91,17 @@
     </div>
   {/if}
 {:else}
-  <button
-    class="file"
-    type="button"
-    onclick={openable ? () => (viewerOpen = true) : download}
-  >
-    <span class="file-name">{body || 'Attachment'}</span>
-    <span class="file-meta">{formatBytes(sizeBytes)}</span>
-    {#if !openable}
-      <Icon icon={Download} size={16} label="Download" />
-    {/if}
-  </button>
+  {#if openable}
+    <button class="file" type="button" onclick={() => (viewerOpen = true)}>
+      <span class="file-name">{body || 'Attachment'}</span>
+      <span class="file-meta">{formatBytes(sizeBytes)}</span>
+    </button>
+  {:else}
+    <div class="file">
+      <span class="file-name">{body || 'Attachment'}</span>
+      <span class="file-meta">{formatBytes(sizeBytes)}</span>
+    </div>
+  {/if}
 {/if}
 
 {#if openable}
@@ -167,10 +160,6 @@
     font: inherit;
     cursor: pointer;
     max-width: 100%;
-  }
-  .file:disabled {
-    cursor: default;
-    color: var(--alloy-color-text-muted);
   }
   .file-name {
     overflow: hidden;

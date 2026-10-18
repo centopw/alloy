@@ -128,6 +128,31 @@ class TimelineStore {
     });
   }
 
+  /** Returns null when the poll was sent, otherwise the message the dialog should show. */
+  async sendPoll(question: string, answers: string[], disclosed: boolean, maxSelections: number): Promise<string | null> {
+    if (!this.roomId) return 'No room is selected.';
+    try {
+      await client.sendPoll(this.roomId, question, answers, disclosed, maxSelections);
+      return null;
+    } catch (e) {
+      return errorMessage(e);
+    }
+  }
+
+  async respondToPoll(item: TimelineItemDto, answerIds: string[]) {
+    if (!this.roomId || !item.event_id) return;
+    await client.respondToPoll(this.roomId, item.event_id, answerIds).catch((e) => {
+      this.error = errorMessage(e);
+    });
+  }
+
+  async endPoll(item: TimelineItemDto) {
+    if (!this.roomId || !item.event_id) return;
+    await client.endPoll(this.roomId, item.event_id).catch((e) => {
+      this.error = errorMessage(e);
+    });
+  }
+
   async redact(item: TimelineItemDto) {
     if (!this.roomId || !item.event_id) return;
     await client.redactEvent(this.roomId, item.event_id, null).catch((e) => {

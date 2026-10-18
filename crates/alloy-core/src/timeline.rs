@@ -3,6 +3,15 @@
 use crate::{AlloyClient, AlloyError, AlloyResult};
 use alloy_protocol::RoomId;
 use matrix_sdk::ruma::RoomId as RumaRoomId;
+use matrix_sdk::ruma::UInt;
+use matrix_sdk::ruma::events::AnyMessageLikeEventContent;
+use matrix_sdk::ruma::events::poll::start::PollKind;
+use matrix_sdk::ruma::events::poll::unstable_end::UnstablePollEndEventContent;
+use matrix_sdk::ruma::events::poll::unstable_response::UnstablePollResponseEventContent;
+use matrix_sdk::ruma::events::poll::unstable_start::{
+    NewUnstablePollStartEventContent, UnstablePollAnswer, UnstablePollAnswers,
+    UnstablePollStartContentBlock, UnstablePollStartEventContent,
+};
 use matrix_sdk::ruma::events::room::message::RoomMessageEventContent;
 use matrix_sdk_ui::timeline::{Timeline, TimelineFocus};
 
@@ -80,6 +89,31 @@ fn event_id(id: &alloy_protocol::EventId) -> AlloyResult<OwnedEventId> {
 
 fn sdk<E: std::fmt::Display>(e: E) -> AlloyError {
     AlloyError::MatrixSdk(e.to_string())
+}
+
+async fn recover_local_echo_txn(
+    timeline: &Timeline,
+    known_txns: &std::collections::HashSet<String>,
+) -> String {
+    // The SDK keeps the transaction id private; recover it from the local echo that just
+    // appeared. If the message was already confirmed by the server, no retry/cancel can
+    // apply, so a synthetic id is returned.
+    for _ in 0..50 {
+        let found = timeline
+            .items()
+            .await
+            .iter()
+            .rev()
+            .filter_map(|i| i.as_event())
+            .filter(|e| e.is_own())
+            .filter_map(|e| e.transaction_id().map(|t| t.to_string()))
+            .find(|t| !known_txns.contains(t));
+        if let Some(t) = found {
+            return t;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    format!("sent-{}", rand::random::<u64>())
 }
 
 fn build_content(
@@ -243,25 +277,7 @@ impl AlloyClient {
                 .map_err(sdk)?,
         };
         drop(handle);
-        // The SDK keeps the transaction id private; recover it from the local echo that just
-        // appeared. If the message was already confirmed by the server, no retry/cancel can
-        // apply, so a synthetic id is returned.
-        for _ in 0..50 {
-            let found = timeline
-                .items()
-                .await
-                .iter()
-                .rev()
-                .filter_map(|i| i.as_event())
-                .filter(|e| e.is_own())
-                .filter_map(|e| e.transaction_id().map(|t| t.to_string()))
-                .find(|t| !known_txns.contains(t));
-            if let Some(t) = found {
-                return Ok(t);
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-        Ok(format!("sent-{}", rand::random::<u64>()))
+        Ok(recover_local_echo_txn(&timeline, &known_txns).await)
     }
 
     /// Edit one of our own messages.
@@ -308,6 +324,97 @@ impl AlloyClient {
             .toggle_reaction(&TimelineEventItemId::EventId(event_id(target)?), key)
             .await
             .map_err(sdk)
+    }
+
+    /// Create a poll (MSC3381) through the send queue. Returns the transaction id of the local
+    /// echo. Answers get ids `"0"`, `"1"`, … in the order given.
+    pub async fn send_poll(
+        &self,
+        room_id: &RoomId,
+        question: &str,
+        answers: &[String],
+        disclosed: bool,
+        max_selections: u32,
+    ) -> AlloyResult<String> {
+        self.ensure_encryption_state(room_id).await?;
+        let timeline = self.cached_timeline(room_id).await?;
+        let fallback = std::iter::once(question.to_owned())
+            .chain(
+                answers
+                    .iter()
+                    .enumerate()
+                    .map(|(i, text)| format!("{}. {text}", i + 1)),
+            )
+            .collect::<Vec<_>>()
+            .join("\n");
+        let poll_answers = answers
+            .iter()
+            .enumerate()
+            .map(|(i, text)| UnstablePollAnswer::new(i.to_string(), text.as_str()))
+            .collect::<Vec<_>>();
+        let mut block = UnstablePollStartContentBlock::new(
+            question,
+            UnstablePollAnswers::try_from(poll_answers).map_err(sdk)?,
+        );
+        block.kind = if disclosed {
+            PollKind::Disclosed
+        } else {
+            PollKind::Undisclosed
+        };
+        block.max_selections = UInt::from(max_selections);
+        let content = UnstablePollStartEventContent::New(
+            NewUnstablePollStartEventContent::plain_text(fallback, block),
+        );
+        let known_txns: std::collections::HashSet<String> = timeline
+            .items()
+            .await
+            .iter()
+            .filter_map(|i| i.as_event())
+            .filter_map(|e| e.transaction_id().map(|t| t.to_string()))
+            .collect();
+        let handle = timeline
+            .send(AnyMessageLikeEventContent::UnstablePollStart(content))
+            .await
+            .map_err(sdk)?;
+        drop(handle);
+        Ok(recover_local_echo_txn(&timeline, &known_txns).await)
+    }
+
+    /// Submit our answer(s) to a poll, replacing any earlier response.
+    pub async fn respond_to_poll(
+        &self,
+        room_id: &RoomId,
+        poll_event_id: &alloy_protocol::EventId,
+        answer_ids: &[String],
+    ) -> AlloyResult<()> {
+        self.ensure_encryption_state(room_id).await?;
+        let timeline = self.cached_timeline(room_id).await?;
+        let content =
+            UnstablePollResponseEventContent::new(answer_ids.to_vec(), event_id(poll_event_id)?);
+        let handle = timeline
+            .send(AnyMessageLikeEventContent::UnstablePollResponse(content))
+            .await
+            .map_err(sdk)?;
+        drop(handle);
+        Ok(())
+    }
+
+    /// End a poll. Receivers only honour the end event when it comes from the poll creator.
+    pub async fn end_poll(
+        &self,
+        room_id: &RoomId,
+        poll_event_id: &alloy_protocol::EventId,
+    ) -> AlloyResult<()> {
+        self.ensure_encryption_state(room_id).await?;
+        let timeline = self.cached_timeline(room_id).await?;
+        let content =
+            UnstablePollEndEventContent::new("This poll has ended.", event_id(poll_event_id)?);
+        let handle = timeline
+            .send(AnyMessageLikeEventContent::UnstablePollEnd(content))
+            .await
+            .map_err(sdk)?;
+        drop(handle);
+        Ok(())
     }
 
     async fn local_echo_handle(

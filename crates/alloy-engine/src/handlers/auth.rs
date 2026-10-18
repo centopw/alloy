@@ -2,7 +2,7 @@ use crate::accounts::{AccountEntry, AccountIndex};
 use crate::context::EngineContext;
 use crate::error::EngineError;
 use crate::router::{CommandGroup, GroupHandler, command_name};
-use alloy_core::{AlloyClient, AlloyError, auth::discover_homeserver};
+use alloy_core::{AlloyClient, AlloyError, auth::discover_homeserver, delete_account_secrets};
 use alloy_protocol::{EngineCommand, EngineEvent, EngineResponse};
 
 /// Handler for authentication commands (`CommandGroup::Auth`).
@@ -23,6 +23,10 @@ fn map_err(e: AlloyError) -> EngineError {
         AlloyError::Auth(m) => EngineError::auth_failed(m),
         AlloyError::NotLoggedIn => EngineError::auth_failed("not logged in"),
         AlloyError::InvalidHomeserverUrl => EngineError::invalid_argument("invalid homeserver"),
+        AlloyError::InsecureHomeserverUrl => EngineError {
+            code: "insecure_homeserver".to_string(),
+            message: "homeserver must use https (http is allowed only for localhost)".to_string(),
+        },
         AlloyError::MatrixSdk(m) => EngineError::network_error(m),
         other => EngineError::internal_error(other.to_string()),
     }
@@ -42,6 +46,15 @@ async fn open_client(
     )
     .await
     .map_err(map_err)
+}
+
+/// Remove a stored account's secrets and store directory. Keyring entries cannot be listed, so the
+/// secrets are deleted by name. A secret-store failure is logged and local removal still happens.
+async fn purge_account(ctx: &EngineContext, index: &AccountIndex, store_id: &str) {
+    if let Err(e) = delete_account_secrets(ctx.secrets.as_ref(), Some(store_id)).await {
+        tracing::warn!(error = %e, "failed to delete account secrets");
+    }
+    let _ = std::fs::remove_dir_all(index.store_dir(store_id));
 }
 
 #[async_trait::async_trait]
@@ -73,28 +86,39 @@ impl GroupHandler for AuthHandler {
             } => {
                 let store_id = uuid::Uuid::new_v4().to_string();
                 let client = open_client(ctx, &homeserver_url, &store_id).await?;
-                let cleanup = |idx: &AccountIndex| {
-                    let _ = std::fs::remove_dir_all(idx.store_dir(&store_id));
-                };
                 if let Err(e) = client.login_password(&username, &password, None).await {
                     drop(client);
-                    cleanup(&index);
+                    purge_account(ctx, &index, &store_id).await;
                     return Err(map_err(e));
                 }
-                let profile = client.account_profile().await.map_err(map_err)?;
+                let profile = match client.account_profile().await {
+                    Ok(profile) => profile,
+                    Err(e) => {
+                        // A session was stored by the login; revoke it on the server as well.
+                        if let Err(logout_err) = client.logout().await {
+                            tracing::warn!(error = %logout_err, "remote logout failed after login");
+                        }
+                        purge_account(ctx, &index, &store_id).await;
+                        return Err(map_err(e));
+                    }
+                };
                 let entry = AccountEntry {
                     user_id: profile.user_id,
                     homeserver_url: profile.homeserver_url,
                     display_name: profile.display_name,
                     avatar_url: profile.avatar_url,
-                    store_id,
+                    store_id: store_id.clone(),
                 };
                 let account = entry.to_account();
-                if let Some(old) = index
-                    .upsert(entry)
-                    .map_err(|e| EngineError::internal_error(e.to_string()))?
-                {
-                    let _ = std::fs::remove_dir_all(index.store_dir(&old.store_id));
+                let replaced = match index.upsert(entry) {
+                    Ok(replaced) => replaced,
+                    Err(e) => {
+                        purge_account(ctx, &index, &store_id).await;
+                        return Err(EngineError::internal_error(e.to_string()));
+                    }
+                };
+                if let Some(old) = replaced {
+                    purge_account(ctx, &index, &old.store_id).await;
                 }
                 ctx.set_client(Some(client)).await;
                 if ctx.background
@@ -137,14 +161,25 @@ impl GroupHandler for AuthHandler {
                     .await
                     .clone()
                     .filter(|c| c.user_id() == Some(account_id.0.as_str()));
-                if let Some(client) = active_client {
-                    client.stop_sync().await;
-                    client.logout().await.map_err(map_err)?;
-                    ctx.set_client(None).await;
-                }
+                // Local state is removed even when the server refuses the logout; the remote
+                // error is still returned so the caller knows the token may remain valid.
+                let remote = match active_client {
+                    Some(client) => {
+                        client.stop_sync().await;
+                        let remote = client.logout().await;
+                        ctx.set_client(None).await;
+                        remote
+                    }
+                    None => Ok(()),
+                };
+                purge_account(ctx, &index, &entry.store_id).await;
                 let _ = index.remove(&account_id.0);
-                let _ = std::fs::remove_dir_all(index.store_dir(&entry.store_id));
+                // The media cache holds decrypted media and is shared by all accounts on this device.
+                if let Err(e) = alloy_core::media::clear_media_cache(&ctx.data_dir).await {
+                    tracing::warn!(error = %e, "failed to clear media cache on logout");
+                }
                 ctx.sink.emit(EngineEvent::AuthState { account: None });
+                remote.map_err(map_err)?;
                 Ok(EngineResponse::LoggedOut)
             }
             EngineCommand::ListAccounts => Ok(EngineResponse::AccountsList {

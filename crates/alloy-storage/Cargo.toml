@@ -16,7 +16,22 @@ serde_json = "1.0"
 thiserror = "1.0"
 tokio = { version = "1.0", features = ["sync", "rt"] }
 tracing = "0.1"
-keyring = { version = "3.0", optional = true }
+
+# keyring 3.x ships no platform store unless a backend feature is enabled; without one it silently
+# uses an in-memory mock that loses everything on exit. Each desktop OS therefore names its backend
+# explicitly. Android and iOS never get keyring (they use `FileSecretStore`).
+#
+# Linux deliberately has no `tokio` feature: zbus's tokio `block_on` nests a `Runtime::block_on`,
+# which panics when the synchronous keyring API is called from inside our tokio runtime. The default
+# async-io path does not have that problem.
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3.6", optional = true, features = ["apple-native"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3.6", optional = true, features = ["windows-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3.6", optional = true, features = ["async-secret-service", "crypto-rust"] }
 
 [dev-dependencies]
 tokio = { version = "1.0", features = ["full"] }

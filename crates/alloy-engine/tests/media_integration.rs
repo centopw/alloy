@@ -74,6 +74,7 @@ async fn roundtrip(eng: &AppEngine, ctx: &EngineContext, encrypted: bool, dir: &
 
     let file = dir.join(format!("pic-{encrypted}.png"));
     std::fs::write(&file, PNG).unwrap();
+    ctx.allow_attachment_path(&file).unwrap();
     eng.handle(EngineCommand::SendAttachment {
         room_id: room_id.clone(),
         file_path: file.to_string_lossy().into_owned(),
@@ -192,33 +193,19 @@ async fn attachments_roundtrip_plain_and_encrypted() {
     roundtrip(&eng, &ctx, false, dir.path()).await;
     roundtrip(&eng, &ctx, true, dir.path()).await;
 
-    // Argument validation and missing files are typed errors.
-    for (cmd, code) in [
-        (
-            EngineCommand::GetMedia {
-                source: MediaSource::Remote {
-                    uri: "mxc://x/y".into(),
-                },
-                kind: "thumbnail".into(),
-                width: None,
-                height: None,
-                mime_type: None,
+    // Argument validation is a typed error.
+    for (cmd, code) in [(
+        EngineCommand::GetMedia {
+            source: MediaSource::Remote {
+                uri: "mxc://x/y".into(),
             },
-            "invalid_argument",
-        ),
-        (
-            EngineCommand::GetMedia {
-                source: MediaSource::Local {
-                    file_path: "/definitely/missing".into(),
-                },
-                kind: "file".into(),
-                width: None,
-                height: None,
-                mime_type: None,
-            },
-            "not_found",
-        ),
-    ] {
+            kind: "thumbnail".into(),
+            width: None,
+            height: None,
+            mime_type: None,
+        },
+        "invalid_argument",
+    )] {
         assert_eq!(eng.handle(cmd).await.unwrap_err().code, code);
     }
 }
@@ -257,6 +244,7 @@ async fn upload_emits_progress_ending_at_total() {
 
     let file = dir.path().join("big.bin");
     std::fs::write(&file, vec![7u8; 2 * 1024 * 1024]).unwrap();
+    ctx.allow_attachment_path(&file).unwrap();
     let mut rx = ctx.sink.subscribe();
     let sent = eng
         .handle(EngineCommand::SendAttachment {
@@ -290,4 +278,70 @@ async fn upload_emits_progress_ending_at_total() {
     let (sent_bytes, total_bytes) = last.expect("no UploadProgress event was emitted");
     assert_eq!(sent_bytes, total_bytes);
     assert!(total_bytes >= 2 * 1024 * 1024);
+}
+
+/// Attachment sources are gated before any login or filesystem access. No homeserver needed.
+#[tokio::test]
+async fn attachment_sources_must_be_registered() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = EngineContext::new(
+        dir.path().to_path_buf(),
+        Arc::new(InMemorySecretStore::new()),
+    );
+    let eng = AppEngine::new(ctx.clone());
+    let room_id = RoomId("!unused:localhost".into());
+    let send = |path: &std::path::Path| EngineCommand::SendAttachment {
+        room_id: room_id.clone(),
+        file_path: path.to_string_lossy().into_owned(),
+        mime_type: None,
+        txn_id: None,
+    };
+
+    // Nothing registered: refused.
+    let inside = dir.path().join("pic.png");
+    std::fs::write(&inside, PNG).unwrap();
+    assert_eq!(
+        eng.handle(send(&inside)).await.unwrap_err().code,
+        "forbidden"
+    );
+
+    // A registered directory admits files beneath it; the next gate is login.
+    ctx.allow_attachment_root(dir.path()).unwrap();
+    assert_eq!(
+        eng.handle(send(&inside)).await.unwrap_err().code,
+        "auth_failed"
+    );
+
+    // Files outside the registered root stay refused.
+    let outside_dir = tempfile::tempdir().unwrap();
+    let outside = outside_dir.path().join("secret.txt");
+    std::fs::write(&outside, b"not for upload").unwrap();
+    assert_eq!(
+        eng.handle(send(&outside)).await.unwrap_err().code,
+        "forbidden"
+    );
+
+    // A symlink inside the root that points outside is resolved and refused.
+    #[cfg(unix)]
+    {
+        let link = dir.path().join("link.txt");
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        assert_eq!(eng.handle(send(&link)).await.unwrap_err().code, "forbidden");
+    }
+
+    // A registered file is admitted; its siblings in the same directory are not.
+    let other_dir = tempfile::tempdir().unwrap();
+    let admitted = other_dir.path().join("admitted.png");
+    let sibling = other_dir.path().join("sibling.png");
+    std::fs::write(&admitted, PNG).unwrap();
+    std::fs::write(&sibling, PNG).unwrap();
+    ctx.allow_attachment_path(&admitted).unwrap();
+    assert_eq!(
+        eng.handle(send(&admitted)).await.unwrap_err().code,
+        "auth_failed"
+    );
+    assert_eq!(
+        eng.handle(send(&sibling)).await.unwrap_err().code,
+        "forbidden"
+    );
 }
