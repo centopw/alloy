@@ -272,7 +272,7 @@ jobs:
           CHROME_PATH: /usr/bin/google-chrome
         run: node scripts/e2e-bridge.mjs
 
-      - name: Mobile E2E (390x844 touch: no page scroll, 44px targets)
+      - name: "Mobile E2E (390x844 touch, no page scroll, 44px targets)"
         working-directory: apps/alloy/ui
         env:
           ALLOY_TEST_HS: http://localhost:8008
