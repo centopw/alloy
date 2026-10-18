@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2 (pre-release)
+
+### Fixed
+- macOS: the app bundle is now ad-hoc signed as a whole. 0.1.1 only had the linker's signature on the binary, so Gatekeeper reported "Alloy.app is damaged" on downloaded builds. It now shows the normal unidentified-developer prompt; notarization still needs an Apple Developer ID (#51).
+
 ## 0.1.1 (pre-release)
 
 First build with in-app updates: installs of 0.1.0 have no updater and need a manual install of this version.

@@ -31,6 +31,20 @@ Alloy is a privacy-first, extensible Matrix client written in Rust with a Tauri 
 
 See [docs/PLAN.md](docs/PLAN.md) for the full roadmap and architecture details.
 
+## Installing a release
+
+Builds are on the [releases page](https://github.com/centopw/alloy/releases). They are not signed with a
+paid developer certificate yet, so the first launch needs one step:
+
+- **macOS:** drag Alloy to Applications, then right-click it and choose Open (or allow it under
+  System Settings > Privacy & Security > Open Anyway). From a terminal:
+  `xattr -dr com.apple.quarantine /Applications/Alloy.app`. If macOS says the app is "damaged"
+  you have 0.1.1, whose bundle was not sealed; run the `xattr` command, or install 0.1.2 or newer.
+- **Windows:** SmartScreen may warn; choose More info, then Run anyway.
+- **Android:** the APK is signed with a throwaway key, so uninstall the old version before installing a new one.
+
+Once installed, desktop builds update themselves from Settings > About.
+
 ## Quick Start
 
 ### Prerequisites
