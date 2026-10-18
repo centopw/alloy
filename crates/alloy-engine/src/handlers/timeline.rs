@@ -192,14 +192,14 @@ impl GroupHandler for TimelineHandler {
                     ));
                 }
                 let client = ctx.active_client().await?;
-                let txn_id = client
+                let event_id = client
                     .send_poll(&room_id, &question, &answers, disclosed, max_selections)
                     .await
                     .map_err(map_err)?;
                 Ok(EngineResponse::MessageSent {
                     room_id,
-                    txn_id,
-                    event_id: None,
+                    txn_id: format!("poll-{}", event_id.0),
+                    event_id: Some(event_id),
                 })
             }
             EngineCommand::RespondToPoll {

@@ -326,8 +326,11 @@ impl AlloyClient {
             .map_err(sdk)
     }
 
-    /// Create a poll (MSC3381) through the send queue. Returns the transaction id of the local
-    /// echo. Answers get ids `"0"`, `"1"`, … in the order given.
+    /// Create a poll (MSC3381). Answers get ids `"0"`, `"1"`, … in the order given.
+    ///
+    /// Sent directly instead of through the timeline's send queue: the poll's local echo was not
+    /// always merged with its remote echo (the poll showed up twice), so the poll appears when the
+    /// server's event arrives and its event id is returned.
     pub async fn send_poll(
         &self,
         room_id: &RoomId,
@@ -335,9 +338,14 @@ impl AlloyClient {
         answers: &[String],
         disclosed: bool,
         max_selections: u32,
-    ) -> AlloyResult<String> {
+    ) -> AlloyResult<alloy_protocol::EventId> {
         self.ensure_encryption_state(room_id).await?;
-        let timeline = self.cached_timeline(room_id).await?;
+        let parsed_id =
+            RumaRoomId::parse(&room_id.0).map_err(|e| AlloyError::InvalidRoomId(e.to_string()))?;
+        let room = self
+            .client
+            .get_room(&parsed_id)
+            .ok_or_else(|| AlloyError::RoomNotFound(room_id.0.clone()))?;
         let fallback = std::iter::once(question.to_owned())
             .chain(
                 answers
@@ -365,19 +373,13 @@ impl AlloyClient {
         let content = UnstablePollStartEventContent::New(
             NewUnstablePollStartEventContent::plain_text(fallback, block),
         );
-        let known_txns: std::collections::HashSet<String> = timeline
-            .items()
-            .await
-            .iter()
-            .filter_map(|i| i.as_event())
-            .filter_map(|e| e.transaction_id().map(|t| t.to_string()))
-            .collect();
-        let handle = timeline
+        let response = room
             .send(AnyMessageLikeEventContent::UnstablePollStart(content))
             .await
             .map_err(sdk)?;
-        drop(handle);
-        Ok(recover_local_echo_txn(&timeline, &known_txns).await)
+        Ok(alloy_protocol::EventId(
+            response.response.event_id.to_string(),
+        ))
     }
 
     /// Submit our answer(s) to a poll, replacing any earlier response.
