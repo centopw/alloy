@@ -37,7 +37,8 @@ Adopted from `docs/plan/04-security-delivery.md` and calibrated against the Phas
 | Cold start (spawn to first window), release build, macOS arm64 | p95 3,443 ms; median 342 ms (n=5: 3,443 / 342 / 320 / 372 / 322 ms) | **fail** on p95 vs <2.0 s (median passes; see limits) |
 | Idle memory (process-tree RSS), release build, macOS arm64 | median 204.5 MB; p95 207.8 MB (n=5: 194.3 / 207.6 / 207.8 / 188.9 / 204.5 MB) | **fail** vs <150 MB |
 | Time-to-first-room-list | not measured on release builds yet | open: tracked as a perf issue |
-| Android release APK (arm64, stripped), LowEnd_720p emulator | APK 72.5 MB; launch `TotalTime` 133 ms; PSS about 103 MB (debug build: 453 MB APK) | **fail** vs <40 MB APK and <80 MB idle (#73) |
+| Android release APK (arm64, stripped) | plain release 72.5 MB; `opt-level=s`, thin LTO, `panic=abort` **36.7 MB** (5 min from a clean target on an M-series Mac); same without `panic=abort` 50.9 MB; fat LTO + 1 codegen unit 29.5 MB (debug build: 453 MB) | APK budget **met** with the CI flags; `panic=abort` means a panic ends the app instead of one task |
+| Android launch and idle memory, LowEnd_720p emulator (plain release build) | launch `TotalTime` 133 ms; PSS about 103 MB | idle <80 MB **not met**; re-measure with the size flags (#73) |
 
 Method: `node scripts/perf-desktop.mjs <release binary> --runs 5` (`just perf-desktop`), run on the `pnpm tauri build --no-bundle` release binary, macOS 26.6.2 arm64, Node 22.19.0. Each run spawns the app, polls System Events for its first window, then samples process-tree RSS (app, its children, and WebKit XPC helpers started in that run) five times at 1 s intervals starting 10 s after ready; the run's idle value is the median of those samples. Verdicts use p95, the stricter statistic, since the budget does not name one. With 5 runs, p95 equals the maximum.
 

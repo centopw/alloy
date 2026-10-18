@@ -91,3 +91,10 @@ perf-ui:
 # Measure cold start and idle RSS of the release desktop app on macOS (method: docs/plan/08-delivery-p1.md section 2.1)
 perf-desktop binary="target/release/alloy-app" runs="5":
     node scripts/perf-desktop.mjs {{binary}} --runs {{runs}}
+
+# Build the size-optimised release APK that CI ships (unsigned; see scripts/sign-android-apk.sh)
+android-release target="aarch64":
+    @test -n "$ANDROID_HOME" || (echo "Error: ANDROID_HOME is not set." && exit 1)
+    rustup target add {{target}}-linux-android 2>/dev/null || true
+    pnpm -C {{UI_DIR}} install
+    CARGO_PROFILE_RELEASE_OPT_LEVEL=s CARGO_PROFILE_RELEASE_LTO=thin CARGO_PROFILE_RELEASE_PANIC=abort pnpm -C apps/alloy tauri android build --apk --target {{target}}
