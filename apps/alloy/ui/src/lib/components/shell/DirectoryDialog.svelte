@@ -70,66 +70,81 @@
 </script>
 
 <Modal {open} title="Browse public rooms" {onclose} width="480px">
-  <div class="search">
-    <Icon icon={Search} size={16} />
-    <input
-      type="search"
-      aria-label="Search public rooms"
-      placeholder="Search public rooms"
-      autocomplete="off"
-      value={query}
-      oninput={(e) => onInput(e.currentTarget.value)}
-    />
-  </div>
-
-  {#if directoryStore.error}
-    <p class="error" role="alert">{directoryStore.error}</p>
-  {/if}
-  {#if joinError}
-    <p class="error" role="alert">{joinError}</p>
-  {/if}
-
-  {#if directoryStore.loading && directoryStore.rooms.length === 0}
-    <p class="status" role="status">Searching...</p>
-  {:else if !directoryStore.loading && directoryStore.rooms.length === 0 && !directoryStore.error}
-    <p class="status">No public rooms match.</p>
-  {/if}
-
-  <ul class="results">
-    {#each directoryStore.rooms as room (room.room_id)}
-      {@const title = room.name ?? room.alias ?? room.room_id}
-      <li>
-        <Avatar userId={room.room_id} displayName={title} src={room.avatar_url} size="md" shape="rounded" />
-        <div class="meta">
-          <span class="name">{title}</span>
-          {#if room.alias}<span class="alias">{room.alias}</span>{/if}
-          {#if room.topic}<span class="topic">{room.topic}</span>{/if}
-          <span class="members">
-            <Icon icon={Users} size={16} />
-            {room.num_joined_members} {room.num_joined_members === 1 ? 'member' : 'members'}
-          </span>
-        </div>
-        {#if room.joined}
-          <Button variant="ghost" disabled>Joined</Button>
-        {:else}
-          <Button disabled={joining !== null} onclick={() => join(room)}>
-            {joining === room.room_id ? 'Joining...' : 'Join'}
-          </Button>
-        {/if}
-      </li>
-    {/each}
-  </ul>
-
-  {#if directoryStore.hasMore}
-    <div class="more">
-      <Button variant="ghost" disabled={directoryStore.loading} onclick={loadMore}>
-        {directoryStore.loading ? 'Loading...' : 'Load more'}
-      </Button>
+  <div class="body">
+    <div class="search">
+      <Icon icon={Search} size={16} />
+      <input
+        type="search"
+        aria-label="Search public rooms"
+        placeholder="Search public rooms"
+        autocomplete="off"
+        value={query}
+        oninput={(e) => onInput(e.currentTarget.value)}
+      />
     </div>
-  {/if}
+
+    {#if directoryStore.error}
+      <p class="error" role="alert">{directoryStore.error}</p>
+    {/if}
+    {#if joinError}
+      <p class="error" role="alert">{joinError}</p>
+    {/if}
+
+    {#if directoryStore.loading && directoryStore.rooms.length === 0}
+      <p class="status" role="status">Searching...</p>
+    {:else if !directoryStore.loading && directoryStore.rooms.length === 0 && !directoryStore.error}
+      <p class="status">No public rooms match.</p>
+    {/if}
+
+    <ul class="results">
+      {#each directoryStore.rooms as room (room.room_id)}
+        {@const title = room.name ?? room.alias ?? room.room_id}
+        <li>
+          <Avatar userId={room.room_id} displayName={title} src={room.avatar_url} size="md" shape="rounded" />
+          <div class="meta">
+            <span class="name" title={title}>{title}</span>
+            {#if room.alias}<span class="alias" title={room.alias}>{room.alias}</span>{/if}
+            {#if room.topic}<span class="topic" title={room.topic}>{room.topic}</span>{/if}
+            <span class="members">
+              <Icon icon={Users} size={16} />
+              {room.num_joined_members} {room.num_joined_members === 1 ? 'member' : 'members'}
+            </span>
+          </div>
+          <div class="action">
+            {#if room.joined}
+              <Button variant="ghost" disabled ariaLabel="Joined {title}">Joined</Button>
+            {:else}
+              <Button
+                disabled={joining !== null}
+                ariaLabel="Join {title}"
+                onclick={() => join(room)}
+              >
+                {joining === room.room_id ? 'Joining...' : 'Join'}
+              </Button>
+            {/if}
+          </div>
+        </li>
+      {/each}
+    </ul>
+
+    {#if directoryStore.hasMore}
+      <div class="more">
+        <Button variant="ghost" disabled={directoryStore.loading} onclick={loadMore}>
+          {directoryStore.loading ? 'Loading...' : 'Load more'}
+        </Button>
+      </div>
+    {/if}
+  </div>
 </Modal>
 
 <style>
+  /* Modal's content area already pads 16px; min-height/overflow let this body scroll inside it. */
+  .body {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: auto;
+  }
   .search {
     display: flex;
     align-items: center;
@@ -161,7 +176,8 @@
     overflow-y: auto;
   }
   .results li {
-    display: flex;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
     gap: var(--alloy-spacing-scale-3);
     padding: var(--alloy-spacing-scale-2);
@@ -171,18 +187,20 @@
     background: var(--alloy-color-surface-hover);
   }
   .meta {
-    flex: 1;
     min-width: 0;
     display: flex;
     flex-direction: column;
     gap: 2px;
   }
-  .name {
-    color: var(--alloy-color-text-primary);
-    font-weight: 600;
+  .name,
+  .alias {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .name {
+    color: var(--alloy-color-text-primary);
+    font-weight: 600;
   }
   .alias,
   .members {
@@ -193,6 +211,7 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
+    white-space: nowrap;
   }
   .topic {
     font-size: var(--alloy-typography-size-sm);
@@ -202,6 +221,16 @@
     -webkit-line-clamp: 2;
     line-clamp: 2;
     -webkit-box-orient: vertical;
+  }
+  .action {
+    flex: none;
+    min-width: 84px;
+    display: flex;
+    justify-content: flex-end;
+  }
+  .action :global(.alloy-button) {
+    flex: none;
+    white-space: nowrap;
   }
   .status {
     margin: var(--alloy-spacing-scale-3) 0 0;

@@ -2,7 +2,7 @@
   import type { TimelineItemDto } from '$lib/generated';
   import { Avatar, UserName } from '../common';
   import Icon from '$lib/icons/Icon.svelte';
-  import { Reply, Pencil, Trash2, Smile, Ellipsis, Copy, MessageSquare } from '$lib/icons';
+  import { Reply, Pencil, Trash2, Smile, Copy, Link, MessageSquare } from '$lib/icons';
   import { timelineStore } from '$lib/stores/timeline.svelte';
   import { threadStore } from '$lib/stores/thread.svelte';
   import { sanitizeHtml } from '$lib/content/html';
@@ -10,6 +10,9 @@
   import { QUICK_REACTIONS } from '$lib/content/emoji';
   import { interceptLinks } from '$lib/platform/links';
   import { portal } from '$lib/platform/portal';
+  import { contextmenu } from '$lib/platform/contextmenu';
+  import { profileCard } from '$lib/stores/profileCard.svelte';
+  import type { MenuItem } from '$lib/stores/contextmenu.svelte';
   import MediaView from './MediaView.svelte';
   import PollView from './PollView.svelte';
 
@@ -34,6 +37,7 @@
       item.timestamp_millis - prev!.timestamp_millis < GROUP_MS
   );
   const time = $derived(formatTime(item.timestamp_millis));
+  const senderName = $derived(item.sender_display_name ?? item.sender);
   const failed = $derived(item.send_state.status === 'Failed');
   const sending = $derived(item.send_state.status === 'Sending');
   const canEdit = $derived(item.is_own && kind === 'TextMessage' && !!item.event_id);
@@ -42,26 +46,28 @@
 
   let picker = $state(false);
   let pickerPos = $state({ x: 0, y: 0 });
-  let more = $state(false);
-  let morePos = $state({ x: 0, y: 0 });
+  let rowEl = $state<HTMLElement | undefined>();
 
-  function togglePicker(e: MouseEvent) {
-    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  /** Opens the reaction picker beside `anchor`, or closes it when already open. */
+  function openPicker(anchor: HTMLElement) {
+    const r = anchor.getBoundingClientRect();
     pickerPos = { x: Math.max(8, Math.min(r.left, window.innerWidth - 280)), y: r.bottom + 6 };
-    more = false;
     picker = !picker;
-  }
-
-  function toggleMore(e: MouseEvent) {
-    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    morePos = { x: Math.max(8, Math.min(r.right - 160, window.innerWidth - 168)), y: r.bottom + 6 };
-    picker = false;
-    more = !more;
   }
 
   function openThread() {
     const roomId = timelineStore.roomId;
     if (roomId && item.event_id) void threadStore.open(roomId, item.event_id);
+  }
+
+  /** Opens the sender's profile card at the pointer, or centred on the avatar when activated from the keyboard. */
+  function openSenderProfile(e: MouseEvent) {
+    let at = { x: e.clientX, y: e.clientY };
+    if (e.detail === 0) {
+      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      at = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    }
+    profileCard.open(item.sender, timelineStore.roomId, at);
   }
 
   const html = $derived(
@@ -75,16 +81,39 @@
     void timelineStore.toggleReaction(item, key);
   }
 
-  function copyText() {
-    more = false;
-    void navigator.clipboard.writeText(quote(item));
-  }
 
   function quote(it: TimelineItemDto): string {
     const c = it.content;
     if (c.kind === 'TextMessage') return c.data.body;
     if (c.kind === 'Media') return c.data.body || 'Attachment';
     return '';
+  }
+
+  /** Context-menu entries for this message. Groups that do not apply are omitted, not disabled. */
+  function menuItems(): MenuItem[] {
+    const roomId = timelineStore.roomId;
+    const replies: MenuItem[] = [];
+    if (canAct && !inThread) {
+      replies.push({ id: 'reply', label: 'Reply', icon: Reply, onselect: () => timelineStore.startReply(item) });
+      replies.push({ id: 'thread', label: 'Reply in thread', icon: MessageSquare, onselect: openThread });
+    }
+    if (canAct) replies.push({ id: 'react', label: 'React', icon: Smile, onselect: () => rowEl && openPicker(rowEl) });
+
+    const copies: MenuItem[] = [];
+    if (canCopy) copies.push({ id: 'copy-text', label: 'Copy text', icon: Copy, onselect: () => void navigator.clipboard.writeText(quote(item)) });
+    if (roomId && item.event_id) {
+      const link = `https://matrix.to/#/${roomId}/${item.event_id}`;
+      copies.push({ id: 'copy-link', label: 'Copy link', icon: Link, onselect: () => void navigator.clipboard.writeText(link) });
+    }
+    copies.push({ id: 'copy-sender', label: 'Copy sender ID', icon: Copy, onselect: () => void navigator.clipboard.writeText(item.sender) });
+
+    const edits: MenuItem[] = [];
+    if (canEdit) edits.push({ id: 'edit', label: 'Edit', icon: Pencil, onselect: () => timelineStore.startEdit(item) });
+    if (item.is_own) edits.push({ id: 'delete', label: 'Delete', icon: Trash2, danger: true, onselect: () => timelineStore.redact(item) });
+
+    const separator: MenuItem = { separator: true };
+    const groups = [replies, copies, edits].filter((g) => g.length > 0);
+    return groups.flatMap((g, i) => (i === 0 ? g : [separator, ...g]));
   }
 </script>
 
@@ -97,31 +126,33 @@
 {:else if item.content.kind === 'Virtual'}
   <div class="spacer"></div>
 {:else}
-  <div class="row" class:grouped class:own={item.is_own} data-event-id={item.event_id ?? undefined}>
+  <div class="row" class:grouped class:own={item.is_own} data-event-id={item.event_id ?? undefined} bind:this={rowEl} use:contextmenu={menuItems}>
     <div class="gutter">
       {#if grouped}
         <span class="gutter-time">{time}</span>
       {:else}
-        <Avatar
-          userId={item.sender}
-          displayName={item.sender_display_name ?? item.sender}
-          src={item.sender_avatar_url ?? null}
-          size={40}
-        />
+        <button type="button" class="avatar-btn" aria-label="Show profile of {senderName}" onclick={openSenderProfile}>
+          <Avatar
+            userId={item.sender}
+            displayName={senderName}
+            src={item.sender_avatar_url ?? null}
+            size={40}
+          />
+        </button>
       {/if}
     </div>
 
     <div class="stack">
       {#if item.reply_to}
         <div class="reply">
-          <UserName userId={item.reply_to.sender} displayName={item.reply_to.sender_display_name} />
+          <UserName userId={item.reply_to.sender} displayName={item.reply_to.sender_display_name} roomId={timelineStore.roomId} interactive />
           <span class="reply-body">{quote(item.reply_to)}</span>
         </div>
       {/if}
 
       {#if !grouped}
         <div class="head">
-          <UserName userId={item.sender} displayName={item.sender_display_name} />
+          <UserName userId={item.sender} displayName={item.sender_display_name} roomId={timelineStore.roomId} interactive />
           <span class="ts">{time}</span>
         </div>
       {/if}
@@ -193,7 +224,7 @@
 
     {#if canAct}
       <div class="toolbar" role="toolbar" aria-label="Message actions">
-        <button type="button" aria-label="React" title="React" onclick={togglePicker}>
+        <button type="button" aria-label="React" title="React" onclick={(e) => openPicker(e.currentTarget as HTMLElement)}>
           <Icon icon={Smile} size={16} />
         </button>
         {#if !inThread}
@@ -216,18 +247,6 @@
             <Icon icon={Trash2} size={16} />
           </button>
         {/if}
-        {#if canCopy}
-          <button
-            type="button"
-            aria-label="More actions"
-            title="More"
-            aria-haspopup="menu"
-            aria-expanded={more}
-            onclick={toggleMore}
-          >
-            <Icon icon={Ellipsis} size={16} />
-          </button>
-        {/if}
       </div>
 
       {#if picker}
@@ -239,15 +258,6 @@
         </div>
       {/if}
 
-      {#if more}
-        <button type="button" class="backdrop" aria-label="Close message menu" tabindex="-1" use:portal onclick={() => (more = false)}></button>
-        <div class="popover menu" role="menu" use:portal style="left: {morePos.x}px; top: {morePos.y}px;">
-          <button type="button" role="menuitem" onclick={copyText}>
-            <Icon icon={Copy} size={16} />
-            <span>Copy text</span>
-          </button>
-        </div>
-      {/if}
     {/if}
   </div>
 {/if}
@@ -257,8 +267,8 @@
     position: relative;
     display: flex;
     align-items: flex-start;
-    margin: 0 var(--alloy-spacing-scale-2);
-    padding: var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-3);
+    margin: 0 var(--alloy-layout-row-inset);
+    padding: var(--alloy-spacing-scale-1) var(--alloy-layout-row-pad-x);
     border-radius: var(--alloy-radii-md);
     min-width: 0;
   }
@@ -539,28 +549,17 @@
   .picker button:hover {
     background: var(--alloy-color-surface-hover);
   }
-  .menu {
-    display: flex;
-    flex-direction: column;
-    min-width: 160px;
-    padding: var(--alloy-spacing-scale-1);
-  }
-  .menu button {
-    display: flex;
-    align-items: center;
-    gap: var(--alloy-spacing-scale-2);
-    padding: 6px var(--alloy-spacing-scale-2);
+  .avatar-btn {
+    display: inline-grid;
+    padding: 0;
     border: 0;
-    border-radius: var(--alloy-radii-md);
-    background: transparent;
-    color: var(--alloy-color-text-primary);
-    font: inherit;
-    font-size: var(--alloy-typography-size-sm);
-    text-align: left;
+    border-radius: var(--alloy-radii-full);
+    background: none;
     cursor: pointer;
   }
-  .menu button:hover {
-    background: var(--alloy-color-surface-hover);
+  .avatar-btn:focus-visible {
+    outline: 2px solid var(--alloy-color-accent-primary);
+    outline-offset: 2px;
   }
   .divider {
     display: flex;

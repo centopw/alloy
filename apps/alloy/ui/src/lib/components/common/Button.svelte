@@ -9,6 +9,8 @@
     type?: 'button' | 'submit' | 'reset';
     icon?: Component<{ size?: number; strokeWidth?: number; class?: string }>;
     ariaLabel?: string;
+    tooltip?: string;
+    shortcut?: string;
     onclick?: (event: MouseEvent) => void;
     children?: Snippet;
     class?: string;
@@ -21,6 +23,8 @@
     type = 'button',
     icon,
     ariaLabel,
+    tooltip,
+    shortcut,
     onclick,
     children,
     class: className = ''
@@ -49,6 +53,8 @@
   {type}
   {disabled}
   aria-label={ariaLabel}
+  data-tooltip={tooltip}
+  data-shortcut={shortcut}
   {onclick}
   class="alloy-button variant-{variant} size-{size} {className}"
   style="

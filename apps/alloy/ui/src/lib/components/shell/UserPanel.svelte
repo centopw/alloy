@@ -1,7 +1,9 @@
 <script lang="ts">
   import { Avatar, UserName } from '../common';
   import Icon from '$lib/icons/Icon.svelte';
-  import { Settings } from '$lib/icons';
+  import { Copy, Settings } from '$lib/icons';
+  import { contextmenu } from '$lib/platform/contextmenu';
+  import type { MenuItem } from '$lib/stores/contextmenu.svelte';
   import { session } from '$lib/stores/session.svelte';
 
   interface Props {
@@ -11,16 +13,26 @@
 
   const account = $derived(session.account);
   const name = $derived(account?.display_name?.trim() || account?.user_id || '');
+
+  function panelItems(userId: string): MenuItem[] {
+    return [
+      { id: 'settings', label: 'Settings', icon: Settings, onselect: () => onsettings?.() },
+      { separator: true },
+      { id: 'copy-user-id', label: 'Copy user ID', icon: Copy, onselect: () => void navigator.clipboard?.writeText(userId).catch(() => undefined) },
+    ];
+  }
 </script>
 
 {#if account}
-  <div class="panel">
-    <Avatar userId={account.user_id} displayName={name} src={account.avatar_url} size="md" />
+  <div class="panel" use:contextmenu={() => panelItems(account.user_id)}>
+    <span class="fixed">
+      <Avatar userId={account.user_id} displayName={name} src={account.avatar_url} size="md" />
+    </span>
     <div class="who">
       <UserName userId={account.user_id} displayName={name} class="name" />
       <span class="id" title={account.user_id}>{account.user_id}</span>
     </div>
-    <button type="button" class="gear" aria-label="User settings" title="User settings" onclick={() => onsettings?.()}>
+    <button type="button" class="gear" aria-label="Settings" onclick={() => onsettings?.()}>
       <Icon icon={Settings} size={20} />
     </button>
   </div>
@@ -32,10 +44,14 @@
     align-items: center;
     gap: var(--alloy-spacing-scale-2);
     flex-shrink: 0;
-    margin: var(--alloy-spacing-scale-2);
-    padding: var(--alloy-spacing-scale-2);
+    margin: var(--alloy-layout-row-inset);
+    padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x);
     border-radius: var(--alloy-radii-md);
     background: var(--alloy-color-surface-canvas);
+  }
+  .fixed {
+    flex: none;
+    display: inline-flex;
   }
   .who {
     display: flex;

@@ -50,6 +50,7 @@ const uName = `e2eu${stamp}`;
 const vName = `e2ev${stamp}`;
 const u = await register(uName);
 const v = await register(vName);
+const uxShot = async (page, name) => { if (process.env.E2E_UX_SHOTS) await page.screenshot({ path: `${process.env.E2E_UX_SHOTS}/${name}.png` }); };
 const room = await api('/createRoom', { name: 'From Bob', invite: [u.id] }, v.token);
 await api(`/join/${encodeURIComponent(room.room_id)}`, {}, u.token);
 await fetch(`${HS}/_matrix/client/v3/rooms/${encodeURIComponent(room.room_id)}/send/m.room.message/t1`, {
@@ -133,6 +134,50 @@ try {
   await page.evaluate(() => document.querySelector('.picker button').click());
   await page.waitForFunction(() => document.querySelector('.chip.mine'), { timeout: 30000 });
 
+  step('hover an icon button shows a tooltip');
+  await page.hover('button[aria-label="Search"]');
+  await page.waitForSelector('[role=tooltip]', { visible: true, timeout: 5000 });
+  await page.waitForFunction(() => document.querySelector('[role=tooltip]')?.textContent.includes('Search'), { timeout: 5000 });
+  await page.mouse.move(5, 5);
+
+  step('clicking a sender name opens the profile card');
+  await page.evaluate(() => [...document.querySelectorAll('.row button.alloy-user-name')].find((b) => !b.closest('.own')).click());
+  await page.waitForSelector('[role=dialog][aria-label="User profile"]', { visible: true, timeout: 15000 });
+  await page.waitForFunction(() => document.querySelector('[role=dialog][aria-label="User profile"]').innerText.includes('@'), { timeout: 15000 });
+  await uxShot(page, 'profile-card');
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.querySelector('[role=dialog][aria-label="User profile"]'), { timeout: 5000 });
+
+  step('room info panel: rename, topic and a private note');
+  await page.click('button[aria-label^="Room info for"]');
+  await page.waitForSelector('section[aria-label="Room info"]', { visible: true, timeout: 15000 });
+  await page.waitForSelector('section[aria-label="Room info"] textarea', { visible: true, timeout: 15000 });
+  await page.evaluate(() => {
+    const areas = [...document.querySelectorAll('section[aria-label="Room info"] textarea')];
+    const note = areas[areas.length - 1];
+    note.focus();
+    note.value = 'remember: e2e note';
+    note.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await page.waitForFunction(() => [...document.querySelectorAll('section[aria-label="Room info"] [role=status]')].some((e) => e.textContent.includes('Saved')), { timeout: 15000 });
+  await uxShot(page, 'room-info');
+  await page.evaluate(() => [...document.querySelectorAll('section[aria-label="Room info"] [role=tab]')].find((t) => t.textContent.includes('Media')).click());
+  await new Promise((r) => setTimeout(r, 1200));
+  await uxShot(page, 'room-info-media');
+  await page.click('button[aria-label="Close room info"]');
+  await page.waitForFunction(() => !document.querySelector('section[aria-label="Room info"]'), { timeout: 5000 });
+
+  step('right-click a room: rename is disabled without the power level');
+  await page.evaluate(() => {
+    const row = [...document.querySelectorAll('button.row')].find((e) => e.textContent.includes('From Bob'));
+    const r = row.getBoundingClientRect();
+    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 20, clientY: r.top + 10 }));
+  });
+  await page.waitForSelector('[role=menu] [role=menuitem]', { visible: true, timeout: 5000 });
+  await page.waitForFunction(() => [...document.querySelectorAll('[role=menuitem]')].find((e) => e.textContent.includes('Rename room'))?.getAttribute('aria-disabled') === 'true', { timeout: 10000 });
+  await uxShot(page, 'context-menu');
+  await page.keyboard.press('Escape');
+
   step('reply in a thread from the panel');
   await bobRow.asElement().hover();
   await page.evaluate((row) => row.querySelector('button[aria-label="Reply in thread"]').click(), bobRow);
@@ -170,12 +215,36 @@ try {
   await page.waitForSelector('[role=dialog] input[type=text]');
   await page.type('[role=dialog] input[type=text]', 'Created in UI');
   await page.evaluate(() => [...document.querySelectorAll('[role=dialog] button')].find((b) => b.textContent.trim() === 'Create').click());
-  await page.waitForFunction(() => [...document.querySelectorAll('h2.title')].some((h) => h.textContent === 'Created in UI') && document.body.innerText.includes('End-to-end encrypted'), { timeout: 60000 });
+  await page.waitForFunction(() => [...document.querySelectorAll('button[aria-label^="Room info for"]')].some((h) => h.getAttribute('aria-label') === 'Room info for Created in UI') && document.body.innerText.includes('End-to-end encrypted'), { timeout: 60000 });
   await page.click('textarea[aria-label=Message]');
   await page.type('textarea[aria-label=Message]', 'secret hello');
   await page.keyboard.press('Enter');
   await page.waitForFunction(() => (() => { const rows = [...document.querySelectorAll('.row.own')]; return rows.length > 0 && rows.every((r) => !r.querySelector('.state, .failed-actions')); })(), { timeout: 60000 });
   await page.screenshot({ path: resolve(shots, 'e2e-3-encrypted-room.png') });
+
+  step('right-click a room you own: rename it from the context menu');
+  await page.evaluate(() => {
+    const row = [...document.querySelectorAll('button.row')].find((e) => e.textContent.includes('Created in UI'));
+    const r = row.getBoundingClientRect();
+    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 20, clientY: r.top + 10 }));
+  });
+  await page.waitForSelector('[role=menu] [role=menuitem]', { visible: true, timeout: 5000 });
+  await page.evaluate(() => [...document.querySelectorAll('[role=menuitem]')].find((e) => e.textContent.includes('Rename room')).click());
+  await page.waitForSelector('[role=dialog] input', { visible: true, timeout: 5000 });
+  await page.click('[role=dialog] input');
+  await page.$eval('[role=dialog] input', (el) => el.select());
+  await page.keyboard.type('Renamed by E2E');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => [...document.querySelectorAll('button.row .title')].some((e) => e.textContent === 'Renamed by E2E'), { timeout: 30000 });
+
+  step('the sidebar can be resized with the keyboard');
+  const handle = '[role=separator][aria-label="Resize sidebar"]';
+  const widthOf = () => page.$eval(handle, (el) => ({ now: Number(el.getAttribute('aria-valuenow')), left: el.getBoundingClientRect().left }));
+  const before = await widthOf();
+  await page.focus(handle);
+  for (let i = 0; i < 4; i++) await page.keyboard.press('ArrowRight');
+  const after = await widthOf();
+  if (!(after.now > before.now && after.left > before.left)) throw new Error(`sidebar did not grow: ${JSON.stringify(before)} -> ${JSON.stringify(after)}`);
 
   step('browse the public room directory');
   await page.click('button[aria-label="Browse public rooms"]');
@@ -186,7 +255,9 @@ try {
   await page.waitForFunction(() => !document.querySelector('input[aria-label="Search public rooms"]'), { timeout: 10000 });
 
   step('settings open and sign out returns to onboarding');
-  await page.click('button[aria-label="User settings"]');
+  await page.click('button[aria-label="Settings"]');
+  await new Promise((r) => setTimeout(r, 600));
+  await uxShot(page, 'settings');
   await page.waitForSelector('[role=dialog]');
   await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Sign out').click());
   await page.waitForSelector('input[placeholder*="matrix.org"]', { timeout: 30000 });

@@ -113,13 +113,14 @@
     color: var(--alloy-color-text-primary);
     font: inherit;
     font-size: var(--alloy-typography-size-lg);
-    padding: var(--alloy-spacing-scale-4);
+    height: var(--alloy-layout-header-height);
+    padding: 0 var(--alloy-layout-gutter);
     border-bottom: 1px solid var(--alloy-color-border-subtle);
   }
   ul {
     list-style: none;
     margin: 0;
-    padding: var(--alloy-spacing-scale-2);
+    padding: var(--alloy-layout-row-inset);
   }
   button {
     display: flex;
@@ -130,7 +131,7 @@
     background: transparent;
     color: inherit;
     font: inherit;
-    padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
+    padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x);
     border-radius: var(--alloy-radii-md);
     cursor: pointer;
     text-align: left;

@@ -100,7 +100,7 @@
     display: grid;
     place-items: center;
     background: var(--alloy-color-surface-canvas);
-    padding: var(--alloy-spacing-scale-4, 16px);
+    padding: var(--alloy-layout-gutter);
   }
   .card {
     width: min(420px, 100%);

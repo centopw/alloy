@@ -88,12 +88,12 @@
     display: flex;
     flex-direction: column;
     gap: var(--alloy-spacing-scale-3);
-    margin-top: var(--alloy-spacing-scale-4);
+    margin-top: var(--alloy-layout-section-gap);
   }
   label {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: var(--alloy-spacing-scale-2);
     font-size: var(--alloy-typography-size-sm);
     color: var(--alloy-color-text-secondary);
   }
@@ -103,7 +103,7 @@
     background: var(--alloy-color-surface-subtle);
     border: 1px solid var(--alloy-color-border-subtle);
     border-radius: var(--alloy-radii-md);
-    padding: 10px 12px;
+    padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
   }
   .row {
     display: flex;

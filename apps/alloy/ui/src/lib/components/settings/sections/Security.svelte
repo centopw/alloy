@@ -28,9 +28,7 @@
   }
 </script>
 
-<section class="section" aria-labelledby="security-title">
-  <h2 id="security-title" class="title">Security</h2>
-
+<section class="section">
   <div class="block">
     <h3 class="subtitle">Verify this device</h3>
     <p class="muted">Confirm it is you by comparing emojis with another signed-in device.</p>
@@ -106,13 +104,7 @@
   .section {
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-spacing-scale-6);
-  }
-  .title {
-    margin: 0;
-    font-size: var(--alloy-typography-size-xl);
-    font-weight: var(--alloy-typography-weight-semibold);
-    color: var(--alloy-color-text-primary);
+    gap: var(--alloy-layout-section-gap);
   }
   .block {
     display: flex;

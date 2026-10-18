@@ -1,10 +1,15 @@
 <script lang="ts">
   import { Avatar, Button, UserName } from '../common';
-  import Icon from '$lib/icons/Icon.svelte';
-  import { X } from '$lib/icons';
+  import { ChevronRight, Copy, Icon, Info, MessageSquare, User, X } from '$lib/icons';
+  import { contextmenu } from '$lib/platform/contextmenu';
   import { membersStore, memberLabel } from '$lib/stores/members.svelte';
   import { errorMessage } from '$lib/stores/errors';
-  import type { RoomMemberDto } from '$lib/generated/index.js';
+  import { profileCard } from '$lib/stores/profileCard.svelte';
+  import { roomsStore } from '$lib/stores/rooms.svelte';
+  import { ui } from '$lib/stores/ui.svelte';
+  import { userProfile } from '$lib/stores/userProfile.svelte';
+  import type { MenuItem } from '$lib/stores/contextmenu.svelte';
+  import type { RoomMemberDto } from '$lib/generated';
 
   interface Props {
     roomId: string;
@@ -16,8 +21,11 @@
 
   let loading = $state(true);
   let loadError = $state<string | null>(null);
+  let actionError = $state<string | null>(null);
   // Bumping this re-runs the load effect (the retry button).
   let attempt = $state(0);
+  // Pointer position of the last right-click on a member, used to place the profile card from the menu.
+  let menuAnchor = $state({ x: 0, y: 0 });
 
   const details = $derived(membersStore.detailsOf(roomId));
   const members = $derived(membersStore.membersOf(roomId));
@@ -59,36 +67,93 @@
       current = false;
     };
   });
+
+  /** Opens the profile card at the pointer, or at the row centre when the row was activated from the keyboard. */
+  function openProfile(e: MouseEvent, userId: string) {
+    let at = { x: e.clientX, y: e.clientY };
+    if (e.detail === 0) {
+      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      at = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    }
+    actionError = null;
+    profileCard.open(userId, roomId, at);
+  }
+
+  async function message(userId: string) {
+    actionError = null;
+    try {
+      const dmRoomId = await userProfile.startDirectMessage(userId);
+      roomsStore.select(dmRoomId);
+    } catch (e) {
+      actionError = errorMessage(e);
+    }
+  }
+
+  function memberMenu(m: RoomMemberDto): MenuItem[] {
+    return [
+      {
+        id: 'view-profile',
+        label: 'View profile',
+        icon: User,
+        onselect: () => profileCard.open(m.user_id, roomId, menuAnchor)
+      },
+      { id: 'message', label: 'Message', icon: MessageSquare, onselect: () => void message(m.user_id) },
+      { separator: true },
+      { id: 'copy-user-id', label: 'Copy user ID', icon: Copy, onselect: () => void navigator.clipboard.writeText(m.user_id) }
+    ];
+  }
 </script>
 
 {#snippet memberRow(m: RoomMemberDto)}
-  <li class="row" class:invited={m.membership === 'Invited'}>
-    <Avatar
-      userId={m.user_id}
-      displayName={memberLabel(m)}
-      src={m.avatar_url}
-      size="sm"
-      shape="circle"
-    />
-    <span class="who">
-      <UserName userId={m.user_id} displayName={memberLabel(m)} />
-    </span>
+  <li>
+    <button
+      type="button"
+      class="row"
+      class:invited={m.membership === 'Invited'}
+      data-user-id={m.user_id}
+      onclick={(e) => openProfile(e, m.user_id)}
+      oncontextmenu={(e) => (menuAnchor = { x: e.clientX, y: e.clientY })}
+      use:contextmenu={() => memberMenu(m)}
+    >
+      <Avatar
+        userId={m.user_id}
+        displayName={memberLabel(m)}
+        src={m.avatar_url}
+        size="sm"
+        shape="circle"
+      />
+      <span class="who">
+        <UserName userId={m.user_id} displayName={memberLabel(m)} />
+      </span>
+    </button>
   </li>
 {/snippet}
 
 <div class="members-panel" role="complementary" aria-label="Members">
-  {#if onclose}
-    <header class="bar">
-      <h2>Members</h2>
+  <header class="bar">
+    <h2>Members</h2>
+    {#if onclose}
       <button type="button" class="close" aria-label="Close members" onclick={() => onclose?.()}>
         <Icon icon={X} size={20} />
       </button>
-    </header>
-  {/if}
+    {/if}
+  </header>
+
+  <button type="button" class="room-info" onclick={() => ui.openRoomInfo('info')}>
+    <Icon icon={Info} size={16} />
+    <span>Room info</span>
+    <Icon icon={ChevronRight} size={16} />
+  </button>
+
   {#if loadError}
     <div class="notice" role="alert">
       <p>Could not load room details: {loadError}</p>
       <Button variant="ghost" size="sm" onclick={() => (attempt += 1)}>Try again</Button>
+    </div>
+  {/if}
+  {#if actionError}
+    <div class="notice" role="alert">
+      <p>{actionError}</p>
     </div>
   {/if}
 
@@ -123,11 +188,24 @@
 </div>
 
 <style>
+  .members-panel {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    min-width: 0;
+    height: 100%;
+    min-height: 0;
+    background: var(--alloy-color-surface-panel);
+    color: var(--alloy-color-text-primary);
+  }
   .bar {
     display: flex;
+    flex: none;
     align-items: center;
     justify-content: space-between;
-    padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
+    box-sizing: border-box;
+    height: var(--alloy-layout-header-height);
+    padding: 0 var(--alloy-layout-gutter);
     border-bottom: 1px solid var(--alloy-color-border-subtle);
   }
   .bar h2 {
@@ -139,6 +217,7 @@
     place-items: center;
     width: 40px;
     height: 40px;
+    margin-inline-end: calc(var(--alloy-layout-gutter) * -1);
     border: 0;
     border-radius: var(--alloy-radii-full);
     background: transparent;
@@ -152,22 +231,39 @@
     outline: 2px solid var(--alloy-color-accent-primary);
     outline-offset: 2px;
   }
-  .members-panel {
+  .room-info {
     display: flex;
-    flex-direction: column;
-    width: 100%;
-    min-width: 0;
-    height: 100%;
-    min-height: 0;
-    background: var(--alloy-color-surface-panel);
+    flex: none;
+    align-items: center;
+    gap: var(--alloy-spacing-scale-3);
+    margin: var(--alloy-layout-row-inset);
+    padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x);
+    border: 0;
+    border-radius: var(--alloy-radii-md);
+    background: transparent;
+    color: var(--alloy-color-text-secondary);
+    font: inherit;
+    font-size: var(--alloy-typography-size-sm);
+    text-align: start;
+    cursor: pointer;
+  }
+  .room-info span {
+    flex: 1;
+  }
+  .room-info:hover {
+    background: var(--alloy-color-surface-hover);
     color: var(--alloy-color-text-primary);
+  }
+  .room-info:focus-visible {
+    outline: 2px solid var(--alloy-color-accent-primary);
+    outline-offset: 2px;
   }
   .info {
     display: flex;
+    flex: none;
     flex-direction: column;
     gap: var(--alloy-spacing-scale-1);
-    flex: none;
-    padding: var(--alloy-spacing-scale-3) var(--alloy-spacing-scale-4);
+    padding: var(--alloy-layout-section-gap) var(--alloy-layout-gutter);
     border-bottom: 1px solid var(--alloy-color-border-subtle);
   }
   .topic {
@@ -190,10 +286,11 @@
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    padding: 0 var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-4);
+    padding: 0 0 var(--alloy-layout-section-gap);
   }
   h3 {
-    margin: var(--alloy-spacing-scale-4) var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-2);
+    margin: var(--alloy-layout-section-gap) 0 var(--alloy-spacing-scale-2);
+    padding: 0 calc(var(--alloy-layout-row-inset) + var(--alloy-layout-row-pad-x));
     color: var(--alloy-color-text-muted);
     font-size: var(--alloy-typography-size-xs);
     font-weight: var(--alloy-typography-weight-semibold);
@@ -203,7 +300,7 @@
   .rows {
     list-style: none;
     margin: 0;
-    padding: 0;
+    padding: 0 var(--alloy-layout-row-inset);
     display: flex;
     flex-direction: column;
     gap: var(--alloy-spacing-scale-1);
@@ -212,12 +309,25 @@
     display: flex;
     align-items: center;
     gap: var(--alloy-spacing-scale-3);
+    box-sizing: border-box;
+    width: 100%;
     min-width: 0;
-    padding: var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-2);
+    margin: 0;
+    padding: var(--alloy-spacing-scale-1) var(--alloy-layout-row-pad-x);
+    border: 0;
     border-radius: var(--alloy-radii-md);
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
   }
   .row:hover {
     background: var(--alloy-color-surface-hover);
+  }
+  .row:focus-visible {
+    outline: 2px solid var(--alloy-color-accent-primary);
+    outline-offset: -2px;
   }
   .row.invited {
     opacity: 0.6;
@@ -233,7 +343,7 @@
     flex-direction: column;
     align-items: flex-start;
     gap: var(--alloy-spacing-scale-2);
-    margin: var(--alloy-spacing-scale-3) var(--alloy-spacing-scale-4);
+    margin: var(--alloy-layout-section-gap) var(--alloy-layout-gutter);
     color: var(--alloy-color-text-secondary);
     font-size: var(--alloy-typography-size-sm);
   }

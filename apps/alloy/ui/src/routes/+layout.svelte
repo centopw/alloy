@@ -1,11 +1,19 @@
 <script lang="ts">
   import "../lib/tokens.css";
+  import "../lib/layout.css";
+  import ProfileCardHost from '$lib/components/shell/ProfileCardHost.svelte';
   import { themeStore } from "$lib/theme/theme.svelte";
+  import ContextMenu from "$lib/components/common/ContextMenu.svelte";
+  import TooltipLayer from "$lib/components/common/TooltipLayer.svelte";
 
   let { children } = $props();
 </script>
 
 {@render children()}
+
+<ContextMenu />
+<TooltipLayer />
+<ProfileCardHost />
 
 <style>
   :global(html, body) {

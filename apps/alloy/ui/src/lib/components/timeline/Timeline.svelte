@@ -4,6 +4,7 @@
   import type { VListHandle } from 'virtua/svelte';
   import type { TimelineItemDto } from '$lib/generated';
   import { timelineStore } from '$lib/stores/timeline.svelte';
+  import { membersStore } from '$lib/stores/members.svelte';
   import Icon from '$lib/icons/Icon.svelte';
   import { ArrowDown } from '$lib/icons';
   import MessageRow from './MessageRow.svelte';
@@ -28,6 +29,16 @@
     const id = roomId;
     untrack(() => void timelineStore.open(id));
     return () => untrack(() => void timelineStore.close());
+  });
+
+  // Sender names come from the member list; load it once per room so rows show names, not IDs.
+  $effect(() => {
+    const id = roomId;
+    untrack(() => {
+      void membersStore.loadMembers(id).catch(() => {
+        // Rows fall back to the Matrix ID localpart until the list loads.
+      });
+    });
   });
 
   // Keep the viewport stable when older history is prepended; stick to bottom for new messages.
@@ -78,10 +89,12 @@
         style="height: 100%; width: 100%;"
       >
         {#snippet children(item: TimelineItemDto, index: number)}
-          <MessageRow
-            {item}
-            prev={index > 0 ? rows[index - 1] : null}
-          />
+          <div class="cell">
+            <MessageRow
+              {item}
+              prev={index > 0 ? rows[index - 1] : null}
+            />
+          </div>
         {/snippet}
       </VList>
     {/if}
@@ -111,15 +124,22 @@
     flex: 1;
     min-height: 0;
   }
+  /* Rows sit on the shared gutter: the row highlight is inset, so the cell pads by the difference. */
+  .cell {
+    padding: 0 calc(var(--alloy-layout-gutter) - var(--alloy-layout-row-inset));
+  }
+  .cell :global(.divider) {
+    margin: 0 calc(var(--alloy-layout-row-inset) * -1);
+  }
   .status {
     margin: 0;
-    padding: var(--alloy-spacing-scale-8);
+    padding: var(--alloy-spacing-scale-8) var(--alloy-layout-gutter);
     text-align: center;
     color: var(--alloy-color-text-secondary);
   }
   .latest {
     position: absolute;
-    right: var(--alloy-spacing-scale-4);
+    right: var(--alloy-layout-gutter);
     bottom: var(--alloy-spacing-scale-4);
     width: 40px;
     height: 40px;

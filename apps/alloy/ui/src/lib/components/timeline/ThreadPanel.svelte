@@ -50,6 +50,7 @@
     display: flex;
     flex-direction: column;
     min-width: 0;
+    width: 100%;
     min-height: 0;
     overflow: hidden;
     background: var(--alloy-color-surface-panel);
@@ -60,7 +61,9 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--alloy-spacing-scale-2);
-    padding: var(--alloy-spacing-scale-3) var(--alloy-spacing-scale-4);
+    height: var(--alloy-layout-header-height);
+    box-sizing: border-box;
+    padding: 0 var(--alloy-layout-gutter);
     border-bottom: 1px solid var(--alloy-color-border-subtle);
   }
   h2 {
@@ -95,7 +98,7 @@
   }
 
   .status {
-    margin: var(--alloy-spacing-scale-3) var(--alloy-spacing-scale-4);
+    margin: var(--alloy-spacing-scale-3) var(--alloy-layout-gutter);
     font-size: var(--alloy-typography-size-xs);
     color: var(--alloy-color-text-muted);
   }

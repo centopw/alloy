@@ -3,9 +3,7 @@
   import { session } from '$lib/stores/session.svelte';
 </script>
 
-<section class="section" aria-labelledby="account-title">
-  <h2 id="account-title" class="title">My Account</h2>
-
+<section class="section">
   {#if session.account}
     <div class="profile">
       <Avatar
@@ -43,16 +41,10 @@
   .section {
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-spacing-scale-4);
-  }
-  .title {
-    margin: 0;
-    font-size: var(--alloy-typography-size-xl);
-    font-weight: var(--alloy-typography-weight-semibold);
-    color: var(--alloy-color-text-primary);
+    gap: var(--alloy-layout-section-gap);
   }
   .subtitle {
-    margin: var(--alloy-spacing-scale-4) 0 0;
+    margin: 0;
     font-size: var(--alloy-typography-size-lg);
     font-weight: var(--alloy-typography-weight-semibold);
     color: var(--alloy-color-text-primary);
@@ -95,7 +87,7 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--alloy-spacing-scale-3);
-    padding: var(--alloy-spacing-scale-3) var(--alloy-spacing-scale-4);
+    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-gutter);
     font-size: var(--alloy-typography-size-base);
     color: var(--alloy-color-text-primary);
   }

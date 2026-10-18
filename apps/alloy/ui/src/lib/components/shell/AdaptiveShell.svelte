@@ -4,11 +4,13 @@
   import Sidebar from './Sidebar.svelte';
   import ChatHeader from './ChatHeader.svelte';
   import MembersPanel from './MembersPanel.svelte';
+  import RoomInfoPanel from './RoomInfoPanel.svelte';
   import CommandPalette from './CommandPalette.svelte';
   import Timeline from '../timeline/Timeline.svelte';
   import ThreadPanel from '../timeline/ThreadPanel.svelte';
   import Composer from '../composer/Composer.svelte';
   import UploadStrip from '../composer/UploadStrip.svelte';
+  import ResizeHandle from '../common/ResizeHandle.svelte';
   import NewRoomDialog from './NewRoomDialog.svelte';
   import DirectoryDialog from './DirectoryDialog.svelte';
   import SettingsDialog from '../settings/SettingsDialog.svelte';
@@ -16,6 +18,7 @@
   import Hud from '../dev/Hud.svelte';
   import { pushBack } from '$lib/platform/backstack';
   import { roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
+  import { layout, LAYOUT_LIMITS } from '$lib/stores/layout.svelte';
   import { ui } from '$lib/stores/ui.svelte';
   import { threadStore } from '$lib/stores/thread.svelte';
   import { verification } from '$lib/stores/verification.svelte';
@@ -29,7 +32,7 @@
   let innerWidth = $state(1280);
 
   // ADR 0002 breakpoints: wide >= 1100px, medium 900-1099px, narrow < 900px.
-  const layout = $derived<'wide' | 'medium' | 'narrow'>(
+  const breakpoint = $derived<'wide' | 'medium' | 'narrow'>(
     innerWidth >= 1100 ? 'wide' : innerWidth >= 900 ? 'medium' : 'narrow'
   );
 
@@ -39,23 +42,31 @@
   const activeId = $derived(roomsStore.active?.id ?? null);
 
   // An open thread takes the side column (wide) or the full overlay (below 1100) and hides the
-  // members panel while it is open.
+  // room info and members panels while it is open.
   const threadOpen = $derived(Boolean(threadStore.roomId && threadStore.rootEventId));
   const threadMode = $derived<'column' | 'overlay' | 'none'>(
-    !threadOpen ? 'none' : layout === 'wide' ? 'column' : 'overlay'
+    !threadOpen ? 'none' : breakpoint === 'wide' ? 'column' : 'overlay'
   );
 
-  // Wide: members sit in their own column. Medium: a rounded overlay over the chat.
-  // Narrow: the same overlay, shown only while a chat is open (the list pane has no chat).
-  const membersMode = $derived<'column' | 'overlay' | 'none'>(
-    !activeId || !ui.membersOpen || threadOpen
+  // Room info and members share one side slot; room info wins when both flags are set.
+  const infoPanel = $derived<'room-info' | 'members' | 'none'>(
+    !activeId || threadOpen ? 'none' : ui.roomInfoOpen ? 'room-info' : ui.membersOpen ? 'members' : 'none'
+  );
+
+  // Wide: a side column. Medium: a rounded overlay over the chat. Narrow: the same overlay, shown
+  // only while a chat is open (the list pane has no chat).
+  const infoMode = $derived<'column' | 'overlay' | 'none'>(
+    infoPanel === 'none'
       ? 'none'
-      : layout === 'wide'
+      : breakpoint === 'wide'
         ? 'column'
-        : layout === 'medium' || pane === 'chat'
+        : breakpoint === 'medium' || pane === 'chat'
           ? 'overlay'
           : 'none'
   );
+
+  // The thread and the info slot are mutually exclusive, so at most one of them is the side panel.
+  const sideLayout = $derived<'column' | 'overlay' | 'none'>(threadMode !== 'none' ? threadMode : infoMode);
 
   onMount(() => {
     verification.listen();
@@ -75,10 +86,24 @@
     });
   });
 
+  // Room info belongs to the room it was opened for, the same way a thread does.
+  $effect(() => {
+    void activeId;
+    untrack(() => {
+      if (ui.roomInfoOpen) ui.closeRoomInfo();
+    });
+  });
+
   // On phones an open thread takes a Back entry, so Back closes the thread before the chat.
   $effect(() => {
-    if (!threadOpen || layout !== 'narrow') return;
+    if (!threadOpen || breakpoint !== 'narrow') return;
     return pushBack(() => threadStore.close());
+  });
+
+  // On phones an open room info overlay takes a Back entry, so Back closes it before the chat.
+  $effect(() => {
+    if (breakpoint !== 'narrow' || infoPanel !== 'room-info' || infoMode !== 'overlay') return;
+    return pushBack(() => ui.closeRoomInfo());
   });
 
   // On phones the system Back button returns from a chat to the room list instead of leaving the app.
@@ -86,7 +111,7 @@
 
   function openChat() {
     pane = 'chat';
-    if (layout === 'narrow' && !releaseChatBack) {
+    if (breakpoint === 'narrow' && !releaseChatBack) {
       releaseChatBack = pushBack(() => {
         releaseChatBack = null;
         pane = 'list';
@@ -122,11 +147,31 @@
 
 <svelte:window onkeydown={onKeydown} bind:innerWidth />
 
-<div class="shell" data-layout={layout} data-pane={pane} data-members={membersMode} data-thread={threadMode}>
+<div
+  class="shell"
+  data-layout={breakpoint}
+  data-pane={pane}
+  data-side={sideLayout}
+  data-thread={threadMode}
+  style:--sidebar-width="{layout.sidebarWidth}px"
+  style:--details-width="{layout.detailsWidth}px"
+>
   <div class="nav">
     <SpaceRail onnew={() => (newRoomOpen = true)} />
     <Sidebar onselect={pick} onnew={() => (newRoomOpen = true)} onbrowse={() => (directoryOpen = true)} onsettings={() => (settingsOpen = true)} />
   </div>
+
+  {#if breakpoint !== 'narrow'}
+    <ResizeHandle
+      value={layout.sidebarWidth}
+      min={LAYOUT_LIMITS.sidebarWidth.min}
+      max={LAYOUT_LIMITS.sidebarWidth.max}
+      defaultValue={LAYOUT_LIMITS.sidebarWidth.default}
+      label="Resize sidebar"
+      edge="end"
+      onchange={(v) => layout.set('sidebarWidth', v)}
+    />
+  {/if}
 
   <main class="chat">
     {#if active && activeId}
@@ -142,12 +187,28 @@
     {/if}
   </main>
 
-  {#if membersMode !== 'none' && activeId}
-    <div class="members">
-      <MembersPanel
-        roomId={activeId}
-        onclose={membersMode === 'overlay' ? () => (ui.membersOpen = false) : undefined}
-      />
+  {#if sideLayout === 'column'}
+    <ResizeHandle
+      value={layout.detailsWidth}
+      min={LAYOUT_LIMITS.detailsWidth.min}
+      max={LAYOUT_LIMITS.detailsWidth.max}
+      defaultValue={LAYOUT_LIMITS.detailsWidth.default}
+      label="Resize side panel"
+      edge="start"
+      onchange={(v) => layout.set('detailsWidth', v)}
+    />
+  {/if}
+
+  {#if infoMode !== 'none' && activeId}
+    <div class="side">
+      {#if infoPanel === 'room-info'}
+        <RoomInfoPanel roomId={activeId} initialTab={ui.roomInfoTab} onclose={() => ui.closeRoomInfo()} />
+      {:else}
+        <MembersPanel
+          roomId={activeId}
+          onclose={infoMode === 'overlay' ? () => (ui.membersOpen = false) : undefined}
+        />
+      {/if}
     </div>
   {/if}
   {#if threadMode !== 'none'}
@@ -168,7 +229,7 @@
   .shell {
     position: relative;
     display: grid;
-    grid-template-columns: 312px minmax(0, 1fr);
+    grid-template-columns: var(--sidebar-width, 312px) 6px minmax(0, 1fr);
     height: 100dvh;
     overflow: hidden;
     /* Keep content clear of the status bar, gesture bar and display cutouts on phones. */
@@ -177,14 +238,15 @@
     background: var(--alloy-color-surface-canvas);
     color: var(--alloy-color-text-primary);
   }
-  .shell[data-members='column'] {
-    grid-template-columns: 312px minmax(0, 1fr) 240px;
+  .shell[data-side='column'] {
+    grid-template-columns: var(--sidebar-width, 312px) 6px minmax(0, 1fr) 6px var(--details-width, 340px);
   }
 
-  /* The rail (72px) and the sidebar (240px) are separate components; this wrapper lays them out. */
+  /* The rail (72px) and the sidebar are separate components; this wrapper lays them out. The
+     sidebar width covers both, so the rail sits inside the resizable left column. */
   .nav {
     display: grid;
-    grid-template-columns: 72px 240px;
+    grid-template-columns: 72px minmax(0, 1fr);
     min-width: 0;
     min-height: 0;
   }
@@ -197,7 +259,7 @@
     background: var(--alloy-color-surface-canvas);
   }
 
-  .members {
+  .side {
     display: flex;
     flex-direction: column;
     min-width: 0;
@@ -206,13 +268,13 @@
     background: var(--alloy-color-surface-panel);
     border-left: 1px solid var(--alloy-color-border-subtle);
   }
-  .shell[data-members='overlay'] .members {
+  .shell[data-side='overlay'] .side {
     position: absolute;
     top: var(--alloy-spacing-scale-2);
     right: var(--alloy-spacing-scale-2);
     bottom: var(--alloy-spacing-scale-2);
     z-index: 10;
-    width: 240px;
+    width: min(var(--details-width, 340px), calc(100% - 2 * var(--alloy-spacing-scale-2)));
     border: 1px solid var(--alloy-color-border-subtle);
     border-radius: var(--alloy-radii-lg);
   }
@@ -223,9 +285,6 @@
     min-width: 0;
     min-height: 0;
     overflow: hidden;
-  }
-  .shell[data-thread='column'] {
-    grid-template-columns: 312px minmax(0, 1fr) 360px;
   }
   .shell[data-thread='column'] .thread-host {
     border-left: 1px solid var(--alloy-color-border-subtle);
@@ -262,7 +321,7 @@
   .shell[data-layout='narrow'][data-pane='chat'] .nav {
     display: none;
   }
-  .shell[data-layout='narrow'][data-members='overlay'] .members {
+  .shell[data-layout='narrow'][data-side='overlay'] .side {
     left: var(--alloy-spacing-scale-2);
     width: auto;
   }

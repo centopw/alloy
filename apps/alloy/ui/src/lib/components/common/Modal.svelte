@@ -103,7 +103,8 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: var(--alloy-spacing-scale-3) var(--alloy-spacing-scale-4);
+    height: var(--alloy-layout-header-height);
+    padding: 0 var(--alloy-layout-gutter);
     border-bottom: 1px solid var(--alloy-color-border-subtle);
   }
   h2 {
@@ -125,7 +126,7 @@
     background: var(--alloy-color-surface-hover);
   }
   .content {
-    padding: var(--alloy-spacing-scale-4);
+    padding: var(--alloy-layout-gutter);
     overflow-y: auto;
   }
 </style>

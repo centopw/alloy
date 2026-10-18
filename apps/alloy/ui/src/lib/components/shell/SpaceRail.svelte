@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Avatar } from '../common';
   import Icon from '$lib/icons/Icon.svelte';
-  import { Plus } from '$lib/icons';
+  import { House, Plus } from '$lib/icons';
   import { roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
   import { ui } from '$lib/stores/ui.svelte';
 
@@ -26,7 +26,7 @@
         aria-current={homeActive ? 'true' : undefined}
         onclick={() => (ui.scope = 'home')}
       >
-        <span class="brand" aria-hidden="true">A</span>
+        <Icon icon={House} size={20} />
       </button>
     </li>
     {#each spaces as space (space.id)}
@@ -47,7 +47,13 @@
       </li>
     {/each}
   </ul>
-  <button type="button" class="create" aria-label="Create room" title="Create room" onclick={() => onnew?.()}>
+  <button
+    type="button"
+    class="create"
+    aria-label="Create or join"
+    title="Create or join"
+    onclick={() => onnew?.()}
+  >
     <Icon icon={Plus} size={20} />
   </button>
 </nav>
@@ -57,7 +63,7 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: var(--alloy-spacing-scale-3);
+    gap: var(--alloy-spacing-scale-2);
     flex: 1;
     min-height: 0;
     padding: var(--alloy-spacing-scale-3) 0;
@@ -99,6 +105,7 @@
   .create {
     display: grid;
     place-items: center;
+    flex: none;
     width: 48px;
     height: 48px;
     padding: 0;
@@ -108,18 +115,11 @@
     color: inherit;
     cursor: pointer;
   }
-  .brand {
-    width: 100%;
-    height: 100%;
-    display: grid;
-    place-items: center;
-    border-radius: var(--alloy-radii-full);
+  .home {
     background: var(--alloy-color-accent-primary);
     color: var(--alloy-color-text-on-accent);
-    font-size: var(--alloy-typography-size-lg);
-    font-weight: var(--alloy-typography-weight-bold);
   }
-  .home[aria-current='true'] .brand {
+  .home[aria-current='true'] {
     border-radius: var(--alloy-radii-lg);
   }
   .create {

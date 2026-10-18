@@ -1,0 +1,17 @@
+/*
+ * Layout rhythm shared by every panel and page. Hand-written (not a theme token): themes change
+ * colours and radii, not the grid. Use these instead of picking spacing per component.
+ *
+ *   gutter      - horizontal padding of every panel, header, list and page (16px)
+ *   header      - height of every panel header (chat header, sidebar header, panel titles)
+ *   row-inset   - inset between a list row's highlight and its panel edge (8px)
+ *   row-pad-x   - padding inside a list row's highlight (12px)
+ *   section-gap - vertical gap between sections inside a panel (16px)
+ */
+:root {
+  --alloy-layout-gutter: var(--alloy-spacing-scale-4);
+  --alloy-layout-header-height: 48px;
+  --alloy-layout-row-inset: var(--alloy-spacing-scale-2);
+  --alloy-layout-row-pad-x: var(--alloy-spacing-scale-3);
+  --alloy-layout-section-gap: var(--alloy-spacing-scale-4);
+}

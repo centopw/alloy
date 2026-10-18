@@ -41,6 +41,8 @@
   ];
 
   let section = $state<Section>('account');
+  // Shared header band: the content column title matches the nav title for the selected section.
+  const sectionLabel = $derived(GROUPS.flatMap((group) => group.items).find((item) => item.id === section)?.label ?? '');
   // Phones show either the section list or one section; wide layouts show both side by side.
   let mobileView = $state<'nav' | 'content'>('nav');
 
@@ -159,13 +161,16 @@
         </div>
       </nav>
 
-      <div class="content">
-        <button type="button" class="back" aria-label="Back to settings" onclick={() => (mobileView = 'nav')}>
-          <Icon icon={ChevronLeft} size={20} />
-        </button>
-        <button type="button" class="close" aria-label="Close settings" onclick={onclose}>
-          <Icon icon={X} size={20} />
-        </button>
+      <div class="content" role="region" aria-labelledby="settings-section-title">
+        <header class="header">
+          <button type="button" class="back" aria-label="Back to settings" onclick={() => (mobileView = 'nav')}>
+            <Icon icon={ChevronLeft} size={20} />
+          </button>
+          <h2 id="settings-section-title" class="header-title">{sectionLabel}</h2>
+          <button type="button" class="close" aria-label="Close settings" onclick={onclose}>
+            <Icon icon={X} size={20} />
+          </button>
+        </header>
 
         <div class="scroll">
           <div class="column">
@@ -214,13 +219,16 @@
     gap: var(--alloy-spacing-scale-4);
     width: 240px;
     flex-shrink: 0;
-    padding: var(--alloy-spacing-scale-2);
+    padding: 0 var(--alloy-layout-row-inset) var(--alloy-layout-row-inset);
     overflow-y: auto;
     background: var(--alloy-color-surface-panel);
   }
   .nav-title {
     margin: 0;
-    padding: var(--alloy-spacing-scale-2);
+    display: flex;
+    align-items: center;
+    min-height: var(--alloy-layout-header-height);
+    padding: 0 calc(var(--alloy-layout-row-inset) + var(--alloy-layout-row-pad-x));
     font-size: var(--alloy-typography-size-lg);
     font-weight: var(--alloy-typography-weight-semibold);
     color: var(--alloy-color-text-primary);
@@ -232,7 +240,7 @@
   }
   .group-label {
     margin: 0;
-    padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-1);
+    padding: var(--alloy-spacing-scale-2) calc(var(--alloy-layout-row-inset) + var(--alloy-layout-row-pad-x)) var(--alloy-spacing-scale-1);
     font-size: var(--alloy-typography-size-xs);
     font-weight: var(--alloy-typography-weight-semibold);
     letter-spacing: 0.04em;
@@ -243,7 +251,7 @@
     display: block;
     width: 100%;
     margin: 0;
-    padding: var(--alloy-spacing-scale-2);
+    padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x);
     border: 0;
     border-radius: var(--alloy-radii-md);
     background: transparent;
@@ -276,18 +284,32 @@
     border-top: 1px solid var(--alloy-color-border-subtle);
   }
   .content {
-    position: relative;
     display: flex;
     flex: 1;
     min-width: 0;
     flex-direction: column;
     background: var(--alloy-color-surface-canvas);
   }
+  .header {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: var(--alloy-spacing-scale-2);
+    min-height: var(--alloy-layout-header-height);
+    padding: 0 calc(var(--alloy-layout-row-inset) + var(--alloy-layout-row-pad-x));
+  }
+  .header-title {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    overflow: hidden;
+    font-size: var(--alloy-typography-size-lg);
+    font-weight: var(--alloy-typography-weight-semibold);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: var(--alloy-color-text-primary);
+  }
   .close {
-    position: absolute;
-    top: var(--alloy-spacing-scale-3);
-    right: var(--alloy-spacing-scale-3);
-    z-index: 1;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -328,10 +350,6 @@
       display: none;
     }
     .back {
-      position: absolute;
-      top: var(--alloy-spacing-scale-3);
-      left: var(--alloy-spacing-scale-3);
-      z-index: 1;
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -345,12 +363,12 @@
       cursor: pointer;
     }
     .column {
-      padding: calc(var(--alloy-spacing-scale-8) * 2.5) var(--alloy-spacing-scale-4) var(--alloy-spacing-scale-6);
+      padding: var(--alloy-spacing-scale-6) var(--alloy-layout-gutter) var(--alloy-spacing-scale-6);
     }
   }
   .column {
     max-width: 640px;
     margin: 0 auto;
-    padding: var(--alloy-spacing-scale-8) var(--alloy-spacing-scale-6);
+    padding: var(--alloy-spacing-scale-6) var(--alloy-layout-gutter);
   }
 </style>

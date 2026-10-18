@@ -18,9 +18,7 @@
   );
 </script>
 
-<section class="section" aria-labelledby="about-title">
-  <h2 id="about-title" class="title">About</h2>
-
+<section class="section">
   <div class="card">
     <div class="row">
       <span class="label">Application</span>
@@ -66,13 +64,7 @@
   .section {
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-spacing-scale-4);
-  }
-  .title {
-    margin: 0;
-    font-size: var(--alloy-typography-size-xl);
-    font-weight: var(--alloy-typography-weight-semibold);
-    color: var(--alloy-color-text-primary);
+    gap: var(--alloy-layout-section-gap);
   }
   .card {
     background: var(--alloy-color-surface-subtle);
@@ -84,7 +76,7 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--alloy-spacing-scale-3);
-    padding: var(--alloy-spacing-scale-3) var(--alloy-spacing-scale-4);
+    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-gutter);
     font-size: var(--alloy-typography-size-base);
     color: var(--alloy-color-text-primary);
   }

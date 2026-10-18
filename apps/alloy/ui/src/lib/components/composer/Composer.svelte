@@ -226,7 +226,8 @@
       <button
         type="button"
         class="round"
-        aria-label="Cancel"
+        aria-label={editing ? 'Cancel edit' : 'Cancel reply'}
+        data-shortcut="Esc"
         onclick={() => {
           const wasEditing = !!editing;
           timelineStore.cancelCompose();
@@ -257,6 +258,7 @@
       rows="1"
       {placeholder}
       aria-label="Message"
+      data-shortcut="Enter"
       role="combobox"
       aria-autocomplete="list"
       aria-expanded={pickerOpen}
@@ -303,7 +305,7 @@
 
 <style>
   .composer {
-    padding: var(--alloy-spacing-scale-3) var(--alloy-spacing-scale-4) var(--alloy-spacing-scale-4);
+    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-gutter) var(--alloy-layout-gutter);
     background: var(--alloy-color-surface-canvas);
   }
   .banner {

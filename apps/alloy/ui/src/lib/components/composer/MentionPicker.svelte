@@ -75,7 +75,7 @@
     display: flex;
     align-items: center;
     gap: var(--alloy-spacing-scale-2);
-    padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
+    padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x);
     border-radius: var(--alloy-radii-md);
     cursor: pointer;
     font-size: var(--alloy-typography-size-sm);

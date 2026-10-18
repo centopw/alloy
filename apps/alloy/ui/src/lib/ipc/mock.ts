@@ -7,6 +7,11 @@ import type {
   Account,
   SasEmoji,
   VectorDiffDto,
+  RoomMediaItem,
+  RoomMediaKind,
+  RoomMemberDto,
+  RoomMembership,
+  UserProfileDto,
 } from '../generated/index.js';
 import type { Transport, EventHandler, Unsubscribe } from './transport.js';
 
@@ -17,6 +22,71 @@ const MOCK_ACCOUNT: Account = {
   avatar_url: null,
   homeserver_url: 'https://matrix.alloy.chat',
 };
+
+const MOCK_MEMBERS: RoomMemberDto[] = [
+  { user_id: '@alice:alloy.chat', display_name: 'Alice', avatar_url: null, power_level: 100, membership: 'Joined' },
+  { user_id: '@bob:alloy.chat', display_name: 'Bob', avatar_url: null, power_level: 50, membership: 'Joined' },
+  { user_id: '@carol:alloy.chat', display_name: null, avatar_url: null, power_level: 0, membership: 'Invited' },
+];
+
+const PROFILE_MEMBERSHIP: Record<RoomMembership, string> = {
+  Joined: 'join',
+  Invited: 'invite',
+  Left: 'leave',
+  Banned: 'ban',
+};
+
+const MOCK_MEDIA_COUNT = 14;
+const MOCK_MEDIA_NEWEST_MILLIS = 1_767_225_600_000;
+
+/** Deterministic shared items of one kind, newest first. */
+function mockMediaItems(kind: RoomMediaKind): RoomMediaItem[] {
+  return Array.from({ length: MOCK_MEDIA_COUNT }, (_, i) => {
+    const fromAlice = i % 2 === 0;
+    const base = {
+      event_id: `$mock_${kind.toLowerCase()}_${i}`,
+      sender: fromAlice ? '@alice:alloy.chat' : '@bob:alloy.chat',
+      sender_display_name: fromAlice ? 'Alice' : 'Bob',
+      timestamp_millis: MOCK_MEDIA_NEWEST_MILLIS - i * 3_600_000,
+      uri: null,
+      thumbnail_uri: null,
+      mime_type: null,
+      size_bytes: null,
+      width: null,
+      height: null,
+    };
+    if (kind === 'Links') {
+      return {
+        ...base,
+        kind: 'link',
+        body: `Shared link ${i}`,
+        urls: [`https://example.org/article-${i}`],
+      };
+    }
+    if (kind === 'Files') {
+      const audio = i % 2 === 1;
+      return {
+        ...base,
+        kind: audio ? 'audio' : 'file',
+        body: audio ? `voice-${i}.ogg` : `report-${i}.pdf`,
+        uri: `mxc://alloy.chat/file-${i}`,
+        mime_type: audio ? 'audio/ogg' : 'application/pdf',
+        size_bytes: 20_480 + i * 1_024,
+      };
+    }
+    const video = i % 2 === 1;
+    return {
+      ...base,
+      kind: video ? 'video' : 'image',
+      body: video ? `clip-${i}.mp4` : `photo-${i}.jpg`,
+      uri: `mxc://alloy.chat/media-${i}`,
+      mime_type: video ? 'video/mp4' : 'image/jpeg',
+      size_bytes: 300_000 + i * 5_000,
+      width: 1280,
+      height: 720,
+    };
+  });
+}
 
 const MOCK_ROOMS: RoomSummary[] = [
   {
@@ -115,6 +185,23 @@ export class MockTransport implements Transport {
   private timelineSubscriptions = new Map<string, string>(); // sub_id -> room_id
   private subCounter = 0;
   private polls = new Map<string, MockPoll>();
+  private topics = new Map<string, string>();
+  private notes = new Map<string, string>();
+  private dmRooms = new Map<string, string>([['@bob:alloy.chat', '!bob:alloy.chat']]);
+
+  /** Applies a patch to a known room and pushes a Set diff to every room-list subscriber. */
+  private patchRoom(roomId: string, patch: Partial<RoomSummary>): void {
+    const index = this.rooms.findIndex((r) => r.id === roomId);
+    if (index === -1) return;
+    const value = { ...this.rooms[index], ...patch };
+    this.rooms[index] = value;
+    for (const subId of this.roomSubscriptions) {
+      this.emit({
+        type: 'RoomListDiff',
+        payload: { subscription_id: subId, diff: { type: 'Set', content: { index, value } } },
+      });
+    }
+  }
 
   /** Builds the poll content as the engine maps it: counts stay hidden until the poll ends when undisclosed. */
   private pollItemContent(eventId: string): TimelineItemDto['content'] {
@@ -806,6 +893,43 @@ export class MockTransport implements Transport {
           payload: { room_id: command.params.room_id },
         };
 
+      case 'MarkRoomRead':
+        this.patchRoom(command.params.room_id, {
+          unread_notifications: { highlight_count: 0, notification_count: 0 },
+        });
+        return { type: 'Unit' };
+
+      case 'SetRoomName':
+        this.patchRoom(command.params.room_id, { name: command.params.name });
+        return { type: 'Unit' };
+
+      case 'SetRoomTopic':
+        this.topics.set(command.params.room_id, command.params.topic);
+        return { type: 'Unit' };
+
+      case 'SetRoomAvatar':
+        this.patchRoom(command.params.room_id, {
+          avatar_url: command.params.file_path ? 'mxc://alloy.chat/mock-avatar' : null,
+        });
+        return { type: 'Unit' };
+
+      case 'GetRoomNote':
+        return {
+          type: 'RoomNote',
+          payload: {
+            room_id: command.params.room_id,
+            note: this.notes.get(command.params.room_id) ?? '',
+          },
+        };
+
+      case 'SetRoomNote':
+        if (command.params.note === '') {
+          this.notes.delete(command.params.room_id);
+        } else {
+          this.notes.set(command.params.room_id, command.params.note);
+        }
+        return { type: 'Unit' };
+
       case 'SetTyping':
         return {
           type: 'TypingStatusSet',
@@ -817,31 +941,103 @@ export class MockTransport implements Transport {
           type: 'RoomMembers',
           payload: {
             room_id: command.params.room_id,
-            members: [
-              { user_id: '@alice:alloy.chat', display_name: 'Alice', avatar_url: null, power_level: 100, membership: 'Joined' },
-              { user_id: '@bob:alloy.chat', display_name: 'Bob', avatar_url: null, power_level: 50, membership: 'Joined' },
-              { user_id: '@carol:alloy.chat', display_name: null, avatar_url: null, power_level: 0, membership: 'Invited' },
-            ],
+            members: [...MOCK_MEMBERS],
           },
         };
 
-      case 'GetRoomDetails':
+      case 'GetRoomDetails': {
+        const roomId = command.params.room_id;
+        const room = this.rooms.find((r) => r.id === roomId);
         return {
           type: 'RoomDetailsRetrieved',
           payload: {
             details: {
-              room_id: command.params.room_id,
-              name: 'General',
-              topic: 'Welcome to Alloy',
+              room_id: roomId,
+              name: room?.name ?? 'General',
+              topic: this.topics.get(roomId) ?? 'Welcome to Alloy',
               canonical_alias: '#general:alloy.chat',
-              avatar_url: null,
-              is_direct: false,
-              encrypted: false,
+              avatar_url: room?.avatar_url ?? null,
+              is_direct: room?.is_direct ?? false,
+              encrypted: room?.encrypted ?? false,
               joined_members: 2,
               invited_members: 1,
+              can_set_name: true,
+              can_set_topic: true,
+              can_set_avatar: true,
             },
           },
         };
+      }
+
+      case 'GetUserProfile': {
+        const userId = command.params.user_id;
+        const roomId = command.params.room_id;
+        const member = roomId ? MOCK_MEMBERS.find((m) => m.user_id === userId) : undefined;
+        const profile: UserProfileDto = {
+          user_id: userId,
+          display_name: member?.display_name ?? userId.slice(1).split(':')[0] ?? userId,
+          avatar_url: member?.avatar_url ?? null,
+          membership: member ? PROFILE_MEMBERSHIP[member.membership] : null,
+          power_level: member ? member.power_level : null,
+          dm_room_id: this.dmRooms.get(userId) ?? null,
+          is_me: userId === MOCK_ACCOUNT.user_id,
+        };
+        return { type: 'UserProfile', payload: { profile } };
+      }
+
+      case 'StartDirectMessage': {
+        const userId = command.params.user_id;
+        const existing = this.dmRooms.get(userId);
+        if (existing) {
+          return { type: 'DirectMessageRoom', payload: { room_id: existing, created: false } };
+        }
+
+        const roomId = `!dm_${userId.slice(1).split(':')[0]}:alloy.chat`;
+        const newRoom: RoomSummary = {
+          id: roomId,
+          name: userId,
+          avatar_url: null,
+          unread_notifications: { highlight_count: 0, notification_count: 0 },
+          latest_event: null,
+          is_direct: true,
+          is_space: false,
+          encrypted: false,
+          membership: 'Joined',
+          favourite: null,
+          low_priority: null,
+        };
+
+        this.rooms.push(newRoom);
+        this.timelineByRoom.set(roomId, []);
+        this.dmRooms.set(userId, roomId);
+
+        for (const subId of this.roomSubscriptions) {
+          this.emit({
+            type: 'RoomListDiff',
+            payload: {
+              subscription_id: subId,
+              diff: { type: 'PushBack', content: { value: newRoom } },
+            },
+          });
+        }
+
+        return { type: 'DirectMessageRoom', payload: { room_id: roomId, created: true } };
+      }
+
+      case 'GetRoomMedia': {
+        const roomId = command.params.room_id;
+        const offset = Number.parseInt(command.params.from ?? '0', 10) || 0;
+        const all = mockMediaItems(command.params.kind);
+        const end = offset + command.params.limit;
+        return {
+          type: 'RoomMedia',
+          payload: {
+            room_id: roomId,
+            items: all.slice(offset, end),
+            next_batch: end < all.length ? String(end) : null,
+          },
+        };
+      }
 
       case 'GetMedia':
         return {

@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Room info panel (click the room title): name, topic and picture editing when permitted, a private per-room note, and Media, Files, Links and Members tabs (#28).
+- Profile card for any user: from names, avatars, members and `matrix.to` mention links, with Message and Copy ID.
+- Right-click menus on rooms (open, mark read, details, rename, picture, note, copy link/ID, leave), messages and members; long-press and the Menu key also open them.
+- Resizable sidebar and side panels (drag, arrow keys, double-click to reset); widths are remembered.
+- Tooltips for every labelled control, shown on hover and keyboard focus, enforced by a static audit test.
+- Engine commands: `SetRoomName/Topic/Avatar`, `GetRoomNote/SetRoomNote`, `MarkRoomRead`, `GetUserProfile`, `StartDirectMessage`, `GetRoomMedia`.
+
+### Fixed
+- Senders no longer show as raw Matrix IDs: room members are fetched for every timeline and names fall back to the ID's local part.
+- One layout rhythm (16px gutters, 48px headers) across chat, sidebar, panels, composer and settings; settings title rows line up.
+- Public room directory rows keep the Join button aligned when a room name is long; the rail's Home entry is an icon; the search hint shows Cmd K on macOS.
+
 ## 0.1.2 (pre-release)
 
 ### Fixed

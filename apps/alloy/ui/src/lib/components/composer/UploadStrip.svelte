@@ -37,7 +37,7 @@
 <style>
   .uploads {
     list-style: none;
-    margin: 0 var(--alloy-spacing-scale-4) var(--alloy-spacing-scale-2);
+    margin: 0 var(--alloy-layout-gutter) var(--alloy-spacing-scale-2);
     padding: 0;
     display: flex;
     flex-direction: column;
@@ -47,7 +47,7 @@
     display: flex;
     align-items: center;
     gap: var(--alloy-spacing-scale-3);
-    padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
+    padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x);
     border-radius: var(--alloy-radii-lg);
     background: var(--alloy-color-surface-subtle);
     font-size: var(--alloy-typography-size-sm);

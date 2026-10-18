@@ -44,7 +44,7 @@
     flex-direction: column;
     gap: var(--alloy-spacing-scale-2);
     flex-shrink: 0;
-    margin: 0 var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-2);
+    margin: 0 var(--alloy-layout-row-inset) var(--alloy-layout-row-inset);
     padding: var(--alloy-spacing-scale-3);
     border-radius: var(--alloy-radii-lg);
     background: var(--alloy-color-surface-elevated);
