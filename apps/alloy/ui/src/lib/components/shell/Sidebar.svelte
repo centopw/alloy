@@ -16,6 +16,8 @@
   import { roomNotify } from '$lib/stores/roomNotify.svelte';
   import type { NotificationLevel } from '$lib/generated';
   import { ui } from '$lib/stores/ui.svelte';
+  import { viewport } from '$lib/stores/viewport.svelte';
+  import { formatListTime } from '$lib/content/format';
   import RenameRoomDialog from './RenameRoomDialog.svelte';
   import UpdateBanner from './UpdateBanner.svelte';
   import UserPanel from './UserPanel.svelte';
@@ -185,7 +187,7 @@
     onclick={() => openRoom(r.id)}
   >
     <span class="fixed">
-      <Avatar userId={r.id} displayName={roomTitle(r)} src={r.avatar_url} size="sm" shape={r.is_direct ? 'circle' : 'rounded'} />
+      <Avatar userId={r.id} displayName={roomTitle(r)} src={r.avatar_url} size={viewport.isPhone ? 48 : 'sm'} shape={r.is_direct ? 'circle' : 'rounded'} />
     </span>
     <span class="text">
       <span class="title">{roomTitle(r)}</span>
@@ -193,26 +195,33 @@
         <span class="preview">{r.latest_event.body}</span>
       {/if}
     </span>
-    {#if r.encrypted}
-      <span class="fixed"><Icon icon={Lock} size={16} label="Encrypted" /></span>
-    {/if}
-    {#if muted}
-      <span class="fixed"><Icon icon={BellOff} size={16} label="Notifications muted" /></span>
-    {/if}
-    {#if unread > 0}
-      {#if muted}
-        <span class="fixed"><span class="dot" aria-hidden="true"></span></span>
-      {:else}
-        <span class="fixed"><Badge count={unread} /></span>
+    <span class="end">
+      {#if viewport.isPhone && r.latest_event}
+        <time class="time" datetime={new Date(r.latest_event.timestamp_millis).toISOString()}>{formatListTime(r.latest_event.timestamp_millis)}</time>
       {/if}
-    {/if}
+      <span class="marks">
+        {#if r.encrypted}
+          <span class="fixed"><Icon icon={Lock} size={16} label="Encrypted" /></span>
+        {/if}
+        {#if muted}
+          <span class="fixed"><Icon icon={BellOff} size={16} label="Notifications muted" /></span>
+        {/if}
+        {#if unread > 0}
+          {#if muted}
+            <span class="fixed"><span class="dot" aria-hidden="true"></span></span>
+          {:else}
+            <span class="fixed"><Badge count={unread} /></span>
+          {/if}
+        {/if}
+      </span>
+    </span>
   </button>
 {/snippet}
 
 {#snippet inviteRow(r: RoomItem)}
   <div class="row invite" use:contextmenu={() => inviteItems(r)}>
     <span class="fixed">
-      <Avatar userId={r.id} displayName={roomTitle(r)} src={r.avatar_url} size="sm" shape={r.is_direct ? 'circle' : 'rounded'} />
+      <Avatar userId={r.id} displayName={roomTitle(r)} src={r.avatar_url} size={viewport.isPhone ? 48 : 'sm'} shape={r.is_direct ? 'circle' : 'rounded'} />
     </span>
     <div class="text">
       <span class="title">{roomTitle(r)}</span>
@@ -227,10 +236,12 @@
 
 <section class="sidebar" aria-label="Rooms">
   <header class="head">
-    <h2 class="scope" title={scopeTitle}>{scopeTitle}</h2>
-    <button type="button" class="icon" aria-label="Browse public rooms" onclick={() => onbrowse?.()}>
-      <Icon icon={Compass} size={20} />
-    </button>
+    <h2 class="scope" title={scopeTitle}>{viewport.isPhone ? 'Chats' : scopeTitle}</h2>
+    {#if !viewport.isPhone}
+      <button type="button" class="icon" aria-label="Browse public rooms" onclick={() => onbrowse?.()}>
+        <Icon icon={Compass} size={20} />
+      </button>
+    {/if}
     <button type="button" class="icon" aria-label="New room" onclick={() => onnew?.()}>
       <Icon icon={Plus} size={20} />
     </button>
@@ -523,5 +534,97 @@
   button:focus-visible {
     outline: 2px solid var(--alloy-color-accent-primary);
     outline-offset: 2px;
+  }
+  /* Trailing cluster (time, unread, marks) flattens into the row on desktop, so desktop layout is unchanged. */
+  .end,
+  .marks {
+    display: contents;
+  }
+  @media (max-width: 899px) {
+    .head {
+      height: 56px;
+      border-bottom: 0;
+    }
+    .scope {
+      font-size: var(--alloy-typography-size-xl);
+    }
+    .icon {
+      width: 44px;
+      height: 44px;
+    }
+    .search {
+      min-height: 44px;
+      box-sizing: border-box;
+      margin: var(--alloy-spacing-scale-2) var(--alloy-layout-gutter);
+      padding: 0 var(--alloy-layout-row-pad-x);
+    }
+    .search input {
+      min-height: 44px;
+      font-size: var(--alloy-typography-size-lg);
+    }
+    .groups {
+      padding: 0 calc(var(--alloy-layout-gutter) - var(--alloy-layout-row-pad-x)) var(--alloy-spacing-scale-2);
+      overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
+    }
+    .group h3 {
+      display: flex;
+      align-items: center;
+      box-sizing: border-box;
+      height: 40px;
+      padding: 0 var(--alloy-layout-row-pad-x);
+    }
+    button.row {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: var(--alloy-spacing-scale-3);
+      min-height: 64px;
+      box-sizing: border-box;
+      padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x);
+    }
+    button.row:active {
+      background: var(--alloy-color-surface-hover);
+    }
+    .end {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      justify-content: space-between;
+      align-self: stretch;
+      gap: var(--alloy-spacing-scale-1);
+    }
+    .marks {
+      display: flex;
+      align-items: center;
+      gap: var(--alloy-spacing-scale-1);
+      min-height: 20px;
+    }
+    .marks :global(.alloy-badge) {
+      min-width: 20px !important;
+      height: 20px !important;
+    }
+    .time {
+      font-size: var(--alloy-typography-size-xs);
+      color: var(--alloy-color-text-muted);
+      white-space: nowrap;
+    }
+    .row.unread .time {
+      color: var(--alloy-color-accent-primary);
+    }
+    .preview {
+      font-size: var(--alloy-typography-size-sm);
+      color: var(--alloy-color-text-secondary);
+    }
+    .invite-actions {
+      margin-top: var(--alloy-spacing-scale-2);
+    }
+    .invite-actions button {
+      flex: 1;
+      min-height: 44px;
+      padding: 0 var(--alloy-layout-row-pad-x);
+      border-radius: var(--alloy-radii-md);
+      font-size: var(--alloy-typography-size-base);
+    }
   }
 </style>

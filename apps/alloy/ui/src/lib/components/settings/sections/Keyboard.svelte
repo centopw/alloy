@@ -174,4 +174,39 @@
     text-align: center;
     color: var(--alloy-color-text-primary);
   }
+
+  /* Phone: each shortcut is a stacked 56px row (action above keys) instead of a three-column table. */
+  @media (max-width: 899px) {
+    .shortcuts,
+    .shortcuts tbody {
+      display: block;
+    }
+    .shortcuts tr {
+      display: flex;
+      flex-direction: column;
+      gap: var(--alloy-spacing-scale-1);
+      box-sizing: border-box;
+      min-height: 56px;
+      padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x);
+    }
+    .shortcuts tr + tr {
+      border-top: 1px solid var(--alloy-color-border-subtle);
+    }
+    .shortcuts tr + tr th,
+    .shortcuts tr + tr td {
+      border-top: none;
+    }
+    .action,
+    .keys {
+      display: block;
+      width: auto;
+      padding: 0;
+    }
+    .action {
+      font-size: var(--alloy-typography-size-lg);
+    }
+    .keys {
+      font-size: var(--alloy-typography-size-sm);
+    }
+  }
 </style>

@@ -5,8 +5,10 @@
   import { client } from '$lib/ipc';
   import { prefs } from '$lib/stores/prefs.svelte';
   import Icon from '$lib/icons/Icon.svelte';
-  import { ChartBar, Plus, Smile, X } from '$lib/icons';
+  import { ChartBar, Paperclip, Plus, Send, Smile, X } from '$lib/icons';
   import { canPickFiles, pickFile } from '$lib/platform/files';
+  import { viewport } from '$lib/stores/viewport.svelte';
+  import { contextMenu } from '$lib/stores/contextmenu.svelte';
   import { EMOJI_PICKER } from '$lib/content/emoji';
   import { tick, untrack } from 'svelte';
   import type { RoomMemberDto } from '$lib/generated/index.js';
@@ -53,10 +55,15 @@
     return active && active.id === roomId ? roomTitle(active) : null;
   });
   // Textarea placeholders wrap instead of truncating, so long room names are cut here.
-  // With Enter as a newline, the placeholder states the send shortcut.
+  // Desktop with Enter as newline states the send shortcut; phones have a Send button and need no hint.
+  const hintSend = $derived(!viewport.isPhone && !prefs.enterToSend);
+  // Phones: the placeholder must stay on one line, so only the room name fits when the whole string is short.
+  // The full name stays in aria-label.
+  const phoneName = $derived(roomName ? `Message ${roomName}` : 'Message');
   const placeholder = $derived.by(() => {
+    if (viewport.isPhone) return phoneName.length < 18 ? phoneName : 'Message';
     const base = roomName ? `Message ${roomName.length > 28 ? `${roomName.slice(0, 27)}…` : roomName}` : 'Message';
-    return prefs.enterToSend ? base : `${base}. Ctrl+Enter or Cmd+Enter to send`;
+    return hintSend ? `${base}. Ctrl+Enter or Cmd+Enter to send` : base;
   });
   const mentionKey = (m: ActiveMention) => `${m.start}:${m.query}`;
   const candidates = $derived(
@@ -201,8 +208,14 @@
         return;
       }
     }
-    // Enter sends by default. With enterToSend off, Enter inserts a newline and Ctrl/Cmd+Enter sends.
-    if (e.key === 'Enter' && !e.isComposing && (prefs.enterToSend ? !e.shiftKey : e.ctrlKey || e.metaKey)) {
+    // Enter sends on desktop by default. Phones always insert a newline and send with the Send button.
+    // Elsewhere with enterToSend off, Enter inserts a newline and Ctrl/Cmd+Enter sends.
+    const sendKey = viewport.isPhone
+      ? e.ctrlKey || e.metaKey
+      : prefs.enterToSend
+        ? !e.shiftKey
+        : e.ctrlKey || e.metaKey;
+    if (e.key === 'Enter' && !e.isComposing && sendKey) {
       e.preventDefault();
       void submit();
     } else if (e.key === 'Escape') {
@@ -217,6 +230,14 @@
   async function attach() {
     const path = await pickFile();
     if (path) await timelineStore.sendFile(path);
+  }
+
+  // Phones keep File and Poll behind the + button so the composer row stays uncluttered.
+  function openAttachMenu(e: MouseEvent) {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const file = { id: 'file', label: 'File', icon: Paperclip, onselect: () => void attach() };
+    const poll = { id: 'poll', label: 'Poll', icon: ChartBar, onselect: () => (pollOpen = true) };
+    contextMenu.open(canPickFiles() ? [file, poll] : [poll], { x: r.left, y: r.top });
   }
 
   function addEmoji(e: string) {
@@ -258,15 +279,29 @@
   {/if}
 
   <div class="field">
-    {#if canPickFiles() && !threadRoot}
+    {#if canPickFiles() && !threadRoot && !viewport.isPhone}
       <button type="button" class="round" aria-label="Attach file" title="Attach file" onclick={attach}>
         <Icon icon={Plus} size={20} />
       </button>
     {/if}
-    {#if !threadRoot}
+    {#if !threadRoot && viewport.isPhone}
+      <button
+        type="button"
+        class="round"
+        aria-label="Add attachment or poll"
+        title="Add"
+        aria-haspopup="menu"
+        onclick={openAttachMenu}
+      >
+        <Icon icon={Plus} size={20} />
+      </button>
+    {/if}
+    {#if !threadRoot && !viewport.isPhone}
       <button type="button" class="round" aria-label="Create poll" title="Create poll" onclick={() => (pollOpen = true)}>
         <Icon icon={ChartBar} size={20} />
       </button>
+    {/if}
+    {#if !threadRoot}
       <PollDialog open={pollOpen} onclose={() => (pollOpen = false)} />
     {/if}
 
@@ -275,7 +310,7 @@
       bind:value={text}
       rows="1"
       {placeholder}
-      aria-label={prefs.enterToSend ? 'Message' : 'Message. Press Ctrl+Enter or Cmd+Enter to send'}
+      aria-label={viewport.isPhone ? phoneName : hintSend ? 'Message. Press Ctrl+Enter or Cmd+Enter to send' : 'Message'}
       data-shortcut="Enter"
       role="combobox"
       aria-autocomplete="list"
@@ -308,6 +343,19 @@
         </div>
       {/if}
     </div>
+    {#if viewport.isPhone}
+      <button
+        type="button"
+        class="send"
+        aria-label="Send message"
+        title="Send"
+        disabled={!canSend}
+        onpointerdown={(e) => e.preventDefault()}
+        onclick={() => void submit()}
+      >
+        <Icon icon={Send} size={20} />
+      </button>
+    {/if}
 
     {#if pickerOpen}
       <MentionPicker
@@ -393,13 +441,32 @@
     cursor: pointer;
     flex: none;
   }
+  .send {
+    border: 0;
+    border-radius: var(--alloy-radii-full);
+    width: 44px;
+    height: 44px;
+    display: inline-grid;
+    place-items: center;
+    cursor: pointer;
+    flex: none;
+    background: var(--alloy-color-accent-primary);
+    color: var(--alloy-color-text-on-accent);
+  }
+  .send:disabled {
+    background: var(--alloy-color-surface-hover);
+    color: var(--alloy-color-text-muted);
+    cursor: default;
+  }
   .banner .round {
     width: 28px;
     height: 28px;
   }
-  .round:hover {
-    background: var(--alloy-color-surface-hover);
-    color: var(--alloy-color-text-primary);
+  @media (hover: hover) {
+    .round:hover {
+      background: var(--alloy-color-surface-hover);
+      color: var(--alloy-color-text-primary);
+    }
   }
   .round:focus-visible {
     outline: 2px solid var(--alloy-color-accent-primary);
@@ -430,7 +497,39 @@
     border-radius: var(--alloy-radii-sm);
     cursor: pointer;
   }
-  .emoji-grid button:hover {
-    background: var(--alloy-color-surface-hover);
+  @media (hover: hover) {
+    .emoji-grid button:hover {
+      background: var(--alloy-color-surface-hover);
+    }
+  }
+  @media (max-width: 899px) {
+    .composer {
+      padding: var(--alloy-spacing-scale-2) var(--alloy-layout-gutter)
+        calc(var(--alloy-spacing-scale-2) + var(--alloy-safe-area-bottom));
+    }
+    .round,
+    .banner .round {
+      width: 44px;
+      height: 44px;
+    }
+    textarea {
+      box-sizing: border-box;
+      flex: 1 1 0;
+      width: 100%;
+      min-width: 0;
+      min-height: 44px;
+      font-size: var(--alloy-typography-size-lg);
+      padding: var(--alloy-spacing-scale-2) 0;
+    }
+    .emoji-grid {
+      grid-template-columns: repeat(7, 44px);
+    }
+    .emoji-grid button {
+      width: 44px;
+      height: 44px;
+      padding: 0;
+      display: grid;
+      place-items: center;
+    }
   }
 </style>

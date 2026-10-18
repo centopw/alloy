@@ -120,4 +120,17 @@
     font-size: var(--alloy-typography-size-xs);
     color: var(--alloy-color-text-secondary);
   }
+  @media (max-width: 899px) {
+    .grid {
+      flex-direction: column;
+    }
+    .card {
+      width: 100%;
+      min-width: 0;
+      min-height: 56px;
+    }
+    .card-label {
+      font-size: var(--alloy-typography-size-base);
+    }
+  }
 </style>

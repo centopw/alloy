@@ -135,4 +135,16 @@
     font-size: var(--alloy-typography-size-xs);
     color: var(--alloy-color-text-muted);
   }
+  @media (max-width: 899px) {
+    .poll {
+      max-width: 100%;
+    }
+    .answer {
+      min-height: 44px;
+      font-size: var(--alloy-typography-size-base);
+    }
+    .meta :global(button) {
+      min-height: 44px;
+    }
+  }
 </style>

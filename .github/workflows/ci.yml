@@ -272,6 +272,16 @@ jobs:
           CHROME_PATH: /usr/bin/google-chrome
         run: node scripts/e2e-bridge.mjs
 
+      - name: Mobile E2E (390x844 touch: no page scroll, 44px targets)
+        working-directory: apps/alloy/ui
+        env:
+          ALLOY_TEST_HS: http://localhost:8008
+          ALLOY_BRIDGE_BIN: ${{ github.workspace }}/target/debug/alloy-bridge
+          CHROME_PATH: /usr/bin/google-chrome
+          E2E_MOBILE: '1'
+          E2E_STRICT: '1'
+        run: node scripts/e2e-bridge.mjs
+
       - name: Dump Docker logs on failure
         if: failure()
         run: |

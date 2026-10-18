@@ -11,15 +11,21 @@
     type MenuItem,
     type MenuPoint,
   } from '$lib/stores/contextmenu.svelte';
+  import { viewport } from '$lib/stores/viewport.svelte';
 
   const TYPEAHEAD_RESET_MS = 600;
 
+  const CANCEL: MenuAction = { id: 'cancel', label: 'Cancel' };
+
   let menuEl: HTMLDivElement | undefined = $state();
+  let scrimEl: HTMLDivElement | undefined = $state();
   let typed = '';
   let typedTimer: number | null = null;
 
   /** Position the menu at contextMenu.at, flipping and clamping to the viewport after each measure. */
   function place(node: HTMLElement, _deps: { at: MenuPoint; items: MenuItem[] }) {
+    // Phone: the menu is a bottom sheet placed by CSS, so no coordinates are applied.
+    if (viewport.isPhone) return;
     const apply = () => {
       const p = placeMenu(
         contextMenu.at,
@@ -144,6 +150,8 @@
       }
     };
     const onPointerDown = (e: PointerEvent) => {
+      // The phone scrim closes on click, not pointerdown, so the tap cannot fall through to the content beneath.
+      if (e.target === scrimEl) return;
       if (e.target instanceof Node && menuEl?.contains(e.target)) return;
       contextMenu.close();
     };
@@ -172,9 +180,14 @@
 </script>
 
 {#if contextMenu.isOpen}
+  {#if viewport.isPhone}
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+    <div class="sheet-scrim" bind:this={scrimEl} use:portal onclick={() => contextMenu.close()}></div>
+  {/if}
   <div
     bind:this={menuEl}
     class="context-menu"
+    class:sheet={viewport.isPhone}
     role="menu"
     aria-label="Actions"
     use:portal
@@ -197,7 +210,7 @@
           onkeydown={(e) => onItemKeydown(e, item)}
         >
           {#if item.icon}
-            <span class="icon"><Icon icon={item.icon} size={16} /></span>
+            <span class="icon"><Icon icon={item.icon} size={viewport.isPhone ? 20 : 16} /></span>
           {/if}
           <span class="label">{item.label}</span>
           {#if item.shortcut}
@@ -206,6 +219,20 @@
         </div>
       {/if}
     {/each}
+
+    {#if viewport.isPhone}
+      <div class="separator" role="separator"></div>
+      <div
+        class="item cancel"
+        role="menuitem"
+        tabindex="-1"
+        onclick={() => selectByPointer(CANCEL)}
+        onpointermove={(e) => hoverItem(e, CANCEL)}
+        onkeydown={(e) => onItemKeydown(e, CANCEL)}
+      >
+        <span class="label">Cancel</span>
+      </div>
+    {/if}
   </div>
 {/if}
 
@@ -276,5 +303,68 @@
     height: 1px;
     margin: var(--alloy-spacing-scale-1) 0;
     background: var(--alloy-color-border-subtle);
+  }
+
+  /* Phone: the menu is a bottom action sheet. Rows are 52px for touch; the Cancel row closes it. */
+  .context-menu.sheet {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    min-width: 0;
+    max-width: none;
+    max-height: 90dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-2)
+      calc(var(--alloy-spacing-scale-2) + var(--alloy-safe-area-bottom));
+    border: 0;
+    border-radius: var(--alloy-radii-lg) var(--alloy-radii-lg) 0 0;
+    box-shadow: var(--alloy-elevation-lg);
+    animation: alloy-action-sheet-up var(--alloy-motion-duration-normal) ease-out backwards;
+  }
+  .sheet .item {
+    height: 52px;
+    padding: 0 var(--alloy-spacing-scale-4);
+    font-size: var(--alloy-typography-size-lg);
+    border-radius: var(--alloy-radii-md);
+  }
+  .sheet .shortcut {
+    display: none;
+  }
+  .sheet .item.cancel {
+    justify-content: center;
+    font-weight: var(--alloy-typography-weight-semibold);
+  }
+  .sheet .item.cancel .label {
+    flex: none;
+  }
+
+  /* Phone: scrim behind the action sheet. Tapping it closes the sheet (click, not pointerdown). */
+  .sheet-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 109;
+    background: rgba(0, 0, 0, 0.5);
+    animation: alloy-fade-in var(--alloy-motion-duration-normal) ease-out backwards;
+  }
+
+  @keyframes alloy-fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes alloy-action-sheet-up {
+    from {
+      transform: translateY(100%);
+    }
+    to {
+      transform: translateY(0);
+    }
   }
 </style>

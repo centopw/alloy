@@ -89,4 +89,22 @@
     color: var(--alloy-color-text-muted);
     cursor: not-allowed;
   }
+  @media (max-width: 899px) {
+    .setting-row {
+      min-height: 56px;
+      padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x);
+    }
+    .label {
+      font-size: var(--alloy-typography-size-lg);
+    }
+    .text {
+      flex: 1;
+    }
+    .select {
+      flex-shrink: 0;
+      max-width: 55%;
+      min-height: 44px;
+      font-size: 16px;
+    }
+  }
 </style>

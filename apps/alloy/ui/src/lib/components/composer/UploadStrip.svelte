@@ -76,4 +76,9 @@
     color: var(--alloy-color-text-secondary);
     font-variant-numeric: tabular-nums;
   }
+  @media (max-width: 899px) {
+    .upload {
+      min-height: 44px;
+    }
+  }
 </style>

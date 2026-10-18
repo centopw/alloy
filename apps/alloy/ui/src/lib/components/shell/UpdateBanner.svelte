@@ -94,4 +94,21 @@
     outline: 2px solid var(--alloy-color-accent-primary);
     outline-offset: 2px;
   }
+
+  @media (max-width: 899px) {
+    .banner {
+      margin: 0 var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-2);
+      padding: var(--alloy-spacing-scale-4);
+    }
+    .text {
+      font-size: var(--alloy-typography-size-lg);
+    }
+    .dismiss {
+      width: 44px;
+      height: 44px;
+    }
+    .actions :global(button) {
+      min-height: 44px;
+    }
+  }
 </style>

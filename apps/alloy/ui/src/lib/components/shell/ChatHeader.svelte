@@ -6,6 +6,7 @@
   import { membersStore } from '$lib/stores/members.svelte';
   import { roomTitle } from '$lib/stores/rooms.svelte';
   import { ui } from '$lib/stores/ui.svelte';
+  import { viewport } from '$lib/stores/viewport.svelte';
   import { shortcutLabel } from '$lib/platform/shortcuts';
 
   interface Props {
@@ -18,6 +19,12 @@
   const roomId = $derived(room.id);
   const title = $derived(roomTitle(room));
   const topic = $derived(membersStore.detailsOf(roomId)?.topic?.trim() || null);
+  const phone = $derived(viewport.isPhone);
+  const members = $derived(membersStore.detailsOf(roomId)?.joined_members ?? null);
+  // Phones have no inline topic divider, so the second line carries the topic, else the member count.
+  const subtitle = $derived(
+    topic ?? (members === null ? null : `${members} ${members === 1 ? 'member' : 'members'}`),
+  );
   const searchShortcut = shortcutLabel('K');
 
   // The topic lives in the room details, which the members panel may not have loaded.
@@ -51,10 +58,19 @@
       onclick={() => ui.toggleRoomInfo()}
     >
       <Avatar userId={roomId} displayName={title} src={room.avatar_url} size="sm" shape="rounded" />
-      <span class="title">{title}</span>
-      {#if topic}
-        <span class="divider" aria-hidden="true"></span>
-        <span class="topic">{topic}</span>
+      {#if phone}
+        <span class="stack">
+          <span class="title">{title}</span>
+          {#if subtitle}
+            <span class="sub">{subtitle}</span>
+          {/if}
+        </span>
+      {:else}
+        <span class="title">{title}</span>
+        {#if topic}
+          <span class="divider" aria-hidden="true"></span>
+          <span class="topic">{topic}</span>
+        {/if}
       {/if}
     </button>
   </h2>
@@ -68,6 +84,7 @@
     >
       <Icon icon={Info} size={20} />
     </button>
+    {#if !phone}
     <button
       type="button"
       class="icon"
@@ -77,6 +94,7 @@
     >
       <Icon icon={Users} size={20} />
     </button>
+    {/if}
     <button
       type="button"
       class="icon"
@@ -164,9 +182,10 @@
     align-items: center;
     gap: var(--alloy-spacing-scale-1);
     margin-left: auto;
-    flex-shrink: 0;
+    flex: none;
   }
   .icon {
+    flex: none;
     display: grid;
     place-items: center;
     width: 32px;
@@ -196,6 +215,40 @@
   @media (max-width: 899px) {
     .back {
       display: grid;
+    }
+  }
+  /* Phones: 56px bar, 44px targets with 8px between them, a two-line identity. */
+  @media (max-width: 899px) {
+    .head {
+      height: 56px;
+      padding: 0 var(--alloy-spacing-scale-2);
+    }
+    .actions {
+      gap: var(--alloy-spacing-scale-2);
+    }
+    .icon {
+      width: 44px;
+      height: 44px;
+    }
+    .identity {
+      gap: var(--alloy-spacing-scale-3);
+    }
+    .stack {
+      display: flex;
+      flex: 1 1 auto;
+      min-width: 0;
+      overflow: hidden;
+      flex-direction: column;
+      justify-content: center;
+      align-items: stretch;
+    }
+    .sub {
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: var(--alloy-typography-size-xs);
+      color: var(--alloy-color-text-secondary);
     }
   }
 </style>

@@ -100,7 +100,7 @@
         {shift}
         bufferSize={400}
         onscroll={onScroll}
-        style="height: 100%; width: 100%;"
+        style="height: 100%; width: 100%; overscroll-behavior: contain;"
       >
         {#snippet children(item: TimelineItemDto, index: number)}
           <div class="cell">
@@ -166,6 +166,12 @@
     place-items: center;
     cursor: pointer;
     box-shadow: var(--alloy-elevation-md);
+  }
+  @media (max-width: 899px) {
+    .latest {
+      width: 44px;
+      height: 44px;
+    }
   }
   .toast {
     position: absolute;

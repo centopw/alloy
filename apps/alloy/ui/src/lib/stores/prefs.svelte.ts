@@ -6,6 +6,7 @@
  * localStorage immediately and to the engine after a short debounce.
  */
 import { client } from '../ipc/index.js';
+import { viewport } from './viewport.svelte.js';
 
 export const PREFS_STORAGE_KEY = 'alloy.prefs.v1';
 export const PREFS_ENGINE_KEY = 'prefs';
@@ -69,6 +70,14 @@ export const DEFAULT_PREFS: Readonly<Prefs> = Object.freeze({
   enterToSend: true,
   launchAtLogin: false,
 });
+
+/**
+ * Defaults for a device with no stored preference. Phones start in the bubble layout, which fits a
+ * narrow screen; desktops keep the modern layout. The stored value always wins over these defaults.
+ */
+export function defaultPrefsFor(isPhone: boolean): Readonly<Prefs> {
+  return isPhone ? { ...DEFAULT_PREFS, messageLayout: 'bubbles' } : DEFAULT_PREFS;
+}
 
 const PREF_KEYS = Object.keys(DEFAULT_PREFS) as PrefKey[];
 
@@ -145,7 +154,7 @@ export class PrefsStore {
 
   constructor(storage: PrefsStorage | null = defaultStorage()) {
     this.#storage = storage;
-    this.#values = { ...DEFAULT_PREFS, ...readStored(storage) };
+    this.#values = { ...defaultPrefsFor(viewport.isPhone), ...readStored(storage) };
   }
 
   get messageLayout(): MessageLayout {
@@ -229,9 +238,9 @@ export class PrefsStore {
   /** Restores one key to its default, or every key when called without arguments. */
   reset<K extends PrefKey>(key?: K): void {
     if (key === undefined) {
-      this.#values = { ...DEFAULT_PREFS };
+      this.#values = { ...defaultPrefsFor(viewport.isPhone) };
     } else {
-      this.#values[key] = DEFAULT_PREFS[key];
+      this.#values[key] = defaultPrefsFor(viewport.isPhone)[key];
     }
     this.#changed();
   }
@@ -256,7 +265,7 @@ export class PrefsStore {
         this.#scheduleEngineSave();
         return;
       }
-      this.#values = { ...DEFAULT_PREFS, ...sanitizePrefs(entry) };
+      this.#values = { ...defaultPrefsFor(viewport.isPhone), ...sanitizePrefs(entry) };
       this.#writeLocal();
     } catch (err) {
       console.warn('[prefs] could not reconcile preferences with the engine; keeping the local copy', err);

@@ -184,4 +184,17 @@
     justify-content: flex-end;
     gap: var(--alloy-spacing-scale-2);
   }
+  @media (max-width: 899px) {
+    input {
+      min-height: 44px;
+      font-size: var(--alloy-typography-size-lg);
+    }
+    .answers :global(button),
+    .actions :global(button) {
+      min-height: 44px;
+    }
+    .row {
+      min-height: 44px;
+    }
+  }
 </style>

@@ -3,6 +3,7 @@
   import { getUserColorValue } from '$lib/identity/userColor';
   import { userProfile } from '$lib/stores/userProfile.svelte';
   import { errorMessage } from '$lib/stores/errors';
+  import { viewport } from '$lib/stores/viewport.svelte';
   import type { UserProfileDto } from '$lib/generated/protocol';
   import { Avatar, Button } from '../common';
 
@@ -99,7 +100,7 @@
       shape="circle"
     />
     <button type="button" class="icon-btn" aria-label="Close profile" title="Close profile" onclick={onclose}>
-      <Icon icon={X} size={16} />
+      <Icon icon={X} size={viewport.isPhone ? 20 : 16} />
     </button>
   </div>
 
@@ -119,7 +120,7 @@
           title={copied ? 'Copied' : 'Copy user ID'}
           onclick={copyUserId}
         >
-          <Icon icon={copied ? Check : Copy} size={16} />
+          <Icon icon={copied ? Check : Copy} size={viewport.isPhone ? 20 : 16} />
         </button>
       </div>
     </div>
@@ -262,5 +263,41 @@
     background: var(--alloy-color-surface-subtle);
     color: var(--alloy-color-status-error);
     font-size: var(--alloy-typography-size-xs);
+  }
+
+  /* Phone: the card is the body of a bottom sheet; controls are touch-sized and actions stack full width. */
+  @media (max-width: 899px) {
+    .card {
+      padding: var(--alloy-layout-section-gap) var(--alloy-layout-gutter);
+      font-size: var(--alloy-typography-size-lg);
+    }
+    .icon-btn {
+      width: 44px;
+      height: 44px;
+    }
+    .icon-btn:hover {
+      background: transparent;
+      color: var(--alloy-text-secondary);
+    }
+    .icon-btn:active {
+      background: var(--alloy-color-surface-hover);
+      color: var(--alloy-text-primary);
+    }
+    .mxid,
+    .status,
+    .notice {
+      font-size: var(--alloy-typography-size-sm);
+    }
+    .fact {
+      min-height: 44px;
+      align-items: center;
+    }
+    .actions {
+      flex-direction: column;
+    }
+    .actions :global(button) {
+      width: 100%;
+      min-height: 48px;
+    }
   }
 </style>

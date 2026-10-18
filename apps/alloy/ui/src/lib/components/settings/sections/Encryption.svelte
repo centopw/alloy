@@ -300,4 +300,29 @@
     color: var(--alloy-color-status-error);
     overflow-wrap: anywhere;
   }
+
+  /* Phone: rows stack value below label so long keys wrap; the checkbox row gets a 44px hit area. */
+  @media (max-width: 899px) {
+    .row {
+      flex-direction: column;
+      align-items: stretch;
+      min-height: 56px;
+    }
+    .row-value {
+      justify-content: space-between;
+      text-align: left;
+    }
+    .icon-button {
+      width: 44px;
+      height: 44px;
+    }
+    .check {
+      min-height: 44px;
+    }
+    .check input[type='checkbox'] {
+      width: 24px;
+      height: 24px;
+      margin: 0;
+    }
+  }
 </style>

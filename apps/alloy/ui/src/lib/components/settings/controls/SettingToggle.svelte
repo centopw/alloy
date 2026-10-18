@@ -62,4 +62,22 @@
     font-size: var(--alloy-typography-size-xs);
     color: var(--alloy-color-text-muted);
   }
+  @media (max-width: 899px) {
+    .setting-row {
+      min-height: 56px;
+      padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x);
+    }
+    .label {
+      font-size: var(--alloy-typography-size-lg);
+    }
+    .setting-row :global(.alloy-toggle) {
+      flex-shrink: 0;
+    }
+    /* 40x22 visual track; the pseudo-element widens the tap target to 44x44. */
+    .setting-row :global(.alloy-toggle)::before {
+      content: '';
+      position: absolute;
+      inset: -11px -2px;
+    }
+  }
 </style>

@@ -39,14 +39,17 @@
           <th scope="row" class="row-head">{row.label}</th>
           {#each columns as column (column.value)}
             <td class="cell">
-              <input
-                type="radio"
-                name={`${groupName}-${row.id}`}
-                aria-label={`${row.label}: ${column.label}`}
-                value={column.value}
-                checked={row.value === column.value}
-                onchange={() => onchange(row.id, column.value)}
-              />
+              <label class="choice">
+                <input
+                  type="radio"
+                  name={`${groupName}-${row.id}`}
+                  aria-label={`${row.label}: ${column.label}`}
+                  value={column.value}
+                  checked={row.value === column.value}
+                  onchange={() => onchange(row.id, column.value)}
+                />
+                <span class="choice-text">{column.label}</span>
+              </label>
             </td>
           {/each}
         </tr>
@@ -116,5 +119,88 @@
     overflow: hidden;
     clip: rect(0 0 0 0);
     white-space: nowrap;
+  }
+
+  .choice-text {
+    display: none;
+  }
+
+  @media (max-width: 899px) {
+    thead {
+      display: none;
+    }
+
+    table,
+    tbody {
+      display: block;
+    }
+
+    table {
+      font-size: var(--alloy-typography-size-sm);
+    }
+
+    tr {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: var(--alloy-spacing-scale-2);
+      min-height: 56px;
+      padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x);
+      border-top: 1px solid var(--alloy-color-border-subtle);
+    }
+
+    .row-head {
+      flex: 1 0 100%;
+      padding: var(--alloy-spacing-scale-1) 0;
+      border: none;
+      font-size: var(--alloy-typography-size-base);
+      font-weight: var(--alloy-typography-weight-medium);
+    }
+
+    .cell {
+      display: block;
+      flex: 1 1 0;
+      min-width: 0;
+      padding: 0;
+      border: none;
+    }
+
+    .choice {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 44px;
+      border: 1px solid var(--alloy-color-border-prominent);
+      border-radius: var(--alloy-radii-md);
+      color: var(--alloy-color-text-primary);
+      cursor: pointer;
+    }
+
+    .choice:has(input:checked) {
+      border-color: var(--alloy-color-accent-primary);
+      background: var(--alloy-color-accent-subtle);
+    }
+
+    .choice:has(input:focus-visible) {
+      outline: 2px solid var(--alloy-color-accent-primary);
+      outline-offset: 2px;
+    }
+
+    .choice input {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      margin: 0;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .choice-text {
+      display: inline;
+      padding: 0 var(--alloy-spacing-scale-2);
+      font-size: var(--alloy-typography-size-sm);
+      text-align: center;
+    }
   }
 </style>

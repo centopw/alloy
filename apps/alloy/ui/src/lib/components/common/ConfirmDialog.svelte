@@ -77,6 +77,12 @@
     justify-content: flex-end;
     gap: var(--alloy-spacing-scale-2);
   }
+  @media (max-width: 899px) {
+    .actions {
+      flex-direction: column-reverse;
+      justify-content: flex-start;
+    }
+  }
   .error {
     margin: 0;
     color: var(--alloy-color-status-error);

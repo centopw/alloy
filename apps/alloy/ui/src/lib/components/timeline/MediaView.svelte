@@ -215,4 +215,12 @@
     color: var(--alloy-color-text-secondary);
     font-size: var(--alloy-typography-size-sm);
   }
+  @media (max-width: 899px) {
+    .frame {
+      max-width: 100%;
+    }
+    .file {
+      min-height: 44px;
+    }
+  }
 </style>

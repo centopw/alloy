@@ -51,3 +51,8 @@ export { ImagePlus } from '@lucide/svelte';
 export { Play } from '@lucide/svelte';
 export { User } from '@lucide/svelte';
 export { StickyNote } from '@lucide/svelte';
+export { Smartphone } from '@lucide/svelte';
+export { Palette } from '@lucide/svelte';
+export { SlidersHorizontal } from '@lucide/svelte';
+export { Keyboard } from '@lucide/svelte';
+export { PanelLeft } from '@lucide/svelte';

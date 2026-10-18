@@ -87,4 +87,15 @@
     outline: 2px solid var(--alloy-color-accent-primary, #4f46e5);
     outline-offset: 2px;
   }
+  /*
+   * Phone and coarse pointers: the visible track stays 40x22 (inline style), but the hit area grows to
+   * 44px tall and 44px wide through an overlay. The button is position: relative (inline style).
+   */
+  @media (max-width: 899px), (pointer: coarse) {
+    .alloy-toggle::before {
+      content: '';
+      position: absolute;
+      inset: -11px -2px;
+    }
+  }
 </style>

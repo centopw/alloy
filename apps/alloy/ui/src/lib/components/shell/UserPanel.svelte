@@ -5,6 +5,7 @@
   import { contextmenu } from '$lib/platform/contextmenu';
   import type { MenuItem } from '$lib/stores/contextmenu.svelte';
   import { session } from '$lib/stores/session.svelte';
+  import { viewport } from '$lib/stores/viewport.svelte';
 
   interface Props {
     onsettings?: () => void;
@@ -23,7 +24,7 @@
   }
 </script>
 
-{#if account}
+{#if account && !viewport.isPhone}
   <div class="panel" use:contextmenu={() => panelItems(account.user_id)}>
     <span class="fixed">
       <Avatar userId={account.user_id} displayName={name} src={account.avatar_url} size="md" />

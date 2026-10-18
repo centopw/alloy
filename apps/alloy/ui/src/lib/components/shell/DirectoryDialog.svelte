@@ -9,6 +9,7 @@
   import { errorMessage } from '$lib/stores/errors';
   import { roomsStore } from '$lib/stores/rooms.svelte';
   import { session } from '$lib/stores/session.svelte';
+  import { viewport } from '$lib/stores/viewport.svelte';
 
   interface Props {
     open: boolean;
@@ -100,7 +101,7 @@
       {#each directoryStore.rooms as room (room.room_id)}
         {@const title = room.name ?? room.alias ?? room.room_id}
         <li>
-          <Avatar userId={room.room_id} displayName={title} src={room.avatar_url} size="md" shape="rounded" />
+          <Avatar userId={room.room_id} displayName={title} src={room.avatar_url} size={viewport.isPhone ? 48 : 'md'} shape="rounded" />
           <div class="meta">
             <span class="name" title={title}>{title}</span>
             {#if room.alias}<span class="alias" title={room.alias}>{room.alias}</span>{/if}
@@ -245,5 +246,39 @@
     display: flex;
     justify-content: center;
     margin-top: var(--alloy-spacing-scale-3);
+  }
+  @media (max-width: 899px) {
+    .body {
+      overflow: visible;
+    }
+    .search {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      margin: 0 calc(-1 * var(--alloy-layout-gutter));
+      padding: var(--alloy-spacing-scale-2) var(--alloy-layout-gutter);
+      border: 0;
+      border-radius: 0;
+      background: var(--alloy-color-surface-elevated);
+    }
+    .search input {
+      min-height: 44px;
+      font-size: var(--alloy-typography-size-lg);
+    }
+    .results {
+      max-height: none;
+      overflow: visible;
+    }
+    .results li {
+      min-height: 64px;
+      box-sizing: border-box;
+    }
+    .name {
+      font-size: var(--alloy-typography-size-base);
+    }
+    .action :global(.alloy-button),
+    .more :global(.alloy-button) {
+      min-height: 44px;
+    }
   }
 </style>

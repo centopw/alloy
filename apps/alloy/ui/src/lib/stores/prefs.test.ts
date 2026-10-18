@@ -11,8 +11,10 @@ import {
   PREFS_ENGINE_DEBOUNCE_MS,
   PREFS_ENGINE_KEY,
   PREFS_STORAGE_KEY,
+  type PrefKey,
   PrefsStore,
   isValidPref,
+  defaultPrefsFor,
   sanitizePrefs,
   type PrefsStorage,
 } from './prefs.svelte.js';
@@ -60,6 +62,20 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+});
+
+describe('defaultPrefsFor', () => {
+  it('starts phones in the bubble layout and keeps the desktop default otherwise', () => {
+    expect(defaultPrefsFor(true).messageLayout).toBe('bubbles');
+    expect(defaultPrefsFor(false)).toEqual(DEFAULT_PREFS);
+  });
+
+  it('differs from the desktop default only in the message layout', () => {
+    for (const key of Object.keys(DEFAULT_PREFS) as PrefKey[]) {
+      if (key === 'messageLayout') continue;
+      expect(defaultPrefsFor(true)[key]).toEqual(DEFAULT_PREFS[key]);
+    }
+  });
 });
 
 describe('defaults', () => {

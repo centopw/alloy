@@ -101,4 +101,10 @@
   .id {
     margin-left: auto;
   }
+  @media (max-width: 899px) {
+    .option {
+      min-height: 52px;
+      font-size: var(--alloy-typography-size-base);
+    }
+  }
 </style>

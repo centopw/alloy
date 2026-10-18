@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.4 (pre-release)
+
+### Changed
+- Phones get a real mobile UI (ADR 0005): bottom tab bar, one screen at a time, full-screen room info/members/thread/settings pages, bottom sheets for dialogs and menus, long-press message actions, a Send button, 44px touch targets, bubbles by default.
+
+### Fixed
+- The page no longer scrolls or bounces on phones; only lists scroll.
+- Long room names no longer run under the header buttons; the composer placeholder stays on one line.
+
 ## 0.1.3 (pre-release)
 
 ### Added

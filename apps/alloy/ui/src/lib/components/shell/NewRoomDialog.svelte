@@ -54,12 +54,14 @@
 </script>
 
 <Modal {open} title="New conversation" {onclose} width="440px">
-  <SegmentedControl
-    label="Create or join"
-    value={mode}
-    options={[{ value: 'create', label: 'Create room' }, { value: 'join', label: 'Join room' }]}
-    onchange={(v) => (mode = v as 'create' | 'join')}
-  />
+    <div class="mode">
+      <SegmentedControl
+        label="Create or join"
+        value={mode}
+        options={[{ value: 'create', label: 'Create room' }, { value: 'join', label: 'Join room' }]}
+        onchange={(v) => (mode = v as 'create' | 'join')}
+      />
+    </div>
   <form onsubmit={submit}>
     {#if mode === 'create'}
       <label>
@@ -90,6 +92,16 @@
     gap: var(--alloy-spacing-scale-3);
     margin-top: var(--alloy-layout-section-gap);
   }
+  .mode {
+    display: flex;
+  }
+  .mode > :global(div) {
+    flex: 1;
+    min-width: 0;
+  }
+  .mode :global(button) {
+    flex: 1;
+  }
   label {
     display: flex;
     flex-direction: column;
@@ -100,10 +112,14 @@
   input {
     font: inherit;
     color: var(--alloy-color-text-primary);
-    background: var(--alloy-color-surface-subtle);
+    background: var(--alloy-color-surface-canvas);
     border: 1px solid var(--alloy-color-border-subtle);
     border-radius: var(--alloy-radii-md);
     padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
+  }
+  input:focus-visible {
+    outline: 2px solid var(--alloy-color-accent-primary);
+    outline-offset: 1px;
   }
   .row {
     display: flex;
@@ -118,5 +134,21 @@
   .error {
     margin: 0;
     color: var(--alloy-color-status-error);
+  }
+  @media (max-width: 899px) {
+    input {
+      min-height: 44px;
+      font-size: var(--alloy-typography-size-lg);
+    }
+    .row {
+      min-height: 44px;
+    }
+    .actions {
+      gap: var(--alloy-spacing-scale-2);
+    }
+    .actions :global(button) {
+      flex: 1;
+      min-height: 44px;
+    }
   }
 </style>

@@ -89,7 +89,8 @@ let failed = null;
 const step = (n) => console.log(`- ${n}`);
 try {
   const page = await browser.newPage();
-  await page.setViewport({ width: 1280, height: 800 });
+  const MOBILE = process.env.E2E_MOBILE === '1';
+  await page.setViewport(MOBILE ? { width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true } : { width: 1280, height: 800 });
   page.on('pageerror', (e) => console.error('pageerror:', e.message));
   page.on('console', (m) => ['error', 'warning', 'log'].includes(m.type()) && console.error('console:', m.text()));
   if (process.env.E2E_TRACE) {
@@ -113,6 +114,63 @@ try {
   step('room list streams in with the invited room');
   await page.waitForFunction(() => [...document.querySelectorAll('button.row .title')].some((e) => e.textContent === 'From Bob'), { timeout: 60000 });
   await page.screenshot({ path: resolve(shots, 'e2e-1-room-list.png') });
+
+  if (MOBILE) {
+    const problems = [];
+    const audit = async (name) => {
+      const r = await page.evaluate(() => {
+        const se = document.scrollingElement;
+        const vis = (el) => { const b = el.getBoundingClientRect(); const cs = getComputedStyle(el); return b.width > 0 && b.height > 0 && cs.visibility !== 'hidden' && cs.display !== 'none' && b.bottom > 0 && b.top < innerHeight; };
+        const small = [...document.querySelectorAll('button, a[href], [role=button], [role=tab], [role=menuitem], input, select, textarea')]
+          .filter(vis).map((el) => ({ el, b: el.getBoundingClientRect() })).filter(({ el, b }) => { if (b.width >= 44 && b.height >= 44) return false; if (el.getAttribute('role') === 'switch') { const pb = getComputedStyle(el, '::before'); return !(parseFloat(pb.height) >= 44); } return true; })
+          .map(({ el, b }) => `${el.tagName.toLowerCase()}[${el.getAttribute('aria-label') || el.textContent.trim().slice(0, 16)}] ${Math.round(b.width)}x${Math.round(b.height)}`);
+        const wide = [...document.querySelectorAll('body *')].filter((el) => vis(el) && el.getBoundingClientRect().right > innerWidth + 1).slice(0, 5).map((el) => `${el.tagName.toLowerCase()}.${String(el.className).slice(0, 30)}`);
+        window.scrollTo(0, 200); const moved = window.scrollY; window.scrollTo(0, 0);
+        return { pageMoves: moved, shellScroll: se.scrollHeight - innerHeight, hScroll: se.scrollWidth - innerWidth, bodyScrollable: getComputedStyle(document.body).overflow, small, wide, vv: window.visualViewport ? Math.round(window.visualViewport.height) : null };
+      });
+      console.log(`AUDIT ${name}: pageMoves=${r.pageMoves} shellScroll=${r.shellScroll} hScroll=${r.hScroll} small=${r.small.length} wide=${r.wide.join(',') || '-'}`);
+      problems.push(...(r.pageMoves > 0 ? [`${name}: page scrolls`] : []), ...(r.hScroll > 0 ? [`${name}: horizontal overflow`] : []), ...(r.wide.length ? [`${name}: overflow ${r.wide[0]}`] : []), ...r.small.map((t) => `${name}: small ${t}`));
+      for (const t of r.small.slice(0, 12)) console.log(`   small: ${t}`);
+      await uxShot(page, `m-${name}`);
+    };
+    const tapSel = async (sel) => { await page.waitForSelector(sel, { visible: true, timeout: 15000 }); await page.tap(sel); await new Promise((r) => setTimeout(r, 700)); };
+    const settle = () => new Promise((r) => setTimeout(r, 700));
+    step('mobile: room list');
+    await audit('1-room-list');
+    step('mobile: open a chat');
+    await page.evaluate(() => [...document.querySelectorAll('button.row')].find((e) => e.textContent.includes('From Bob')).click());
+    await page.waitForFunction(() => document.body.innerText.includes('Hi from bob'), { timeout: 60000 });
+    await settle();
+    await audit('2-chat');
+    step('mobile: composer focus');
+    await page.tap('textarea[aria-label^=Message]'); await settle();
+    await page.type('textarea[aria-label^=Message]', 'phone message with a fairly long text to see wrapping behaviour in the composer area');
+    await audit('3-composer');
+    await page.keyboard.press('Enter'); await settle();
+    step('mobile: room info');
+    await tapSel('button[aria-label^="Room info for"]');
+    await audit('4-room-info');
+    await page.evaluate(() => document.querySelector('button[aria-label="Close room info"]')?.click()); await settle();
+    step('mobile: room info tabs');
+    await tapSel('button[aria-label^="Room info for"]');
+    for (const tab of ['Media', 'Members']) {
+      await page.evaluate((t) => [...document.querySelectorAll('[role=tab]')].find((e) => e.textContent.trim() === t).click(), tab);
+      await settle();
+      await audit(`5-room-info-${tab.toLowerCase()}`);
+    }
+    await page.evaluate(() => document.querySelector('button[aria-label="Close room info"], button[aria-label="Back"]')?.click()); await settle();
+    step('mobile: back to list, new room, directory, settings');
+    await page.evaluate(() => document.querySelector('button[aria-label="Back to rooms"]')?.click()); await settle();
+    await tapSel('button[aria-label="New room"]'); await audit('6-new-room'); await page.keyboard.press('Escape'); await settle();
+    await page.evaluate(() => [...document.querySelectorAll('nav[aria-label=Primary] button')].find((b) => b.textContent.includes('Discover')).click()); await settle(); await audit('7-directory'); await page.keyboard.press('Escape'); await settle();
+    await page.evaluate(() => [...document.querySelectorAll('nav[aria-label=Primary] button')].find((b) => b.textContent.includes('Settings')).click()); await settle(); await audit('8-settings-nav');
+    await page.evaluate(() => [...document.querySelectorAll('[role=dialog] button')].find((b) => b.textContent.trim() === 'Appearance').click()); await settle();
+    await audit('9-settings-appearance');
+    if (problems.length) { console.log('MOBILE PROBLEMS (' + problems.length + '):\n' + [...new Set(problems)].join('\n')); }
+    console.log(problems.length ? 'E2E MOBILE AUDIT FAILED' : 'E2E OK (mobile audit)');
+    await browser.close(); server.close(); bridge.kill(); fs.rmSync(dataDir, { recursive: true, force: true });
+    process.exit(problems.length && process.env.E2E_STRICT ? 1 : 0);
+  }
 
   step('open room: the other user message is rendered with a coloured name');
   await page.evaluate(() => [...document.querySelectorAll('button.row')].find((e) => e.textContent.includes('From Bob')).click());

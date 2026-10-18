@@ -25,8 +25,9 @@
 
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { Icon, X, Play, File, Link, ExternalLink, Image, ImagePlus, Trash2, Download } from '$lib/icons';
+  import { Icon, X, ChevronLeft, Play, File, Link, ExternalLink, Image, ImagePlus, Trash2, Download } from '$lib/icons';
   import { formatBytes, formatDay } from '$lib/content/format';
+  import { viewport } from '$lib/stores/viewport.svelte';
   import { pickFile } from '$lib/platform/files';
   import { openExternal } from '$lib/platform/links';
   import { roomInfo } from '$lib/stores/roomInfo.svelte';
@@ -264,7 +265,7 @@
   <header class="bar">
     <h2 class="title">Room info</h2>
     <button type="button" class="icon-btn" aria-label="Close room info" title="Close room info" onclick={onclose}>
-      <Icon icon={X} size={20} />
+      <Icon icon={viewport.isPhone ? ChevronLeft : X} size={20} />
     </button>
   </header>
 
@@ -801,5 +802,77 @@
 
   .sentinel {
     height: 1px;
+  }
+
+  /* Phone: a full-screen page with a back arrow, not a floating card. */
+  @media (max-width: 899px) {
+    .room-info {
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      box-sizing: border-box;
+      padding: var(--alloy-safe-area-top) var(--alloy-safe-area-right) var(--alloy-safe-area-bottom)
+        var(--alloy-safe-area-left);
+      font-size: var(--alloy-typography-size-lg);
+    }
+    .bar {
+      height: var(--alloy-layout-header-height);
+      padding: 0 var(--alloy-spacing-scale-2);
+      justify-content: flex-start;
+    }
+    .title {
+      flex: 1;
+      min-width: 0;
+      font-size: var(--alloy-typography-size-lg);
+    }
+    .icon-btn {
+      order: -1;
+      width: 44px;
+      height: 44px;
+    }
+    .icon-btn:hover {
+      background: transparent;
+      color: var(--alloy-text-secondary);
+    }
+    .hero-meta,
+    .hint,
+    .status,
+    .empty,
+    .label,
+    .row-meta {
+      font-size: var(--alloy-typography-size-sm);
+    }
+    .tab {
+      min-height: 44px;
+      padding: 0 var(--alloy-spacing-scale-3);
+      font-size: var(--alloy-typography-size-lg);
+    }
+    .body {
+      overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
+    }
+    .input {
+      min-height: 44px;
+      font-size: var(--alloy-typography-size-lg);
+    }
+    .body :global(button) {
+      min-height: 44px;
+    }
+    .row-actions :global(button) {
+      min-height: 44px;
+    }
+    .row {
+      min-height: 56px;
+      padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x);
+    }
+    .row:hover:not(:disabled) {
+      background: transparent;
+    }
+    .row:active:not(:disabled) {
+      background: var(--alloy-color-surface-hover);
+    }
+    .row-title {
+      font-size: var(--alloy-typography-size-lg);
+    }
   }
 </style>

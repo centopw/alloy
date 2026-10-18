@@ -1,9 +1,10 @@
 <script lang="ts">
   import Icon from '$lib/icons/Icon.svelte';
-  import { X } from '$lib/icons';
+  import { ChevronLeft, X } from '$lib/icons';
   import MessageRow from './MessageRow.svelte';
   import Composer from '../composer/Composer.svelte';
   import { threadStore, threadReplies, threadRootItem } from '$lib/stores/thread.svelte';
+  import { viewport } from '$lib/stores/viewport.svelte';
 
   interface Props {
     onclose: () => void;
@@ -19,7 +20,7 @@
   <header>
     <h2>Thread</h2>
     <button type="button" class="round" aria-label="Close thread" title="Close thread" onclick={onclose}>
-      <Icon icon={X} size={20} />
+      <Icon icon={viewport.isPhone ? ChevronLeft : X} size={20} />
     </button>
   </header>
 
@@ -104,5 +105,45 @@
   }
   .status.error {
     color: var(--alloy-color-status-error);
+  }
+
+  /* Phone: a full-screen page with its own back arrow, above the chat. */
+  @media (max-width: 899px) {
+    .thread {
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      width: auto;
+      padding: var(--alloy-safe-area-top) var(--alloy-safe-area-right) var(--alloy-safe-area-bottom)
+        var(--alloy-safe-area-left);
+      box-sizing: border-box;
+    }
+    header {
+      justify-content: flex-start;
+      height: auto;
+      min-height: 56px;
+      padding: 0 var(--alloy-spacing-scale-2);
+    }
+    h2 {
+      flex: 1;
+      min-width: 0;
+      font-size: var(--alloy-typography-size-lg);
+      font-weight: var(--alloy-typography-weight-semibold);
+    }
+    .round {
+      width: 44px;
+      height: 44px;
+    }
+    .round:hover {
+      background: transparent;
+      color: var(--alloy-color-text-secondary);
+    }
+    .messages {
+      overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
+    }
+    .status {
+      font-size: var(--alloy-typography-size-sm);
+    }
   }
 </style>

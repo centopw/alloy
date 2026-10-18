@@ -153,4 +153,33 @@
     bottom: calc(var(--alloy-spacing-scale-3) + var(--alloy-safe-area-bottom, 0px));
     max-width: 360px;
   }
+
+  /* Phone: the sign-in form fills the screen width inside the safe areas; controls are touch-sized. */
+  @media (max-width: 899px) {
+    .onboarding {
+      box-sizing: border-box;
+      padding: calc(var(--alloy-layout-gutter) + var(--alloy-safe-area-top))
+        calc(var(--alloy-layout-gutter) + var(--alloy-safe-area-right))
+        calc(var(--alloy-layout-gutter) + var(--alloy-safe-area-bottom))
+        calc(var(--alloy-layout-gutter) + var(--alloy-safe-area-left));
+    }
+    .card {
+      width: 100%;
+    }
+    .lead {
+      font-size: var(--alloy-typography-size-lg);
+    }
+    input {
+      box-sizing: border-box;
+      min-height: 44px;
+      font-size: var(--alloy-typography-size-lg);
+    }
+    .error {
+      font-size: var(--alloy-typography-size-sm);
+    }
+    form :global(button) {
+      width: 100%;
+      min-height: 48px;
+    }
+  }
 </style>

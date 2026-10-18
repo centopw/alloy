@@ -9,6 +9,7 @@
   import { formatDay, formatTime, isEmojiOnly } from '$lib/content/format';
   import { isHiddenState, stateEventSummary } from '$lib/content/stateEvents';
   import { prefs } from '$lib/stores/prefs.svelte';
+  import { viewport } from '$lib/stores/viewport.svelte';
   import { QUICK_REACTIONS } from '$lib/content/emoji';
   import { interceptLinks } from '$lib/platform/links';
   import { portal } from '$lib/platform/portal';
@@ -48,7 +49,7 @@
   );
   const layout = $derived(prefs.messageLayout);
   const time = $derived(formatTime(item.timestamp_millis, prefs.timeFormat));
-  const avatarSize = $derived(layout === 'bubbles' ? 28 : 40);
+  const avatarSize = $derived(layout === 'bubbles' ? 28 : viewport.isPhone ? 36 : 40);
   /** IRC always shows the name column; bubbles omit the head on your own messages. */
   const showHead = $derived(layout === 'irc' || (!grouped && !(layout === 'bubbles' && item.is_own)));
   /** A short run of emoji renders large when the pref is on. */
@@ -166,7 +167,7 @@
       {#if showHead}
         <div class="head">
           <UserName userId={item.sender} displayName={item.sender_display_name} roomId={timelineStore.roomId} interactive />
-          <span class="ts">{time}</span>
+          {#if layout !== 'bubbles'}<span class="ts">{time}</span>{/if}
         </div>
       {/if}
 
@@ -277,7 +278,8 @@
 
       {#if picker}
         <button type="button" class="backdrop" aria-label="Close reactions" tabindex="-1" use:portal onclick={() => (picker = false)}></button>
-        <div class="popover picker" role="menu" use:portal style="left: {pickerPos.x}px; top: {pickerPos.y}px;">
+        <div class="popover picker" role="menu" aria-label="Reactions" use:portal style={viewport.isPhone ? undefined : `left: ${pickerPos.x}px; top: ${pickerPos.y}px;`}>
+          {#if viewport.isPhone}<span class="grip" aria-hidden="true"></span>{/if}
           {#each QUICK_REACTIONS as e}
             <button type="button" role="menuitem" onclick={() => react(e)}>{e}</button>
           {/each}
@@ -302,9 +304,13 @@
   .row:not(.grouped) {
     padding-top: var(--alloy-spacing-scale-2);
   }
-  .row:hover,
   .row:focus-within {
     background: var(--alloy-color-surface-hover);
+  }
+  @media (hover: hover) {
+    .row:hover {
+      background: var(--alloy-color-surface-hover);
+    }
   }
   .gutter {
     flex: none;
@@ -466,8 +472,10 @@
     font-size: var(--alloy-typography-size-sm);
     cursor: pointer;
   }
-  .thread-chip:hover {
-    background: var(--alloy-color-surface-hover);
+  @media (hover: hover) {
+    .thread-chip:hover {
+      background: var(--alloy-color-surface-hover);
+    }
   }
   .thread-chip:focus-visible {
     outline: 2px solid var(--alloy-color-accent-primary);
@@ -492,8 +500,10 @@
     font-size: var(--alloy-typography-size-sm);
     cursor: pointer;
   }
-  .chip:hover {
-    background: var(--alloy-color-surface-hover);
+  @media (hover: hover) {
+    .chip:hover {
+      background: var(--alloy-color-surface-hover);
+    }
   }
   .chip.mine {
     border-color: var(--alloy-color-accent-primary);
@@ -517,9 +527,11 @@
     box-shadow: var(--alloy-elevation-sm);
     z-index: 2;
   }
-  .row:hover .toolbar,
-  .row:focus-within .toolbar {
-    display: flex;
+  @media (min-width: 900px) and (hover: hover) {
+    .row:hover .toolbar,
+    .row:focus-within .toolbar {
+      display: flex;
+    }
   }
   .toolbar button {
     display: inline-grid;
@@ -702,15 +714,114 @@
   .row.grouped.own[data-layout='bubbles'] .bubble {
     border-top-right-radius: var(--alloy-radii-sm);
   }
-  .row[data-layout='bubbles']:hover .bubble-time,
-  .row[data-layout='bubbles']:focus-within .bubble-time {
-    display: block;
-    text-align: right;
-    font-size: var(--alloy-typography-size-xs);
-    color: var(--alloy-color-text-muted);
+  @media (hover: hover) {
+    .row[data-layout='bubbles']:hover .bubble-time,
+    .row[data-layout='bubbles']:focus-within .bubble-time {
+      display: block;
+      text-align: right;
+      font-size: var(--alloy-typography-size-xs);
+      color: var(--alloy-color-text-muted);
+    }
   }
   .row.jumbo[data-layout='bubbles'] .bubble {
     padding: 0;
     background: none;
+  }
+
+  /* Phone: full-width rows, 44px touch targets, reaction picker as a bottom sheet. */
+  @media (max-width: 899px) {
+    .row {
+      margin: 0;
+      padding-left: var(--alloy-spacing-scale-3);
+      padding-right: var(--alloy-spacing-scale-3);
+      border-radius: 0;
+    }
+    .gutter {
+      width: 48px;
+    }
+    .avatar-btn {
+      position: relative;
+    }
+    .avatar-btn::after {
+      content: '';
+      position: absolute;
+      inset: -8px;
+    }
+    .thread-chip {
+      min-height: 44px;
+      padding: 0 var(--alloy-spacing-scale-3);
+    }
+    .chip {
+      min-height: 40px;
+      padding: 0 var(--alloy-spacing-scale-2);
+    }
+    .failed-actions button {
+      display: inline-flex;
+      align-items: center;
+      min-height: 44px;
+      padding: 0 var(--alloy-spacing-scale-2);
+    }
+    .block {
+      max-width: 100%;
+    }
+    .row[data-layout='bubbles'] .bubble {
+      max-width: 80%;
+    }
+    .row[data-layout='irc'] {
+      --irc-name-width: 6.5rem;
+    }
+    .row[data-layout='irc'] .gutter {
+      width: 3.5rem;
+    }
+    .backdrop {
+      background: rgba(0, 0, 0, 0.5);
+    }
+    .popover.picker {
+      left: 0;
+      right: 0;
+      top: auto;
+      bottom: 0;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: var(--alloy-spacing-scale-1);
+      padding: var(--alloy-spacing-scale-3) var(--alloy-spacing-scale-3)
+        calc(var(--alloy-spacing-scale-3) + var(--alloy-safe-area-bottom));
+      border: 0;
+      border-radius: var(--alloy-radii-lg) var(--alloy-radii-lg) 0 0;
+    }
+    .grip {
+      flex: 0 0 100%;
+      height: 4px;
+      margin-bottom: var(--alloy-spacing-scale-2);
+    }
+    .grip::before {
+      content: '';
+      display: block;
+      width: 36px;
+      height: 4px;
+      margin: 0 auto;
+      border-radius: var(--alloy-radii-full);
+      background: var(--alloy-color-border-prominent);
+    }
+    .picker button {
+      display: inline-grid;
+      place-items: center;
+      width: 44px;
+      height: 44px;
+      font-size: 1.375rem;
+    }
+  }
+
+  /* Touch devices have no hover: bubble times and gutter times stay visible. */
+  @media (hover: none) {
+    .row[data-layout='bubbles'] .bubble-time {
+      display: block;
+      text-align: right;
+      font-size: var(--alloy-typography-size-xs);
+      color: var(--alloy-color-text-muted);
+    }
+    .row .gutter-time {
+      opacity: 1;
+    }
   }
 </style>

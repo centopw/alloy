@@ -1,6 +1,22 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
-  import { Icon, X, ChevronLeft } from '$lib/icons';
+  import { untrack, type Component } from 'svelte';
+  import {
+    Icon,
+    X,
+    ChevronLeft,
+    ChevronRight,
+    LogOut,
+    User,
+    Smartphone,
+    ShieldCheck,
+    Lock,
+    Palette,
+    Bell,
+    SlidersHorizontal,
+    Keyboard as KeyboardIcon,
+    PanelLeft,
+    Info
+  } from '$lib/icons';
   import { session } from '$lib/stores/session.svelte';
   import { pushBack } from '$lib/platform/backstack';
 import Account from './sections/Account.svelte';
@@ -32,29 +48,31 @@ import HelpAbout from './sections/HelpAbout.svelte';
     | 'encryption'
     | 'help-about';
 
-  const GROUPS: { label: string; items: { id: Section; label: string }[] }[] = [
+  type NavIcon = Component<{ size?: number; strokeWidth?: number; class?: string }>;
+
+  const GROUPS: { label: string; items: { id: Section; label: string; icon: NavIcon }[] }[] = [
     {
       label: 'User settings',
       items: [
-        { id: 'account', label: 'Account' },
-        { id: 'devices', label: 'Devices' },
-        { id: 'security-privacy', label: 'Security & Privacy' },
-        { id: 'encryption', label: 'Encryption' },
+        { id: 'account', label: 'Account', icon: User },
+        { id: 'devices', label: 'Devices', icon: Smartphone },
+        { id: 'security-privacy', label: 'Security & Privacy', icon: ShieldCheck },
+        { id: 'encryption', label: 'Encryption', icon: Lock },
       ],
     },
     {
       label: 'App settings',
       items: [
-        { id: 'appearance', label: 'Appearance' },
-        { id: 'notifications', label: 'Notifications' },
-        { id: 'preferences', label: 'Preferences' },
-        { id: 'keyboard', label: 'Keyboard' },
-        { id: 'sidebar', label: 'Sidebar' },
+        { id: 'appearance', label: 'Appearance', icon: Palette },
+        { id: 'notifications', label: 'Notifications', icon: Bell },
+        { id: 'preferences', label: 'Preferences', icon: SlidersHorizontal },
+        { id: 'keyboard', label: 'Keyboard', icon: KeyboardIcon },
+        { id: 'sidebar', label: 'Sidebar', icon: PanelLeft },
       ],
     },
     {
       label: 'Info',
-      items: [{ id: 'help-about', label: 'Help & About' }],
+      items: [{ id: 'help-about', label: 'Help & About', icon: Info }],
     },
   ];
 
@@ -156,7 +174,12 @@ import HelpAbout from './sections/HelpAbout.svelte';
       bind:this={panel}
     >
       <nav class="nav" aria-labelledby="settings-title">
-        <h2 id="settings-title" class="nav-title">Settings</h2>
+        <header class="nav-header">
+          <h2 id="settings-title" class="nav-title">Settings</h2>
+          <button type="button" class="nav-close" aria-label="Close settings" onclick={onclose}>
+            <Icon icon={X} size={20} />
+          </button>
+        </header>
 
         {#each GROUPS as group (group.label)}
           <div class="group">
@@ -168,14 +191,19 @@ import HelpAbout from './sections/HelpAbout.svelte';
                 aria-current={section === item.id ? 'page' : undefined}
                 onclick={() => openSection(item.id)}
               >
-                {item.label}
+                <span class="nav-icon"><Icon icon={item.icon} size={20} /></span>
+                <span class="nav-label">{item.label}</span>
+                <span class="nav-chevron"><Icon icon={ChevronRight} size={20} /></span>
               </button>
             {/each}
           </div>
         {/each}
 
         <div class="nav-footer">
-          <button type="button" class="nav-item danger" onclick={signOut}>Sign out</button>
+          <button type="button" class="nav-item danger" onclick={signOut}>
+            <span class="nav-icon"><Icon icon={LogOut} size={20} /></span>
+            <span class="nav-label">Sign out</span>
+          </button>
         </div>
       </nav>
 
@@ -359,15 +387,107 @@ import HelpAbout from './sections/HelpAbout.svelte';
   .back {
     display: none;
   }
-  @media (max-width: 719px) {
+  .nav-icon,
+  .nav-chevron,
+  .nav-close {
+    display: none;
+  }
+  @media (max-width: 899px) {
     .backdrop {
       padding: 0;
+      background: var(--alloy-color-surface-canvas);
     }
     .panel {
+      padding: var(--alloy-safe-area-top) var(--alloy-safe-area-right) 0 var(--alloy-safe-area-left);
       border-radius: 0;
+      box-shadow: none;
     }
     .nav {
       width: 100%;
+      gap: 0;
+      padding: 0 0 var(--alloy-safe-area-bottom);
+      background: var(--alloy-color-surface-canvas);
+      overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
+    }
+    .nav-header {
+      display: flex;
+      align-items: center;
+      gap: var(--alloy-spacing-scale-2);
+      min-height: 56px;
+      padding: 0 var(--alloy-spacing-scale-2) 0 var(--alloy-layout-gutter);
+    }
+    .nav-header .nav-title {
+      flex: 1;
+      min-height: 0;
+      padding: 0;
+    }
+    .nav-close {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      width: 44px;
+      height: 44px;
+      padding: 0;
+      border: 0;
+      border-radius: var(--alloy-radii-full);
+      background: transparent;
+      color: var(--alloy-color-text-secondary);
+      cursor: pointer;
+    }
+    .group-label {
+      padding: var(--alloy-spacing-scale-4) var(--alloy-layout-gutter) var(--alloy-spacing-scale-2);
+    }
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: var(--alloy-spacing-scale-3);
+      min-height: 56px;
+      padding: 0 var(--alloy-layout-gutter);
+      border-bottom: 1px solid var(--alloy-color-border-subtle);
+      border-radius: 0;
+      font-size: var(--alloy-typography-size-lg);
+      color: var(--alloy-color-text-primary);
+    }
+    .nav-item:hover {
+      background: transparent;
+      color: var(--alloy-color-text-primary);
+    }
+    .nav-item:active {
+      background: var(--alloy-color-surface-hover);
+    }
+    .nav-item[aria-current='page'] {
+      background: transparent;
+      font-weight: var(--alloy-typography-weight-medium);
+    }
+    .nav-item.danger,
+    .nav-item.danger .nav-icon {
+      color: var(--alloy-color-status-error);
+    }
+    .nav-icon,
+    .nav-chevron {
+      display: inline-flex;
+      flex-shrink: 0;
+    }
+    .nav-icon {
+      color: var(--alloy-color-text-secondary);
+    }
+    .nav-chevron {
+      color: var(--alloy-color-text-muted);
+    }
+    .nav-label {
+      flex: 1;
+      min-width: 0;
+    }
+    .nav-footer {
+      margin-top: auto;
+      padding-top: 0;
+      border-top: 1px solid var(--alloy-color-border-subtle);
+    }
+    .nav-footer .nav-item {
+      min-height: 52px;
+      border-bottom: none;
     }
     .panel[data-view='nav'] .content {
       display: none;
@@ -379,17 +499,48 @@ import HelpAbout from './sections/HelpAbout.svelte';
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 40px;
-      height: 40px;
+      flex-shrink: 0;
+      width: 44px;
+      height: 44px;
       padding: 0;
       border: 0;
       border-radius: var(--alloy-radii-full);
       background: transparent;
-      color: var(--alloy-color-text-secondary);
+      color: var(--alloy-color-text-primary);
       cursor: pointer;
     }
+    .header {
+      min-height: 56px;
+      padding: 0 var(--alloy-spacing-scale-2);
+    }
+    .close {
+      display: none;
+    }
+    .scroll {
+      overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
+    }
     .column {
-      padding: var(--alloy-spacing-scale-6) var(--alloy-layout-gutter) var(--alloy-spacing-scale-6);
+      max-width: none;
+      margin: 0;
+      padding: var(--alloy-spacing-scale-4) var(--alloy-layout-gutter)
+        calc(var(--alloy-spacing-scale-6) + var(--alloy-safe-area-bottom));
+    }
+    .column :global(input:not([type='checkbox']):not([type='radio'])),
+    .column :global(select),
+    .column :global(textarea) {
+      min-height: 44px;
+      font-size: var(--alloy-typography-size-lg);
+    }
+    .column :global(.alloy-button) {
+      min-height: 44px;
+    }
+    .column :global(.icon-button) {
+      width: 44px;
+      height: 44px;
+    }
+    .column :global(.row) {
+      min-height: 56px;
     }
   }
   .column {

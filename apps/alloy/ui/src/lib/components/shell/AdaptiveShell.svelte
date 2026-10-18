@@ -3,6 +3,8 @@
   import SpaceRail from './SpaceRail.svelte';
   import Sidebar from './Sidebar.svelte';
   import ChatHeader from './ChatHeader.svelte';
+  import SpaceChips from './SpaceChips.svelte';
+  import MobileTabBar from './MobileTabBar.svelte';
   import MembersPanel from './MembersPanel.svelte';
   import RoomInfoPanel from './RoomInfoPanel.svelte';
   import CommandPalette from './CommandPalette.svelte';
@@ -25,6 +27,7 @@
   import { prefs, installPrefsEffects } from '$lib/stores/prefs.svelte';
   import { notifier } from '$lib/stores/notifier.svelte';
   import { notificationSettings } from '$lib/stores/notificationSettings.svelte';
+  import { viewport } from '$lib/stores/viewport.svelte';
 
   let paletteOpen = $state(false);
   let settingsOpen = $state(false);
@@ -71,6 +74,23 @@
   // The thread and the info slot are mutually exclusive, so at most one of them is the side panel.
   const sideLayout = $derived<'column' | 'overlay' | 'none'>(threadMode !== 'none' ? threadMode : infoMode);
 
+  // Phones (<= 899px) swap the rail for a space strip and add a bottom tab bar.
+  const phone = $derived(viewport.isPhone);
+  const tabActive = $derived<'chats' | 'discover' | 'settings'>(
+    directoryOpen ? 'discover' : settingsOpen ? 'settings' : 'chats'
+  );
+  const unreadTotal = $derived(
+    roomsStore.rooms.reduce(
+      (sum, r) => sum + (r.is_space ? 0 : r.unread_notifications.notification_count),
+      0
+    )
+  );
+
+  function showChats() {
+    directoryOpen = false;
+    settingsOpen = false;
+  }
+
   onMount(() => {
     const teardownPrefs = installPrefsEffects();
     void prefs.load();
@@ -109,10 +129,12 @@
     return pushBack(() => threadStore.close());
   });
 
-  // On phones an open room info overlay takes a Back entry, so Back closes it before the chat.
+  // On phones an open room info or member overlay takes a Back entry, so Back closes it before the chat.
   $effect(() => {
-    if (breakpoint !== 'narrow' || infoPanel !== 'room-info' || infoMode !== 'overlay') return;
-    return pushBack(() => ui.closeRoomInfo());
+    if (breakpoint !== 'narrow' || infoMode !== 'overlay') return;
+    if (infoPanel === 'room-info') return pushBack(() => ui.closeRoomInfo());
+    if (infoPanel === 'members') return pushBack(() => (ui.membersOpen = false));
+    return;
   });
 
   // On phones the system Back button returns from a chat to the room list instead of leaving the app.
@@ -166,8 +188,22 @@
   style:--details-width="{layout.detailsWidth}px"
 >
   <div class="nav">
-    <SpaceRail onnew={() => (newRoomOpen = true)} />
-    <Sidebar onselect={pick} onnew={() => (newRoomOpen = true)} onbrowse={() => (directoryOpen = true)} onsettings={() => (settingsOpen = true)} />
+    {#if phone}
+      <SpaceChips onnew={() => (newRoomOpen = true)} />
+      <div class="list-body">
+        <Sidebar onselect={pick} onnew={() => (newRoomOpen = true)} onbrowse={() => (directoryOpen = true)} onsettings={() => (settingsOpen = true)} />
+      </div>
+      <MobileTabBar
+        active={tabActive}
+        onchats={showChats}
+        ondiscover={() => (directoryOpen = true)}
+        onsettings={() => (settingsOpen = true)}
+        unread={unreadTotal}
+      />
+    {:else}
+      <SpaceRail onnew={() => (newRoomOpen = true)} />
+      <Sidebar onselect={pick} onnew={() => (newRoomOpen = true)} onbrowse={() => (directoryOpen = true)} onsettings={() => (settingsOpen = true)} />
+    {/if}
   </div>
 
   {#if breakpoint !== 'narrow'}
@@ -239,7 +275,8 @@
     position: relative;
     display: grid;
     grid-template-columns: var(--sidebar-width, 312px) 6px minmax(0, 1fr);
-    height: 100dvh;
+    height: 100%;
+    box-sizing: border-box;
     overflow: hidden;
     /* Keep content clear of the status bar, gesture bar and display cutouts on phones. */
     padding: var(--alloy-safe-area-top) var(--alloy-safe-area-right) var(--alloy-safe-area-bottom)
@@ -317,12 +354,27 @@
     color: var(--alloy-color-text-primary);
   }
 
-  /* Narrow: one pane at a time. The list pane is the rail plus sidebar; the chat pane is the conversation. */
+  /* Phone (narrow): one screen at a time. The list screen is the space strip, the room list and the
+     bottom tab bar; the chat screen is the conversation. Only inner lists scroll. */
   .shell[data-layout='narrow'] {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    /* The tab bar pads the bottom safe area itself on the list screen. */
+    padding-bottom: 0;
+  }
+  .shell[data-layout='narrow'][data-pane='chat'] {
+    padding-bottom: var(--alloy-safe-area-bottom);
   }
   .shell[data-layout='narrow'] .nav {
-    grid-template-columns: 72px minmax(0, 1fr);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .shell[data-layout='narrow'] .list-body {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
+    flex: 1 1 0;
+    min-height: 0;
   }
   .shell[data-layout='narrow'][data-pane='list'] .chat {
     display: none;
@@ -330,8 +382,27 @@
   .shell[data-layout='narrow'][data-pane='chat'] .nav {
     display: none;
   }
+  /* Room info and members take the whole screen, sliding in from the right. */
   .shell[data-layout='narrow'][data-side='overlay'] .side {
-    left: var(--alloy-spacing-scale-2);
+    position: fixed;
+    inset: 0;
+    z-index: 20;
     width: auto;
+    border: 0;
+    border-radius: 0;
+    padding: var(--alloy-safe-area-top) var(--alloy-safe-area-right) var(--alloy-safe-area-bottom)
+      var(--alloy-safe-area-left);
+    animation: alloy-panel-in var(--alloy-motion-duration-normal) ease-out;
+  }
+  .shell[data-layout='narrow'][data-thread='overlay'] .thread-host {
+    animation: alloy-panel-in var(--alloy-motion-duration-normal) ease-out;
+  }
+  @keyframes alloy-panel-in {
+    from {
+      transform: translateX(100%);
+    }
+    to {
+      transform: none;
+    }
   }
 </style>

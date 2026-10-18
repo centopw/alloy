@@ -114,4 +114,17 @@
     margin: 0;
     color: var(--alloy-color-status-error);
   }
+  @media (max-width: 899px) {
+    input {
+      min-height: 44px;
+      font-size: var(--alloy-typography-size-lg);
+    }
+    .actions {
+      gap: var(--alloy-spacing-scale-2);
+    }
+    .actions :global(button) {
+      flex: 1;
+      min-height: 44px;
+    }
+  }
 </style>

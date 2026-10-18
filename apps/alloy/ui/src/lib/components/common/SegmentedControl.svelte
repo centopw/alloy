@@ -117,4 +117,20 @@
     outline-offset: 1px;
     z-index: 1;
   }
+
+  /*
+   * Phone and coarse pointers: segments are touch targets (44px high) and share the full width of
+   * the control as equal flex items. Inline styles set no width or height, so these rules apply.
+   */
+  @media (max-width: 899px), (pointer: coarse) {
+    .alloy-segmented-control {
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .alloy-segmented-option {
+      flex: 1 1 0;
+      min-width: 0;
+      min-height: var(--alloy-touch-target);
+    }
+  }
 </style>

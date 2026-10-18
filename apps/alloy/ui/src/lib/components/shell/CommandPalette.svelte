@@ -1,6 +1,9 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { Avatar } from '../common';
+  import { viewport } from '$lib/stores/viewport.svelte';
+  import Icon from '$lib/icons/Icon.svelte';
+  import { ChevronLeft } from '$lib/icons';
   import { roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
   import { pushBack } from '$lib/platform/backstack';
 
@@ -60,21 +63,26 @@
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
   <div class="backdrop" onclick={onclose}>
     <div class="palette" role="dialog" aria-modal="true" aria-label="Quick switcher" tabindex="-1" onclick={(e) => e.stopPropagation()}>
-      <input
-        bind:this={input}
-        bind:value={query}
-        onkeydown={onKey}
-        placeholder="Jump to a conversation"
-        aria-label="Jump to a conversation"
-        role="combobox"
-        aria-expanded="true"
-        aria-controls="palette-results"
-      />
+      <div class="bar">
+        <button type="button" class="back" aria-label="Close quick switcher" onclick={onclose}>
+          <Icon icon={ChevronLeft} size={24} />
+        </button>
+        <input
+          bind:this={input}
+          bind:value={query}
+          onkeydown={onKey}
+          placeholder="Jump to a conversation"
+          aria-label="Jump to a conversation"
+          role="combobox"
+          aria-expanded="true"
+          aria-controls="palette-results"
+        />
+      </div>
       <ul id="palette-results" role="listbox">
         {#each results as r, i (r.id)}
           <li role="option" aria-selected={i === index}>
             <button type="button" class:sel={i === index} onclick={() => onpick(r.id)}>
-              <Avatar userId={r.id} displayName={roomTitle(r)} size="sm" />
+              <Avatar userId={r.id} displayName={roomTitle(r)} size={viewport.isPhone ? 48 : 'sm'} />
               <span>{roomTitle(r)}</span>
             </button>
           </li>
@@ -144,5 +152,67 @@
     padding: var(--alloy-spacing-scale-4);
     text-align: center;
     color: var(--alloy-color-text-secondary);
+  }
+  .bar {
+    display: block;
+  }
+  .back {
+    display: none;
+  }
+  @media (max-width: 899px) {
+    .backdrop {
+      padding: 0;
+      align-items: stretch;
+      background: var(--alloy-color-surface-panel);
+    }
+    .palette {
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      height: 100%;
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
+    }
+    .bar {
+      display: flex;
+      align-items: center;
+      flex-shrink: 0;
+      padding-top: var(--alloy-safe-area-top);
+    }
+    .bar input {
+      flex: 1;
+      min-width: 0;
+      padding: 0 var(--alloy-layout-gutter) 0 var(--alloy-spacing-scale-1);
+    }
+    .back {
+      display: grid;
+      place-items: center;
+      flex: none;
+      width: 44px;
+      height: 44px;
+      min-height: 44px;
+      margin-left: var(--alloy-spacing-scale-1);
+      padding: 0;
+      border: 0;
+      border-radius: var(--alloy-radii-full);
+      background: transparent;
+      color: var(--alloy-color-text-secondary);
+      cursor: pointer;
+    }
+    ul {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
+      padding: var(--alloy-layout-row-inset) var(--alloy-layout-row-inset) calc(var(--alloy-safe-area-bottom) + var(--alloy-layout-row-inset));
+    }
+    li button {
+      min-height: 64px;
+      box-sizing: border-box;
+      padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x);
+      font-size: var(--alloy-typography-size-base);
+    }
   }
 </style>

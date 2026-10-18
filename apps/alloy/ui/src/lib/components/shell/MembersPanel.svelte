@@ -1,7 +1,8 @@
 <script lang="ts">
   import { Avatar, Button, UserName } from '../common';
-  import { ChevronRight, Copy, Icon, Info, MessageSquare, User, X } from '$lib/icons';
+  import { ChevronLeft, ChevronRight, Copy, Icon, Info, MessageSquare, User, X } from '$lib/icons';
   import { contextmenu } from '$lib/platform/contextmenu';
+  import { viewport } from '$lib/stores/viewport.svelte';
   import { membersStore, memberLabel } from '$lib/stores/members.svelte';
   import { errorMessage } from '$lib/stores/errors';
   import { profileCard } from '$lib/stores/profileCard.svelte';
@@ -134,7 +135,7 @@
     <h2>Members</h2>
     {#if onclose}
       <button type="button" class="close" aria-label="Close members" onclick={() => onclose?.()}>
-        <Icon icon={X} size={20} />
+        <Icon icon={viewport.isPhone ? ChevronLeft : X} size={20} />
       </button>
     {/if}
   </header>
@@ -352,5 +353,64 @@
   }
   .notice p {
     margin: 0;
+  }
+
+  /* Phone: a full-screen page with a back arrow, and touch-sized rows. */
+  @media (max-width: 899px) {
+    .members-panel {
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      box-sizing: border-box;
+      padding: var(--alloy-safe-area-top) var(--alloy-safe-area-right) var(--alloy-safe-area-bottom)
+        var(--alloy-safe-area-left);
+    }
+    .bar {
+      height: var(--alloy-layout-header-height);
+      padding: 0 var(--alloy-spacing-scale-2);
+      justify-content: flex-start;
+    }
+    .bar h2 {
+      flex: 1;
+      min-width: 0;
+      font-size: var(--alloy-typography-size-lg);
+      font-weight: var(--alloy-typography-weight-semibold);
+    }
+    .close {
+      order: -1;
+      width: 44px;
+      height: 44px;
+      margin-inline: 0;
+    }
+    .close:hover {
+      background: transparent;
+    }
+    .room-info {
+      min-height: 56px;
+      font-size: var(--alloy-typography-size-lg);
+    }
+    .room-info:hover {
+      background: transparent;
+      color: var(--alloy-color-text-secondary);
+    }
+    .room-info:active {
+      background: var(--alloy-color-surface-hover);
+    }
+    .list {
+      overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
+    }
+    .row {
+      min-height: 56px;
+    }
+    .row:hover {
+      background: transparent;
+    }
+    .row:active {
+      background: var(--alloy-color-surface-hover);
+    }
+    .who {
+      font-size: var(--alloy-typography-size-lg);
+    }
   }
 </style>

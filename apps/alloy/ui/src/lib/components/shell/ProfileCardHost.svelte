@@ -101,13 +101,16 @@
 </script>
 
 {#if profileCard.isOpen && profileCard.userId}
+  {#if narrow}
+    <button type="button" class="scrim" aria-label="Dismiss profile" onclick={() => profileCard.close()}></button>
+  {/if}
   <div
     bind:this={cardEl}
     class="host"
     class:sheet={narrow}
     style={narrow ? undefined : `left: ${position.left}px; top: ${position.top}px; width: ${CARD_WIDTH}px;`}
     role="dialog"
-    aria-modal="false"
+    aria-modal={narrow ? 'true' : 'false'}
     aria-label="User profile"
     tabindex="-1"
   >
@@ -147,10 +150,11 @@
     bottom: 0;
     top: auto;
     width: 100%;
-    max-height: 80vh;
+    max-height: 90dvh;
+    overscroll-behavior: contain;
     border-radius: var(--alloy-radii-lg) var(--alloy-radii-lg) 0 0;
     border-bottom: none;
-    padding-bottom: var(--alloy-space-4);
+    padding-bottom: calc(var(--alloy-spacing-scale-4) + var(--alloy-safe-area-bottom));
   }
 
   .grabber {
@@ -159,5 +163,16 @@
     margin: var(--alloy-space-2) auto 0;
     border-radius: var(--alloy-radii-full);
     background: var(--alloy-color-border-prominent);
+  }
+
+  /* Phone: a scrim behind the bottom sheet. Tapping it dismisses the profile. */
+  .scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 999;
+    padding: 0;
+    border: none;
+    background: rgba(0, 0, 0, 0.5);
+    cursor: pointer;
   }
 </style>
