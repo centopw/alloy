@@ -17,8 +17,7 @@
   import { roomNotify } from '$lib/stores/roomNotify.svelte';
   import { displayTags, TAG_COLOUR_VARS, TAG_COLOURS } from '$lib/stores/tags';
   import { tags } from '$lib/stores/tags.svelte';
-  import { updatesStore } from '$lib/stores/updates.svelte';
-  import UpdatePill from '../updates/UpdatePill.svelte';
+  import UpdateNotice from '../updates/UpdateNotice.svelte';
   import { groupRoomsByTag, ROOM_SORTS, type RoomSort } from '$lib/stores/roomSort';
   import type { TagColour } from '$lib/generated';
   import { ui } from '$lib/stores/ui.svelte';
@@ -446,9 +445,6 @@
 <section class="sidebar" aria-label="Rooms">
   <header class="head" use:contextmenu={paneItems}>
     <h2 class="scope" title={scopeTitle}>{viewport.isPhone ? 'Chats' : scopeTitle}</h2>
-    {#if viewport.isPhone && updatesStore.pending}
-      <UpdatePill />
-    {/if}
     {#if !viewport.isPhone}
       <button type="button" class="icon" aria-label="Browse public rooms" onclick={() => onbrowse?.()}>
         <Icon icon={Compass} size={20} />
@@ -544,6 +540,7 @@
     {/if}
   </div>
 
+  <UpdateNotice />
   <UserPanel onsettings={() => onsettings?.()} />
 </section>
 

@@ -346,6 +346,7 @@
       bind:this={field}
       bind:value={text}
       rows="1"
+      data-composer-field
       {placeholder}
       aria-label={viewport.isPhone ? phoneName : hintSend ? 'Message. Press Ctrl+Enter or Cmd+Enter to send' : 'Message'}
       data-shortcut="Enter"

@@ -31,7 +31,8 @@
   import { notificationSettings } from '$lib/stores/notificationSettings.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
   import { updatesStore } from '$lib/stores/updates.svelte';
-  import TitleStrip from './TitleStrip.svelte';
+  import { focusComposer, shouldFocusComposer } from '$lib/platform/typeToFocus';
+  import ChangelogDialog from '$lib/components/updates/ChangelogDialog.svelte';
 
   let paletteOpen = $state(false);
   let settingsOpen = $state(false);
@@ -182,6 +183,8 @@
   }
 
   function onKeydown(e: KeyboardEvent) {
+    // Typing anywhere in a conversation starts a message; the keystroke follows focus into the field.
+    if (activeId && !paletteOpen && shouldFocusComposer(e)) focusComposer();
     const mod = e.metaKey || e.ctrlKey;
     if (mod && e.key.toLowerCase() === 'k') {
       e.preventDefault();
@@ -199,7 +202,7 @@
 <svelte:window onkeydown={onKeydown} bind:innerWidth />
 
 <div class="frame">
-<TitleStrip />
+<ChangelogDialog />
 <div
   class="shell"
   data-layout={breakpoint}

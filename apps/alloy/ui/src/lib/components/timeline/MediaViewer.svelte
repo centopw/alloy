@@ -9,10 +9,12 @@
 </script>
 
 <script lang="ts">
-  import { Modal } from '../common';
+  import { tick } from 'svelte';
   import Icon from '$lib/icons/Icon.svelte';
-  import { Download } from '$lib/icons';
+  import { Download, X } from '$lib/icons';
   import { errorMessage } from '$lib/stores/errors';
+  import { pushBack } from '$lib/platform/backstack';
+  import { portal } from '$lib/platform/portal';
   import { canDownloadMedia, downloadMedia } from '$lib/platform/saveFile';
 
   interface Props {
@@ -30,6 +32,8 @@
   let failed = $state(false);
   let saving = $state(false);
   let status = $state<string | null>(null);
+  let root: HTMLDivElement | undefined = $state();
+  let opener: HTMLElement | null = null;
 
   const title = $derived(
     body || (mediaKind === 'video' ? 'Video' : mediaKind === 'audio' ? 'Audio' : 'Image')
@@ -55,6 +59,42 @@
     };
   });
 
+  // Android Back closes the viewer.
+  $effect(() => {
+    if (!open) return;
+    return pushBack(() => onclose());
+  });
+
+  $effect(() => {
+    if (open) {
+      opener = document.activeElement as HTMLElement | null;
+      void tick().then(() => root?.focus());
+    } else {
+      opener?.focus?.();
+      opener = null;
+    }
+  });
+
+  function onKey(e: KeyboardEvent) {
+    if (e.key === 'Escape') {
+      e.stopPropagation();
+      onclose();
+    } else if (e.key === 'Tab' && root) {
+      // Keep focus inside the viewer.
+      const f = root.querySelectorAll<HTMLElement>('button:not(:disabled), video, audio');
+      if (f.length === 0) return;
+      const first = f[0];
+      const last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+  }
+
   async function download() {
     saving = true;
     status = null;
@@ -68,25 +108,36 @@
   }
 </script>
 
-<Modal {open} {title} {onclose} width="min(960px, 94vw)">
-  <div class="viewer">
-    {#if downloadable}
-      <div class="toolbar">
-        <p class="status" aria-live="polite">{status ?? ''}</p>
-        <button type="button" class="download" onclick={download} disabled={saving || src === null}>
+{#if open}
+  <div class="viewer" role="dialog" aria-modal="true" aria-label={title} tabindex="-1" bind:this={root} onkeydown={onKey} use:portal>
+    <header class="bar">
+      <h2 class="name">{title}</h2>
+      <p class="status" aria-live="polite">{status ?? ''}</p>
+      {#if downloadable}
+        <button
+          type="button"
+          class="tool"
+          aria-label="Download"
+          data-tooltip="Download"
+          onclick={download}
+          disabled={saving || src === null}
+        >
           <Icon icon={Download} size={20} />
-          <span>{saving ? 'Saving' : 'Download'}</span>
         </button>
-      </div>
-    {/if}
-    <div class="stage">
+      {/if}
+      <button type="button" class="tool" aria-label="Close" data-tooltip="Close" onclick={onclose}>
+        <Icon icon={X} size={20} />
+      </button>
+    </header>
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+    <div class="stage" onclick={(e) => e.target === e.currentTarget && onclose()}>
       {#if failed}
-        <p class="status" role="alert">This {mediaKind} could not be loaded.</p>
+        <p class="note" role="alert">This {mediaKind} could not be loaded.</p>
       {:else if src === null}
-        <p class="status" aria-live="polite">Loading</p>
+        <p class="note" aria-live="polite">Loading</p>
       {:else if mediaKind === 'video'}
         <!-- svelte-ignore a11y_media_has_caption -->
-        <video controls src={src} aria-label={title}></video>
+        <video controls autoplay src={src} aria-label={title}></video>
       {:else if mediaKind === 'audio'}
         <audio controls src={src} aria-label={title}></audio>
       {:else}
@@ -94,59 +145,76 @@
       {/if}
     </div>
   </div>
-</Modal>
+{/if}
 
 <style>
-  /* Fixed height bounds the media: the stage fills what is left after the toolbar. */
+  /* Fills the whole window on every platform (portalled out of the virtualised timeline, whose transforms would otherwise confine it); the media keeps its own shape, with no panel behind it. */
   .viewer {
+    position: fixed;
+    inset: 0;
+    z-index: 70;
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-spacing-scale-3);
-    height: min(72vh, 680px);
-    min-height: 120px;
+    padding-top: var(--alloy-safe-area-top);
+    padding-bottom: var(--alloy-safe-area-bottom);
+    background: var(--alloy-color-surface-canvas);
+    color: var(--alloy-color-text-primary);
+    outline: none;
   }
 
-  .toolbar {
+  .bar {
     display: flex;
+    flex: none;
     align-items: center;
-    justify-content: flex-end;
-    gap: var(--alloy-spacing-scale-3);
+    gap: var(--alloy-spacing-scale-2);
+    padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
   }
 
-  .toolbar .status {
+  .name {
     flex: 1 1 auto;
     min-width: 0;
-    overflow-wrap: anywhere;
+    margin: 0;
+    overflow: hidden;
+    font-size: var(--alloy-typography-size-sm);
+    font-weight: var(--alloy-typography-weight-semibold);
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  .download {
+  .status {
+    flex: none;
+    margin: 0;
+    color: var(--alloy-color-text-secondary);
+    font-size: var(--alloy-typography-size-sm);
+  }
+
+  .tool {
     display: inline-flex;
     flex: none;
     align-items: center;
-    gap: var(--alloy-spacing-scale-1);
-    min-height: 36px;
-    padding: 0 var(--alloy-spacing-scale-3);
-    border: 1px solid var(--alloy-color-border-prominent);
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border: 0;
     border-radius: var(--alloy-radii-md);
-    background: var(--alloy-color-surface-subtle);
-    color: var(--alloy-color-text-primary);
-    font: inherit;
-    font-size: var(--alloy-typography-size-sm);
+    background: transparent;
+    color: var(--alloy-color-text-secondary);
     cursor: pointer;
   }
 
-  .download:hover:not(:disabled) {
+  .tool:hover:not(:disabled) {
     background: var(--alloy-color-surface-hover);
+    color: var(--alloy-color-text-primary);
   }
 
-  .download:disabled {
-    color: var(--alloy-color-text-secondary);
+  .tool:disabled {
+    opacity: 0.5;
     cursor: default;
   }
 
-  .download:focus-visible {
+  .tool:focus-visible {
     outline: 2px solid var(--alloy-color-accent-primary);
-    outline-offset: 1px;
+    outline-offset: -2px;
   }
 
   .stage {
@@ -155,6 +223,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    padding: 0 var(--alloy-spacing-scale-3) var(--alloy-spacing-scale-3);
   }
 
   img,
@@ -162,30 +231,16 @@
     max-width: 100%;
     max-height: 100%;
     object-fit: contain;
-    border-radius: var(--alloy-radii-md);
-    background: var(--alloy-color-surface-subtle);
   }
 
   audio {
     width: min(480px, 100%);
   }
 
-  .status {
+  .note {
     margin: 0;
     color: var(--alloy-color-text-secondary);
     font-size: var(--alloy-typography-size-sm);
     text-align: center;
-  }
-
-  /* Phones: the Modal is a bottom sheet capped at 90dvh; leave room for its header and the toolbar. */
-  @media (max-width: 899px) {
-    .viewer {
-      height: calc(90dvh - 9rem);
-    }
-
-    .download {
-      min-height: var(--alloy-touch-target);
-      padding: 0 var(--alloy-spacing-scale-4);
-    }
   }
 </style>

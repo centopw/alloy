@@ -6,7 +6,7 @@
   import { timelineStore } from '$lib/stores/timeline.svelte';
   import { threadStore } from '$lib/stores/thread.svelte';
   import { sanitizeHtml } from '$lib/content/html';
-  import { formatDay, formatTime, isEmojiOnly } from '$lib/content/format';
+  import { formatDay, formatTime, isEmojiOnly, isFileName } from '$lib/content/format';
   import { isHiddenState, stateEventSummary } from '$lib/content/stateEvents';
   import { prefs } from '$lib/stores/prefs.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
@@ -61,6 +61,13 @@
   /** A short run of emoji renders large when the pref is on. */
   const jumbo = $derived(
     item.content.kind === 'TextMessage' && prefs.bigEmoji && isEmojiOnly(item.content.data.body)
+  );
+  /** A picture, video or sticker sent without a caption sits straight on the timeline, with no bubble behind it. */
+  const bareMedia = $derived(
+    item.content.kind === 'Media' &&
+      ['image', 'video', 'sticker'].includes(item.content.data.media_kind ?? '') &&
+      !item.reply_to &&
+      !(item.content.data.body && !isFileName(item.content.data.body))
   );
   const stateSummary = $derived(item.content.kind === 'RoomState' ? stateEventSummary(item.content.data) : null);
   const senderName = $derived(item.sender_display_name ?? item.sender);
@@ -143,7 +150,7 @@
 {:else if item.content.kind === 'Virtual'}
   <div class="spacer"></div>
 {:else}
-  <div class="row" class:grouped class:own={item.is_own} class:jumbo class:highlighted data-layout={layout} data-event-id={item.event_id ?? undefined} bind:this={rowEl} use:contextmenu={menuItems}>
+  <div class="row" class:grouped class:own={item.is_own} class:jumbo class:bare={bareMedia} class:highlighted data-layout={layout} data-event-id={item.event_id ?? undefined} bind:this={rowEl} use:contextmenu={menuItems}>
     <div class="gutter">
       {#if layout === 'irc' || (layout === 'modern' && grouped)}
         <span class="gutter-time">{time}</span>
@@ -196,7 +203,7 @@
               height={item.content.data.height}
               thumbnailUri={item.content.data.thumbnail_uri}
             />
-            {#if item.content.data.media_kind === 'image' && item.content.data.body}
+            {#if item.content.data.media_kind === 'image' && item.content.data.body && !isFileName(item.content.data.body)}
               <div class="body caption">{item.content.data.body}{#if item.edited}<span class="edited">(edited)</span>{/if}</div>
             {/if}
           </div>
@@ -648,7 +655,8 @@
     font-size: var(--alloy-typography-size-xs);
     color: var(--alloy-color-text-muted);
   }
-  .row.jumbo[data-layout='bubbles'] .bubble {
+  .row.jumbo[data-layout='bubbles'] .bubble,
+  .row.bare[data-layout='bubbles'] .bubble {
     padding: 0;
     background: none;
   }

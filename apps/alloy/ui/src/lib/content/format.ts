@@ -65,3 +65,11 @@ export function isEmojiOnly(text: string, maxCount = 3): boolean {
   }
   return count > 0;
 }
+
+/**
+ * Whether a media message's `body` is just the file name. Clients without captions put the file
+ * name there, so it is not a caption worth showing under the picture.
+ */
+export function isFileName(body: string): boolean {
+  return /^\S+\.[A-Za-z0-9]{2,5}$/.test(body.trim());
+}

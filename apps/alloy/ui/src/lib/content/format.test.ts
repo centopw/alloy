@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../ipc/index.js", () => ({ client: { invoke: vi.fn() } }));
 
-import { formatListTime, formatTime, isEmojiOnly } from "./format";
+import { formatListTime, formatTime, isEmojiOnly, isFileName } from "./format";
 
 const afternoon = new Date(2026, 9, 1, 15, 5).getTime();
 
@@ -54,5 +54,18 @@ describe("isEmojiOnly", () => {
     expect(isEmojiOnly("1")).toBe(false);
     expect(isEmojiOnly("")).toBe(false);
     expect(isEmojiOnly("   ")).toBe(false);
+  });
+});
+
+describe('isFileName', () => {
+  it('treats a bare file name as no caption', () => {
+    expect(isFileName('gif-2004309606923428.webp')).toBe(true);
+    expect(isFileName('IMG_0042.JPG')).toBe(true);
+  });
+
+  it('keeps real captions', () => {
+    expect(isFileName('look at this.png')).toBe(false);
+    expect(isFileName('Lunch today')).toBe(false);
+    expect(isFileName('see you at 5.30')).toBe(false);
   });
 });

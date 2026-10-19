@@ -164,12 +164,12 @@
     max-height: 360px;
     border-radius: var(--alloy-radii-lg);
     overflow: hidden;
-    background: var(--alloy-color-surface-subtle);
   }
   .frame-open {
     display: block;
     padding: 0;
     border: 0;
+    background: transparent;
     font: inherit;
     color: inherit;
     text-align: inherit;
@@ -184,13 +184,15 @@
   canvas {
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    object-fit: contain;
     display: block;
   }
   .placeholder {
     width: 100%;
     height: 100%;
     min-height: 80px;
+    border-radius: var(--alloy-radii-lg);
+    background: var(--alloy-color-surface-subtle);
   }
   .file {
     display: flex;
