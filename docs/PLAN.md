@@ -19,6 +19,10 @@ This file is authoritative where the detail docs disagree (see §2).
 | D10 | **No iOS in first versions** (user, 2026-10-16): ship desktop + Android only, distributed by direct install (signed installers/AppImage/deb/rpm/MSI, APK via GitHub Releases, F-Droid later) so no app-store publication is required before first version. iOS (and App Store/TestFlight, APNs, NSE, Pulley) moves to P5. Play Store optional later. Android push = UnifiedPush first (no Google dependency), FCM optional. | user |
 | D8 | Apache-2.0. `forbid(unsafe_code)` workspace-wide; cargo-deny/audit in CI; zero telemetry by default. | 04 |
 | D9 | Package format `.alloy-pkg`, signed Minisign/Ed25519; dev-mode sideload on desktop. Manifest files are **JSON/JSONC validated by published JSON Schema** (user asked for `.json`; TOML dropped). | 03 |
+| D11 | **Discord-style layout** on desktop: space rail, room list, chat, optional side panels; gutter/bubbles/IRC message layouts are a user setting. | [0002](decisions/0002-discord-style-layout.md) |
+| D12 | **Settings are functional or absent.** Every control changes real behaviour, either an account setting through an engine command or a device preference in the `prefs` store; nothing decorative. | [0004](decisions/0004-functional-settings.md) |
+| D13 | **Mobile is its own shell, not a squeezed desktop** (width <= 899px): one screen at a time, bottom tab bar (Chats, Discover, Settings), full-screen pages, bottom/action sheets, 44px touch targets, a page that never scrolls. Guarded by a mobile E2E audit in CI. | [0005](decisions/0005-mobile-first-shell.md) |
+| D14 | **Advisories are explicit.** Unmaintained or unsound transitive dependencies with no upstream fix are accepted one by one, with a reason, in `deny.toml` and `.cargo/audit.toml`; the daily audit fails on anything new. Releases are pre-releases until signing certificates exist; desktop updates through a signed feed (`updater-feed` release), Android only reports a newer release. | [RELEASING](RELEASING.md) |
 
 ## 2. Cross-doc conflicts resolved
 
@@ -94,13 +98,15 @@ Parallel streams (after P0 contracts frozen: `alloy-protocol` v0, token schema v
 - **Delivery:** code-signing CI, updater, SBOM, SECURITY.md/CONTRIBUTING.
 - **Exit:** log in, E2EE chat, send/receive/edit/redact/reply/react, media, verify device, dark/light/AMOLED, on macOS+Windows+Linux; signed nightly builds; perf budgets in CI.
 
-**P1 status (2026-10-17): feature-complete on the engine, desktop packaging pending.** Engine: auth (discovery, password, restore, logout), room list, timeline with local echo, edit/redact/reply/react, receipts/typing, recovery + SAS verification, authenticated/encrypted media — all covered by Synapse integration tests (`crates/alloy-engine/tests`). UI: onboarding, adaptive shell, bubbles/gutter timeline, composer, invites, new room, settings, verification dialogs, command palette, per decision 0001. Full-stack proof: `apps/alloy/ui/scripts/e2e-bridge.mjs` (UI + `alloy-bridge` + Synapse). Known gaps for v0.1: OIDC (#65), @mentions/members API, upload progress, room details drawer, a11y audit (#36), signed installers, real-device perf (G1).
+**P1 status (2026-10-19): complete. Shipped as pre-releases v0.1.0 to v0.1.4 (macOS arm64/x64, Windows, Linux, signed-with-a-throwaway-key Android APK).** Engine: auth (discovery, password, restore, logout), room list, timeline with local echo, edit/redact/reply/react, receipts/typing, recovery + SAS verification, authenticated/encrypted media, room admin (name/topic/avatar/note), user profiles and DMs, notification rules, devices and profile editing; all covered by Synapse integration tests (`crates/alloy-engine/tests`). UI: onboarding, Discord-style shell, three message layouts, composer with markdown/mentions/attachments/polls, threads, room info and profile cards, context menus, resizable panels, command palette, ten functional settings pages, desktop notifications, in-app updates, per decisions 0001 to 0005. Full-stack proof: `apps/alloy/ui/scripts/e2e-bridge.mjs` (desktop and `E2E_MOBILE=1` audits against `alloy-bridge` + Synapse, both in CI). Still open from the P1 exit: OIDC login (#65), perf budgets in CI (#69, #70), real-device perf (G1, #26), a11y audit (#20, #36), and signing certificates for notarized/Authenticode/Play-style distribution (#51, owner: user).
 
 ### P2 — Mobile + parity + Tier-A customization (v0.2–0.4)
 - **Mobile:** UI-05 safe areas/gestures, CORE-14/15 `alloy-ffi` UnifiedPush (+ optional FCM) service, UI-08 event wiring; signed APK via GitHub Releases. iOS not in scope (D10).
 - **Features:** CORE-10 reactions/polls, CORE-11 threads (UX-10), CORE-12 spaces, CORE-13 encrypted search, UX-09 QR login + SAS UX, UX-11 voice messages/polls UI, UX-12 Fluent i18n/RTL, a11y pass.
 - **Customization Tier A:** EXT-01/02/03 (theme packages, hot reload, keybindings, slash commands), UX-14 settings screen, local `.json` package loading, JSON Schemas published.
 - **Exit:** feature parity with Element X core flows; push works on both mobiles; users can load a custom theme/keybinding JSON.
+
+**P2 status (2026-10-19): about half done.** Done: reactions and polls (#30), threads (#27), spaces and room directory (#28), mobile-first shell with back-button flow, safe areas and keyboard handling (ADR 0005, #25 partly), Android release APK of 36 MB with an update check (#73), Android sign-in fixed (system CA store), functional settings and notifications (ADR 0004). Not started: push delivery via UnifiedPush/FCM and `alloy-ffi` (#24, the biggest gap for real mobile use), content:// attachments (#72), encrypted search (#31), QR login (#32), voice messages (#33), Fluent i18n/RTL (#34), Tier-A package loading (#35: four themes ship, but compiled in, not loaded from user JSON), a11y audit (#36), Android keystore wrapping (#74).
 
 ### P3 — Tier-B plugins (v0.5)
 Serial first: EXT-04 WIT + `alloy-protocol` plugin events (needs stable core API). Then parallel: EXT-05 engine, EXT-06 Wasmi fallback, EXT-07 capabilities/prompts, EXT-08 limits, EXT-09 scoped KV, EXT-10 `alloy-pdk-rust`, EXT-11 `.alloy-pkg`, UX-13 + UI-06/07 slots & declarative renderer & sandboxed iframe widgets, EXT-16 TS PDK (optional/nonblocking).
@@ -127,7 +133,35 @@ Highest risks: WebView perf on low-end Android (G1), Android background delivery
 ## 7. Open items (non-blocking, defaults chosen)
 - Oldest device baseline: Android 10+ low-end devices (default); iOS out of scope.
 - Default density: Normal; bubbles for DMs, gutter for channels (05 recommendation).
-- Mobile tabs: 4 (Spaces, DMs, Mentions, Settings).
+- Mobile tabs: 3 (Chats, Discover, Settings), decided in ADR 0005 after the 4-tab proposal.
 - Apple Developer ID / Play accounts: needed by P1 signing CI (owner: user).
 - Telemetry: none in v1.
 - Product name/branding/domain: "Alloy" placeholder.
+
+## 8. Roadmap (2026-10-19)
+
+### What changed against the plan above
+- **Crates:** an `alloy-engine` crate (command handlers, subscriptions, event sink) sits between the Tauri app and `alloy-core`, and `alloy-bridge` exposes it over WebSocket for the browser E2E. `alloy-ffi` and `tools/alloy-pack` do not exist yet (P2 push, P3 packaging).
+- **Customization:** the token system, light/dark/AMOLED and one extra theme ship, and `schemas/` hold the theme, keybinding and plugin-manifest schemas, but themes are compiled in; `alloy-plugin` has the Wasmtime host (fuel, 32 MiB cap, capability denial) and a sample `hello-plugin`, not yet wired into the engine.
+- **Layout and mobile:** D11 and D13 replaced the single adaptive layout of the first plan.
+- **Delivery:** GitHub Releases with a nightly channel, signed update feed for desktop, ad-hoc signed macOS bundle, SBOM; all releases are pre-releases.
+- **Performance:** G1 stays provisional (emulator only: p95 20-22 ms frames); release APK 36 MB.
+
+### Now (v0.2 train: Android and parity)
+| Item | Issue | Why now |
+|---|---|---|
+| Push notifications without Google services (UnifiedPush, optional FCM, `alloy-ffi`) | #24 | Phones get nothing while the app is closed |
+| OIDC / MAS login | #65 | matrix.org and other large servers are moving to MAS |
+| Mobile gestures (swipe to reply, pull to refresh), content:// attachments | #25, #72 | Finish the mobile shell |
+| Real-device G1 and idle-memory budgets | #26, #69, #70 | Confirms or triggers the D2 fallback |
+| Keyboard/screen-reader baseline, then full a11y audit | #20, #36 | Needed before 1.0; cheap now |
+| Android keystore wrapping, secret types for passwords | #74 | Security debt from #37 |
+
+### Next (v0.2 to v0.4)
+Encrypted search (#31), QR login and verification polish (#32), voice messages (#33), Fluent i18n and RTL (#34), Tier-A packages: load theme/keybinding/slash-command JSON from disk with hot reload (#35).
+
+### Later
+v0.5 plugins (#38 to #46), v1.0 marketplace, signing and distribution (#47 to #55; signing certificates and store accounts are the user's), Post-1.0 (#56 to #60).
+
+### Standing rules for new work
+Every screen passes the mobile audit; every setting changes behaviour; every dependency advisory is accepted explicitly or fixed; every bug fix lands with a test that fails without it.

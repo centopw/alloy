@@ -1,172 +1,140 @@
 # Alloy
 
-**A modern, cross-platform Matrix chat client.**
+**A privacy-first, customizable Matrix chat client for desktop and Android.**
 
-> **Status:** Pre-alpha (planning & foundations)
+Rust core, Tauri 2 shell, Svelte 5 UI. End-to-end encrypted, zero telemetry, Apache-2.0.
 
-Alloy is a privacy-first, extensible Matrix client written in Rust with a Tauri 2 desktop shell and a Svelte 5 web UI. It emphasizes encryption, customization, and deep user control through JSON packages and sandboxed WASM plugins.
+> **Status: pre-release (v0.1.x).** Desktop (macOS, Windows, Linux) and Android work end to end against a
+> real homeserver: sign in, encrypted chats, threads, polls, media, notifications, updates. Push
+> notifications while the app is closed, OIDC login, search, plugins and the marketplace are not built yet.
+> See the [roadmap](#roadmap).
 
-## Features (Planned)
+## What works today
 
-- **Desktop & Mobile:** Native apps for macOS, Windows, Linux, and Android (direct distribution; sideload APK)
-- **End-to-End Encryption:** E2EE via vodozemac; message verification & backup
-- **Deep Customization:**
-  - Tier-A: JSON packages (themes, keybindings, slash commands)
-  - Tier-B: Sandboxed WASM plugins (message renderers, custom panels, commands)
-  - Tier-C: Community marketplace with signed plugins & themes
-- **Sliding Sync:** Efficient room list and timeline synchronization (MSC3575, with MSC4186 proxy fallback)
-- **Modern UI:** Virtualized timeline, adaptive shell, light/dark/AMOLED themes
-- **Media Handling:** Authenticated downloads, thumbnail generation
-- **Privacy:** Zero telemetry by default; opt-in analytics only with consent
+**Chat**
+- Password sign-in with homeserver discovery, session restore, device verification (emoji SAS), recovery key.
+- Encrypted and plain rooms on sliding sync (MSC4186, with MSC3575 fallback), history loads as you scroll.
+- Send, edit, delete, reply, react, threads, polls, mentions, markdown, emoji, attachments with progress,
+  image/video/audio viewer, read receipts, typing indicator, unread badges that clear when you read.
+- Spaces, room directory, invites, new rooms and DMs, room info (name, topic, picture, private note,
+  media/files/links/members), profile cards, right-click and long-press menus.
 
-## Status
+**Look and feel**
+- Discord-style desktop layout with resizable panels; Modern, Bubbles or IRC message layouts;
+  light, dark and AMOLED themes plus one extra; font size, time format, per-user name colours.
+- A separate mobile UI under 900 px: one screen at a time, bottom tab bar, full-screen pages, bottom and
+  action sheets, 44 px touch targets, Send button, a page that never scrolls.
 
-**P0 — Foundations** (active)
-- [x] Workspace bootstrap
-- [ ] Core: matrix-sdk login + room list + timeline (in progress)
-- [ ] UI: Type generation + virtualized timeline (in progress)
-- [ ] Storage: keychain + encrypted database (planned)
-- [ ] Tauri mobile perf gate (planned)
-- [ ] CI skeleton with security checks (planned)
+**Settings that do something**
+- Account (display name, avatar), devices, security and privacy, encryption keys, notifications
+  (server push rules, desktop/Android notifications, per-room levels), preferences, keyboard reference, sidebar.
 
-See [docs/PLAN.md](docs/PLAN.md) for the full roadmap and architecture details.
+**Delivery**
+- Installers for macOS (arm64, x64), Windows (exe, msi) and Linux (AppImage, deb, rpm) and a 36 MB Android APK, on the
+  [releases page](https://github.com/centopw/alloy/releases). Desktop updates itself; Android tells you when
+  a newer release exists. SBOM attached to releases. No telemetry.
+
+## Roadmap
+
+Full plan: [docs/PLAN.md](docs/PLAN.md). Board: [github.com/users/centopw/projects/2](https://github.com/users/centopw/projects/2).
+
+| Train | Scope | State |
+|---|---|---|
+| P0 Foundations | workspace, spikes, CI, gate G0 | done |
+| **v0.1 Desktop MVP** | the list above | **done** (v0.1.0 to v0.1.4) |
+| **v0.2 to v0.4 Android and parity** | UnifiedPush/FCM push, OIDC login, mobile gestures, real-device perf (G1), a11y audit, encrypted search, QR login, voice messages, i18n and RTL, theme/keybinding JSON packages | in progress |
+| v0.5 Plugins | sandboxed WASM plugins (Wasmtime host exists), 12 UI extension slots, capability prompts | planned |
+| v1.0 Marketplace | signed packages and index, signed installers, Flathub/winget/Homebrew/F-Droid | planned |
+| Post-1.0 | web, calls (MatrixRTC), multi-account, widgets, iOS | planned |
+
+Not yet signed with paid developer certificates, so every release is marked pre-release.
 
 ## Installing a release
 
-Builds are on the [releases page](https://github.com/centopw/alloy/releases). They are not signed with a
-paid developer certificate yet, so the first launch needs one step:
+Builds are on the [releases page](https://github.com/centopw/alloy/releases):
 
 - **macOS:** drag Alloy to Applications, then right-click it and choose Open (or allow it under
   System Settings > Privacy & Security > Open Anyway). From a terminal:
-  `xattr -dr com.apple.quarantine /Applications/Alloy.app`. If macOS says the app is "damaged"
-  you have 0.1.1, whose bundle was not sealed; run the `xattr` command, or install 0.1.2 or newer.
-- **Windows:** SmartScreen may warn; choose More info, then Run anyway.
+  `xattr -dr com.apple.quarantine /Applications/Alloy.app`. Use 0.1.2 or newer (0.1.1 had an unsealed bundle).
+- **Windows:** `.exe` installer or `.msi`; SmartScreen may warn, choose More info, then Run anyway.
+- **Linux:** AppImage, `.deb` or `.rpm`.
 - **Android:** the APK is signed with a throwaway key, so uninstall the old version before installing a new one.
+  Needs Android 7.0 (API 24) or newer; the Android 10+ low-end target is the one we tune for.
 
-Once installed, desktop builds update themselves from Settings > About.
+Once installed, desktop builds update themselves from Settings > Help & About.
 
-## Quick Start
+## Development
 
 ### Prerequisites
 
-- **Rust:** 1.90+ (with rustfmt and clippy)
-- **Node.js & pnpm:** 22+ and 9+ respectively
-- **Just:** Command runner (see setup below)
-- **Docker:** Optional, for local Synapse testing
+- **Rust** 1.90+ (rustfmt, clippy) and **Node.js** 22+ with **pnpm** 9+ (`npm`, `yarn`, `bun` are not used)
+- **just** (task runner), **cargo-deny**, **cargo-audit**
+- **Docker** for the local Synapse used by integration and E2E tests
+- Android builds: Android SDK, NDK 27 and `rustup target add aarch64-linux-android`
 
-### Setup
+### Run it
 
-1. **Clone & enter the repo:**
-   ```bash
-   git clone https://github.com/centopw/alloy.git
-   cd alloy
-   ```
+```bash
+git clone https://github.com/centopw/alloy.git && cd alloy
+just hooks                 # commit-message hook (Conventional Commits)
+just synapse-up            # local homeserver on :8008 (users alice and bob, password testpassword123!)
+cd apps/alloy && pnpm install && (cd ui && pnpm install)
+pnpm tauri dev             # desktop app
+pnpm tauri android build --apk --debug --target aarch64   # Android debug APK
+```
 
-2. **Install tools:**
-   ```bash
-   # macOS
-   brew install just cargo-deny
-   # Or install globally via cargo
-   cargo install just cargo-deny --locked
-   ```
+### Checks (all enforced in CI)
 
-3. **Install dependencies & run checks:**
-   ```bash
-   just ui-check
-   ```
+```bash
+just ci                    # everything below
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+ALLOY_TEST_HS=http://localhost:8008 cargo test --workspace --no-fail-fast
+cargo deny check && cargo audit
+cd apps/alloy/ui && pnpm check && pnpm test && pnpm build
+node scripts/e2e-bridge.mjs                              # UI + engine + Synapse, desktop
+E2E_MOBILE=1 E2E_STRICT=1 node scripts/e2e-bridge.mjs    # phone audit: no page scroll, 44 px targets
+```
 
-4. **Start a local Synapse test homeserver (optional):**
-   ```bash
-   just synapse-up
-   # Run against it, then
-   just synapse-down
-   ```
-
-5. **Run the full CI pipeline locally:**
-   ```bash
-   just ci
-   ```
-
-This runs:
-- `cargo fmt --check` (Rust formatting)
-- `cargo clippy -D warnings --workspace` (Linting)
-- `cargo test` (Unit & integration tests)
-- `cargo deny check` (Dependency & license audit)
-- `cargo audit` (Vulnerability check)
-- `pnpm install && pnpm check && pnpm build` (UI type-check & build)
+Other recipes: `just --list`. Releasing: [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Architecture
 
 ```
-┌─────────────────────────────┐
-│  apps/alloy (Tauri 2 shell) │
-│  Svelte 5 + TypeScript UI   │
-│  • Adaptive shell/timeline  │
-│  • Token engine → CSS vars  │
-│  • 12 extension slots       │
-└──────────────┬──────────────┘
-       ⬌ IPC (Tauri / WASM)
-┌──────────────────────────────────┐
-│  Rust Core (crates/*) ────────┐  │
-│  • alloy-protocol: DTOs       │  │
-│  • alloy-core: matrix-sdk-ui  │  │
-│  • alloy-storage: keychain+DB │  │
-│  • alloy-plugin: WASM host    │  │
-│  • alloy-theme: tokens        │  │
-│  • alloy-ffi: NSE/FCM         │  │
-└──────────────────────────────────┘
-       ⬌ sliding sync, E2EE, media
-   ┌───────────────────────────┐
-   │  Matrix Homeserver        │
-   └───────────────────────────┘
+apps/alloy
+  ui/            Svelte 5 + TypeScript (runes only), tokens -> CSS variables, virtua timeline
+  src-tauri/     Tauri 2 shell: IPC glue, updater, notifications, Android project
+        | typed commands + VectorDiff events (alloy-protocol, TS types generated by specta)
+crates/
+  alloy-protocol   DTOs and commands shared with the UI
+  alloy-engine     command handlers, subscriptions, event sink
+  alloy-core       matrix-sdk / matrix-sdk-ui wrapper: sync, timeline, crypto, media, TLS
+  alloy-storage    SDK store + OS keychain (Android: file store)
+  alloy-theme      design-token schema and CSS generator
+  alloy-plugin     Wasmtime component host (limits, capabilities); not yet wired in
+  alloy-bridge     dev WebSocket bridge used by the browser E2E
+packages/          bundled themes, sample plugin     schemas/   JSON Schemas
 ```
 
-For details, see [docs/PLAN.md](docs/PLAN.md) and the architecture docs in [docs/plan/](docs/plan/).
+Data flow is one way: UI -> IPC -> `alloy-engine` -> `matrix-sdk` -> `eyeball-im` diffs -> `VectorDiffDto` ->
+Svelte reactive arrays. `#![forbid(unsafe_code)]` everywhere.
 
-## Project Recipes
+## Documentation
 
-```bash
-just --list              # Show all recipes
-just fmt                 # Format Rust code
-just lint                # Lint (fmt --check + clippy)
-just test                # Run all tests
-just deny                # Check licenses & banned deps
-just audit               # Check for known vulnerabilities
-just ui-check            # Type-check UI
-just ui-build            # Build UI bundles
-just synapse-up          # Start local Synapse in Docker
-just synapse-down        # Stop Synapse
-just ci                  # Full CI pipeline (all checks)
-```
+| | |
+|---|---|
+| [Master plan and roadmap](docs/PLAN.md) | decisions D1 to D14, phases, what changed, what is next |
+| [Decision records](docs/decisions/README.md) | [0001 visual language](docs/decisions/0001-ui-visual-language.md), [0002 layout](docs/decisions/0002-discord-style-layout.md), [0003 UX review](docs/decisions/0003-ux-review-2026-10.md), [0004 functional settings](docs/decisions/0004-functional-settings.md), [0005 mobile shell](docs/decisions/0005-mobile-first-shell.md) |
+| [Detail docs](docs/plan/) | UI stack, core, extensibility, security and delivery, UX, IPC contract, theming |
+| [Releasing](docs/RELEASING.md) · [CI](docs/CI.md) · [Tracking](docs/TRACKING.md) | pipelines, update feed, board workflow |
+| [Changelog](CHANGELOG.md) | per release |
 
-## Contributing
+## Contributing, conduct, security
 
-We welcome contributions! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for:
-- Development setup
-- Git & PR conventions (Conventional Commits)
-- Code style & quality expectations
-- Testing requirements
-- Security vulnerability reporting
-
-## Code of Conduct
-
-By participating, you agree to abide by the [Code of Conduct](CODE_OF_CONDUCT.md), which adopts the [Contributor Covenant 2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct.html).
+[CONTRIBUTING.md](CONTRIBUTING.md) (Conventional Commits, issue-first workflow) · [Code of Conduct](CODE_OF_CONDUCT.md) ·
+[SECURITY.md](SECURITY.md): report vulnerabilities through GitHub Security Advisories or hiep@hce.vn with `[SECURITY]`.
+Accepted dependency advisories, each with its reason, are listed in `deny.toml` and `.cargo/audit.toml`.
 
 ## License
 
-Alloy is licensed under the **Apache License 2.0**. See [LICENSE](LICENSE) for the full text.
-
-## Security
-
-For security vulnerability reports, please follow [SECURITY.md](SECURITY.md) and use **GitHub Security Advisories** (preferred) or email hiep@hce.vn with subject `[SECURITY]`.
-
----
-
-**More documentation:**
-- [Master Plan](docs/PLAN.md)
-- [UI Stack](docs/plan/01-ui-stack.md)
-- [Core Architecture](docs/plan/02-core-architecture.md)
-- [Extensibility](docs/plan/03-extensibility.md)
-- [Security & Delivery](docs/plan/04-security-delivery.md)
-- [UX Design](docs/plan/05-ux-design.md)
-- [CI Pipeline](docs/CI.md)
+Apache License 2.0, see [LICENSE](LICENSE).
