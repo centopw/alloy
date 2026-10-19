@@ -84,13 +84,13 @@ export function placeFlyout(
   return { x, y };
 }
 
-/** Svelte action: wire a node to the global context menu. The factory returns [] to opt out. */
 /** What a `use:contextmenu` element offers: rows, optionally with menu options (the reaction bar). */
 export interface ContextMenuSource {
   items: () => MenuItem[];
   options?: () => MenuOptions | undefined;
 }
 
+/** Svelte action: wire a node to the global context menu. The factory returns [] to opt out. */
 export function contextmenu(node: HTMLElement, factory: (() => MenuItem[]) | ContextMenuSource) {
   let source = factory;
   const getItems = () => (typeof source === 'function' ? source() : source.items());

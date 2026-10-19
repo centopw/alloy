@@ -218,7 +218,7 @@ try {
   step('react to the first message');
   const bobRow = await page.evaluateHandle(() => [...document.querySelectorAll('.row')].find((r) => r.textContent.includes('Hi from bob')));
   await bobRow.asElement().hover();
-  await page.evaluate((row) => row.querySelector('button[aria-label=React]').click(), bobRow);
+  await page.evaluate((row) => row.querySelector('button[aria-label="More reactions"]').click(), bobRow);
   // The shared emoji picker: search narrows the grid, picking an emoji toggles the reaction.
   await page.waitForSelector('.emoji-picker .cell', { visible: true, timeout: 30000 });
   await uxShot(page, 'emoji-picker');
@@ -226,6 +226,13 @@ try {
   await page.waitForFunction(() => document.querySelector('.emoji-picker .heading')?.textContent === 'Results' && /thumbs up/i.test(document.querySelector('.emoji-picker .cell')?.getAttribute('aria-label') ?? ''), { timeout: 10000 });
   await page.evaluate(() => document.querySelector('.emoji-picker .cell').click());
   await page.waitForFunction(() => document.querySelector('.chip.mine'), { timeout: 30000 });
+
+  step('one-click quick reaction from the hover toolbar');
+  await page.waitForFunction(() => [...document.querySelectorAll('.row[data-event-id]')].some((r) => r.textContent.includes('alloy-e2e') && r.querySelector('.toolbar')), { timeout: 30000 });
+  const linkRow = await page.evaluateHandle(() => [...document.querySelectorAll('.row[data-event-id]')].find((r) => r.textContent.includes('alloy-e2e')));
+  await linkRow.asElement().hover();
+  await page.evaluate((row) => row.querySelector('.toolbar button[aria-label^="React with"]').click(), linkRow);
+  await page.waitForFunction((row) => row.querySelector('.chip.mine'), { timeout: 30000 }, linkRow);
 
   step('hover an icon button shows a tooltip');
   await page.hover('button[aria-label="Search in room"]');
