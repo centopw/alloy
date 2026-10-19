@@ -48,8 +48,8 @@
     </div>
     <div class="row updates">
       <span class="label">Updates</span>
-      <div class="update-status">
-        <span class="status" role="status">
+      <div class="update">
+        <span class="value" role="status">
           {#if updatesStore.checking}
             Checking...
           {:else if available}
@@ -61,21 +61,21 @@
         {#if updatesStore.error}
           <p class="update-error" role="alert">{updatesStore.error}</p>
         {/if}
-      </div>
-      <div class="update-actions">
-        {#if available && !updatesStore.checking}
+        <div class="update-actions">
+          {#if available && !updatesStore.checking}
+            <Button
+              size="sm"
+              disabled={updatesStore.installing}
+              onclick={() => void updatesStore.install()}>{actionLabel}</Button
+            >
+          {/if}
           <Button
+            variant="ghost"
             size="sm"
-            disabled={updatesStore.installing}
-            onclick={() => void updatesStore.install()}>{actionLabel}</Button
+            disabled={updatesStore.checking || updatesStore.installing}
+            onclick={() => void updatesStore.check()}>Check for updates</Button
           >
-        {/if}
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled={updatesStore.checking || updatesStore.installing}
-          onclick={() => void updatesStore.check()}>Check for updates</Button
-        >
+        </div>
       </div>
     </div>
   </div>
@@ -131,7 +131,7 @@
   }
   .row {
     display: flex;
-    align-items: center;
+    align-items: baseline;
     justify-content: space-between;
     gap: var(--alloy-spacing-scale-3);
     padding: var(--alloy-spacing-scale-3) var(--alloy-layout-gutter);
@@ -163,23 +163,34 @@
     outline: 2px solid var(--alloy-color-accent-primary);
     outline-offset: 2px;
   }
-  .updates {
-    flex-wrap: wrap;
-    align-items: flex-start;
-  }
-  .update-status {
+  /* The label sits on the first line of the value column, like every other row; the actions go
+     under the status, right-aligned to the same edge as the values above. */
+  .update {
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-spacing-scale-1);
+    align-items: flex-end;
+    gap: var(--alloy-spacing-scale-2);
     min-width: 0;
-  }
-  .status {
-    color: var(--alloy-color-text-secondary);
-    font-size: var(--alloy-typography-size-sm);
+    text-align: right;
   }
   .update-actions {
     display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
     gap: var(--alloy-spacing-scale-2);
+  }
+  .label {
+    flex: none;
+  }
+  .update-actions :global(.variant-ghost) {
+    border-color: var(--alloy-color-border-prominent);
+  }
+  @media (max-width: 899px) {
+    .link {
+      display: inline-flex;
+      align-items: center;
+      min-height: 44px;
+    }
   }
   .update-error {
     margin: 0;

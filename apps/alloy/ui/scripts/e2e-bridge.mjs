@@ -176,6 +176,9 @@ try {
     await page.evaluate(() => [...document.querySelectorAll('nav[aria-label=Primary] button')].find((b) => b.textContent.includes('Settings')).click()); await settle(); await audit('8-settings-nav');
     await page.evaluate(() => [...document.querySelectorAll('[role=dialog] button')].find((b) => b.textContent.trim() === 'Appearance').click()); await settle();
     await audit('9-settings-appearance');
+    await page.evaluate(() => document.querySelector('button[aria-label="Back to settings"]').click()); await settle();
+    await page.evaluate(() => [...document.querySelectorAll('[role=dialog] button')].find((b) => b.textContent.trim() === 'Help & About').click()); await settle();
+    await audit('10-settings-about');
     if (problems.length) { console.log('MOBILE PROBLEMS (' + problems.length + '):\n' + [...new Set(problems)].join('\n')); }
     console.log(problems.length ? 'E2E MOBILE AUDIT FAILED' : 'E2E OK (mobile audit)');
     await browser.close(); server.close(); bridge.kill(); fs.rmSync(dataDir, { recursive: true, force: true });
@@ -351,6 +354,8 @@ try {
     await page.evaluate((l) => [...document.querySelectorAll('[role=dialog] nav button, [role=dialog] button')].find((b) => b.textContent.trim() === l).click(), label);
     await new Promise((r) => setTimeout(r, 500));
   };
+  await openPage('Help & About');
+  await uxShot(page, 'settings-about');
   await openPage('Appearance');
   await page.evaluate(() => [...document.querySelectorAll('[role=dialog] label')].find((l) => l.textContent.includes('Bubbles')).click());
   await page.waitForFunction(() => document.documentElement.getAttribute('data-message-layout') === 'bubbles', { timeout: 5000 });

@@ -85,6 +85,8 @@
 <style>
   .alloy-button {
     border: 1px solid transparent;
+    font-family: inherit;
+    line-height: inherit;
   }
   .variant-primary {
     background-color: var(--alloy-color-accent-primary, #4f46e5);
