@@ -9,3 +9,5 @@ export { default as Select, type SelectOption } from './Select.svelte';
 export { default as TextField } from './TextField.svelte';
 export { default as TextArea } from './TextArea.svelte';
 export { default as ConfirmDialog } from './ConfirmDialog.svelte';
+export { default as EmojiPicker } from './EmojiPicker.svelte';
+export { default as EmojiPickerHost } from './EmojiPickerHost.svelte';

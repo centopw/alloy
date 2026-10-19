@@ -27,7 +27,7 @@ describe('clampLayoutWidth', () => {
   it('clamps to limits and rounds to whole pixels', () => {
     expect(clampLayoutWidth('sidebarWidth', 10)).toBe(LAYOUT_LIMITS.sidebarWidth.min);
     expect(clampLayoutWidth('sidebarWidth', 9999)).toBe(LAYOUT_LIMITS.sidebarWidth.max);
-    expect(clampLayoutWidth('detailsWidth', 300.6)).toBe(301);
+    expect(clampLayoutWidth('detailsWidth', 380.6)).toBe(381);
   });
 
   it('falls back to the default for non-finite values', () => {
@@ -108,8 +108,8 @@ describe('LayoutStore', () => {
     };
     const store = new LayoutStore(broken);
     expect(store.sidebarWidth).toBe(LAYOUT_LIMITS.sidebarWidth.default);
-    expect(() => store.set('sidebarWidth', 400)).not.toThrow();
-    expect(store.sidebarWidth).toBe(400);
+    expect(() => store.set('sidebarWidth', 300)).not.toThrow();
+    expect(store.sidebarWidth).toBe(300);
     expect(() => store.reset()).not.toThrow();
     warn.mockRestore();
   });

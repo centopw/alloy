@@ -89,31 +89,38 @@
     line-height: inherit;
   }
   .variant-primary {
-    background-color: var(--alloy-color-accent-primary, #4f46e5);
-    color: var(--alloy-color-text-on-accent, #ffffff);
+    background-color: var(--alloy-color-accent-fill);
+    color: var(--alloy-color-text-on-accent);
     border-color: transparent;
   }
   .variant-primary:not(:disabled):hover {
-    background-color: var(--alloy-color-accent-hover, #4338ca);
+    background-color: var(--alloy-color-accent-hover);
   }
   .variant-ghost {
     background-color: transparent;
-    color: var(--alloy-color-text-primary, #f4f4f5);
+    color: var(--alloy-color-text-primary);
     border-color: transparent;
   }
   .variant-ghost:not(:disabled):hover {
-    background-color: var(--alloy-color-surface-hover, #27272a);
+    background-color: var(--alloy-color-surface-hover);
   }
   .variant-danger {
-    background-color: var(--alloy-color-status-error, #dc2626);
-    color: #ffffff;
+    background-color: var(--alloy-color-status-error);
+    color: var(--alloy-color-text-on-accent);
     border-color: transparent;
   }
   .variant-danger:not(:disabled):hover {
     filter: brightness(0.9);
   }
+  /* Touch: every button is a full-size target, whatever its desktop size. */
+  @media (max-width: 899px) {
+    .alloy-button {
+      min-height: 44px;
+      min-width: 44px;
+    }
+  }
   .alloy-button:focus-visible {
-    outline: 2px solid var(--alloy-color-accent-primary, #4f46e5);
+    outline: 2px solid var(--alloy-color-accent-primary);
     outline-offset: 2px;
   }
 </style>

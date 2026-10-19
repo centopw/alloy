@@ -1,9 +1,12 @@
 <script lang="ts">
   import { Button } from '$lib/components/common';
   import { SettingToggle } from '$lib/components/settings/controls';
+  import { capabilities, currentEnv } from '$lib/platform/capabilities';
   import { openExternal } from '$lib/platform/links';
+  import { prefs } from '$lib/stores/prefs.svelte';
   import { ui } from '$lib/stores/ui.svelte';
   import { updatesStore } from '$lib/stores/updates.svelte';
+  import { viewport } from '$lib/stores/viewport.svelte';
   import pkg from '../../../../../package.json';
 
   const REPOSITORY_URL = 'https://github.com/centopw/alloy';
@@ -15,8 +18,9 @@
 
   const info = $derived(updatesStore.info);
   const available = $derived(info?.available ? info : null);
-  const actionLabel = $derived(
-    updatesStore.installing ? 'Installing...' : info?.can_install ? 'Update' : 'View release'
+  const caps = $derived(capabilities(currentEnv(viewport.isPhone)));
+  const lastChecked = $derived(
+    updatesStore.lastCheckedAt === null ? 'Never' : new Date(updatesStore.lastCheckedAt).toLocaleString()
   );
 
   /** Names the engine transport this UI is talking through. */
@@ -62,22 +66,42 @@
           <p class="update-error" role="alert">{updatesStore.error}</p>
         {/if}
         <div class="update-actions">
-          {#if available && !updatesStore.checking}
-            <Button
-              size="sm"
-              disabled={updatesStore.installing}
-              onclick={() => void updatesStore.install()}>{actionLabel}</Button
-            >
+          {#if available}
+            <Button variant="ghost" size="sm" onclick={() => updatesStore.openChangelog()}>What's new</Button>
           {/if}
           <Button
             variant="ghost"
             size="sm"
-            disabled={updatesStore.checking || updatesStore.installing}
+            disabled={updatesStore.checking || updatesStore.busy}
             onclick={() => void updatesStore.check()}>Check for updates</Button
           >
         </div>
       </div>
     </div>
+    <div class="row">
+      <span class="label">Last checked</span>
+      <span class="value">{lastChecked}</span>
+    </div>
+  </div>
+
+  <div class="block">
+    <h3 class="subtitle">Automatic updates</h3>
+    <SettingToggle
+      label="Automatically check for updates"
+      description="Looks for a new release every few hours."
+      checked={prefs.autoCheckUpdates}
+      onchange={(value) => updatesStore.setAutoCheck(value)}
+    />
+    {#if caps.autoDownloadUpdates}
+      <SettingToggle
+        label="Download updates automatically"
+        description="Fetches new releases in the background so they are ready to install."
+        checked={prefs.autoDownloadUpdates}
+        disabled={!prefs.autoCheckUpdates}
+        disabledReason="Turn on automatic checks first."
+        onchange={(value) => updatesStore.setAutoDownload(value)}
+      />
+    {/if}
   </div>
 
   <div class="block">

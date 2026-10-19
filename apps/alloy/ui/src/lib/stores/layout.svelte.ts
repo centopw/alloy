@@ -6,8 +6,8 @@
 export const LAYOUT_STORAGE_KEY = 'alloy.layout.v1';
 
 export const LAYOUT_LIMITS = {
-  sidebarWidth: { min: 220, max: 480, default: 312 },
-  detailsWidth: { min: 280, max: 560, default: 340 },
+  sidebarWidth: { min: 200, max: 320, default: 240 },
+  detailsWidth: { min: 320, max: 420, default: 320 },
 } as const;
 
 export type LayoutKey = keyof typeof LAYOUT_LIMITS;

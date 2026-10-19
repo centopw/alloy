@@ -90,6 +90,16 @@ Design-system text input wrapping `<input>` with support for leading icon, binda
 
 Design-system multiline text input wrapping `<textarea>` with bindable value and element ref, token styling, error states, and optional automatic height expansion via `rows` and `maxRows`.
 
+### EmojiPicker
+
+One emoji picker for the composer and message reactions. `EmojiPicker.svelte` is the content: category tabs, search, Recently used, grouped sections with sticky headings, skin tones, keyboard support. `EmojiPickerHost.svelte` is mounted once in the root layout and shows it as a popover on desktop or a bottom sheet on phones. Open it with `emojiPicker.open({ anchor, onpick, keepOpen? })` from `stores/emojiPicker.svelte.ts`. Emoji data loads lazily from `emojibase-data` (`content/emoji.ts`); recents and the skin tone persist in `stores/emojiRecents.ts`.
+
+## Context Menus
+
+The OS-native context menu never appears. `installNativeMenuGuard` (`platform/nativeMenu.ts`, installed in the root layout) suppresses it everywhere and opens our text-edit, link, or selection menu where one applies. A component that needs its own menu uses `use:contextmenu={() => items}` (`platform/contextmenu.ts`). Do not register `oncontextmenu` handlers that bypass `contextMenu.open`; `lib/native-menu-audit.test.ts` enforces this.
+
+A row with `submenu` opens a flyout instead of selecting: the row shows a chevron, has no `onselect`, and its flyout is either a static `items` list or a function re-run on each open. `submenu.search` adds a search field that filters rows by label (trimmed, case-insensitive). With `search.create`, a non-empty query with no exact label match adds a create row (`label(query)`) that calls `onCreate(query)`. `submenu.maxHeight` (default 320px) caps the flyout before it scrolls. `keepOpen` runs `onselect` without closing, so toggles stay open. On desktop, flyouts open beside their row (`placeFlyout`); Arrow-Left or Escape steps back one level, and Tab closes the whole menu. On phones, the flyout drills into the same action sheet with a Back row. Filtering uses `submenuView`; `isSubmenuAction` and `resolveSubmenuItems` are shared with the component.
+
 ## Tokens Used
 
 - `--alloy-color-accent-primary`: Primary action, toggle checked state

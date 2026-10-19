@@ -18,6 +18,10 @@ export interface MenuAction {
   selected?: boolean;
   separator?: false;
   onselect?: () => void;
+  /** Opens a flyout from this row instead of selecting. A row with a submenu has no onselect. */
+  submenu?: MenuSubmenu;
+  /** Selecting runs onselect but keeps the menu open (toggles). Function-based submenu items are re-resolved. */
+  keepOpen?: boolean;
 }
 
 export interface MenuAnchor {
@@ -40,6 +44,24 @@ export interface MenuSeparator {
 
 export type MenuItem = MenuAction | MenuSeparator;
 
+export interface MenuSearchCreate {
+  label: (query: string) => string;
+  onCreate: (query: string) => void;
+}
+
+export interface MenuSubmenuSearch {
+  placeholder: string;
+  create?: MenuSearchCreate;
+}
+
+export interface MenuSubmenu {
+  items: MenuItem[] | (() => MenuItem[]);
+  /** Adds a search field at the top of the flyout; typing filters rows by label (case-insensitive). */
+  search?: MenuSubmenuSearch;
+  /** Max flyout height in px before it scrolls (default 320). */
+  maxHeight?: number;
+}
+
 export interface MenuPoint {
   x: number;
   y: number;
@@ -47,6 +69,40 @@ export interface MenuPoint {
 
 export function isSeparator(item: MenuItem): item is MenuSeparator {
   return item.separator === true;
+}
+
+export type SubmenuAction = MenuAction & { submenu: MenuSubmenu };
+
+export function isSubmenuAction(item: MenuItem): item is SubmenuAction {
+  return !isSeparator(item) && item.submenu !== undefined;
+}
+
+export function resolveSubmenuItems(submenu: MenuSubmenu): MenuItem[] {
+  return typeof submenu.items === 'function' ? submenu.items() : submenu.items;
+}
+
+export interface SubmenuView {
+  /** Rows after filtering. Separators are kept only when the query is empty. */
+  items: MenuItem[];
+  /** Trimmed query the rows were filtered with. */
+  query: string;
+  /** Whether the create row is offered: a non-empty query, no exact label match, and a create action. */
+  showCreate: boolean;
+}
+
+/**
+ * Filter submenu `items` by `query` (trimmed, case-insensitive substring of the label). The create row
+ * is offered only when `allowCreate` is true, the trimmed query is non-empty, and no label equals it.
+ */
+export function submenuView(items: MenuItem[], query: string, allowCreate: boolean): SubmenuView {
+  const q = query.trim();
+  if (q === '') return { items, query: q, showCreate: false };
+  const needle = q.toLowerCase();
+  const filtered = items.filter(
+    (item): item is MenuAction => !isSeparator(item) && item.label.toLowerCase().includes(needle),
+  );
+  const exact = items.some((item) => !isSeparator(item) && item.label.trim().toLowerCase() === needle);
+  return { items: filtered, query: q, showCreate: allowCreate && !exact };
 }
 
 class ContextMenuStore {

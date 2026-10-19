@@ -1,169 +1,265 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { UpdateInfo } from '../platform/updates';
+import type { UpdateInfo, UpdateProgress } from '../platform/updates';
+import {
+  AUTO_CHECK_DELAY_MS,
+  SKIPPED_VERSION_KEY,
+  UPDATE_CHECK_INTERVAL_MS,
+  UpdatesStore,
+  type UpdatesDeps,
+} from './updates.svelte';
 
-const mocks = vi.hoisted(() => ({
-  checkForUpdate: vi.fn(),
-  installUpdate: vi.fn(),
-  openExternal: vi.fn(),
-}));
-
+vi.mock('./prefs.svelte', () => ({ prefs: {} }));
 vi.mock('../platform/updates', () => ({
-  checkForUpdate: mocks.checkForUpdate,
-  installUpdate: mocks.installUpdate,
+  checkForUpdate: vi.fn(),
+  downloadUpdate: vi.fn(),
+  applyUpdate: vi.fn(),
+  onUpdateDownloaded: vi.fn(() => () => {}),
 }));
+vi.mock('../platform/links', () => ({ openExternal: vi.fn() }));
 
-vi.mock('../platform/links', () => ({
-  openExternal: mocks.openExternal,
-}));
+const RELEASE_URL = 'https://example.com/releases/1.2.0';
 
-import { updatesStore } from './updates.svelte';
-
-const RELEASE_URL = 'https://example.org/releases/1.2.0';
-
-const AVAILABLE: UpdateInfo = {
-  available: true,
-  version: '1.2.0',
-  notes: null,
-  can_install: true,
-  url: RELEASE_URL,
-};
-
-const UP_TO_DATE: UpdateInfo = { ...AVAILABLE, available: false, version: '1.1.0' };
-
-function resetStore() {
-  updatesStore.info = null;
-  updatesStore.checking = false;
-  updatesStore.installing = false;
-  updatesStore.error = null;
-  updatesStore.dismissedVersion = null;
+function info(overrides: Partial<UpdateInfo> = {}): UpdateInfo {
+  return {
+    available: true,
+    version: '1.2.0',
+    notes: '## Fixes',
+    can_install: true,
+    url: RELEASE_URL,
+    downloaded: false,
+    ...overrides,
+  };
 }
 
-beforeEach(() => {
-  vi.clearAllMocks();
-  resetStore();
-});
+interface Harness {
+  deps: UpdatesDeps;
+  values: { autoCheckUpdates: boolean; autoDownloadUpdates: boolean };
+  storage: Map<string, string>;
+}
 
-afterEach(() => {
-  resetStore();
-});
+function harness(overrides: Partial<UpdatesDeps> = {}): Harness {
+  const values = { autoCheckUpdates: false, autoDownloadUpdates: false };
+  const storage = new Map<string, string>();
+  const prefs = {
+    get autoCheckUpdates() {
+      return values.autoCheckUpdates;
+    },
+    get autoDownloadUpdates() {
+      return values.autoDownloadUpdates;
+    },
+    set: (key: keyof typeof values, value: boolean) => {
+      values[key] = value;
+    },
+  };
+  const deps: UpdatesDeps = {
+    check: vi.fn(async () => info({ available: false, version: '1.0.0' })),
+    download: vi.fn(async (_onProgress: (p: UpdateProgress) => void) => {}),
+    apply: vi.fn(async () => {}),
+    onDownloaded: vi.fn(() => () => {}),
+    open: vi.fn(async (_url: string) => {}),
+    prefs: prefs as UpdatesDeps['prefs'],
+    storage: {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        storage.set(key, value);
+      },
+    },
+    now: () => 1000,
+    ...overrides,
+  };
+  return { deps, values, storage };
+}
 
-describe('updatesStore.check', () => {
-  it('stores the probe result', async () => {
-    mocks.checkForUpdate.mockResolvedValue(AVAILABLE);
-    await updatesStore.check();
-    expect(updatesStore.info).toEqual(AVAILABLE);
-    expect(updatesStore.checking).toBe(false);
+describe('UpdatesStore', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
   });
 
-  it('silent check swallows errors and never sets error', async () => {
-    mocks.checkForUpdate.mockRejectedValue(new Error('offline'));
-    await expect(updatesStore.check({ silent: true })).resolves.toBeUndefined();
-    expect(updatesStore.error).toBeNull();
-    expect(updatesStore.info).toBeNull();
-    expect(updatesStore.checking).toBe(false);
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
-  it('non-silent check sets error on failure', async () => {
-    mocks.checkForUpdate.mockRejectedValue(new Error('offline'));
-    await updatesStore.check();
-    expect(updatesStore.error).toBe('offline');
-    expect(updatesStore.checking).toBe(false);
+  it('offers a manual update and records the check time when auto-download is off', async () => {
+    const { deps } = harness({ check: vi.fn(async () => info()) });
+    const store = new UpdatesStore(deps);
+
+    await store.check();
+
+    expect(store.phase).toBe('available');
+    expect(store.primaryLabel).toBe('Download update');
+    expect(store.lastCheckedAt).toBe(1000);
+    expect(deps.download).not.toHaveBeenCalled();
   });
 
-  it('non-silent check clears a previous error before probing', async () => {
-    updatesStore.error = 'old failure';
-    mocks.checkForUpdate.mockResolvedValue(UP_TO_DATE);
-    await updatesStore.check();
-    expect(updatesStore.error).toBeNull();
+  it('downloads automatically and reports ready when auto-download is on', async () => {
+    const { deps, values } = harness({ check: vi.fn(async () => info()) });
+    values.autoDownloadUpdates = true;
+    const store = new UpdatesStore(deps);
+
+    await store.check();
+    await vi.waitFor(() => expect(store.phase).toBe('ready'));
+
+    expect(deps.download).toHaveBeenCalledTimes(1);
+    expect(store.info?.downloaded).toBe(true);
+    expect(store.primaryLabel).toBe('Restart to apply update');
   });
 
-  it('ignores a call while a check is already running', async () => {
-    let finish: (value: UpdateInfo) => void = () => {};
-    mocks.checkForUpdate.mockReturnValue(new Promise<UpdateInfo>((resolve) => (finish = resolve)));
-    const first = updatesStore.check();
-    await updatesStore.check();
-    expect(mocks.checkForUpdate).toHaveBeenCalledTimes(1);
-    finish(AVAILABLE);
-    await first;
-  });
-});
-
-describe('updatesStore.pending', () => {
-  it('is set only when an update is available', async () => {
-    mocks.checkForUpdate.mockResolvedValue(UP_TO_DATE);
-    await updatesStore.check();
-    expect(updatesStore.pending).toBeNull();
-
-    mocks.checkForUpdate.mockResolvedValue(AVAILABLE);
-    await updatesStore.check();
-    expect(updatesStore.pending).toEqual(AVAILABLE);
-  });
-});
-
-describe('updatesStore.dismiss', () => {
-  it('hides the offered version', async () => {
-    mocks.checkForUpdate.mockResolvedValue(AVAILABLE);
-    await updatesStore.check();
-    updatesStore.dismiss();
-    expect(updatesStore.dismissedVersion).toBe('1.2.0');
-    expect(updatesStore.pending).toBeNull();
-  });
-
-  it('shows a later version again', async () => {
-    mocks.checkForUpdate.mockResolvedValue(AVAILABLE);
-    await updatesStore.check();
-    updatesStore.dismiss();
-
-    const newer = { ...AVAILABLE, version: '1.3.0' };
-    mocks.checkForUpdate.mockResolvedValue(newer);
-    await updatesStore.check();
-    expect(updatesStore.pending).toEqual(newer);
-  });
-
-  it('does nothing without an update', () => {
-    updatesStore.dismiss();
-    expect(updatesStore.dismissedVersion).toBeNull();
-  });
-});
-
-describe('updatesStore.install', () => {
-  it('opens the release page instead of installing when can_install is false', async () => {
-    mocks.checkForUpdate.mockResolvedValue({ ...AVAILABLE, can_install: false });
-    await updatesStore.check();
-    await updatesStore.install();
-    expect(mocks.openExternal).toHaveBeenCalledWith(RELEASE_URL);
-    expect(mocks.installUpdate).not.toHaveBeenCalled();
-    expect(updatesStore.installing).toBe(false);
-  });
-
-  it('installs in place on desktop and marks installing while it runs', async () => {
-    mocks.checkForUpdate.mockResolvedValue(AVAILABLE);
-    await updatesStore.check();
-
+  it('reports byte progress and falls back when the total is unknown', async () => {
     let finish: () => void = () => {};
-    mocks.installUpdate.mockReturnValue(new Promise<void>((resolve) => (finish = resolve)));
-    const pending = updatesStore.install();
-    expect(updatesStore.installing).toBe(true);
+    const download = vi.fn((onProgress: (p: UpdateProgress) => void) => {
+      onProgress({ downloaded: 50, total: 100 });
+      return new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+    });
+    const { deps } = harness({ download });
+    const store = new UpdatesStore(deps);
+    store.info = info();
+
+    const running = store.download();
+    expect(store.phase).toBe('downloading');
+    expect(store.primaryLabel).toBe('Downloading 50%');
+
+    store.progress = null;
+    expect(store.primaryLabel).toBe('Downloading update...');
+    expect(store.busy).toBe(true);
+
     finish();
-    await pending;
-
-    expect(mocks.installUpdate).toHaveBeenCalledTimes(1);
-    expect(mocks.openExternal).not.toHaveBeenCalled();
-    expect(updatesStore.installing).toBe(false);
+    await running;
+    expect(store.phase).toBe('ready');
+    expect(store.progress).toBeNull();
   });
 
-  it('surfaces a string rejection from the backend as error', async () => {
-    mocks.checkForUpdate.mockResolvedValue(AVAILABLE);
-    await updatesStore.check();
-    mocks.installUpdate.mockRejectedValue('signature mismatch');
-    await updatesStore.install();
-    expect(updatesStore.error).toBe('signature mismatch');
-    expect(updatesStore.installing).toBe(false);
+  it('keeps a download failure visible and does not retry it automatically', async () => {
+    const { deps, values } = harness({
+      check: vi.fn(async () => info()),
+      download: vi.fn(async () => {
+        throw new Error('network down');
+      }),
+    });
+    values.autoDownloadUpdates = true;
+    const store = new UpdatesStore(deps);
+
+    await store.check();
+    await vi.waitFor(() => expect(store.phase).toBe('error'));
+    expect(store.error).toContain('network down');
+
+    await store.check();
+    expect(deps.download).toHaveBeenCalledTimes(1);
   });
 
-  it('does nothing without an available update', async () => {
-    await updatesStore.install();
-    expect(mocks.installUpdate).not.toHaveBeenCalled();
-    expect(mocks.openExternal).not.toHaveBeenCalled();
+  it('restarts when downloaded and downloads otherwise from primary()', async () => {
+    const { deps } = harness();
+    const store = new UpdatesStore(deps);
+
+    store.info = info({ downloaded: true });
+    await store.primary();
+    expect(deps.apply).toHaveBeenCalledTimes(1);
+
+    const fresh = new UpdatesStore(deps);
+    fresh.info = info();
+    await fresh.primary();
+    expect(deps.download).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens the release page instead of installing where in-place install is unavailable', async () => {
+    const { deps } = harness();
+    const store = new UpdatesStore(deps);
+    store.info = info({ can_install: false });
+
+    expect(store.primaryLabel).toBe('Open release page');
+    await store.primary();
+
+    expect(deps.open).toHaveBeenCalledWith(RELEASE_URL);
+    expect(deps.download).not.toHaveBeenCalled();
+    expect(deps.apply).not.toHaveBeenCalled();
+  });
+
+  it('surfaces install failures', async () => {
+    const { deps } = harness({
+      apply: vi.fn(async () => {
+        throw new Error('boom');
+      }),
+    });
+    const store = new UpdatesStore(deps);
+    store.info = info({ downloaded: true });
+
+    await store.apply();
+
+    expect(store.phase).toBe('error');
+    expect(store.error).toContain('boom');
+  });
+
+  it('persists a skipped version and hides it on the next launch', async () => {
+    const { deps, storage } = harness({ check: vi.fn(async () => info()) });
+    const store = new UpdatesStore(deps);
+    await store.check();
+
+    store.skipVersion();
+
+    expect(store.pending).toBeNull();
+    expect(storage.get(SKIPPED_VERSION_KEY)).toBe('1.2.0');
+
+    const next = new UpdatesStore({ ...deps, check: vi.fn(async () => info()) });
+    expect(next.skippedVersion).toBe('1.2.0');
+    await next.check();
+    expect(next.pending).toBeNull();
+  });
+
+  it('hides the offer for this run after remind-me-later', async () => {
+    const { deps } = harness({ check: vi.fn(async () => info()) });
+    const store = new UpdatesStore(deps);
+    await store.check();
+
+    store.remindLater();
+
+    expect(store.pending).toBeNull();
+    expect(store.info?.available).toBe(true);
+  });
+
+  it('schedules background checks and stops them when auto-check is turned off', async () => {
+    const { deps, values } = harness();
+    values.autoCheckUpdates = true;
+    const store = new UpdatesStore(deps);
+    const teardown = store.start();
+
+    expect(deps.check).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(AUTO_CHECK_DELAY_MS);
+    expect(deps.check).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(UPDATE_CHECK_INTERVAL_MS);
+    expect(deps.check).toHaveBeenCalledTimes(2);
+
+    store.setAutoCheck(false);
+    expect(values.autoCheckUpdates).toBe(false);
+    await vi.advanceTimersByTimeAsync(UPDATE_CHECK_INTERVAL_MS * 2);
+    expect(deps.check).toHaveBeenCalledTimes(2);
+
+    teardown();
+  });
+
+  it('does not surface silent background check failures', async () => {
+    const { deps } = harness({
+      check: vi.fn(async () => {
+        throw new Error('offline');
+      }),
+    });
+    const store = new UpdatesStore(deps);
+
+    await store.check({ silent: true });
+
+    expect(store.error).toBeNull();
+  });
+
+  it('shows a manual check failure', async () => {
+    const { deps } = harness({
+      check: vi.fn(async () => {
+        throw new Error('offline');
+      }),
+    });
+    const store = new UpdatesStore(deps);
+
+    await store.check();
+
+    expect(store.error).toContain('offline');
   });
 });

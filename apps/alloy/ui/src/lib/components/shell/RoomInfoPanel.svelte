@@ -25,64 +25,87 @@
 
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { Icon, X, ChevronLeft, Play, File, Link, ExternalLink, Image, ImagePlus, Trash2, Download, Copy, MessageSquare, User } from '$lib/icons';
+  import { Icon, X, ChevronLeft, Play, File, Link, ExternalLink, Image, ImagePlus, Trash2, Download, Copy, MessageSquare, User, Search, Lock } from '$lib/icons';
   import { formatBytes, formatDay } from '$lib/content/format';
   import { viewport } from '$lib/stores/viewport.svelte';
   import { pickFile } from '$lib/platform/files';
   import { openExternal } from '$lib/platform/links';
+  import { pushBack } from '$lib/platform/backstack';
   import { roomInfo } from '$lib/stores/roomInfo.svelte';
   import { roomMedia } from '$lib/stores/roomMedia.svelte';
+  import { roomNotify } from '$lib/stores/roomNotify.svelte';
   import { membersStore, memberLabel } from '$lib/stores/members.svelte';
   import { profileCard } from '$lib/stores/profileCard.svelte';
   import { errorMessage } from '$lib/stores/errors';
-  import type { RoomMediaItem, RoomMediaKind } from '$lib/generated/protocol';
+  import type { RoomInfoTab } from '$lib/stores/ui.svelte';
+  import type { NotificationLevel, RoomMediaItem, RoomMediaKind } from '$lib/generated/protocol';
   import { contextmenu } from '$lib/platform/contextmenu';
   import { roomsStore } from '$lib/stores/rooms.svelte';
   import { userProfile } from '$lib/stores/userProfile.svelte';
   import type { MenuItem } from '$lib/stores/contextmenu.svelte';
   import type { RoomMemberDto } from '$lib/generated';
-  import { Avatar, Button, TextArea, TextField, UserName } from '../common';
+  import { Avatar, Button, Select, TextArea, TextField, UserName, type SelectOption } from '../common';
   import MediaViewer, { fetchMediaFile } from '../timeline/MediaViewer.svelte';
 
-  type Tab = 'info' | 'media' | 'files' | 'links' | 'members';
-  type MediaTab = 'media' | 'files' | 'links';
+  type MediaView = 'media' | 'files' | 'links';
+  type View = 'overview' | MediaView | 'members';
 
   interface Props {
     roomId: string;
     onclose: () => void;
-    initialTab?: Tab;
+    /** Opens in-room search. The search button is hidden when omitted. */
+    onsearch?: () => void;
+    initialTab?: RoomInfoTab;
   }
 
-  let { roomId, onclose, initialTab = 'info' }: Props = $props();
+  let { roomId, onclose, onsearch, initialTab = 'info' }: Props = $props();
 
-  const TABS: { value: Tab; label: string }[] = [
-    { value: 'info', label: 'Info' },
-    { value: 'media', label: 'Media' },
-    { value: 'files', label: 'Files' },
-    { value: 'links', label: 'Links' },
-    { value: 'members', label: 'Members' },
-  ];
-
-  const MEDIA_KIND: Record<MediaTab, RoomMediaKind> = {
+  const MEDIA_KIND: Record<MediaView, RoomMediaKind> = {
     media: 'Media',
     files: 'Files',
     links: 'Links',
   };
 
-  function isMediaTab(t: Tab): t is MediaTab {
-    return t === 'media' || t === 'files' || t === 'links';
+  const MEDIA_TITLE: Record<MediaView, string> = {
+    media: 'Shared media',
+    files: 'Files & documents',
+    links: 'Shared links',
+  };
+
+  /** Rows shown on the overview before "View all" opens the full list. */
+  const PREVIEW = { media: 6, files: 3, links: 3, members: 5 } as const;
+
+  const NOTIFY_OPTIONS: SelectOption[] = [
+    { value: 'default', label: 'Use default' },
+    { value: 'All', label: 'All messages' },
+    { value: 'Mentions', label: 'Mentions and keywords only' },
+    { value: 'Mute', label: 'Mute' },
+  ];
+
+  function isMediaView(v: View): v is MediaView {
+    return v === 'media' || v === 'files' || v === 'links';
   }
 
-  let tab = $state<Tab>('info');
+  function viewAll(count: number, done: boolean): string {
+    return done ? `View all (${count})` : 'View all';
+  }
 
-  // Seed the tab from the prop on mount and whenever the parent changes it.
+  let view = $state<View>('overview');
+
+  // Seed the view from the prop on mount and whenever the parent changes it.
   $effect(() => {
-    tab = initialTab;
+    view = initialTab === 'info' ? 'overview' : initialTab;
   });
 
-  const tabId = $derived(`room-info-tab-${tab}`);
+  // A sub-view registers a system Back handler so Back returns to the overview first (phone only).
+  $effect(() => {
+    if (view === 'overview') return;
+    return pushBack(() => (view = 'overview'));
+  });
 
-  // Info tab state
+  const title = $derived(view === 'overview' ? 'Details' : view === 'members' ? 'Members' : MEDIA_TITLE[view]);
+
+  // Details and note state
   const details = $derived(roomInfo.details(roomId));
   let nameDraft = $state('');
   let topicDraft = $state('');
@@ -166,8 +189,33 @@
     await roomInfo.setAvatar(roomId, null);
   }
 
-  // Media tabs state
-  const current = $derived(isMediaTab(tab) ? roomMedia.view(roomId, MEDIA_KIND[tab]) : null);
+  // Room notifications. Unknown until the room is read; the select stays blank meanwhile.
+  const notifyValue = $derived.by(() => {
+    const isDefault = roomNotify.isDefault(roomId);
+    if (isDefault === null) return '';
+    return isDefault ? 'default' : (roomNotify.levelOf(roomId) ?? '');
+  });
+
+  $effect(() => {
+    const id = roomId;
+    untrack(() => void roomNotify.load(id));
+  });
+
+  function setNotify(value: string) {
+    void roomNotify.set(roomId, value === 'default' ? null : (value as NotificationLevel));
+  }
+
+  function copyLink() {
+    void navigator.clipboard.writeText(`https://matrix.to/#/${roomId}`);
+  }
+
+  // Media state. The overview previews all three kinds; a sub-view loads only its own kind.
+  const mediaState = $derived({
+    media: roomMedia.view(roomId, 'Media'),
+    files: roomMedia.view(roomId, 'Files'),
+    links: roomMedia.view(roomId, 'Links'),
+  });
+  const current = $derived(isMediaView(view) ? mediaState[view] : null);
   let sentinel = $state<HTMLElement | null>(null);
   let viewer = $state<{
     uri: string;
@@ -179,20 +227,24 @@
   let fileError = $state<string | null>(null);
 
   $effect(() => {
-    const t = tab;
-    if (isMediaTab(t)) untrack(() => void roomMedia.load(roomId, MEDIA_KIND[t]));
+    const id = roomId;
+    const v = view;
+    const kinds: MediaView[] = v === 'overview' ? ['media', 'files', 'links'] : isMediaView(v) ? [v] : [];
+    untrack(() => {
+      for (const k of kinds) void roomMedia.load(id, MEDIA_KIND[k]);
+    });
   });
 
   // Infinite scroll: load the next page when the sentinel at the bottom becomes visible.
   $effect(() => {
     const el = sentinel;
-    const t = tab;
-    if (!el || !isMediaTab(t)) return;
-    const kind = MEDIA_KIND[t];
+    const v = view;
+    if (!el || !isMediaView(v)) return;
+    const kind = MEDIA_KIND[v];
     const io = new IntersectionObserver((entries) => {
       if (!entries.some((e) => e.isIntersecting)) return;
-      const view = roomMedia.view(roomId, kind);
-      if (!view.loading && !view.done) void roomMedia.loadMore(roomId, kind);
+      const state = roomMedia.view(roomId, kind);
+      if (!state.loading && !state.done) void roomMedia.loadMore(roomId, kind);
     });
     io.observe(el);
     return () => io.disconnect();
@@ -234,20 +286,7 @@
     }
   }
 
-  function onTabKey(e: KeyboardEvent) {
-    const index = TABS.findIndex((t) => t.value === tab);
-    let next = index;
-    if (e.key === 'ArrowRight') next = (index + 1) % TABS.length;
-    else if (e.key === 'ArrowLeft') next = (index - 1 + TABS.length) % TABS.length;
-    else if (e.key === 'Home') next = 0;
-    else if (e.key === 'End') next = TABS.length - 1;
-    else return;
-    e.preventDefault();
-    tab = TABS[next].value;
-    document.getElementById(`room-info-tab-${tab}`)?.focus();
-  }
-
-  // Members tab state. The roster reloads on every open (forced, so never stale) and on retry;
+  // Members state. The roster reloads on every open (forced, so never stale) and on retry;
   // cached rows stay visible until the reply lands.
   const members = $derived(membersStore.membersOf(roomId));
   let membersLoading = $state(true);
@@ -255,8 +294,6 @@
   let membersActionError = $state<string | null>(null);
   // Bumping this re-runs the roster load (the retry button).
   let membersAttempt = $state(0);
-  // Pointer position of the last right-click on a member, used to place the profile card from the menu.
-  let menuAnchor = $state({ x: 0, y: 0 });
 
   function byName(a: RoomMemberDto, b: RoomMemberDto): number {
     return memberLabel(a).localeCompare(memberLabel(b));
@@ -271,6 +308,7 @@
       { title: 'Invited', members: members.filter((m) => m.membership === 'Invited').sort(byName) },
     ].filter((g) => g.members.length > 0),
   );
+  const ordered = $derived(groups.flatMap((g) => g.members));
 
   $effect(() => {
     const id = roomId;
@@ -315,9 +353,27 @@
     }
   }
 
+  let panel = $state<HTMLElement | null>(null);
+
+  /** Centre of a member's row. The row stays mounted after its context menu closes, so it anchors the profile card. */
+  function memberRowCentre(userId: string): { x: number; y: number } | null {
+    const row = panel?.querySelector<HTMLElement>(`[data-user-id="${CSS.escape(userId)}"]`);
+    if (!row) return null;
+    const r = row.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  }
+
   function memberMenu(m: RoomMemberDto): MenuItem[] {
     return [
-      { id: 'view-profile', label: 'View profile', icon: User, onselect: () => profileCard.open(m.user_id, roomId, menuAnchor) },
+      {
+        id: 'view-profile',
+        label: 'View profile',
+        icon: User,
+        onselect: () => {
+          const at = memberRowCentre(m.user_id);
+          if (at) profileCard.open(m.user_id, roomId, at);
+        },
+      },
       { id: 'message', label: 'Message', icon: MessageSquare, onselect: () => void messageMember(m.user_id) },
       { separator: true },
       { id: 'copy-user-id', label: 'Copy user ID', icon: Copy, onselect: () => void navigator.clipboard.writeText(m.user_id) },
@@ -325,54 +381,146 @@
   }
 </script>
 
-<section class="room-info" aria-label="Room info">
-  <header class="bar">
-    <h2 class="title">Room info</h2>
-    <button type="button" class="icon-btn" aria-label="Close room info" title="Close room info" onclick={onclose}>
-      <Icon icon={viewport.isPhone ? ChevronLeft : X} size={20} />
-    </button>
-  </header>
-
-  <div class="hero">
-    <Avatar userId={roomId} displayName={details?.name ?? ''} src={details?.avatar_url ?? null} size="xl" shape="rounded" />
-    <div class="hero-text">
-      <p class="hero-name">{details?.name || 'Unnamed room'}</p>
-      {#if details?.canonical_alias}
-        <p class="hero-meta">{details.canonical_alias}</p>
-      {/if}
-      {#if details}
-        <p class="hero-meta">
-          {details.encrypted ? 'Encrypted' : 'Not encrypted'} · {details.joined_members} members
-        </p>
-      {/if}
-    </div>
-  </div>
-
-  <div class="tabs" role="tablist" aria-label="Room info sections" tabindex="-1" onkeydown={onTabKey}>
-    {#each TABS as t (t.value)}
+{#snippet mediaGrid(items: RoomMediaItem[])}
+  <div class="media-grid">
+    {#each items as item (item.event_id)}
       <button
-        id="room-info-tab-{t.value}"
         type="button"
-        role="tab"
-        class="tab"
-        class:active={tab === t.value}
-        aria-selected={tab === t.value}
-        aria-controls="room-info-panel"
-        tabindex={tab === t.value ? 0 : -1}
-        onclick={() => (tab = t.value)}
+        class="media-cell"
+        aria-label="Open {item.body || item.kind}"
+        title={item.body || item.kind}
+        onclick={() => openMedia(item)}
       >
-        {t.label}
+        {#await thumbFor(item.kind === 'video' ? item.thumbnail_uri : item.uri, item.kind === 'video' ? 'image/jpeg' : item.mime_type)}
+          <span class="media-fallback"></span>
+        {:then src}
+          {#if src}
+            <img class="media-img" src={src} alt="" loading="lazy" />
+          {:else}
+            <span class="media-fallback"><Icon icon={Image} size={20} /></span>
+          {/if}
+        {/await}
+        {#if item.kind === 'video'}
+          <span class="play-badge" aria-hidden="true"><Icon icon={Play} size={16} /></span>
+        {/if}
       </button>
     {/each}
   </div>
+{/snippet}
 
-  <div class="body" role="tabpanel" id="room-info-panel" aria-labelledby={tabId}>
-    {#if tab === 'info'}
-      {#if roomInfo.error(roomId)}
-        <p class="notice" role="alert">{roomInfo.error(roomId)}</p>
-      {/if}
+{#snippet fileRow(item: RoomMediaItem)}
+  <li>
+    <button
+      type="button"
+      class="row"
+      aria-label="Download {item.body}"
+      title="Download {item.body}"
+      disabled={fileBusy === item.event_id}
+      onclick={() => openFile(item)}
+    >
+      <span class="row-icon"><Icon icon={File} size={20} /></span>
+      <span class="row-main">
+        <span class="row-title">{item.body}</span>
+        <span class="row-meta">
+          {formatBytes(item.size_bytes ?? 0)} · {item.sender_display_name || item.sender} · {formatDay(item.timestamp_millis)}
+        </span>
+      </span>
+      <Icon icon={Download} size={16} />
+    </button>
+  </li>
+{/snippet}
 
-      <div class="group">
+{#snippet linkRow(item: RoomMediaItem)}
+  {@const url = linkOf(item)}
+  <li>
+    <button type="button" class="row" aria-label="Open link {url}" title={url} onclick={() => void openExternal(url)}>
+      <span class="row-icon"><Icon icon={Link} size={20} /></span>
+      <span class="row-main">
+        <span class="row-title link">{hostOf(url)}</span>
+        <span class="row-meta">{url}</span>
+        <span class="row-meta">{item.sender_display_name || item.sender} · {formatDay(item.timestamp_millis)}</span>
+      </span>
+      <Icon icon={ExternalLink} size={16} />
+    </button>
+  </li>
+{/snippet}
+
+{#snippet memberRow(m: RoomMemberDto)}
+  <li>
+    <button
+      type="button"
+      class="row"
+      aria-label="Open profile for {memberLabel(m)}"
+      data-user-id={m.user_id}
+      onclick={(e) => openMemberProfile(e, m.user_id)}
+      use:contextmenu={() => memberMenu(m)}
+    >
+      <Avatar userId={m.user_id} displayName={memberLabel(m)} src={m.avatar_url} size="md" shape="circle" />
+      <span class="row-main">
+        <UserName userId={m.user_id} displayName={memberLabel(m)} roomId={roomId} />
+      </span>
+    </button>
+  </li>
+{/snippet}
+
+<section class="details" aria-label="Room info" bind:this={panel}>
+  <header class="bar">
+    {#if view !== 'overview'}
+      <button type="button" class="icon-btn" aria-label="Back to details" title="Back to details" onclick={() => (view = 'overview')}>
+        <Icon icon={ChevronLeft} size={20} />
+      </button>
+    {/if}
+    <h2 class="title">{title}</h2>
+    {#if view === 'overview' || !viewport.isPhone}
+      <button type="button" class="icon-btn close" aria-label="Close room info" title="Close room info" onclick={onclose}>
+        <Icon icon={viewport.isPhone ? ChevronLeft : X} size={20} />
+      </button>
+    {/if}
+  </header>
+
+  <div class="body">
+    {#if fileError}
+      <p class="notice" role="alert">{fileError}</p>
+    {/if}
+
+    {#if view === 'overview'}
+      <div class="identity">
+        <Avatar userId={roomId} displayName={details?.name ?? ''} src={details?.avatar_url ?? null} size="xl" shape="rounded" />
+        <p class="name">{details?.name || 'Unnamed room'}</p>
+        {#if details?.canonical_alias}<p class="id">{details.canonical_alias}</p>{/if}
+        {#if details}
+          <p class="meta">
+            {#if details.encrypted}<Icon icon={Lock} size={16} />{/if}
+            {details.encrypted ? 'End-to-end encrypted' : 'Not encrypted'} · {details.joined_members} members
+          </p>
+        {/if}
+      </div>
+
+      <div class="actions">
+        {#if onsearch}
+          <Button variant="ghost" size="sm" icon={Search} onclick={onsearch}>
+            {#snippet children()}Search{/snippet}
+          </Button>
+        {/if}
+        <Button variant="ghost" size="sm" icon={Copy} onclick={copyLink}>
+          {#snippet children()}Copy link{/snippet}
+        </Button>
+        <div class="notify">
+          <Select
+            label="Notifications"
+            value={notifyValue}
+            options={NOTIFY_OPTIONS}
+            disabled={roomNotify.saving(roomId)}
+            onchange={setNotify}
+          />
+        </div>
+      </div>
+
+      <section class="section" aria-labelledby="room-info-about">
+        <h3 class="heading" id="room-info-about">About</h3>
+        {#if roomInfo.error(roomId)}
+          <p class="notice" role="alert">{roomInfo.error(roomId)}</p>
+        {/if}
         <label class="field">
           <span class="label">Name</span>
           <TextField
@@ -389,36 +537,33 @@
           <span class="label">Topic</span>
           <TextArea rows={3} bind:value={topicDraft} disabled={!details?.can_set_topic} onblur={commitTopic} />
         </label>
-        {#if roomInfo.saving(roomId)}
-          <p class="status" role="status">Saving…</p>
-        {/if}
-      </div>
-
-      <div class="group">
-        <p class="label">Room picture</p>
-        <div class="row-actions">
+        <div class="picture">
+          <span class="label">Room picture</span>
           {#if details?.can_set_avatar}
-            <Button variant="ghost" size="sm" onclick={changeAvatar}>
-              {#snippet children()}
-                <Icon icon={ImagePlus} size={16} /> Change picture
-              {/snippet}
+            <Button variant="ghost" size="sm" icon={ImagePlus} onclick={changeAvatar}>
+              {#snippet children()}Change picture{/snippet}
             </Button>
             {#if details.avatar_url}
-              <Button variant="ghost" size="sm" onclick={removeAvatar}>
-                {#snippet children()}
-                  <Icon icon={Trash2} size={16} /> Remove picture
-                {/snippet}
+              <Button variant="ghost" size="sm" icon={Trash2} onclick={removeAvatar}>
+                {#snippet children()}Remove picture{/snippet}
               </Button>
             {/if}
           {:else}
             <p class="hint">Only room admins can change the picture.</p>
           {/if}
         </div>
-      </div>
+        {#if roomInfo.saving(roomId)}
+          <p class="status" role="status">Saving…</p>
+        {/if}
+      </section>
 
-      <div class="group">
+      <section class="card" aria-label="Private note">
+        <div class="card-head">
+          <h3 class="heading">Private note</h3>
+          <span class="pill">Only you</span>
+        </div>
         <label class="field">
-          <span class="label">Note (only visible to you)</span>
+          <span class="sr-only">Private note</span>
           <TextArea
             rows={4}
             value={noteDraft}
@@ -431,67 +576,83 @@
         {:else if noteSaved}
           <p class="status" role="status">Saved</p>
         {/if}
-      </div>
-    {:else if isMediaTab(tab) && current}
+      </section>
+
+      {#if mediaState.media.items.length > 0}
+        <section class="section">
+          <div class="section-head">
+            <h3 class="heading">Shared media</h3>
+            <Button variant="ghost" size="sm" onclick={() => (view = 'media')}>
+              {#snippet children()}{viewAll(mediaState.media.items.length, mediaState.media.done)}{/snippet}
+            </Button>
+          </div>
+          {@render mediaGrid(mediaState.media.items.slice(0, PREVIEW.media))}
+        </section>
+      {/if}
+
+      {#if mediaState.files.items.length > 0}
+        <section class="section">
+          <div class="section-head">
+            <h3 class="heading">Files &amp; documents</h3>
+            <Button variant="ghost" size="sm" onclick={() => (view = 'files')}>
+              {#snippet children()}{viewAll(mediaState.files.items.length, mediaState.files.done)}{/snippet}
+            </Button>
+          </div>
+          <ul class="list">
+            {#each mediaState.files.items.slice(0, PREVIEW.files) as item (item.event_id)}
+              {@render fileRow(item)}
+            {/each}
+          </ul>
+        </section>
+      {/if}
+
+      {#if mediaState.links.items.length > 0}
+        <section class="section">
+          <div class="section-head">
+            <h3 class="heading">Shared links</h3>
+            <Button variant="ghost" size="sm" onclick={() => (view = 'links')}>
+              {#snippet children()}{viewAll(mediaState.links.items.length, mediaState.links.done)}{/snippet}
+            </Button>
+          </div>
+          <ul class="list">
+            {#each mediaState.links.items.slice(0, PREVIEW.links) as item (item.event_id)}
+              {@render linkRow(item)}
+            {/each}
+          </ul>
+        </section>
+      {/if}
+
+      {#if ordered.length > 0}
+        <section class="section">
+          <div class="section-head">
+            <h3 class="heading">Members</h3>
+            <Button variant="ghost" size="sm" onclick={() => (view = 'members')}>
+              {#snippet children()}{viewAll(ordered.length, true)}{/snippet}
+            </Button>
+          </div>
+          <ul class="list">
+            {#each ordered.slice(0, PREVIEW.members) as m (m.user_id)}
+              {@render memberRow(m)}
+            {/each}
+          </ul>
+        </section>
+      {/if}
+    {:else if isMediaView(view) && current}
       {#if current.error}
         <p class="notice" role="alert">{current.error}</p>
       {/if}
 
-      {#if tab === 'media'}
+      {#if view === 'media'}
         {#if current.items.length > 0}
-          <div class="media-grid">
-            {#each current.items as item (item.event_id)}
-              <button
-                type="button"
-                class="media-cell"
-                aria-label="Open {item.body || item.kind}"
-                title={item.body || item.kind}
-                onclick={() => openMedia(item)}
-              >
-                {#await thumbFor(item.kind === 'video' ? item.thumbnail_uri : item.uri, item.kind === 'video' ? 'image/jpeg' : item.mime_type)}
-                  <span class="media-fallback"></span>
-                {:then src}
-                  {#if src}
-                    <img class="media-img" src={src} alt="" loading="lazy" />
-                  {:else}
-                    <span class="media-fallback"><Icon icon={Image} size={20} /></span>
-                  {/if}
-                {/await}
-                {#if item.kind === 'video'}
-                  <span class="play-badge" aria-hidden="true"><Icon icon={Play} size={16} /></span>
-                {/if}
-              </button>
-            {/each}
-          </div>
+          {@render mediaGrid(current.items)}
         {:else if current.done && !current.loading}
           <p class="empty">No shared media yet</p>
         {/if}
-      {:else if tab === 'files'}
-        {#if fileError}
-          <p class="notice" role="alert">{fileError}</p>
-        {/if}
+      {:else if view === 'files'}
         {#if current.items.length > 0}
           <ul class="list">
             {#each current.items as item (item.event_id)}
-              <li>
-                <button
-                  type="button"
-                  class="row"
-                  aria-label="Download {item.body}"
-                  title="Download {item.body}"
-                  disabled={fileBusy === item.event_id}
-                  onclick={() => openFile(item)}
-                >
-                  <span class="row-icon"><Icon icon={File} size={20} /></span>
-                  <span class="row-main">
-                    <span class="row-title">{item.body}</span>
-                    <span class="row-meta">
-                      {formatBytes(item.size_bytes ?? 0)} · {item.sender_display_name || item.sender} · {formatDay(item.timestamp_millis)}
-                    </span>
-                  </span>
-                  <Icon icon={Download} size={16} />
-                </button>
-              </li>
+              {@render fileRow(item)}
             {/each}
           </ul>
         {:else if current.done && !current.loading}
@@ -501,24 +662,7 @@
         {#if current.items.length > 0}
           <ul class="list">
             {#each current.items as item (item.event_id)}
-              {@const url = linkOf(item)}
-              <li>
-                <button
-                  type="button"
-                  class="row"
-                  aria-label="Open link {url}"
-                  title={url}
-                  onclick={() => void openExternal(url)}
-                >
-                  <span class="row-icon"><Icon icon={Link} size={20} /></span>
-                  <span class="row-main">
-                    <span class="row-title">{hostOf(url)}</span>
-                    <span class="row-meta">{url}</span>
-                    <span class="row-meta">{item.sender_display_name || item.sender} · {formatDay(item.timestamp_millis)}</span>
-                  </span>
-                  <Icon icon={ExternalLink} size={16} />
-                </button>
-              </li>
+              {@render linkRow(item)}
             {/each}
           </ul>
         {:else if current.done && !current.loading}
@@ -529,30 +673,12 @@
       {#if current.loading}
         <p class="status" role="status">Loading…</p>
       {:else if !current.done && current.items.length > 0}
-        <Button variant="ghost" size="sm" onclick={() => roomMedia.loadMore(roomId, MEDIA_KIND[tab as MediaTab])}>
+        <Button variant="ghost" size="sm" onclick={() => roomMedia.loadMore(roomId, MEDIA_KIND[view as MediaView])}>
           {#snippet children()}Load more{/snippet}
         </Button>
       {/if}
       <div class="sentinel" bind:this={sentinel} aria-hidden="true"></div>
     {:else}
-      {#snippet memberRow(m: RoomMemberDto)}
-        <li>
-          <button
-            type="button"
-            class="row"
-            aria-label="Open profile for {memberLabel(m)}"
-            data-user-id={m.user_id}
-            onclick={(e) => openMemberProfile(e, m.user_id)}
-            oncontextmenu={(e) => (menuAnchor = { x: e.clientX, y: e.clientY })}
-            use:contextmenu={() => memberMenu(m)}
-          >
-            <Avatar userId={m.user_id} displayName={memberLabel(m)} src={m.avatar_url} size="md" shape="circle" />
-            <span class="row-main">
-              <UserName userId={m.user_id} displayName={memberLabel(m)} roomId={roomId} />
-            </span>
-          </button>
-        </li>
-      {/snippet}
       {#if membersError}
         <div class="notice" role="alert">
           <p>Could not load members: {membersError}</p>
@@ -568,8 +694,8 @@
         <p class="status" role="status">Loading members…</p>
       {:else}
         {#each groups as group (group.title)}
-          <section class="group">
-            <h3 class="label">{group.title} ({group.members.length})</h3>
+          <section class="section">
+            <h3 class="heading">{group.title} ({group.members.length})</h3>
             <ul class="list">
               {#each group.members as m (m.user_id)}
                 {@render memberRow(m)}
@@ -594,23 +720,19 @@
 {/if}
 
 <style>
-  .room-info {
+  .details {
     display: flex;
     flex-direction: column;
-    width: 100%;
     height: 100%;
     min-height: 0;
     background: var(--alloy-color-surface-panel);
-    color: var(--alloy-text-primary);
-    font-family: var(--alloy-typography-font-family-sans);
-    font-size: var(--alloy-typography-size-sm);
+    color: var(--alloy-color-text-primary);
   }
 
   .bar {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: var(--alloy-space-2);
+    gap: var(--alloy-spacing-scale-2);
     height: var(--alloy-layout-header-height);
     padding: 0 var(--alloy-layout-gutter);
     border-bottom: 1px solid var(--alloy-color-border-subtle);
@@ -618,9 +740,11 @@
   }
 
   .title {
+    flex: 1;
+    min-width: 0;
     margin: 0;
-    font-size: var(--alloy-typography-size-base);
-    font-weight: 600;
+    font-size: var(--alloy-typography-size-lg);
+    font-weight: var(--alloy-typography-weight-semibold);
   }
 
   .icon-btn {
@@ -630,140 +754,174 @@
     width: 32px;
     height: 32px;
     padding: 0;
-    border: none;
-    border-radius: var(--alloy-radii-md);
+    border: 0;
+    border-radius: var(--alloy-radii-sm);
     background: transparent;
-    color: var(--alloy-text-secondary);
+    color: var(--alloy-color-text-secondary);
     cursor: pointer;
+    transition: background-color var(--alloy-motion-duration-fast) ease, color var(--alloy-motion-duration-fast) ease;
   }
 
   .icon-btn:hover {
     background: var(--alloy-color-surface-hover);
-    color: var(--alloy-text-primary);
-  }
-
-  .hero {
-    display: flex;
-    align-items: center;
-    gap: var(--alloy-space-3);
-    padding: var(--alloy-layout-gutter);
-    flex-shrink: 0;
-  }
-
-  .hero-text {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-  }
-
-  .hero-name {
-    margin: 0;
-    font-size: var(--alloy-typography-size-lg);
-    font-weight: 600;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .hero-meta {
-    margin: 0;
-    color: var(--alloy-text-muted);
-    font-size: var(--alloy-typography-size-xs);
-  }
-
-  .tabs {
-    display: flex;
-    gap: var(--alloy-space-1);
-    padding: 0 var(--alloy-layout-gutter);
-    border-bottom: 1px solid var(--alloy-color-border-subtle);
-    overflow-x: auto;
-    flex-shrink: 0;
-  }
-
-  .tab {
-    padding: var(--alloy-space-2) var(--alloy-space-2);
-    border: none;
-    border-bottom: 2px solid transparent;
-    background: transparent;
-    color: var(--alloy-text-secondary);
-    font: inherit;
-    cursor: pointer;
-    white-space: nowrap;
-  }
-
-  .tab.active {
-    color: var(--alloy-text-primary);
-    border-bottom-color: var(--alloy-color-accent-primary);
+    color: var(--alloy-color-text-primary);
   }
 
   .body {
     flex: 1;
     min-height: 0;
-    overflow: auto;
+    overflow-y: auto;
     display: flex;
     flex-direction: column;
     gap: var(--alloy-layout-section-gap);
-    padding: var(--alloy-layout-gutter);
+    padding: var(--alloy-spacing-scale-6);
   }
 
-  .group {
+  .identity {
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-space-2);
+    align-items: flex-start;
+    gap: var(--alloy-spacing-scale-1);
+    min-width: 0;
+  }
+
+  .name {
+    margin: 0;
+    font-size: var(--alloy-typography-size-xl);
+    font-weight: var(--alloy-typography-weight-semibold);
+    overflow-wrap: anywhere;
+  }
+
+  .id {
+    margin: 0;
+    font-family: var(--alloy-typography-font-family-mono);
+    font-size: var(--alloy-typography-size-sm);
+    color: var(--alloy-color-text-muted);
+    overflow-wrap: anywhere;
+  }
+
+  .meta {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--alloy-spacing-scale-1);
+    margin: 0;
+    font-size: var(--alloy-typography-size-sm);
+    color: var(--alloy-color-text-secondary);
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--alloy-spacing-scale-2);
+  }
+
+  .notify {
+    flex: 1 1 200px;
+    min-width: 0;
+  }
+
+  .section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--alloy-spacing-scale-3);
+    padding-top: var(--alloy-layout-section-gap);
+    border-top: 1px solid var(--alloy-color-border-subtle);
+  }
+
+  .section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--alloy-spacing-scale-2);
+  }
+
+  .heading,
+  .label {
+    margin: 0;
+    font-size: var(--alloy-typography-size-xs);
+    font-weight: var(--alloy-typography-weight-semibold);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--alloy-color-text-secondary);
   }
 
   .field {
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-space-1);
+    gap: var(--alloy-spacing-scale-1);
+    min-width: 0;
   }
 
-  .label {
-    margin: 0;
-    color: var(--alloy-text-secondary);
-    font-size: var(--alloy-typography-size-xs);
-    font-weight: 600;
-  }
-
-  .row-actions {
+  .picture {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--alloy-space-2);
     align-items: center;
+    gap: var(--alloy-spacing-scale-2);
+  }
+
+  .card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--alloy-spacing-scale-2);
+    padding: var(--alloy-spacing-scale-3);
+    border: 1px solid var(--alloy-color-border-subtle);
+    border-radius: var(--alloy-radii-sm);
+    background: var(--alloy-color-surface-subtle);
+  }
+
+  .card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--alloy-spacing-scale-2);
+  }
+
+  .pill {
+    padding: 0 var(--alloy-spacing-scale-2);
+    border-radius: var(--alloy-radii-full);
+    background: var(--alloy-color-surface-hover);
+    color: var(--alloy-color-text-secondary);
+    font-size: var(--alloy-typography-size-xs);
   }
 
   .hint,
   .status,
   .empty {
     margin: 0;
-    color: var(--alloy-text-muted);
     font-size: var(--alloy-typography-size-xs);
+    color: var(--alloy-color-text-muted);
   }
 
   .notice {
     margin: 0;
-    padding: var(--alloy-space-2);
+    padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
     border-radius: var(--alloy-radii-sm);
     background: var(--alloy-color-surface-subtle);
     color: var(--alloy-color-status-error);
-    font-size: var(--alloy-typography-size-xs);
+    font-size: var(--alloy-typography-size-sm);
   }
 
   .media-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: var(--alloy-space-1);
+    gap: var(--alloy-spacing-scale-1);
   }
 
   .media-cell {
     position: relative;
     aspect-ratio: 1;
     padding: 0;
-    border: none;
-    border-radius: var(--alloy-radii-md);
+    border: 0;
+    border-radius: var(--alloy-radii-sm);
     overflow: hidden;
     background: var(--alloy-color-surface-subtle);
     cursor: pointer;
+    transition: opacity var(--alloy-motion-duration-fast) ease;
+  }
+
+  .media-cell:hover {
+    opacity: 0.85;
   }
 
   .media-img {
@@ -779,45 +937,43 @@
     justify-content: center;
     width: 100%;
     height: 100%;
-    color: var(--alloy-text-muted);
+    color: var(--alloy-color-text-muted);
   }
 
   .play-badge {
     position: absolute;
-    right: var(--alloy-space-1);
-    bottom: var(--alloy-space-1);
+    right: var(--alloy-spacing-scale-1);
+    bottom: var(--alloy-spacing-scale-1);
     display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 24px;
-    height: 24px;
+    padding: var(--alloy-spacing-scale-1);
     border-radius: var(--alloy-radii-full);
     background: var(--alloy-color-surface-elevated);
-    color: var(--alloy-text-primary);
+    color: var(--alloy-color-text-primary);
   }
 
   .list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-space-1);
+    gap: var(--alloy-spacing-scale-1);
+    margin: 0;
+    padding: 0;
+    list-style: none;
   }
 
   .row {
     display: flex;
     align-items: center;
-    gap: var(--alloy-space-3);
+    gap: var(--alloy-spacing-scale-3);
     width: 100%;
-    padding: var(--alloy-space-2);
-    border: none;
-    border-radius: var(--alloy-radii-md);
+    min-width: 0;
+    padding: var(--alloy-spacing-scale-2);
+    border: 0;
+    border-radius: var(--alloy-radii-sm);
     background: transparent;
     color: inherit;
-    font: inherit;
-    text-align: start;
+    text-align: left;
     cursor: pointer;
+    transition: background-color var(--alloy-motion-duration-fast) ease;
   }
 
   .row:hover:not(:disabled) {
@@ -825,106 +981,79 @@
   }
 
   .row:disabled {
+    opacity: 0.6;
     cursor: progress;
   }
 
   .row-icon {
     display: inline-flex;
     flex-shrink: 0;
-    color: var(--alloy-text-secondary);
+    color: var(--alloy-color-text-muted);
   }
 
   .row-main {
     display: flex;
+    flex: 1;
     flex-direction: column;
     min-width: 0;
-    flex: 1;
   }
 
   .row-title {
     overflow: hidden;
+    font-size: var(--alloy-typography-size-sm);
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .row-title.link {
     color: var(--alloy-color-text-link);
   }
 
   .row-meta {
     overflow: hidden;
+    font-size: var(--alloy-typography-size-xs);
+    color: var(--alloy-color-text-muted);
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: var(--alloy-text-muted);
-    font-size: var(--alloy-typography-size-xs);
   }
 
   .sentinel {
     height: 1px;
   }
 
-  /* Phone: a full-screen page with a back arrow, not a floating card. */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
   @media (max-width: 899px) {
-    .room-info {
+    .details {
       position: fixed;
       inset: 0;
       z-index: 50;
-      box-sizing: border-box;
-      padding: var(--alloy-safe-area-top) var(--alloy-safe-area-right) var(--alloy-safe-area-bottom)
-        var(--alloy-safe-area-left);
-      font-size: var(--alloy-typography-size-lg);
+      padding-top: env(safe-area-inset-top);
+      padding-bottom: env(safe-area-inset-bottom);
     }
-    .bar {
-      height: var(--alloy-layout-header-height);
-      padding: 0 var(--alloy-spacing-scale-2);
-      justify-content: flex-start;
-    }
-    .title {
-      flex: 1;
-      min-width: 0;
-      font-size: var(--alloy-typography-size-lg);
-    }
-    .icon-btn {
+
+    .close {
       order: -1;
-      width: 44px;
-      height: 44px;
     }
-    .icon-btn:hover {
-      background: transparent;
-      color: var(--alloy-text-secondary);
+
+    .icon-btn {
+      width: var(--alloy-touch-target);
+      height: var(--alloy-touch-target);
     }
-    .hero-meta,
-    .hint,
-    .status,
-    .empty,
-    .label,
-    .row-meta {
-      font-size: var(--alloy-typography-size-sm);
-    }
-    .tab {
-      min-height: 44px;
-      padding: 0 var(--alloy-spacing-scale-3);
-      font-size: var(--alloy-typography-size-lg);
-    }
+
     .body {
-      overscroll-behavior: contain;
-      -webkit-overflow-scrolling: touch;
+      padding: var(--alloy-layout-gutter);
     }
-    .body :global(button) {
-      min-height: 44px;
-    }
-    .row-actions :global(button) {
-      min-height: 44px;
-    }
+
     .row {
       min-height: 56px;
-      padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x);
-    }
-    .row:hover:not(:disabled) {
-      background: transparent;
-    }
-    .row:active:not(:disabled) {
-      background: var(--alloy-color-surface-hover);
-    }
-    .row-title {
-      font-size: var(--alloy-typography-size-lg);
     }
   }
 </style>

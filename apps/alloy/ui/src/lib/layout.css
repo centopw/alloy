@@ -14,4 +14,5 @@
   --alloy-layout-row-inset: var(--alloy-spacing-scale-2);
   --alloy-layout-row-pad-x: var(--alloy-spacing-scale-3);
   --alloy-layout-section-gap: var(--alloy-spacing-scale-4);
+  --alloy-layout-rail-width: 68px;
 }

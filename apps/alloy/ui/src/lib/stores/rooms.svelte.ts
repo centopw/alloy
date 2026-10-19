@@ -5,12 +5,20 @@ import { expect } from './errors.js';
 import { prefs } from './prefs.svelte.js';
 import { roomNotify } from './roomNotify.svelte.js';
 import { ui } from './ui.svelte.js';
-import { markFor, unreadCount, type ReadMark } from './unread.js';
+import { loadReadMarks, markFor, saveReadMarks, unreadCount, type ReadMark } from './unread.js';
 import { sortRooms } from './roomSort.js';
 import { displayTags } from './tags.js';
 import { tags } from './tags.svelte.js';
 
 export type RoomFilter = 'all' | 'unread' | 'direct' | 'rooms';
+
+/** Filter chips in display order. `label` is the chip text; `rooms` is the Channels chip. */
+export const ROOM_FILTERS: readonly { value: RoomFilter; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'direct', label: 'Direct' },
+  { value: 'rooms', label: 'Channels' },
+  { value: 'unread', label: 'Unread' },
+];
 
 type RoomDiffEvent = Extract<EngineEvent, { type: 'RoomListDiff' }>;
 
@@ -26,7 +34,7 @@ class RoomsStore {
   /** Joined spaces that contain each room, by room id (from the engine's space graph). */
   spaceParents = $state<Record<string, string[]>>({});
   /** Per room: the counter and newest message when the user last read it (see `unreadCount`). */
-  private readMarks = $state<Record<string, ReadMark>>({});
+  private readMarks = $state<Record<string, ReadMark>>(loadReadMarks(typeof localStorage === 'undefined' ? null : localStorage));
 
   private sub: Subscription<RoomDiffEvent> | null = null;
   private batcher: FrameBatcher<RoomDiffEvent> | null = null;
@@ -68,11 +76,22 @@ class RoomsStore {
     return unreadCount(r, this.readMarks[r.id]);
   }
 
+  private persistReadMarks() {
+    saveReadMarks(typeof localStorage === 'undefined' ? null : localStorage, this.readMarks);
+  }
+
+  /** Forget every read mark (sign-out), so the next account starts clean. */
+  clearReadMarks() {
+    this.readMarks = {};
+    this.persistReadMarks();
+  }
+
   /** Record that the user has read a room, so a stale server counter stops showing as unread. */
   markRead(roomId: string) {
     const r = this.rooms.find((x) => x.id === roomId);
     if (!r || r.unread_notifications.notification_count === 0) return;
     this.readMarks[roomId] = markFor(r);
+    this.persistReadMarks();
   }
 
   active = $derived(

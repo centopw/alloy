@@ -161,13 +161,11 @@ try {
     await tapSel('button[aria-label^="Room info for"]');
     await audit('4-room-info');
     await page.evaluate(() => document.querySelector('button[aria-label="Close room info"]')?.click()); await settle();
-    step('mobile: room info tabs');
+    step('mobile: room info sub-views');
     await tapSel('button[aria-label^="Room info for"]');
-    for (const tab of ['Media', 'Members']) {
-      await page.evaluate((t) => [...document.querySelectorAll('[role=tab]')].find((e) => e.textContent.trim() === t).click(), tab);
-      await settle();
-      await audit(`5-room-info-${tab.toLowerCase()}`);
-    }
+    await page.evaluate(() => [...document.querySelectorAll('section[aria-label="Room info"] button')].find((b) => /^View all/.test(b.textContent.trim())).click()); await settle();
+    await audit('5-room-info-members');
+    await page.evaluate(() => document.querySelector('button[aria-label="Back to details"]')?.click()); await settle();
     await page.evaluate(() => document.querySelector('button[aria-label="Close room info"], button[aria-label="Back"]')?.click()); await settle();
     step('mobile: back to list, new room, directory, settings');
     await page.evaluate(() => document.querySelector('button[aria-label="Back to rooms"]')?.click()); await settle();
@@ -200,9 +198,12 @@ try {
   const bobRow = await page.evaluateHandle(() => [...document.querySelectorAll('.row')].find((r) => r.textContent.includes('Hi from bob')));
   await bobRow.asElement().hover();
   await page.evaluate((row) => row.querySelector('button[aria-label=React]').click(), bobRow);
-  await page.waitForSelector('.picker button', { visible: true });
-  if (process.env.E2E_TRACE) console.log('picker top element:', await page.evaluate(() => { const b = document.querySelector('.picker button'); const r = b.getBoundingClientRect(); const t = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return t && (t.className + ' / ' + t.tagName + ' / ' + t.outerHTML.slice(0, 120)); }));
-  await page.evaluate(() => document.querySelector('.picker button').click());
+  // The shared emoji picker: search narrows the grid, picking an emoji toggles the reaction.
+  await page.waitForSelector('.emoji-picker .cell', { visible: true, timeout: 30000 });
+  await uxShot(page, 'emoji-picker');
+  await page.type('.emoji-picker input[aria-label="Search emoji"]', 'thumbs up');
+  await page.waitForFunction(() => document.querySelector('.emoji-picker .heading')?.textContent === 'Results' && /thumbs up/i.test(document.querySelector('.emoji-picker .cell')?.getAttribute('aria-label') ?? ''), { timeout: 10000 });
+  await page.evaluate(() => document.querySelector('.emoji-picker .cell').click());
   await page.waitForFunction(() => document.querySelector('.chip.mine'), { timeout: 30000 });
 
   step('hover an icon button shows a tooltip');
@@ -232,9 +233,11 @@ try {
   });
   await page.waitForFunction(() => [...document.querySelectorAll('section[aria-label="Room info"] [role=status]')].some((e) => e.textContent.includes('Saved')), { timeout: 15000 });
   await uxShot(page, 'room-info');
-  await page.evaluate(() => [...document.querySelectorAll('section[aria-label="Room info"] [role=tab]')].find((t) => t.textContent.includes('Media')).click());
-  await new Promise((r) => setTimeout(r, 1200));
-  await uxShot(page, 'room-info-media');
+  // Members: the overview lists a few, 'View all' drills into the full list and Back returns.
+  await page.evaluate(() => [...document.querySelectorAll('section[aria-label="Room info"] button')].find((b) => /^View all/.test(b.textContent.trim())).click());
+  await new Promise((r) => setTimeout(r, 800));
+  await uxShot(page, 'room-info-members');
+  await page.click('section[aria-label="Room info"] button[aria-label="Back to details"]');
   await page.click('button[aria-label="Close room info"]');
   await page.waitForFunction(() => !document.querySelector('section[aria-label="Room info"]'), { timeout: 5000 });
 
@@ -245,8 +248,13 @@ try {
     row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 20, clientY: r.top + 10 }));
   });
   await page.waitForSelector('[role=menu] [role=menuitem]', { visible: true, timeout: 5000 });
-  await page.waitForFunction(() => [...document.querySelectorAll('[role=menuitem]')].find((e) => e.textContent.includes('Rename room'))?.getAttribute('aria-disabled') === 'true', { timeout: 10000 });
+  // Tiered menu: there is no 'Open' entry; Room settings opens a flyout that holds Rename room.
+  const topLabels = await page.$$eval('[role=menu] [role=menuitem]', (els) => els.map((e) => e.textContent.trim()));
+  if (topLabels.some((l) => l === 'Open')) throw new Error(`room menu still has an Open entry: ${topLabels}`);
   await uxShot(page, 'context-menu');
+  await page.evaluate(() => [...document.querySelectorAll('[role=menuitem]')].find((e) => e.textContent.includes('Room settings')).click());
+  await page.waitForFunction(() => [...document.querySelectorAll('[role=menuitem]')].find((e) => e.textContent.includes('Rename room'))?.getAttribute('aria-disabled') === 'true', { timeout: 10000 });
+  await uxShot(page, 'context-menu-flyout');
   await page.keyboard.press('Escape');
 
   step('reply in a thread from the panel');
@@ -311,6 +319,8 @@ try {
     row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 20, clientY: r.top + 10 }));
   });
   await page.waitForSelector('[role=menu] [role=menuitem]', { visible: true, timeout: 5000 });
+  await page.evaluate(() => [...document.querySelectorAll('[role=menuitem]')].find((e) => e.textContent.includes('Room settings')).click());
+  await page.waitForFunction(() => [...document.querySelectorAll('[role=menuitem]')].some((e) => e.textContent.includes('Rename room')), { timeout: 5000 });
   await page.evaluate(() => [...document.querySelectorAll('[role=menuitem]')].find((e) => e.textContent.includes('Rename room')).click());
   await page.waitForSelector('[role=dialog] input', { visible: true, timeout: 5000 });
   await page.click('[role=dialog] input');
@@ -375,11 +385,42 @@ try {
     const r = row.getBoundingClientRect();
     row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 20, clientY: r.top + 10 }));
   });
-  await page.waitForSelector('[role=menu] [role=menuitemradio]', { visible: true, timeout: 5000 });
+  // Tags is its own flyout: toggle an existing tag, then create a new one by typing a name and pressing Enter.
+  const roomMenu = async () => {
+    await page.evaluate(() => {
+      const row = [...document.querySelectorAll('button.row')].find((e) => e.textContent.includes('Renamed by E2E'));
+      const r = row.getBoundingClientRect();
+      row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 20, clientY: r.top + 10 }));
+    });
+    await page.waitForSelector('[role=menu] [role=menuitem]', { visible: true, timeout: 5000 });
+    await page.evaluate(() => [...document.querySelectorAll('[role=menuitem]')].find((e) => e.textContent.trim().startsWith('Tags')).click());
+    await page.waitForSelector('input[placeholder*="create a tag"]', { visible: true, timeout: 5000 });
+  };
+  await page.keyboard.press('Escape');
+  await roomMenu();
+  await uxShot(page, 'context-menu-tags');
   await page.evaluate(() => [...document.querySelectorAll('[role=menuitemradio]')].find((e) => e.textContent.includes('Work')).click());
   await page.waitForFunction(() => [...document.querySelectorAll('[role=toolbar][aria-label="Filter rooms by tag"] button')].some((b) => b.textContent.includes('Work')), { timeout: 15000 });
   await page.evaluate(() => [...document.querySelectorAll('[role=toolbar][aria-label="Filter rooms by tag"] button')].find((b) => b.textContent.includes('Work')).click());
   await page.waitForFunction(() => { const rows = [...document.querySelectorAll('button.row')]; return rows.length > 0 && rows.every((r) => r.textContent.includes('Renamed by E2E')); }, { timeout: 15000 });
+  // Create a tag straight from the room menu's search field.
+  await page.keyboard.press('Escape');
+  await roomMenu();
+  await page.type('input[placeholder*="create a tag"]', 'Urgent');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => [...document.querySelectorAll('[role=toolbar][aria-label="Filter rooms by tag"] button')].some((b) => b.textContent.includes('Urgent')), { timeout: 15000 });
+  // Right-click a tag chip: its own menu offers to delete it.
+  await page.evaluate(() => {
+    const chip = [...document.querySelectorAll('[role=toolbar][aria-label="Filter rooms by tag"] button')].find((b) => b.textContent.includes('Urgent'));
+    const r = chip.getBoundingClientRect();
+    chip.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 5, clientY: r.top + 5 }));
+  });
+  await page.waitForFunction(() => [...document.querySelectorAll('[role=menuitem]')].some((e) => e.textContent.includes('Delete tag')), { timeout: 5000 });
+  await uxShot(page, 'context-menu-tag-chip');
+  await page.evaluate(() => [...document.querySelectorAll('[role=menuitem]')].find((e) => e.textContent.includes('Delete tag')).click());
+  await page.waitForSelector('[role=dialog]', { visible: true, timeout: 5000 });
+  await page.evaluate(() => [...document.querySelectorAll('[role=dialog] button')].find((b) => b.textContent.trim() === 'Delete tag').click());
+  await page.waitForFunction(() => ![...document.querySelectorAll('[role=toolbar][aria-label="Filter rooms by tag"] button')].some((b) => b.textContent.includes('Urgent')), { timeout: 15000 });
   await openTagsSettings();
   await page.click('[role=dialog] button[aria-label="Delete Work"]');
   await page.waitForSelector('[role=dialog][aria-label="Delete tag"]', { visible: true, timeout: 5000 });

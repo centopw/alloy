@@ -7,9 +7,10 @@
   import Icon from '$lib/icons/Icon.svelte';
   import { ChartBar, Paperclip, Plus, Send, Smile, X } from '$lib/icons';
   import { canPickFiles, pickFile } from '$lib/platform/files';
+  import { contextmenu } from '$lib/platform/contextmenu';
   import { viewport } from '$lib/stores/viewport.svelte';
-  import { contextMenu } from '$lib/stores/contextmenu.svelte';
-  import { EMOJI_PICKER } from '$lib/content/emoji';
+  import { contextMenu, type MenuItem } from '$lib/stores/contextmenu.svelte';
+  import { emojiPicker } from '$lib/stores/emojiPicker.svelte';
   import { tick, untrack } from 'svelte';
   import type { RoomMemberDto } from '$lib/generated/index.js';
   import { membersStore, memberLabel } from '$lib/stores/members.svelte';
@@ -35,7 +36,6 @@
 
   let text = $state('');
   let field: HTMLTextAreaElement | undefined = $state();
-  let emojiOpen = $state(false);
   let mention = $state<ActiveMention | null>(null);
   let pollOpen = $state(false);
   // Key (`start:query`) of a mention dismissed with Escape; it reopens once the query changes.
@@ -87,7 +87,7 @@
   $effect(() => {
     void roomId;
     text = '';
-    emojiOpen = false;
+    untrack(() => emojiPicker.close());
     mention = null;
     mentionDismissed = null;
     mentionRecords = [];
@@ -219,7 +219,7 @@
       e.preventDefault();
       void submit();
     } else if (e.key === 'Escape') {
-      if (emojiOpen) emojiOpen = false;
+      if (emojiPicker.isOpen) emojiPicker.close();
       else if (replying || editing) {
         timelineStore.cancelCompose();
         if (editing) text = '';
@@ -240,11 +240,48 @@
     contextMenu.open(canPickFiles() ? [file, poll] : [poll], { x: r.left, y: r.top });
   }
 
+  // Right-click on a composer button offers exactly the action that button performs.
+  function attachMenu(): MenuItem[] {
+    return [{ id: 'attach', label: 'Attach file', icon: Paperclip, onselect: () => void attach() }];
+  }
+
+  let emojiButton: HTMLButtonElement | undefined = $state();
+
+  function toggleEmoji() {
+    if (emojiPicker.isOpen) {
+      emojiPicker.close();
+      return;
+    }
+    const anchor = emojiButton?.getBoundingClientRect();
+    if (!anchor) return;
+    emojiPicker.open({ anchor, onpick: addEmoji });
+  }
+
+  function emojiMenu(): MenuItem[] {
+    return [
+      {
+        id: 'emoji',
+        label: emojiPicker.isOpen ? 'Hide emoji picker' : 'Show emoji picker',
+        icon: Smile,
+        onselect: toggleEmoji,
+      },
+    ];
+  }
+
+  function sendMenu(): MenuItem[] {
+    return [{ id: 'send', label: 'Send message', icon: Send, disabled: !canSend, onselect: () => void submit() }];
+  }
+
+  /** Insert at the caret (replacing a selection), then put the caret after the emoji. */
   function addEmoji(e: string) {
-    text += e;
-    emojiOpen = false;
-    field?.focus();
+    const start = field?.selectionStart ?? text.length;
+    const end = field?.selectionEnd ?? text.length;
+    text = text.slice(0, start) + e + text.slice(end);
     onInput();
+    void tick().then(() => {
+      field?.focus();
+      field?.setSelectionRange(start + e.length, start + e.length);
+    });
   }
 
   function banner(): string {
@@ -280,7 +317,7 @@
 
   <div class="field">
     {#if canPickFiles() && !threadRoot && !viewport.isPhone}
-      <button type="button" class="round" aria-label="Attach file" title="Attach file" onclick={attach}>
+      <button type="button" class="round" aria-label="Attach file" title="Attach file" onclick={attach} use:contextmenu={attachMenu}>
         <Icon icon={Plus} size={20} />
       </button>
     {/if}
@@ -324,31 +361,25 @@
       onblur={() => (mention = null)}
     ></textarea>
 
-    <div class="emoji-wrap">
-      <button
-        type="button"
-        class="round"
-        aria-label="Insert emoji"
-        aria-expanded={emojiOpen}
-        title="Insert emoji"
-        onclick={() => (emojiOpen = !emojiOpen)}
-      >
-        <Icon icon={Smile} size={20} />
-      </button>
-      {#if emojiOpen}
-        <div class="emoji-grid" role="menu">
-          {#each EMOJI_PICKER as e}
-            <button type="button" role="menuitem" onclick={() => addEmoji(e)}>{e}</button>
-          {/each}
-        </div>
-      {/if}
-    </div>
+    <button
+      bind:this={emojiButton}
+      type="button"
+      class="round"
+      aria-label="Insert emoji"
+      aria-expanded={emojiPicker.isOpen}
+      title="Insert emoji"
+      use:contextmenu={emojiMenu}
+      onclick={toggleEmoji}
+    >
+      <Icon icon={Smile} size={20} />
+    </button>
     {#if viewport.isPhone}
       <button
         type="button"
         class="send"
         aria-label="Send message"
         title="Send"
+        use:contextmenu={sendMenu}
         disabled={!canSend}
         onpointerdown={(e) => e.preventDefault()}
         onclick={() => void submit()}
@@ -450,7 +481,7 @@
     place-items: center;
     cursor: pointer;
     flex: none;
-    background: var(--alloy-color-accent-primary);
+    background: var(--alloy-color-accent-fill);
     color: var(--alloy-color-text-on-accent);
   }
   .send:disabled {
@@ -472,36 +503,6 @@
     outline: 2px solid var(--alloy-color-accent-primary);
     outline-offset: 2px;
   }
-  .emoji-wrap {
-    position: relative;
-  }
-  .emoji-grid {
-    position: absolute;
-    bottom: calc(100% + var(--alloy-spacing-scale-2));
-    right: 0;
-    display: grid;
-    grid-template-columns: repeat(8, 1fr);
-    gap: 2px;
-    padding: var(--alloy-spacing-scale-2);
-    background: var(--alloy-color-surface-elevated);
-    border: 1px solid var(--alloy-color-border-subtle);
-    border-radius: var(--alloy-radii-lg);
-    box-shadow: var(--alloy-elevation-md);
-    z-index: 5;
-  }
-  .emoji-grid button {
-    border: 0;
-    background: transparent;
-    font-size: 1.25rem;
-    padding: var(--alloy-spacing-scale-1);
-    border-radius: var(--alloy-radii-sm);
-    cursor: pointer;
-  }
-  @media (hover: hover) {
-    .emoji-grid button:hover {
-      background: var(--alloy-color-surface-hover);
-    }
-  }
   @media (max-width: 899px) {
     .composer {
       padding: var(--alloy-spacing-scale-2) var(--alloy-layout-gutter)
@@ -520,16 +521,6 @@
       min-height: 44px;
       font-size: var(--alloy-typography-size-lg);
       padding: var(--alloy-spacing-scale-2) 0;
-    }
-    .emoji-grid {
-      grid-template-columns: repeat(7, 44px);
-    }
-    .emoji-grid button {
-      width: 44px;
-      height: 44px;
-      padding: 0;
-      display: grid;
-      place-items: center;
     }
   }
 </style>

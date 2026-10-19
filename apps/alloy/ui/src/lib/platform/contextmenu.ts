@@ -65,6 +65,25 @@ export function placeAnchor(
   return { x, y };
 }
 
+/**
+ * Place a flyout of `size` beside its parent `row`: to the right by default (the gap clears the parent
+ * border), flipping left when it would overflow, and clamped to the viewport with `margin`. Vertically it
+ * starts at the row's top edge.
+ */
+export function placeFlyout(
+  row: MenuAnchor,
+  size: MenuSize,
+  viewport: MenuViewport,
+  margin = 8,
+  gap = 8,
+): MenuPoint {
+  let x = row.x + row.width + gap;
+  if (x + size.width > viewport.width - margin) x = row.x - gap - size.width;
+  x = Math.max(margin, Math.min(x, viewport.width - size.width - margin));
+  const y = Math.max(margin, Math.min(row.y, viewport.height - size.height - margin));
+  return { x, y };
+}
+
 /** Svelte action: wire a node to the global context menu. The factory returns [] to opt out. */
 export function contextmenu(node: HTMLElement, factory: () => MenuItem[]) {
   let getItems = factory;

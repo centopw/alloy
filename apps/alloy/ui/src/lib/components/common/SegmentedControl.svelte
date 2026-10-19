@@ -67,9 +67,9 @@
   style="
     display: inline-flex;
     align-items: center;
-    background-color: var(--alloy-color-surface-subtle, #27272a);
-    border: 1px solid var(--alloy-color-border-subtle, #3f3f46);
-    border-radius: var(--alloy-radii-md, 8px);
+    background-color: var(--alloy-color-surface-subtle);
+    border: 1px solid var(--alloy-color-border-subtle);
+    border-radius: var(--alloy-radii-md);
     padding: 3px;
     gap: 2px;
     user-select: none;
@@ -93,15 +93,15 @@
         align-items: center;
         justify-content: center;
         padding: 4px 10px;
-        font-size: var(--alloy-typography-size-sm, 12px);
-        font-weight: {isSelected ? 'var(--alloy-typography-weight-semibold, 600)' : 'var(--alloy-typography-weight-regular, 400)'};
-        color: {isSelected ? 'var(--alloy-color-text-primary, #ffffff)' : 'var(--alloy-color-text-secondary, #a1a1aa)'};
-        background-color: {isSelected ? 'var(--alloy-color-surface-panel, #3f3f46)' : 'transparent'};
+        font-size: var(--alloy-typography-size-sm);
+        font-weight: {isSelected ? 'var(--alloy-typography-weight-semibold)' : 'var(--alloy-typography-weight-regular)'};
+        color: {isSelected ? 'var(--alloy-color-text-primary)' : 'var(--alloy-color-text-secondary)'};
+        background-color: {isSelected ? 'var(--alloy-color-surface-active)' : 'transparent'};
         border: none;
-        border-radius: var(--alloy-radii-sm, 4px);
+        border-radius: var(--alloy-radii-sm);
         cursor: {disabled ? 'not-allowed' : 'pointer'};
-        box-shadow: {isSelected ? 'var(--alloy-elevation-sm, 0 1px 2px rgba(0,0,0,0.15))' : 'none'};
-        transition: background-color var(--alloy-motion-duration-fast, 150ms) ease, color var(--alloy-motion-duration-fast, 150ms) ease;
+        box-shadow: {isSelected ? 'var(--alloy-elevation-sm)' : 'none'};
+        transition: background-color var(--alloy-motion-duration-fast) ease, color var(--alloy-motion-duration-fast) ease;
         outline: none;
         white-space: nowrap;
       "
@@ -113,7 +113,7 @@
 
 <style>
   .alloy-segmented-option:focus-visible {
-    outline: 2px solid var(--alloy-color-accent-primary, #4f46e5);
+    outline: 2px solid var(--alloy-color-accent-primary);
     outline-offset: 1px;
     z-index: 1;
   }

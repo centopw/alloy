@@ -2,12 +2,17 @@
   import "../lib/tokens.css";
   import "../lib/layout.css";
   import "../lib/mobile.css";
+  import { onMount } from "svelte";
   import ProfileCardHost from '$lib/components/shell/ProfileCardHost.svelte';
+  import EmojiPickerHost from '$lib/components/common/EmojiPickerHost.svelte';
   import { themeStore } from "$lib/theme/theme.svelte";
   import ContextMenu from "$lib/components/common/ContextMenu.svelte";
   import TooltipLayer from "$lib/components/common/TooltipLayer.svelte";
+  import { installNativeMenuGuard } from "$lib/platform/nativeMenu";
 
   let { children } = $props();
+
+  onMount(() => installNativeMenuGuard(document));
 </script>
 
 {@render children()}
@@ -15,6 +20,7 @@
 <ContextMenu />
 <TooltipLayer />
 <ProfileCardHost />
+<EmojiPickerHost />
 
 <style>
   /* The document never scrolls: the page is pinned to the viewport and only inner regions scroll.

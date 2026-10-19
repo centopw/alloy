@@ -29,21 +29,23 @@ html, body {
 
 :root:not([data-theme]) {
   /* Fallback defaults for tokens before theme loads */
-  --alloy-color-surface-canvas: #18181b;
-  --alloy-color-surface-subtle: #27272a;
-  --alloy-color-surface-panel: #1f1f23;
-  --alloy-color-surface-elevated: #27272a;
-  --alloy-color-surface-hover: #3f3f46;
-  --alloy-color-background: #18181b;
-  --alloy-color-text-primary: #f4f4f5;
-  --alloy-color-text-secondary: #a1a1aa;
-  --alloy-color-text-muted: #71717a;
+  --alloy-color-surface-canvas: #0e1015;
+  --alloy-color-surface-subtle: #151821;
+  --alloy-color-surface-panel: #151821;
+  --alloy-color-surface-elevated: #1c202d;
+  --alloy-color-surface-hover: #1a1e2b;
+  --alloy-color-surface-active: #252a3a;
+  --alloy-color-background: #0e1015;
+  --alloy-color-text-primary: #f1f5f9;
+  --alloy-color-text-secondary: #94a3b8;
+  --alloy-color-text-muted: #64748b;
   --alloy-color-text-link: #60a5fa;
   --alloy-color-text-on-accent: #ffffff;
-  --alloy-color-accent-primary: #5865f2;
+  --alloy-color-accent-primary: #3b82f6;
   --alloy-color-accent-secondary: #818cf8;
-  --alloy-color-accent-subtle: #312e81;
-  --alloy-color-accent-hover: #4f46e5;
+  --alloy-color-accent-subtle: #152137;
+  --alloy-color-accent-hover: #1d4ed8;
+  --alloy-color-accent-fill: #2563eb;
   --alloy-color-status-online: #22c55e;
   --alloy-color-status-away: #f59e0b;
   --alloy-color-status-busy: #ef4444;
@@ -53,12 +55,14 @@ html, body {
   --alloy-color-status-info: #3b82f6;
   --alloy-color-status-success: #22c55e;
   --alloy-color-status-mention: #f97316;
-  --alloy-color-bubble-own-background: #4f46e5;
+  --alloy-color-bubble-own-background: #1d4ed8;
   --alloy-color-bubble-own-text: #ffffff;
-  --alloy-color-bubble-other-background: #27272a;
-  --alloy-color-bubble-other-text: #f4f4f5;
-  --alloy-color-border-subtle: #27272a;
-  --alloy-color-border-prominent: #3f3f46;
+  --alloy-color-bubble-other-background: #1c202d;
+  --alloy-color-bubble-other-text: #f1f5f9;
+  --alloy-color-border-subtle: #232734;
+  --alloy-color-border-prominent: #333a4d;
+  --alloy-color-border-floating: #2e3446;
+  --alloy-color-scrim: #05070ab3;
 
   --alloy-typography-font-family-sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --alloy-typography-font-family-mono: "JetBrains Mono", "Fira Code", monospace;
@@ -91,13 +95,13 @@ html, body {
 
   --alloy-radii-none: 0px;
   --alloy-radii-sm: 4px;
-  --alloy-radii-md: 8px;
-  --alloy-radii-lg: 16px;
+  --alloy-radii-md: 6px;
+  --alloy-radii-lg: 8px;
   --alloy-radii-full: 9999px;
 
   --alloy-elevation-none: none;
   --alloy-elevation-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
-  --alloy-elevation-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -2px rgba(0, 0, 0, 0.5);
+  --alloy-elevation-md: 0 8px 24px -4px rgba(0, 0, 0, 0.6);
   --alloy-elevation-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.6), 0 4px 6px -4px rgba(0, 0, 0, 0.6);
 
   --alloy-motion-duration-fast: 100ms;

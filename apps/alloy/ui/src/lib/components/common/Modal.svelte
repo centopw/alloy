@@ -123,7 +123,7 @@
   .backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.5);
+    background: var(--alloy-color-scrim);
     display: grid;
     place-items: center;
     z-index: 60;
@@ -136,7 +136,7 @@
     background: var(--alloy-color-surface-elevated);
     color: var(--alloy-color-text-primary);
     border: 1px solid var(--alloy-color-border-prominent);
-    border-radius: var(--alloy-radii-lg);
+    border-radius: var(--alloy-radii-md);
     box-shadow: var(--alloy-elevation-lg);
     outline: 0;
   }
@@ -196,7 +196,7 @@
       border-left: 0;
       border-right: 0;
       border-bottom: 0;
-      border-radius: var(--alloy-radii-lg) var(--alloy-radii-lg) 0 0;
+      border-radius: var(--alloy-radii-md) var(--alloy-radii-md) 0 0;
       padding-bottom: var(--alloy-safe-area-bottom);
       animation: alloy-sheet-up var(--alloy-motion-duration-normal) ease-out backwards;
     }

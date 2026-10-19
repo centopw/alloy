@@ -45,8 +45,10 @@ import Tags from './sections/Tags.svelte';
   interface Props {
     open: boolean;
     onclose: () => void;
+    /** Page to show when the dialog opens (for example 'tags' from the room list's tag menu). */
+    initialSection?: SettingsSectionId;
   }
-  let { open, onclose }: Props = $props();
+  let { open, onclose, initialSection }: Props = $props();
 
   type Section = SettingsSectionId;
 
@@ -101,7 +103,14 @@ import Tags from './sections/Tags.svelte';
   // Android Back closes the dialog; inside a section it first returns to the section list.
   $effect(() => {
     if (!open) return;
-    mobileView = 'nav';
+    // Opening on a specific page goes straight to it (on phones too); otherwise start at the list.
+    const target = untrack(() => initialSection);
+    if (target && untrack(() => visibleSections).some((item) => item.id === target)) {
+      section = target;
+      mobileView = 'content';
+    } else {
+      mobileView = 'nav';
+    }
     return pushBack(() => onclose());
   });
   $effect(() => {

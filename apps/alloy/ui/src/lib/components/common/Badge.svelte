@@ -39,8 +39,8 @@
       font-size: var(--alloy-typography-size-xs, 11px);
       font-weight: var(--alloy-typography-weight-bold, 700);
       line-height: 1;
-      background-color: {isMuted ? 'var(--alloy-color-surface-hover, #3f3f46)' : 'var(--alloy-color-accent-primary, #4f46e5)'};
-      color: {isMuted ? 'var(--alloy-color-text-secondary, #a1a1aa)' : 'var(--alloy-color-text-on-accent, #ffffff)'};
+      background-color: {isMuted ? 'var(--alloy-color-surface-hover)' : 'var(--alloy-color-accent-fill)'};
+      color: {isMuted ? 'var(--alloy-color-text-secondary)' : 'var(--alloy-color-text-on-accent)'};
       user-select: none;
       box-sizing: border-box;
     "

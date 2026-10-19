@@ -109,7 +109,7 @@
     background-color: {userColor};
     color: var(--alloy-color-text-on-accent);
     font-size: {currentFontSize}px;
-    font-weight: var(--alloy-typography-weight-semibold, 600);
+    font-weight: var(--alloy-typography-weight-semibold);
     user-select: none;
     overflow: visible;
   "

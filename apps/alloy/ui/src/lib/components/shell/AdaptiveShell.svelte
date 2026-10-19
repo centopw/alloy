@@ -28,9 +28,16 @@
   import { notifier } from '$lib/stores/notifier.svelte';
   import { notificationSettings } from '$lib/stores/notificationSettings.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
+  import { updatesStore } from '$lib/stores/updates.svelte';
+  import TitleStrip from './TitleStrip.svelte';
 
   let paletteOpen = $state(false);
   let settingsOpen = $state(false);
+  let settingsSection = $state<'tags' | undefined>();
+  function openSettings(section?: 'tags') {
+    settingsSection = section;
+    settingsOpen = true;
+  }
   let newRoomOpen = $state(false);
   let directoryOpen = $state(false);
   let pane = $state<'list' | 'chat'>('list');
@@ -92,6 +99,7 @@
     void prefs.load();
     verification.listen();
     void roomsStore.start();
+    const stopUpdates = updatesStore.start();
     void tags.load();
     void verification.refreshRecovery();
     void notificationSettings.load();
@@ -99,7 +107,9 @@
     return () => {
       notifier.stop();
       void roomsStore.stop();
+      stopUpdates();
       tags.reset();
+      roomsStore.clearReadMarks();
       teardownPrefs();
     };
   });
@@ -168,13 +178,15 @@
       paletteOpen = !paletteOpen;
     } else if (mod && e.key === ',') {
       e.preventDefault();
-      settingsOpen = true;
+      openSettings();
     }
   }
 </script>
 
 <svelte:window onkeydown={onKeydown} bind:innerWidth />
 
+<div class="frame">
+<TitleStrip />
 <div
   class="shell"
   data-layout={breakpoint}
@@ -188,18 +200,18 @@
     {#if phone}
       <SpaceChips onnew={() => (newRoomOpen = true)} />
       <div class="list-body">
-        <Sidebar onselect={pick} onnew={() => (newRoomOpen = true)} onbrowse={() => (directoryOpen = true)} onsettings={() => (settingsOpen = true)} />
+        <Sidebar onselect={pick} onnew={() => (newRoomOpen = true)} onbrowse={() => (directoryOpen = true)} onsettings={openSettings} />
       </div>
       <MobileTabBar
         active={tabActive}
         onchats={showChats}
         ondiscover={() => (directoryOpen = true)}
-        onsettings={() => (settingsOpen = true)}
+        onsettings={() => openSettings()}
         unread={unreadTotal}
       />
     {:else}
       <SpaceRail onnew={() => (newRoomOpen = true)} />
-      <Sidebar onselect={pick} onnew={() => (newRoomOpen = true)} onbrowse={() => (directoryOpen = true)} onsettings={() => (settingsOpen = true)} />
+      <Sidebar onselect={pick} onnew={() => (newRoomOpen = true)} onbrowse={() => (directoryOpen = true)} onsettings={openSettings} />
     {/if}
   </div>
 
@@ -243,7 +255,7 @@
 
   {#if infoMode !== 'none' && activeId}
     <div class="side">
-      <RoomInfoPanel roomId={activeId} initialTab={ui.roomInfoTab} onclose={() => ui.closeRoomInfo()} />
+      <RoomInfoPanel roomId={activeId} initialTab={ui.roomInfoTab} onclose={() => ui.closeRoomInfo()} onsearch={() => (paletteOpen = true)} />
     </div>
   {/if}
   {#if threadMode !== 'none'}
@@ -252,20 +264,28 @@
     </div>
   {/if}
 </div>
+</div>
 
 <CommandPalette open={paletteOpen} onclose={() => (paletteOpen = false)} onpick={pick} />
 <NewRoomDialog open={newRoomOpen} onclose={() => (newRoomOpen = false)} onopened={pick} />
 <DirectoryDialog open={directoryOpen} onclose={() => (directoryOpen = false)} onjoined={pick} />
-<SettingsDialog open={settingsOpen} onclose={() => (settingsOpen = false)} />
+<SettingsDialog open={settingsOpen} initialSection={settingsSection} onclose={() => (settingsOpen = false)} />
 <VerificationDialog />
 {#if import.meta.env.DEV}<Hud bind:visible={hudVisible} />{/if}
 
 <style>
+  .frame {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+  }
   .shell {
     position: relative;
+    flex: 1;
+    min-height: 0;
     display: grid;
-    grid-template-columns: var(--sidebar-width, 312px) 6px minmax(0, 1fr);
-    height: 100%;
+    grid-template-columns: calc(var(--alloy-layout-rail-width) + var(--sidebar-width, 240px)) 6px minmax(0, 1fr);
     box-sizing: border-box;
     overflow: hidden;
     /* Keep content clear of the status bar, gesture bar and display cutouts on phones. */
@@ -275,14 +295,14 @@
     color: var(--alloy-color-text-primary);
   }
   .shell[data-side='column'] {
-    grid-template-columns: var(--sidebar-width, 312px) 6px minmax(0, 1fr) 6px var(--details-width, 340px);
+    grid-template-columns: calc(var(--alloy-layout-rail-width) + var(--sidebar-width, 240px)) 6px minmax(0, 1fr) 6px var(--details-width, 320px);
   }
 
-  /* The rail (72px) and the sidebar are separate components; this wrapper lays them out. The
+  /* The rail (68px) and the sidebar are separate components; this wrapper lays them out. The
      sidebar width covers both, so the rail sits inside the resizable left column. */
   .nav {
     display: grid;
-    grid-template-columns: 72px minmax(0, 1fr);
+    grid-template-columns: var(--alloy-layout-rail-width) minmax(0, 1fr);
     min-width: 0;
     min-height: 0;
   }
@@ -310,9 +330,9 @@
     right: var(--alloy-spacing-scale-2);
     bottom: var(--alloy-spacing-scale-2);
     z-index: 10;
-    width: min(var(--details-width, 340px), calc(100% - 2 * var(--alloy-spacing-scale-2)));
+    width: min(var(--details-width, 320px), calc(100% - 2 * var(--alloy-spacing-scale-2)));
     border: 1px solid var(--alloy-color-border-subtle);
-    border-radius: var(--alloy-radii-lg);
+    border-radius: var(--alloy-radii-md);
   }
 
   .thread-host {

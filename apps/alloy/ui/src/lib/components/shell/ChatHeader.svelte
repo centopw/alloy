@@ -2,12 +2,15 @@
   import type { RoomSummary } from '$lib/generated/protocol';
   import { Avatar } from '../common';
   import Icon from '$lib/icons/Icon.svelte';
-  import { ChevronLeft, Info, Search, Users } from '$lib/icons';
+  import { CheckCheck, ChevronLeft, Copy, Info, Link, Search, Users } from '$lib/icons';
+  import { copyText } from '$lib/platform/clipboard';
+  import { contextmenu } from '$lib/platform/contextmenu';
+  import { shortcutLabel } from '$lib/platform/shortcuts';
+  import type { MenuItem } from '$lib/stores/contextmenu.svelte';
   import { membersStore } from '$lib/stores/members.svelte';
-  import { roomTitle } from '$lib/stores/rooms.svelte';
+  import { roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
   import { ui } from '$lib/stores/ui.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
-  import { shortcutLabel } from '$lib/platform/shortcuts';
 
   interface Props {
     room: RoomSummary;
@@ -27,6 +30,42 @@
   );
   const searchShortcut = shortcutLabel('K');
 
+  function copyQuietly(text: string) {
+    copyText(text).catch(() => {
+      /* the clipboard refused the write; the menu has no other channel to report it */
+    });
+  }
+
+  function headerMenu(): MenuItem[] {
+    return [
+      { id: 'details', label: 'Room details', icon: Info, onselect: () => ui.openRoomInfo('info') },
+      {
+        id: 'search',
+        label: 'Search in room',
+        icon: Search,
+        shortcut: searchShortcut,
+        disabled: !onsearch,
+        onselect: () => onsearch?.(),
+      },
+      { separator: true },
+      {
+        id: 'copy-link',
+        label: 'Copy room link',
+        icon: Link,
+        onselect: () => copyQuietly(`https://matrix.to/#/${roomId}`),
+      },
+      { id: 'copy-id', label: 'Copy room ID', icon: Copy, onselect: () => copyQuietly(roomId) },
+      { separator: true },
+      {
+        id: 'mark-read',
+        label: 'Mark as read',
+        icon: CheckCheck,
+        disabled: roomsStore.unreadOf(room) === 0,
+        onselect: () => roomsStore.markRead(roomId),
+      },
+    ];
+  }
+
   // The topic lives in the room details, which may not have loaded yet.
   $effect(() => {
     void membersStore.loadDetails(roomId).catch(() => {
@@ -35,8 +74,8 @@
   });
 </script>
 
-<header class="head">
-  <button type="button" class="icon back" aria-label="Back to rooms" onclick={() => onback?.()}>
+<header class="head" use:contextmenu={headerMenu}>
+  <button type="button" class="icon back" aria-label="Back to rooms" onclick={() => onback?.()} use:contextmenu={() => [{ id: 'back', label: 'Back to rooms', icon: ChevronLeft, onselect: () => onback?.() }]}>
     <Icon icon={ChevronLeft} size={20} />
   </button>
   <h2 class="heading">
@@ -68,6 +107,7 @@
     <button
       type="button"
       class="icon"
+      use:contextmenu={() => [{ id: 'details', label: 'Room details', icon: Info, onselect: () => ui.toggleRoomInfo('info') }]}
       aria-label="Room info"
       aria-pressed={ui.roomInfoOpen && ui.roomInfoTab === 'info'}
       onclick={() => ui.toggleRoomInfo('info')}
@@ -78,6 +118,7 @@
     <button
       type="button"
       class="icon"
+      use:contextmenu={() => [{ id: 'members', label: 'Show members', icon: Users, onselect: () => ui.toggleRoomInfo('members') }]}
       aria-label="Member list"
       aria-pressed={ui.roomInfoOpen && ui.roomInfoTab === 'members'}
       onclick={() => ui.toggleRoomInfo('members')}
@@ -88,6 +129,7 @@
     <button
       type="button"
       class="icon"
+      use:contextmenu={() => [{ id: 'search', label: 'Search in room', icon: Search, onselect: () => onsearch?.() }]}
       aria-label="Search"
       data-shortcut={searchShortcut}
       onclick={() => onsearch?.()}

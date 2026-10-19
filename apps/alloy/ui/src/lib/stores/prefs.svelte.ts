@@ -40,6 +40,8 @@ export interface Prefs {
   autoplayMedia: boolean;
   enterToSend: boolean;
   launchAtLogin: boolean;
+  autoCheckUpdates: boolean;
+  autoDownloadUpdates: boolean;
   roomSort: RoomSort;
 }
 
@@ -71,6 +73,8 @@ export const DEFAULT_PREFS: Readonly<Prefs> = Object.freeze({
   autoplayMedia: false,
   enterToSend: true,
   launchAtLogin: false,
+  autoCheckUpdates: true,
+  autoDownloadUpdates: false,
   roomSort: 'activity',
 });
 
@@ -226,6 +230,12 @@ export class PrefsStore {
   }
   get launchAtLogin(): boolean {
     return this.#values.launchAtLogin;
+  }
+  get autoCheckUpdates(): boolean {
+    return this.#values.autoCheckUpdates;
+  }
+  get autoDownloadUpdates(): boolean {
+    return this.#values.autoDownloadUpdates;
   }
 
   get roomSort(): RoomSort {

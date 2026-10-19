@@ -10,9 +10,8 @@
   import { isHiddenState, stateEventSummary } from '$lib/content/stateEvents';
   import { prefs } from '$lib/stores/prefs.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
-  import { QUICK_REACTIONS } from '$lib/content/emoji';
+  import { emojiPicker } from '$lib/stores/emojiPicker.svelte';
   import { interceptLinks } from '$lib/platform/links';
-  import { portal } from '$lib/platform/portal';
   import { contextmenu } from '$lib/platform/contextmenu';
   import { profileCard } from '$lib/stores/profileCard.svelte';
   import type { MenuItem } from '$lib/stores/contextmenu.svelte';
@@ -66,15 +65,11 @@
   const canCopy = $derived(kind === 'TextMessage');
   const highlighted = $derived(!!item.event_id && timelineStore.highlightedEventId === item.event_id);
 
-  let picker = $state(false);
-  let pickerPos = $state({ x: 0, y: 0 });
   let rowEl = $state<HTMLElement | undefined>();
 
-  /** Opens the reaction picker beside `anchor`, or closes it when already open. */
-  function openPicker(anchor: HTMLElement) {
-    const r = anchor.getBoundingClientRect();
-    pickerPos = { x: Math.max(8, Math.min(r.left, window.innerWidth - 280)), y: r.bottom + 6 };
-    picker = !picker;
+  /** Opens the shared emoji picker beside `anchor`; choosing an emoji toggles that reaction. */
+  function openReactions(anchor: DOMRect) {
+    emojiPicker.open({ anchor, onpick: (emoji) => void timelineStore.toggleReaction(item, emoji) });
   }
 
   function openThread() {
@@ -98,11 +93,6 @@
       : null
   );
 
-  function react(key: string) {
-    picker = false;
-    void timelineStore.toggleReaction(item, key);
-  }
-
   /** Context-menu entries for this message. Groups that do not apply are omitted, not disabled. */
   function menuItems(): MenuItem[] {
     const roomId = timelineStore.roomId;
@@ -111,7 +101,7 @@
       replies.push({ id: 'reply', label: 'Reply', icon: Reply, onselect: () => timelineStore.startReply(item) });
       replies.push({ id: 'thread', label: 'Reply in thread', icon: MessageSquare, onselect: openThread });
     }
-    if (canAct) replies.push({ id: 'react', label: 'React', icon: Smile, onselect: () => rowEl && openPicker(rowEl) });
+    if (canAct) replies.push({ id: 'react', label: 'React', icon: Smile, onselect: () => rowEl && openReactions(rowEl.getBoundingClientRect()) });
 
     const copies: MenuItem[] = [];
     if (canCopy) copies.push({ id: 'copy-text', label: 'Copy text', icon: Copy, onselect: () => void navigator.clipboard.writeText(quote(item)) });
@@ -228,7 +218,7 @@
                 type="button"
                 class="chip"
                 class:mine={r.by_me}
-                onclick={() => react(r.key)}
+                onclick={() => void timelineStore.toggleReaction(item, r.key)}
                 aria-pressed={r.by_me}
                 aria-label="{r.key} {r.count}"
               >
@@ -244,7 +234,7 @@
 
     {#if canAct}
       <div class="toolbar" role="toolbar" aria-label="Message actions">
-        <button type="button" aria-label="React" title="React" onclick={(e) => openPicker(e.currentTarget as HTMLElement)}>
+        <button type="button" aria-label="React" title="React" onclick={(e) => openReactions((e.currentTarget as HTMLElement).getBoundingClientRect())}>
           <Icon icon={Smile} size={16} />
         </button>
         {#if !inThread}
@@ -268,16 +258,6 @@
           </button>
         {/if}
       </div>
-
-      {#if picker}
-        <button type="button" class="backdrop" aria-label="Close reactions" tabindex="-1" use:portal onclick={() => (picker = false)}></button>
-        <div class="popover picker" role="menu" aria-label="Reactions" use:portal style={viewport.isPhone ? undefined : `left: ${pickerPos.x}px; top: ${pickerPos.y}px;`}>
-          {#if viewport.isPhone}<span class="grip" aria-hidden="true"></span>{/if}
-          {#each QUICK_REACTIONS as e}
-            <button type="button" role="menuitem" onclick={() => react(e)}>{e}</button>
-          {/each}
-        </div>
-      {/if}
 
     {/if}
   </div>
@@ -517,43 +497,9 @@
   }
   .toolbar button:focus-visible,
   .failed-actions button:focus-visible,
-  .chip:focus-visible,
-  .popover button:focus-visible {
+  .chip:focus-visible {
     outline: 2px solid var(--alloy-color-accent-primary);
     outline-offset: 1px;
-  }
-  .backdrop {
-    border: 0;
-    padding: 0;
-    background: transparent;
-    position: fixed;
-    inset: 0;
-    z-index: 70;
-  }
-  .popover {
-    position: fixed;
-    z-index: 71;
-    background: var(--alloy-color-surface-elevated);
-    border: 1px solid var(--alloy-color-border-subtle);
-    border-radius: var(--alloy-radii-lg);
-    box-shadow: var(--alloy-elevation-md);
-  }
-  .picker {
-    display: flex;
-    gap: 2px;
-    padding: var(--alloy-spacing-scale-1);
-  }
-  .picker button {
-    padding: var(--alloy-spacing-scale-1);
-    border: 0;
-    border-radius: var(--alloy-radii-md);
-    background: transparent;
-    font-size: 1.1rem;
-    line-height: 1;
-    cursor: pointer;
-  }
-  .picker button:hover {
-    background: var(--alloy-color-surface-hover);
   }
   .avatar-btn {
     display: inline-grid;
@@ -695,7 +641,7 @@
     box-shadow: 0 0 0 2px var(--alloy-color-accent-primary);
   }
 
-  /* Phone: full-width rows, 44px touch targets, reaction picker as a bottom sheet. */
+  /* Phone: full-width rows and 44px touch targets. */
   @media (max-width: 899px) {
     .row {
       margin: 0;
@@ -739,43 +685,6 @@
     }
     .row[data-layout='irc'] .gutter {
       width: 3.5rem;
-    }
-    .backdrop {
-      background: rgba(0, 0, 0, 0.5);
-    }
-    .popover.picker {
-      left: 0;
-      right: 0;
-      top: auto;
-      bottom: 0;
-      flex-wrap: wrap;
-      justify-content: center;
-      gap: var(--alloy-spacing-scale-1);
-      padding: var(--alloy-spacing-scale-3) var(--alloy-spacing-scale-3)
-        calc(var(--alloy-spacing-scale-3) + var(--alloy-safe-area-bottom));
-      border: 0;
-      border-radius: var(--alloy-radii-lg) var(--alloy-radii-lg) 0 0;
-    }
-    .grip {
-      flex: 0 0 100%;
-      height: 4px;
-      margin-bottom: var(--alloy-spacing-scale-2);
-    }
-    .grip::before {
-      content: '';
-      display: block;
-      width: 36px;
-      height: 4px;
-      margin: 0 auto;
-      border-radius: var(--alloy-radii-full);
-      background: var(--alloy-color-border-prominent);
-    }
-    .picker button {
-      display: inline-grid;
-      place-items: center;
-      width: 44px;
-      height: 44px;
-      font-size: 1.375rem;
     }
   }
 

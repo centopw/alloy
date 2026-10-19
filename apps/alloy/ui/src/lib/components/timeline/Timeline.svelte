@@ -11,6 +11,8 @@
   import Icon from '$lib/icons/Icon.svelte';
   import { ArrowDown } from '$lib/icons';
   import MessageRow from './MessageRow.svelte';
+  import { contextmenu } from '$lib/platform/contextmenu';
+  import type { MenuItem } from '$lib/stores/contextmenu.svelte';
 
   interface Props {
     roomId: string;
@@ -136,10 +138,33 @@
   function toBottom() {
     vlist?.scrollToIndex(rows.length - 1, { align: 'end', smooth: true });
   }
+
+  /** Set on each press so the background menu yields to a message row that owns the press. */
+  let pressedOnRow = false;
+
+  function onViewportPointerDown(e: PointerEvent) {
+    pressedOnRow = e.target instanceof Element && e.target.closest('.row') !== null;
+  }
+
+  function scrollToTop() {
+    vlist?.scrollToIndex(0, { align: 'start', smooth: true });
+    void timelineStore.loadOlder();
+  }
+
+  /** Background menu items. Empty when a message row owns the press, so the row menu wins. */
+  function backgroundItems(): MenuItem[] {
+    if (pressedOnRow) return [];
+    const empty = rows.length === 0;
+    return [
+      { id: 'jump-latest', label: 'Jump to latest', disabled: empty, onselect: toBottom },
+      { id: 'scroll-top', label: 'Scroll to top (load older)', disabled: empty, onselect: scrollToTop },
+      { id: 'mark-read', label: 'Mark as read', onselect: () => void timelineStore.markRead() },
+    ];
+  }
 </script>
 
 <section class="timeline" aria-label="Conversation with {title}, {isDirect ? 'direct message' : 'room'}, {encrypted ? 'end-to-end encrypted' : 'not encrypted'}">
-  <div class="viewport" bind:clientHeight={viewportHeight}>
+  <div class="viewport" role="presentation" bind:clientHeight={viewportHeight} onpointerdown={onViewportPointerDown} use:contextmenu={backgroundItems}>
     {#if timelineStore.loading && rows.length === 0}
       <p class="status" aria-busy="true">Loading messages</p>
     {:else if rows.length === 0}

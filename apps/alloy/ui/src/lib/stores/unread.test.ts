@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RoomSummary } from '../generated/index.js';
-import { markFor, unreadCount } from './unread.js';
+import { loadReadMarks, markFor, saveReadMarks, unreadCount } from './unread.js';
 
 const room = (count: number, ts = 100): RoomSummary =>
   ({
@@ -34,5 +34,25 @@ describe('unreadCount', () => {
     const mark = markFor(room(6, 100));
     expect(unreadCount(room(0, 100), mark)).toBe(0);
     expect(unreadCount(room(2, 100), mark)).toBe(0);
+  });
+});
+
+describe('read marks storage', () => {
+  it('round-trips marks and ignores corrupt data', () => {
+    const store = new Map<string, string>();
+    const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) };
+    const marks = { '!a:x': markFor(room(6, 100)) };
+    saveReadMarks(storage, marks);
+    expect(loadReadMarks(storage)).toEqual(marks);
+    store.set('alloy.readMarks', '{not json');
+    expect(loadReadMarks(storage)).toEqual({});
+    store.set('alloy.readMarks', JSON.stringify({ '!b:x': { count: 'x' }, '!c:x': { count: 2, latest: '1:@a:x' } }));
+    expect(loadReadMarks(storage)).toEqual({ '!c:x': { count: 2, latest: '1:@a:x' } });
+  });
+
+  it('keeps a room read after a reload that recomputes the same or a lower count', () => {
+    const mark = markFor(room(6, 100));
+    expect(unreadCount(room(6, 100), mark)).toBe(0);
+    expect(unreadCount(room(3, 100), mark)).toBe(0);
   });
 });

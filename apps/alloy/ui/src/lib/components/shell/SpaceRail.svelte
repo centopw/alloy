@@ -1,7 +1,11 @@
 <script lang="ts">
   import { Avatar } from '../common';
   import Icon from '$lib/icons/Icon.svelte';
-  import { House, Plus } from '$lib/icons';
+  import { CheckCheck, House, Link, Plus } from '$lib/icons';
+  import type { RoomSummary } from '$lib/generated/protocol';
+  import { copyText } from '$lib/platform/clipboard';
+  import { contextmenu } from '$lib/platform/contextmenu';
+  import type { MenuItem } from '$lib/stores/contextmenu.svelte';
   import { roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
   import { ui } from '$lib/stores/ui.svelte';
 
@@ -12,6 +16,59 @@
 
   const spaces = $derived(roomsStore.rooms.filter((r) => r.is_space && r.membership === 'Joined'));
   const homeActive = $derived(ui.scope === 'home');
+
+  /** Unread joined rooms inside `space`, or across every room when `space` is null. */
+  function unreadRooms(space: string | null) {
+    return roomsStore.rooms.filter(
+      (r) =>
+        !r.is_space &&
+        r.membership !== 'Invited' &&
+        roomsStore.unreadOf(r) > 0 &&
+        (space === null || (roomsStore.spaceParents[r.id] ?? []).includes(space)),
+    );
+  }
+
+  function markUnread(space: string | null) {
+    for (const r of unreadRooms(space)) roomsStore.markRead(r.id);
+  }
+
+  function homeMenu(): MenuItem[] {
+    return [
+      {
+        id: 'mark-all',
+        label: 'Mark all as read',
+        icon: CheckCheck,
+        disabled: unreadRooms(null).length === 0,
+        onselect: () => markUnread(null),
+      },
+    ];
+  }
+
+  function spaceMenu(space: RoomSummary): MenuItem[] {
+    return [
+      {
+        id: 'mark-space',
+        label: 'Mark space as read',
+        icon: CheckCheck,
+        disabled: unreadRooms(space.id).length === 0,
+        onselect: () => markUnread(space.id),
+      },
+      {
+        id: 'copy-link',
+        label: 'Copy space link',
+        icon: Link,
+        onselect: () => {
+          copyText(`https://matrix.to/#/${space.id}`).catch(() => {
+            /* the clipboard refused the write; the menu has no other channel to report it */
+          });
+        },
+      },
+    ];
+  }
+
+  function createMenu(): MenuItem[] {
+    return [{ id: 'new-room', label: 'New room...', icon: Plus, onselect: () => onnew?.() }];
+  }
 </script>
 
 <nav class="rail" aria-label="Spaces">
@@ -21,6 +78,7 @@
       <button
         type="button"
         class="home"
+        use:contextmenu={homeMenu}
         aria-label="Home"
         title="Home"
         aria-current={homeActive ? 'true' : undefined}
@@ -37,6 +95,7 @@
         <button
           type="button"
           class="space"
+          use:contextmenu={() => spaceMenu(space)}
           aria-label={title}
           title={title}
           aria-current={active ? 'true' : undefined}
@@ -50,6 +109,7 @@
   <button
     type="button"
     class="create"
+    use:contextmenu={createMenu}
     aria-label="Create or join"
     title="Create or join"
     onclick={() => onnew?.()}
@@ -90,7 +150,7 @@
     position: absolute;
     left: 0;
     top: 50%;
-    width: 4px;
+    width: 3px;
     height: 0;
     transform: translateY(-50%);
     border-radius: var(--alloy-radii-full);
@@ -98,7 +158,7 @@
     transition: height 120ms ease;
   }
   .pill.shown {
-    height: 40px;
+    height: 24px;
   }
   .home,
   .space,
@@ -106,21 +166,18 @@
     display: grid;
     place-items: center;
     flex: none;
-    width: 48px;
-    height: 48px;
+    width: 44px;
+    height: 44px;
     padding: 0;
     border: 0;
-    border-radius: var(--alloy-radii-full);
+    border-radius: var(--alloy-radii-lg);
     background: transparent;
     color: inherit;
     cursor: pointer;
   }
   .home {
-    background: var(--alloy-color-accent-primary);
+    background: var(--alloy-color-accent-fill);
     color: var(--alloy-color-text-on-accent);
-  }
-  .home[aria-current='true'] {
-    border-radius: var(--alloy-radii-lg);
   }
   .create {
     background: var(--alloy-color-surface-subtle);

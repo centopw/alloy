@@ -46,6 +46,7 @@ describe('capabilities', () => {
       desktopNotifications: true,
       windowFocusOptions: true,
       systemTray: true,
+      autoDownloadUpdates: true,
     });
   });
 
@@ -60,6 +61,7 @@ describe('capabilities', () => {
       desktopNotifications: true,
       windowFocusOptions: true,
       systemTray: false,
+      autoDownloadUpdates: false,
     });
   });
 
@@ -74,6 +76,7 @@ describe('capabilities', () => {
       desktopNotifications: false,
       windowFocusOptions: false,
       systemTray: false,
+      autoDownloadUpdates: false,
     });
   });
 
@@ -88,6 +91,7 @@ describe('capabilities', () => {
       desktopNotifications: false,
       windowFocusOptions: false,
       systemTray: false,
+      autoDownloadUpdates: false,
     });
   });
 
@@ -102,6 +106,7 @@ describe('capabilities', () => {
       desktopNotifications: false,
       windowFocusOptions: false,
       systemTray: false,
+      autoDownloadUpdates: false,
     });
   });
 });

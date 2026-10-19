@@ -1,5 +1,4 @@
 <script lang="ts">
-  import UpdateBanner from '../shell/UpdateBanner.svelte';
   import { Button, TextField } from '../common';
   import { session } from '$lib/stores/session.svelte';
   import { errorMessage } from '$lib/stores/errors';
@@ -91,7 +90,6 @@
       </form>
     {/if}
   </div>
-  <div class="update-slot"><UpdateBanner /></div>
 </main>
 
 <style>
@@ -133,13 +131,6 @@
     margin: 0;
     color: var(--alloy-color-status-error, #e5484d);
     font-size: 0.9rem;
-  }
-  .update-slot {
-    position: fixed;
-    left: var(--alloy-spacing-scale-3);
-    right: var(--alloy-spacing-scale-3);
-    bottom: calc(var(--alloy-spacing-scale-3) + var(--alloy-safe-area-bottom, 0px));
-    max-width: 360px;
   }
 
   /* Phone: the sign-in form fills the screen width inside the safe areas; controls are touch-sized. */

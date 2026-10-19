@@ -41,6 +41,8 @@ export interface PlatformCapabilities {
   windowFocusOptions: boolean;
   /** Desktop system tray integration. */
   systemTray: boolean;
+  /** In-place update install and background download (desktop app only; Android opens the release page). */
+  autoDownloadUpdates: boolean;
 }
 
 /**
@@ -57,6 +59,7 @@ export function capabilities(env: PlatformEnv): PlatformCapabilities {
     desktopNotifications: isDesktop,
     windowFocusOptions: isDesktop,
     systemTray: env.tauri && isDesktop,
+    autoDownloadUpdates: env.tauri && isDesktop,
   };
 }
 
