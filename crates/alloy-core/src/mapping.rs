@@ -48,9 +48,54 @@ fn latest_preview(room: &matrix_sdk::Room) -> Option<TimelineItemPreview> {
     }
 }
 
+/// Has the user read everything the room list knows about? True when their read receipt sits on
+/// the newest event, or the newest event is their own message.
+fn caught_up(room: &matrix_sdk::Room) -> bool {
+    use matrix_sdk::latest_events::LatestEventValue;
+    let receipt = room.read_receipts().latest_active.map(|r| r.event_id);
+    match room.latest_event() {
+        LatestEventValue::Remote(event) => {
+            let own = event
+                .raw()
+                .get_field::<matrix_sdk::ruma::OwnedUserId>("sender")
+                .ok()
+                .flatten()
+                .is_some_and(|s| s == room.own_user_id());
+            own || (receipt.is_some() && event.event_id() == receipt.as_deref())
+        }
+        _ => receipt.is_some(),
+    }
+}
+
+/// Unread counts for the room list.
+///
+/// The SDK computes counts on the client from the events it holds and the user's own read receipt,
+/// so they drop to zero the moment a receipt is sent. The counters a homeserver attaches to a
+/// sliding-sync response can stay stale until the next message (which kept the unread dot on after
+/// the room was read), and Synapse leaves them at zero.
+///
+/// A client count above zero wins (raised to the server's when that is larger, as the room list
+/// only holds a few events). A client count of zero is trusted only when the user has caught up
+/// with the newest event; otherwise it may just mean nothing was computed yet (for example right
+/// after a restart) and the server's count stands.
+fn unread_counts(room: &matrix_sdk::Room) -> NotificationCount {
+    let server = room.unread_notification_counts();
+    let caught_up = caught_up(room);
+    let pick = |client: u64, server: u64| {
+        if client == 0 && caught_up {
+            0
+        } else {
+            client.max(server)
+        }
+    };
+    NotificationCount {
+        notification_count: pick(room.num_unread_notifications(), server.notification_count),
+        highlight_count: pick(room.num_unread_mentions(), server.highlight_count),
+    }
+}
+
 /// Convert a matrix-sdk Room to an alloy-protocol RoomSummary DTO.
 pub fn room_to_summary(room: &matrix_sdk::Room) -> RoomSummary {
-    let counts = room.unread_notification_counts();
     RoomSummary {
         id: RoomId(room.room_id().to_string()),
         name: room
@@ -58,10 +103,7 @@ pub fn room_to_summary(room: &matrix_sdk::Room) -> RoomSummary {
             .map(|n| n.to_string())
             .or_else(|| room.name()),
         avatar_url: room.avatar_url().map(|u| u.to_string()),
-        unread_notifications: NotificationCount {
-            highlight_count: counts.highlight_count,
-            notification_count: counts.notification_count,
-        },
+        unread_notifications: unread_counts(room),
         latest_event: latest_preview(room),
         is_direct: room.direct_targets_length() > 0,
         is_space: room.is_space(),

@@ -62,6 +62,16 @@ await fetch(`${HS}/_matrix/client/v3/rooms/${encodeURIComponent(room.room_id)}/s
 const dirName = `dir-e2e-${Date.now()}`;
 await api('/createRoom', { name: dirName, visibility: 'public', preset: 'public_chat' }, v.token);
 const invited = await api('/createRoom', { name: 'Invite me', invite: [u.id] }, v.token);
+// A room with far more history than one screen: V writes 80 numbered messages, U has not read them.
+const longRoom = await api('/createRoom', { name: 'Long History', invite: [u.id] }, v.token);
+await api(`/join/${encodeURIComponent(longRoom.room_id)}`, {}, u.token);
+for (let i = 1; i <= 80; i++) {
+  await fetch(`${HS}/_matrix/client/v3/rooms/${encodeURIComponent(longRoom.room_id)}/send/m.room.message/h${i}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${v.token}` },
+    body: JSON.stringify({ msgtype: 'm.text', body: `history ${String(i).padStart(2, '0')}` }),
+  });
+}
 
 // --- services: bridge + static UI server
 const dataDir = fs.mkdtempSync(join(os.tmpdir(), 'alloy-e2e-'));
@@ -303,6 +313,24 @@ try {
   for (let i = 0; i < 4; i++) await page.keyboard.press('ArrowRight');
   const after = await widthOf();
   if (!(after.now > before.now && after.left > before.left)) throw new Error(`sidebar did not grow: ${JSON.stringify(before)} -> ${JSON.stringify(after)}`);
+
+  step('a room with a long history: unread badge clears once read, older messages load on scroll');
+  await page.waitForFunction(() => [...document.querySelectorAll('button.row.unread')].some((e) => e.textContent.includes('Long History')), { timeout: 60000 });
+  // A tall window shows far more than the room opens with: the missing history must load by itself, with no scrolling.
+  const viewport = page.viewport();
+  await page.setViewport({ ...viewport, height: 6000 });
+  await page.evaluate(() => [...document.querySelectorAll('button.row')].find((e) => e.textContent.includes('Long History')).click());
+  await page.waitForFunction(() => document.body.innerText.includes('history 80'), { timeout: 60000 });
+  await page.waitForFunction(() => document.body.innerText.includes('history 01'), { timeout: 30000 });
+  await page.setViewport(viewport);
+  await page.waitForFunction(() => ![...document.querySelectorAll('button.row.unread')].some((e) => e.textContent.includes('Long History')), { timeout: 30000 });
+  let reachedOldest = false;
+  for (let i = 0; i < 60 && !reachedOldest; i++) {
+    await page.evaluate(() => { const v = document.querySelector('section.timeline .viewport > div'); if (v) v.scrollTop = 0; });
+    await new Promise((r) => setTimeout(r, 400));
+    reachedOldest = await page.evaluate(() => document.body.innerText.includes('history 01'));
+  }
+  if (!reachedOldest) throw new Error('scrolling up never loaded the oldest message (history 01)');
 
   step('browse the public room directory');
   await page.click('button[aria-label="Browse public rooms"]');

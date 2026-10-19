@@ -22,6 +22,7 @@
 
   let vlist: VListHandle | undefined = $state();
   let atBottom = $state(true);
+  let viewportHeight = $state(0);
   let shift = $state(false);
 
   // Virtual items (read marker, timeline start) carry no content worth a row. Hidden state events
@@ -73,6 +74,47 @@
     lastLen = len;
   });
 
+  // A room opens with only its newest few events. When they do not fill the viewport there is nothing
+  // to scroll, so the scroll-driven `loadOlder` never fires: keep paginating until the list fills it
+  // (or the start of the room is reached), also when the viewport grows (window resize, keyboard closing).
+  // A pagination error stops the loop.
+  $effect(() => {
+    void rows.length;
+    void vlist;
+    void viewportHeight;
+    if (timelineStore.loading || timelineStore.paginating || timelineStore.reachedStart || timelineStore.error) return;
+    let cancelled = false;
+    void tick().then(() =>
+      requestAnimationFrame(() => {
+        if (cancelled) return;
+        const fills = vlist ? vlist.getScrollSize() > vlist.getViewportSize() + 200 : false;
+        if (!fills) void timelineStore.loadOlder();
+      }),
+    );
+    return () => (cancelled = true);
+  });
+
+  // The newest event counts as read while it is on screen: when the room opens, when a message
+  // arrives while the user is at the bottom, and when the window comes back to the foreground.
+  // (Scrolling alone never fires for a short list, which left the unread dot on.)
+  let windowActive = $state(typeof document === 'undefined' || (document.visibilityState === 'visible' && !document.hidden));
+  $effect(() => {
+    const update = () => (windowActive = document.visibilityState === 'visible');
+    const blur = () => (windowActive = false);
+    document.addEventListener('visibilitychange', update);
+    window.addEventListener('focus', update);
+    window.addEventListener('blur', blur);
+    return () => {
+      document.removeEventListener('visibilitychange', update);
+      window.removeEventListener('focus', update);
+      window.removeEventListener('blur', blur);
+    };
+  });
+  $effect(() => {
+    const newest = rows.findLast((r) => r.event_id)?.event_id;
+    if (newest && atBottom && windowActive && !timelineStore.loading) untrack(() => void timelineStore.markRead());
+  });
+
   function onScroll(offset: number) {
     if (!vlist) return;
     const distance = vlist.getScrollSize() - (offset + vlist.getViewportSize());
@@ -87,7 +129,7 @@
 </script>
 
 <section class="timeline" aria-label="Conversation with {title}, {isDirect ? 'direct message' : 'room'}, {encrypted ? 'end-to-end encrypted' : 'not encrypted'}">
-  <div class="viewport">
+  <div class="viewport" bind:clientHeight={viewportHeight}>
     {#if timelineStore.loading && rows.length === 0}
       <p class="status" aria-busy="true">Loading messages</p>
     {:else if rows.length === 0}
