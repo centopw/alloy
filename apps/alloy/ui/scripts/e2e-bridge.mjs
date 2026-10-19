@@ -414,20 +414,32 @@ try {
 
   // A second room with U as admin (unencrypted), for pins, forwarding, favourites, drafts and message search.
   step('pins: pin a message, see the pinned bar, unpin from the list');
+  // Opens the context menu on `selector` and clicks `label` in the same page task, so a menu that closes
+  // on its own (layout shifts while images load) cannot slip away between finding the entry and clicking it.
   const menuOn = async (selector, label) => {
-    await page.evaluate((sel) => {
-      const el = document.querySelector(sel);
-      const r = el.getBoundingClientRect();
-      el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 20, clientY: r.top + 10 }));
-    }, selector);
-    await page.waitForSelector('[role=menu] [role=menuitem]', { visible: true, timeout: 5000 });
-    try {
-      await page.waitForFunction((text) => [...document.querySelectorAll('[role=menuitem]')].some((e) => e.textContent.trim() === text), { timeout: 5000 }, label);
-    } catch {
-      const seen = await page.$$eval('[role=menuitem]', (els) => els.map((e) => e.textContent.trim()));
-      throw new Error(`menu has no "${label}" entry; it offers: ${seen.join(' | ')}`);
+    let seen = [];
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const result = await page.evaluate(async (sel, text) => {
+        const el = document.querySelector(sel);
+        if (!el) return { clicked: false, seen: ['(no element matches the selector)'] };
+        const r = el.getBoundingClientRect();
+        el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 20, clientY: r.top + 10 }));
+        const entries = () => [...document.querySelectorAll('[role=menu] [role=menuitem]')];
+        for (let i = 0; i < 40; i++) {
+          await new Promise((done) => requestAnimationFrame(() => setTimeout(done, 25)));
+          const hit = entries().find((e) => e.textContent.trim() === text);
+          if (hit) {
+            hit.click();
+            return { clicked: true, seen: [] };
+          }
+        }
+        return { clicked: false, seen: entries().map((e) => e.textContent.trim()) };
+      }, selector, label);
+      if (result.clicked) return;
+      seen = result.seen;
+      await page.keyboard.press('Escape');
     }
-    await page.evaluate((text) => [...document.querySelectorAll('[role=menuitem]')].find((e) => e.textContent.trim() === text).click(), label);
+    throw new Error(`menu has no "${label}" entry; it offers: ${seen.join(' | ') || 'nothing'}`);
   };
   const rowKey = async (title) => page.evaluate((t) => { const el = [...document.querySelectorAll('button.row')].find((e) => e.textContent.includes(t)); el.setAttribute('data-e2e', t); return t; }, title);
   await rowKey('Pin Room');
