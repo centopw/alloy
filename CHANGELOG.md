@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.6 (pre-release)
+
+### Fixed
+- Help & About: the Updates row no longer scatters its status text and buttons across the card. Status and actions share one column aligned to the same right edge as the other values, with the label on the first line; the "Check for updates" button is outlined, and the source link is a 44 px target on phones.
+- Buttons use the app font instead of the browser's default button font.
+- The phone E2E audit now covers Help & About.
+
 ## 0.1.5 (pre-release)
 
 ### Documentation
