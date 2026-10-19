@@ -14,15 +14,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
-      - name: Create the pre-release if it does not exist
+      - name: Install git-cliff
+        uses: taiki-e/install-action@v2
+        with:
+          tool: git-cliff
+
+      # Highlights from CHANGELOG.md, grouped commits since the previous version, a compare link and
+      # the install notes. Re-runs refresh the notes of an existing release.
+      - name: Create or update the pre-release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release view "${{ github.ref_name }}" -R "${{ github.repository }}" >/dev/null 2>&1 || \
+          git fetch --tags --force
+          scripts/release-notes.sh "${{ github.ref_name }}" > /tmp/release-notes.md
+          if gh release view "${{ github.ref_name }}" -R "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release edit "${{ github.ref_name }}" -R "${{ github.repository }}" \
+              --title "Alloy ${{ github.ref_name }}" --notes-file /tmp/release-notes.md
+          else
             gh release create "${{ github.ref_name }}" -R "${{ github.repository }}" --prerelease \
-              --title "Alloy ${{ github.ref_name }}" \
-              --notes-file .github/release-notes.md
+              --title "Alloy ${{ github.ref_name }}" --notes-file /tmp/release-notes.md
+          fi
 
   build-tauri:
     needs: create-release
@@ -130,14 +144,6 @@ jobs:
           projectPath: apps/alloy
           tagName: ${{ github.ref_name }}
           releaseName: 'Alloy ${{ github.ref_name }}'
-          releaseBody: |
-            Unsigned pre-release build. See CHANGELOG.md for what is included and the known gaps.
-
-            **macOS:** the app is not notarized yet, so the first launch needs one extra step. Drag Alloy to Applications, then right-click it and choose Open, or allow it under System Settings > Privacy & Security > Open Anyway. From a terminal: `xattr -dr com.apple.quarantine /Applications/Alloy.app`
-
-            **Windows:** SmartScreen may warn; choose More info > Run anyway.
-
-            **Android:** signed with a throwaway key; uninstall the previous version before installing a new one.
           releaseDraft: false
           prerelease: true
           includeRelease: true
