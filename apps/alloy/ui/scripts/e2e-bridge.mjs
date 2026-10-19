@@ -68,13 +68,15 @@ await fetch(`${HS}/_matrix/client/v3/rooms/${encodeURIComponent(pinRoom.room_id)
 // Three pictures sent in a row without captions: the timeline folds them into one album.
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
 const upload = await fetch(`${HS}/_matrix/media/v3/upload?filename=a.png`, { method: 'POST', headers: { 'content-type': 'image/png', authorization: `Bearer ${v.token}` }, body: png });
+if (!upload.ok) throw new Error(`album fixture: upload failed with ${upload.status} ${await upload.text()}`);
 const mxc = (await upload.json()).content_uri;
 for (const n of [1, 2, 3]) {
-  await fetch(`${HS}/_matrix/client/v3/rooms/${encodeURIComponent(pinRoom.room_id)}/send/m.room.message/img${n}`, {
+  const sent = await fetch(`${HS}/_matrix/client/v3/rooms/${encodeURIComponent(pinRoom.room_id)}/send/m.room.message/img${n}`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${v.token}` },
     body: JSON.stringify({ msgtype: 'm.image', body: `IMG_000${n}.png`, url: mxc, info: { mimetype: 'image/png', w: 1, h: 1, size: png.length } }),
   });
+  if (!sent.ok) throw new Error(`album fixture: sending picture ${n} failed with ${sent.status} ${await sent.text()}`);
 }
 
 const dirName = `dir-e2e-${Date.now()}`;
