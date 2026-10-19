@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.7 (pre-release)
+
+### Added
+- **Custom room tags** (ADR 0006): define your own tags (name, colour, order) in Settings > Tags, toggle them from a room's menu, filter the room list by a tag and sort it by activity, name, unread or tag. Tags are standard Matrix room tags (`u.<id>`), so other clients see them; the catalogue syncs through account data. New commands `GetTagCatalog`, `SaveTagCatalog`, `SetRoomTag`, `DeleteRoomTag`.
+- Replies show a proper quote (sender name, two-line excerpt) above the text in every layout; clicking it jumps to the original message when it is loaded.
+- GitHub release pages now list highlights, the commits since the previous version grouped by type, and a compare link (`scripts/release-notes.sh`).
+
+### Changed
+- One members UI: the separate members sidebar is gone; the header people button opens Room info > Members.
+- Dropdowns and text boxes use our own controls instead of the browser's (`Select`, `TextField`, `TextArea`); enforced by a test.
+- Settings are platform-aware: phones no longer show the Keyboard page or Enter-to-send, Android no longer shows "open at login", the Sidebar page becomes "Chat list" on phones.
+
+### Fixed
+- Hovering a message in the bubbles layout no longer makes it grow and push the messages below it.
+- The unread badge no longer stays on after you have read a room (a stale server counter is ignored once you have read the room, until something newer arrives).
+- Text areas no longer show the browser's resize grip.
+
 ## 0.1.6 (pre-release)
 
 ### Fixed

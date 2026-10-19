@@ -28,3 +28,5 @@
 - UI work: `AdaptiveShell`, `RoomList`, `Timeline`, `MessageRow`, `Composer`, `SettingsDialog`, `RoomDetails` (becomes the members panel) are reworked; new `SpaceRail`, `UserPanel`, `Sidebar`, `MembersPanel`. The room-list filter chips of 0001 item 5 are replaced by sections and search.
 - The emoji-guard test and the colour/AA requirements stay. Reviewers reject hard-coded radii and hex colours.
 - The members, mention, upload-progress and media-viewer work of #66-#68 continues and plugs into this layout.
+
+Note (2026-10-19): the separate members column described here was removed; members live in Room info > Members ([0006](0006-shared-controls-tags-and-one-members-ui.md)).

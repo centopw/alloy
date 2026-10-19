@@ -23,6 +23,7 @@ This file is authoritative where the detail docs disagree (see §2).
 | D12 | **Settings are functional or absent.** Every control changes real behaviour, either an account setting through an engine command or a device preference in the `prefs` store; nothing decorative. | [0004](decisions/0004-functional-settings.md) |
 | D13 | **Mobile is its own shell, not a squeezed desktop** (width <= 899px): one screen at a time, bottom tab bar (Chats, Discover, Settings), full-screen pages, bottom/action sheets, 44px touch targets, a page that never scrolls. Guarded by a mobile E2E audit in CI. | [0005](decisions/0005-mobile-first-shell.md) |
 | D14 | **Advisories are explicit.** Unmaintained or unsound transitive dependencies with no upstream fix are accepted one by one, with a reason, in `deny.toml` and `.cargo/audit.toml`; the daily audit fails on anything new. Releases are pre-releases until signing certificates exist; desktop updates through a signed feed (`updater-feed` release), Android only reports a newer release. | [RELEASING](RELEASING.md) |
+| D15 | **DRY UI and custom room tags.** One implementation per UI concept (shared `Select`/`TextField`/`TextArea`, members only in Room info, settings filtered per platform); users define their own room tags stored as Matrix `u.<id>` tags plus a `chat.alloy.room_tags` catalogue. | [0006](decisions/0006-shared-controls-tags-and-one-members-ui.md) |
 
 ## 2. Cross-doc conflicts resolved
 
