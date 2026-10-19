@@ -9,51 +9,55 @@
   "tokens": {
     "color": {
       "surface": {
-        "canvas": "#18181b",
-        "subtle": "#27272a",
-        "panel": "#1f1f23",
-        "elevated": "#27272a",
-        "hover": "#3f3f46"
+        "canvas": "#0e1015",
+        "subtle": "#151821",
+        "panel": "#151821",
+        "elevated": "#1c202d",
+        "hover": "#1a1e2b",
+        "active": "#252a3a"
       },
-      "background": "#18181b",
+      "background": "#0e1015",
       "text": {
-        "primary": "#f4f4f5",
-        "secondary": "#a1a1aa",
-        "muted": "#71717a",
+        "primary": "#f1f5f9",
+        "secondary": "#94a3b8",
+        "muted": "#64748b",
         "link": "#60a5fa",
         "on_accent": "#ffffff"
       },
       "accent": {
-        "primary": "#5865f2",
+        "primary": "#3b82f6",
         "secondary": "#818cf8",
-        "subtle": "#312e81",
-        "hover": "#4f46e5"
+        "subtle": "#152137",
+        "hover": "#1d4ed8",
+        "fill": "#2563eb"
       },
       "status": {
-        "online": "#22c55e",
+        "online": "#10b981",
         "away": "#f59e0b",
         "busy": "#ef4444",
-        "offline": "#71717a",
+        "offline": "#64748b",
         "error": "#ef4444",
         "warning": "#f59e0b",
         "info": "#3b82f6",
-        "success": "#22c55e",
-        "mention": "#f97316"
+        "success": "#10b981",
+        "mention": "#3b82f6"
       },
       "bubble": {
         "own": {
-          "background": "#4f46e5",
+          "background": "#1d4ed8",
           "text": "#ffffff"
         },
         "other": {
-          "background": "#27272a",
-          "text": "#f4f4f5"
+          "background": "#1c202d",
+          "text": "#f1f5f9"
         }
       },
       "border": {
-        "subtle": "#27272a",
-        "prominent": "#3f3f46"
+        "subtle": "#232734",
+        "prominent": "#333a4d",
+        "floating": "#2e3446"
       },
+      "scrim": "#05070ab3",
       "user": {
         "1": "#f87171",
         "2": "#fb923c",
@@ -128,14 +132,14 @@
     "radii": {
       "none": "0px",
       "sm": "4px",
-      "md": "8px",
-      "lg": "16px",
+      "md": "6px",
+      "lg": "8px",
       "full": "9999px"
     },
     "elevation": {
       "none": "none",
       "sm": "0 1px 2px 0 rgba(0, 0, 0, 0.4)",
-      "md": "0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -2px rgba(0, 0, 0, 0.5)",
+      "md": "0 8px 24px -4px rgba(0, 0, 0, 0.6)",
       "lg": "0 10px 15px -3px rgba(0, 0, 0, 0.6), 0 4px 6px -4px rgba(0, 0, 0, 0.6)"
     },
     "motion": {

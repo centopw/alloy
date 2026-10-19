@@ -66,7 +66,8 @@
                 "subtle": { "type": "string", "description": "Subtle elevated surfaces" },
                 "panel": { "type": "string", "description": "Panel/card backgrounds" },
                 "elevated": { "type": "string", "description": "Elevated component backgrounds" },
-                "hover": { "type": "string", "description": "Hover state backgrounds" }
+                "hover": { "type": "string", "description": "Hover state backgrounds" },
+                "active": { "type": "string", "description": "Pressed or selected row backgrounds" }
               },
               "additionalProperties": false
             },
@@ -93,7 +94,8 @@
                 "primary": { "type": "string", "description": "Primary accent color" },
                 "secondary": { "type": "string", "description": "Secondary accent color" },
                 "subtle": { "type": "string", "description": "Subtle accent variants" },
-                "hover": { "type": "string", "description": "Accent hover state" }
+                "hover": { "type": "string", "description": "Accent hover state" },
+                "fill": { "type": "string", "description": "Filled accent surfaces carrying on_accent text (buttons, badges, selected chips)" }
               },
               "additionalProperties": false
             },
@@ -141,10 +143,12 @@
               "description": "Border and divider colors",
               "properties": {
                 "subtle": { "type": "string" },
-                "prominent": { "type": "string" }
+                "prominent": { "type": "string" },
+                "floating": { "type": "string", "description": "Floating panel and popover borders" }
               },
               "additionalProperties": false
             },
+            "scrim": { "type": "string", "description": "Modal backdrop scrim (use a translucent colour)" },
             "user": {
               "type": "object",
               "description": "Sender identity color palette (1..12)",

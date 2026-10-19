@@ -231,9 +231,15 @@ impl ThemeResolver {
                 if let Some(v) = &s.hover {
                     out.insert("color.surface.hover".into(), v.clone());
                 }
+                if let Some(v) = &s.active {
+                    out.insert("color.surface.active".into(), v.clone());
+                }
             }
             if let Some(v) = &c.background {
                 out.insert("color.background".into(), v.clone());
+            }
+            if let Some(v) = &c.scrim {
+                out.insert("color.scrim".into(), v.clone());
             }
             if let Some(t) = &c.text {
                 if let Some(v) = &t.primary {
@@ -264,6 +270,9 @@ impl ThemeResolver {
                 }
                 if let Some(v) = &a.hover {
                     out.insert("color.accent.hover".into(), v.clone());
+                }
+                if let Some(v) = a.fill.as_ref().or(a.primary.as_ref()) {
+                    out.insert("color.accent.fill".into(), v.clone());
                 }
             }
             if let Some(st) = &c.status {
@@ -319,6 +328,9 @@ impl ThemeResolver {
                 }
                 if let Some(v) = &bd.prominent {
                     out.insert("color.border.prominent".into(), v.clone());
+                }
+                if let Some(v) = &bd.floating {
+                    out.insert("color.border.floating".into(), v.clone());
                 }
             }
             if let Some(u) = &c.user {
@@ -664,11 +676,11 @@ impl ThemeResolver {
             7.0,
         );
 
-        // 8. Text on accent on accent primary (AA >= 4.5)
+        // 8. Text on accent fill (falls back to accent primary when unset) (AA >= 4.5)
         check_pair(
             "text_on_accent",
             "color.text.on_accent",
-            "color.accent.primary",
+            "color.accent.fill",
             4.5,
             7.0,
         );

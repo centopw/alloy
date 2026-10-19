@@ -11,21 +11,22 @@
     "color": {
       "surface": {
         "canvas": "#000000",
-        "subtle": "#0a0a0a",
-        "panel": "#050505",
-        "elevated": "#121212",
-        "hover": "#18181b"
+        "subtle": "#0a0c10",
+        "panel": "#0a0c10",
+        "elevated": "#121621",
+        "hover": "#161a24",
+        "active": "#1c2130"
       },
       "background": "#000000",
       "bubble": {
         "other": {
-          "background": "#121212",
+          "background": "#121621",
           "text": "#f4f4f5"
         }
       },
       "border": {
-        "subtle": "#18181b",
-        "prominent": "#27272a"
+        "subtle": "#161a24",
+        "prominent": "#272c3a"
       }
     }
   }

@@ -146,6 +146,8 @@ pub struct SurfaceColors {
     pub elevated: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hover: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -174,6 +176,8 @@ pub struct AccentColors {
     pub subtle: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hover: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fill: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -224,6 +228,8 @@ pub struct BorderColors {
     pub subtle: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prominent: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub floating: Option<String>,
 }
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -273,6 +279,8 @@ pub struct ColorTokens {
     pub user: Option<UserColors>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub border: Option<BorderColors>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scrim: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

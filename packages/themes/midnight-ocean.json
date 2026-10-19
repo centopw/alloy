@@ -14,7 +14,8 @@
         "subtle": "#1c2541",
         "panel": "#111c3a",
         "elevated": "#1c2541",
-        "hover": "#253256"
+        "hover": "#253256",
+        "active": "#2d3b6b"
       },
       "background": "#0b132b",
       "text": {
@@ -28,7 +29,8 @@
         "primary": "#0077b6",
         "secondary": "#38bdf8",
         "subtle": "#0c4a6e",
-        "hover": "#0369a1"
+        "hover": "#0369a1",
+        "fill": "#0077b6"
       },
       "status": {
         "online": "#34d399",

@@ -19,6 +19,7 @@ pub fn alloy_light() -> Theme {
                     panel: Some("#fafafa".into()),
                     elevated: Some("#ffffff".into()),
                     hover: Some("#e4e4e7".into()),
+                    active: Some("#d4d4d8".into()),
                 }),
                 background: Some("#ffffff".into()),
                 text: Some(TextColors {
@@ -33,6 +34,7 @@ pub fn alloy_light() -> Theme {
                     secondary: Some("#6366f1".into()),
                     subtle: Some("#e0e7ff".into()),
                     hover: Some("#4338ca".into()),
+                    fill: Some("#4f46e5".into()),
                 }),
                 status: Some(StatusColors {
                     online: Some("#16a34a".into()),
@@ -72,7 +74,9 @@ pub fn alloy_light() -> Theme {
                 border: Some(BorderColors {
                     subtle: Some("#e4e4e7".into()),
                     prominent: Some("#d4d4d8".into()),
+                    floating: Some("#d4d4d8".into()),
                 }),
+                scrim: Some("#05070ab3".into()),
             }),
             typography: Some(TypographyTokens {
                 font_family: Some(FontFamilyTokens {
@@ -198,6 +202,7 @@ pub fn alloy_dark() -> Theme {
                     panel: Some("#1f1f23".into()),
                     elevated: Some("#27272a".into()),
                     hover: Some("#3f3f46".into()),
+                    active: Some("#252a3a".into()),
                 }),
                 background: Some("#18181b".into()),
                 text: Some(TextColors {
@@ -211,7 +216,8 @@ pub fn alloy_dark() -> Theme {
                     primary: Some("#5865f2".into()),
                     secondary: Some("#818cf8".into()),
                     subtle: Some("#312e81".into()),
-                    hover: Some("#4f46e5".into()),
+                    hover: Some("#1d4ed8".into()),
+                    fill: Some("#2563eb".into()),
                 }),
                 status: Some(StatusColors {
                     online: Some("#22c55e".into()),
@@ -251,7 +257,9 @@ pub fn alloy_dark() -> Theme {
                 border: Some(BorderColors {
                     subtle: Some("#27272a".into()),
                     prominent: Some("#3f3f46".into()),
+                    floating: Some("#2e3446".into()),
                 }),
+                scrim: Some("#05070ab3".into()),
             }),
             typography: Some(TypographyTokens {
                 font_family: Some(FontFamilyTokens {
