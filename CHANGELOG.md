@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.1.5 (pre-release)
+
+### Documentation
+- README rewritten for the current state (what works, roadmap, install, development, architecture, doc index); `apps/alloy/README.md` replaces the template text.
+- `docs/PLAN.md`: decisions D11 to D14 (layout, functional settings, mobile shell, advisory and release policy), P1 marked complete with the shipped v0.1.x, P2 status, and a roadmap section (what changed against the plan, now, next, later).
 
 ### Security / CI
 - GitHub Actions moved off the deprecated Node 20 runtime: `actions/checkout` v7, `setup-node` v7, `setup-java` v6, `pnpm/action-setup` v6, `upload-artifact` v7.
