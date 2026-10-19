@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { placeFlyout } from './contextmenu';
+import { placeFlyout, placeReactionBar } from './contextmenu';
 
 const VIEWPORT = { width: 1000, height: 800 };
 
@@ -27,5 +27,28 @@ describe('placeFlyout', () => {
   it('clamps the flyout below the top margin when the row is above the viewport', () => {
     const row = { x: 100, y: -50, width: 200, height: 32 };
     expect(placeFlyout(row, { width: 150, height: 200 }, VIEWPORT)).toEqual({ x: 308, y: 8 });
+  });
+});
+
+describe('placeReactionBar', () => {
+  const phone = { width: 390, height: 780 };
+  const limits = { top: 56, bottom: 560 };
+  const bar = { width: 300, height: 52 };
+  const rowAt = (y: number) => ({ x: 0, y, width: 390, height: 60 });
+
+  it('floats centred above the pressed message', () => {
+    expect(placeReactionBar(rowAt(400), bar, phone, limits)).toEqual({ x: 45, y: 340 });
+  });
+
+  it('drops below the message when there is no room above', () => {
+    expect(placeReactionBar(rowAt(60), bar, phone, limits)).toEqual({ x: 45, y: 128 });
+  });
+
+  it('stays above the action sheet for a message near the bottom', () => {
+    expect(placeReactionBar(rowAt(700), bar, phone, limits)).toEqual({ x: 45, y: 500 });
+  });
+
+  it('keeps a bar wider than the screen at the left margin', () => {
+    expect(placeReactionBar(rowAt(400), { width: 500, height: 52 }, phone, limits).x).toBe(8);
   });
 });

@@ -83,7 +83,7 @@ class ThreadStore {
   }
 
   /** Send a reply into the open thread. The engine threads it under the root. */
-  async send(body: string, mentions: string[] = []) {
+  async send(body: string, mentions: string[] = [], mentionRoom = false) {
     if (!this.roomId || !this.rootEventId) return;
     const text = body.trim();
     if (!text) return;
@@ -92,6 +92,7 @@ class ThreadStore {
         markdown: true,
         in_thread_root: this.rootEventId,
         mentions: mentions.length ? mentions : null,
+        mention_room: mentionRoom,
       });
     } catch (e) {
       this.error = errorMessage(e);

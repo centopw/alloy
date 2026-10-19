@@ -10,7 +10,7 @@ import { sortRooms } from './roomSort.js';
 import { displayTags } from './tags.js';
 import { tags } from './tags.svelte.js';
 
-export type RoomFilter = 'all' | 'unread' | 'direct' | 'rooms';
+export type RoomFilter = 'all' | 'unread' | 'direct' | 'rooms' | 'archive';
 
 /** Filter chips in display order. `label` is the chip text; `rooms` is the Channels chip. */
 export const ROOM_FILTERS: readonly { value: RoomFilter; label: string }[] = [
@@ -18,6 +18,7 @@ export const ROOM_FILTERS: readonly { value: RoomFilter; label: string }[] = [
   { value: 'direct', label: 'Direct' },
   { value: 'rooms', label: 'Channels' },
   { value: 'unread', label: 'Unread' },
+  { value: 'archive', label: 'Archive' },
 ];
 
 type RoomDiffEvent = Extract<EngineEvent, { type: 'RoomListDiff' }>;
@@ -55,7 +56,9 @@ class RoomsStore {
       if (r.is_space) return false;
       if (inScope && !(this.spaceParents[r.id] ?? []).includes(ui.scope)) return false;
       if (homeOnly && (this.spaceParents[r.id] ?? []).length > 0) return false;
-      if (this.filter === 'unread' && this.unreadOf(r) === 0) return false;
+      // Archived (low-priority) rooms live under their own chip and stay out of every other list.
+      if (this.filter === 'archive' ? !r.low_priority : r.low_priority) return false;
+      if (this.filter === 'unread' && !this.isUnread(r)) return false;
       if (this.filter === 'direct' && !r.is_direct) return false;
       if (this.filter === 'rooms' && r.is_direct) return false;
       return !q || roomTitle(r).toLowerCase().includes(q);
@@ -69,7 +72,12 @@ class RoomsStore {
     });
   });
 
-  unreadTotal = $derived(this.rooms.reduce((n, r) => n + (this.unreadOf(r) > 0 ? 1 : 0), 0));
+  unreadTotal = $derived(this.rooms.reduce((n, r) => n + (!r.low_priority && this.isUnread(r) ? 1 : 0), 0));
+
+  /** Whether the room shows as unread: new messages, or marked unread by hand. */
+  isUnread(r: RoomSummary): boolean {
+    return this.unreadOf(r) > 0 || !!r.marked_unread;
+  }
 
   /** Unread count to show for a room: the server's, minus what the user has already read here. */
   unreadOf(r: RoomSummary): number {
@@ -162,6 +170,36 @@ class RoomsStore {
   select(roomId: string | null) {
     this.activeRoomId = roomId;
     this.lastActive = this.rooms.find((r) => r.id === roomId) ?? null;
+    // Opening a chat that was marked unread by hand reads it.
+    if (roomId && this.lastActive?.marked_unread) void this.setMarkedUnread(roomId, false);
+  }
+
+  /** Pins a room to the top of the list (Matrix favourite tag). */
+  setFavourite(roomId: string, favourite: boolean): Promise<void> {
+    return this.#flag(roomId, { favourite }, () => client.setRoomFavourite(roomId, favourite));
+  }
+
+  /** Moves a room to or from the Archive (Matrix low-priority tag). */
+  setArchived(roomId: string, archived: boolean): Promise<void> {
+    return this.#flag(roomId, { low_priority: archived }, () => client.setRoomLowPriority(roomId, archived));
+  }
+
+  setMarkedUnread(roomId: string, unread: boolean): Promise<void> {
+    return this.#flag(roomId, { marked_unread: unread }, () => client.setRoomMarkedUnread(roomId, unread));
+  }
+
+  /** Applies a flag at once and undoes it if the engine refuses; the room diff stays authoritative. */
+  async #flag(roomId: string, patch: Partial<RoomSummary>, send: () => Promise<unknown>): Promise<void> {
+    const index = this.rooms.findIndex((r) => r.id === roomId);
+    if (index === -1) return;
+    const previous = this.rooms[index];
+    this.rooms[index] = { ...previous, ...patch };
+    try {
+      await send();
+    } catch {
+      const now = this.rooms.findIndex((r) => r.id === roomId);
+      if (now !== -1) this.rooms[now] = { ...this.rooms[now], ...Object.fromEntries(Object.keys(patch).map((k) => [k, previous[k as keyof RoomSummary]])) };
+    }
   }
 
   /**

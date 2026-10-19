@@ -10,6 +10,7 @@ import { client } from '../ipc/index.js';
 import { viewport } from './viewport.svelte.js';
 import { ROOM_SORTS, type RoomSort } from './roomSort.js';
 import { DEFAULT_QUICK_REACTIONS, isQuickReactions } from '../content/quickReactions.js';
+import { NO_MUTES, isMutedUntil, sameMutedUntil, type MutedUntil } from '../content/mute.js';
 
 export const PREFS_STORAGE_KEY = 'alloy.prefs.v1';
 export const PREFS_ENGINE_KEY = 'prefs';
@@ -20,12 +21,14 @@ export type MessageLayout = 'modern' | 'bubbles' | 'irc';
 export type FontScale = 90 | 100 | 110 | 120 | 130;
 export type TimeFormat = 'auto' | '12h' | '24h';
 export type LinkPreviewMode = 'off' | 'unencrypted' | 'always';
+export type VoiceSpeed = '1' | '1.5' | '2';
 
 export interface Prefs {
   messageLayout: MessageLayout;
   fontScale: FontScale;
   timeFormat: TimeFormat;
   bigEmoji: boolean;
+  showReadReceipts: boolean;
   notifyDesktop: boolean;
   notifySound: boolean;
   notifyPreview: boolean;
@@ -50,6 +53,9 @@ export interface Prefs {
   roomSort: RoomSort;
   /** Emoji shown in the quick-reaction bar, in order. */
   quickReactions: readonly string[];
+  voiceSpeed: VoiceSpeed;
+  /** Rooms muted for a limited time: room id -> epoch ms when the mute ends. */
+  mutedUntil: MutedUntil;
 }
 
 export type PrefKey = keyof Prefs;
@@ -62,6 +68,7 @@ export const DEFAULT_PREFS: Readonly<Prefs> = Object.freeze({
   fontScale: 100,
   timeFormat: 'auto',
   bigEmoji: true,
+  showReadReceipts: true,
   notifyDesktop: true,
   notifySound: true,
   notifyPreview: true,
@@ -85,6 +92,8 @@ export const DEFAULT_PREFS: Readonly<Prefs> = Object.freeze({
   autoDownloadUpdates: false,
   roomSort: 'activity',
   quickReactions: DEFAULT_QUICK_REACTIONS,
+  voiceSpeed: '1',
+  mutedUntil: NO_MUTES,
 });
 
 /**
@@ -98,6 +107,7 @@ export function defaultPrefsFor(isPhone: boolean): Readonly<Prefs> {
 /** Equality for preference values: lists compare by content, everything else by identity. */
 function sameValue(a: unknown, b: unknown): boolean {
   if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((v, i) => v === b[i]);
+  if (isMutedUntil(a) && isMutedUntil(b)) return sameMutedUntil(a, b);
   return a === b;
 }
 
@@ -122,8 +132,10 @@ const PREF_SCOPE: Record<PrefKey, PrefScope> = {
   launchAtLogin: 'device',
   autoCheckUpdates: 'device',
   autoDownloadUpdates: 'device',
+  voiceSpeed: 'device',
   timeFormat: 'synced',
   bigEmoji: 'synced',
+  showReadReceipts: 'synced',
   roomListPreviews: 'synced',
   roomListSections: 'synced',
   roomListPeople: 'synced',
@@ -138,6 +150,7 @@ const PREF_SCOPE: Record<PrefKey, PrefScope> = {
   linkPreviews: 'synced',
   roomSort: 'synced',
   quickReactions: 'synced',
+  mutedUntil: 'synced',
 };
 
 /** Preferences that stay on this install. */
@@ -160,6 +173,7 @@ const ENUM_VALUES = {
   timeFormat: ['auto', '12h', '24h'],
   linkPreviews: ['off', 'unencrypted', 'always'],
   roomSort: ROOM_SORTS,
+  voiceSpeed: ['1', '1.5', '2'],
 } as const satisfies Partial<{ [K in PrefKey]: readonly Prefs[K][] }>;
 
 type EnumKey = keyof typeof ENUM_VALUES;
@@ -171,6 +185,7 @@ function isEnumKey(key: PrefKey): key is EnumKey {
 /** Whether `value` is an allowed value for `key`. Booleans and the enum sets are the only accepted types. */
 export function isValidPref(key: PrefKey, value: unknown): boolean {
   if (key === 'quickReactions') return isQuickReactions(value);
+  if (key === 'mutedUntil') return isMutedUntil(value);
   if (typeof DEFAULT_PREFS[key] === 'boolean') return typeof value === 'boolean';
   if (isEnumKey(key)) return (ENUM_VALUES[key] as readonly unknown[]).includes(value);
   return false;
@@ -284,6 +299,9 @@ export class PrefsStore {
   get bigEmoji(): boolean {
     return this.#values.bigEmoji;
   }
+  get showReadReceipts(): boolean {
+    return this.#values.showReadReceipts;
+  }
   get notifyDesktop(): boolean {
     return this.#values.notifyDesktop;
   }
@@ -355,6 +373,13 @@ export class PrefsStore {
   get quickReactions(): readonly string[] {
     return this.#values.quickReactions;
   }
+  get voiceSpeed(): VoiceSpeed {
+    return this.#values.voiceSpeed;
+  }
+  get mutedUntil(): MutedUntil {
+    return this.#values.mutedUntil;
+  }
+
 
   get<K extends PrefKey>(key: K): Prefs[K] {
     return this.#values[key];

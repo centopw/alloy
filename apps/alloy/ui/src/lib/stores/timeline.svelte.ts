@@ -4,6 +4,9 @@ import { FrameBatcher, Subscription } from './subscription.js';
 import { errorMessage, expect } from './errors.js';
 import { uploadsStore } from './uploads.svelte.js';
 import { roomsStore } from './rooms.svelte.js';
+import { lastOwnEventId, readersByEvent } from '../content/receipts.js';
+import { voiceExtension, writeTempFile } from '../platform/files.js';
+import type { VoiceClip } from '../platform/voiceRecorder.js';
 
 type TimelineDiffEvent = Extract<EngineEvent, { type: 'TimelineDiff' }>;
 
@@ -19,6 +22,20 @@ class TimelineStore {
   editing = $state<TimelineItemDto | null>(null);
   highlightedEventId = $state<string | null>(null);
   jumpTarget = $state<{ eventId: string; seq: number } | null>(null);
+  /** Multi-select: event ids chosen while selection mode is on. */
+  selecting = $state(false);
+  selectedIds = $state<string[]>([]);
+  /** Messages waiting for the "Delete for everyone?" confirmation. */
+  pendingDelete = $state<TimelineItemDto[] | null>(null);
+  /** A message waiting for the "Report this message?" confirmation. */
+  pendingReport = $state<TimelineItemDto | null>(null);
+
+  /** Who has read each of your messages, by event id (see `readersByEvent`). */
+  readers = $derived(readersByEvent(this.items));
+  /** Your newest sent message; only it shows the "seen by" avatars. */
+  lastOwnEventId = $derived(lastOwnEventId(this.items));
+  /** The selected messages in timeline order. */
+  selectedItems = $derived(this.items.filter((i) => !!i.event_id && this.selectedIds.includes(i.event_id)));
 
   private jumpSeq = 0;
   private highlightTimer: number | NodeJS.Timeout | null = null;
@@ -76,6 +93,10 @@ class TimelineStore {
     }
     this.highlightedEventId = null;
     this.jumpTarget = null;
+    this.selecting = false;
+    this.selectedIds = [];
+    this.pendingDelete = null;
+    this.pendingReport = null;
     if (id) await client.unsubscribe(id).catch(() => {});
   }
 
@@ -94,7 +115,7 @@ class TimelineStore {
   }
 
   /** Send text (markdown by default); honors a pending reply or edit. */
-  async send(body: string, mentions: string[] = []) {
+  async send(body: string, mentions: string[] = [], mentionRoom = false) {
     if (!this.roomId) return;
     const roomId = this.roomId;
     const text = body.trim();
@@ -110,11 +131,34 @@ class TimelineStore {
         await client.sendText(roomId, text, {
           markdown: true,
           reply_to: reply,
-          mentions: mentions.length ? mentions : null
+          mentions: mentions.length ? mentions : null,
+          mention_room: mentionRoom,
         });
       }
     } catch (e) {
       this.error = errorMessage(e);
+    }
+  }
+
+  /** Sends a recorded clip as a voice message: the shell writes it to a temp file, the engine uploads it. */
+  async sendVoice(clip: VoiceClip) {
+    const roomId = this.roomId;
+    if (!roomId) return;
+    const txnId = crypto.randomUUID();
+    uploadsStore.begin({ txnId, roomId, name: 'Voice message' });
+    try {
+      const path = await writeTempFile(clip.blob, voiceExtension(clip.mimeType));
+      expect(
+        await client.invoke({
+          action: 'SendVoice',
+          params: { room_id: roomId, file_path: path, duration_ms: clip.durationMs, waveform: clip.waveform, txn_id: txnId },
+        }),
+        'AttachmentSent',
+      );
+    } catch (e) {
+      this.error = errorMessage(e);
+    } finally {
+      uploadsStore.end(txnId);
     }
   }
 
@@ -162,6 +206,39 @@ class TimelineStore {
     await client.endPoll(this.roomId, item.event_id).catch((e) => {
       this.error = errorMessage(e);
     });
+  }
+
+  /** Redact several messages (Matrix deletes for everyone). A reason is only sent when given. */
+  async redactItems(items: readonly TimelineItemDto[], reason: string | null = null) {
+    const roomId = this.roomId;
+    if (!roomId) return;
+    for (const item of items) {
+      if (!item.event_id) continue;
+      await client.redactEvent(roomId, item.event_id, reason?.trim() || null);
+    }
+  }
+
+  beginSelect(eventId: string) {
+    this.selecting = true;
+    this.selectedIds = [eventId];
+  }
+
+  toggleSelect(eventId: string) {
+    this.selectedIds = this.selectedIds.includes(eventId)
+      ? this.selectedIds.filter((id) => id !== eventId)
+      : [...this.selectedIds, eventId];
+    if (this.selectedIds.length === 0) this.selecting = false;
+  }
+
+  endSelect() {
+    this.selecting = false;
+    this.selectedIds = [];
+  }
+
+  /** Reports a message to the room's moderators and the homeserver. */
+  async report(item: TimelineItemDto) {
+    if (!this.roomId || !item.event_id) return;
+    expect(await client.reportEvent(this.roomId, item.event_id), 'EventReported');
   }
 
   async redact(item: TimelineItemDto) {

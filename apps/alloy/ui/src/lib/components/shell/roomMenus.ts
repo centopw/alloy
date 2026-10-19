@@ -5,6 +5,8 @@ import { pickFile } from '$lib/platform/files';
 import { contextMenu, type MenuItem } from '$lib/stores/contextmenu.svelte';
 import { roomInfo } from '$lib/stores/roomInfo.svelte';
 import { roomNotify } from '$lib/stores/roomNotify.svelte';
+import { muteRoom, setRoomLevel } from '$lib/stores/muteTimer.svelte';
+import { MUTE_DURATIONS } from '$lib/content/mute';
 import { ui } from '$lib/stores/ui.svelte';
 
 /** Notification choices in display order. `null` restores the account default. */
@@ -24,13 +26,22 @@ function isCurrentLevel(roomId: string, target: NotificationLevel | null): boole
 
 /** Notification level menu for a room; the current choice is `selected`. */
 export function notifyItems(roomId: string): MenuItem[] {
-  return NOTIFY_LEVELS.map(({ target, label }) => ({
-    id: `notify-${target ?? 'default'}`,
-    label,
-    selected: isCurrentLevel(roomId, target),
-    disabled: roomNotify.saving(roomId),
-    onselect: () => void roomNotify.set(roomId, target),
-  }));
+  return NOTIFY_LEVELS.map(({ target, label }): MenuItem => {
+    const base = { id: `notify-${target ?? 'default'}`, label, selected: isCurrentLevel(roomId, target), disabled: roomNotify.saving(roomId) };
+    if (target === 'Mute') {
+      return {
+        ...base,
+        submenu: {
+          items: MUTE_DURATIONS.map(({ label: durationLabel, ms }): MenuItem => ({
+            id: `mute-${ms ?? 'forever'}`,
+            label: durationLabel,
+            onselect: () => void muteRoom(roomId, ms),
+          })),
+        },
+      };
+    }
+    return { ...base, onselect: () => void setRoomLevel(roomId, target) };
+  });
 }
 
 /** Accessible label for the bell button: the room's current notification choice. */

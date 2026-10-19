@@ -2,13 +2,30 @@
 
 ## Unreleased
 
+### Added
+- **Messenger and Telegram style conversations** (ADR 0008):
+  - **Reactions:** hover bar on desktop; on a phone press and hold a message for a pill of your emoji beside it, or double tap to react with your first emoji. Tap or right-click a reaction to see who reacted.
+  - **Reply:** swipe a message to the right on a phone; the Up arrow in an empty message box edits your last message on desktop.
+  - **Seen:** one check when sent, two when someone has read it, and avatars of readers under your newest message in small rooms (setting: Show who has read your messages).
+  - **Pinned messages** with a bar under the header, **Forward** to several rooms, **Select** several messages to copy, forward or delete, and **Delete for everyone** with a confirmation (moderators can delete others' messages).
+  - **Jump to latest** shows how many new messages arrived, and an `@` button jumps to messages that mention you.
+- **Chat list:** pin chats to the top, archive them, mark as unread, mute for 1 hour, 8 hours, 24 hours or until you turn it back on, a "more" button on hover, swipe a chat left for Mute and Archive on a phone, and unsent text shows as "Draft:" in the list and comes back when you return.
+- **Search all chats:** the sidebar search also finds message text across your unencrypted rooms.
+- **Media:** pictures sent together appear as one album; the viewer is a gallery (swipe or arrow keys, pinch or double tap to zoom, swipe down to close, sender and time); audio plays inline with a waveform and 1x / 1.5x / 2x speed; Android can now download media to the Downloads folder; the attach button takes several files at once.
+- **Voice messages:** hold the microphone on a phone (slide left to cancel, up to lock) or click it on desktop. Voice notes from other Matrix clients play too.
+- **Writing:** a formatting toolbar on selected text (and an "Aa" row on phones) with Bold, Italic, Strikethrough, Code, Spoiler, Quote and Link, plus Ctrl/Cmd shortcuts; `||spoilers||` stay blurred until clicked; `@room` pings everyone when you are allowed to.
+- **Location:** send your location or share it live for 15 minutes, 1 hour or 8 hours, with a banner and Stop button; received locations show a card that opens a map in your browser. No map is loaded inside the app.
+- **Safety:** sign out one or all other sessions, change a member's role, remove or ban members, report a message, and block people (Settings > Security and privacy lists and unblocks them).
+
 ### Changed
 - The update prompt is a small, quiet notice above your account card instead of a bright button in an extra top bar. It never interrupts: dismiss it with the X (it returns next launch), skip a version from its menu, or keep chatting and restart whenever you like.
-- Opening a picture or video now fills the whole window on every platform, with the picture on the plain background (Download and Close in the corner).
+- Opening a picture or video fills the whole window on every platform, with the picture on the plain background.
 - Pictures, videos and stickers sent without a caption sit straight on the timeline: no bubble or panel behind them, and a bare file name is no longer shown as a caption.
-- Phones: tapping the message box no longer jumps the conversation to older messages when the keyboard opens. You stay where you were (at the newest message, or wherever you had scrolled to), and it returns the same way when the keyboard closes.
-- **Quick reactions:** hovering a message on desktop shows your favourite emoji in its toolbar; one click reacts, and the smiley-plus button opens the full picker. On a phone, press and hold a message to get the same bar above the action sheet (Messenger style). Choose and remove your own emoji in Settings > Preferences > Reactions (synced across your devices).
+- Phones: tapping the message box no longer jumps the conversation to older messages when the keyboard opens.
+- **Quick reactions** are yours to choose in Settings > Preferences > Reactions (synced across your devices).
 - Start typing anywhere in a conversation and the text goes into the message box, no click needed.
+- Read receipts are now tracked in every conversation (needed for the seen marks).
+- Deleting a message asks first.
 
 ## 0.1.9 (pre-release)
 

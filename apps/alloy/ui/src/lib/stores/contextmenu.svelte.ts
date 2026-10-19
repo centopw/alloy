@@ -39,6 +39,8 @@ export interface MenuReactions {
   onpick: (emoji: string) => void;
   /** Open the full emoji picker. */
   onmore: () => void;
+  /** Rect of the pressed message; the phone bar floats beside it. */
+  anchor?: MenuAnchor;
 }
 
 export interface MenuOptions {

@@ -4,6 +4,8 @@ import {
   activeMention,
   mentionOptionId,
   rankMembers,
+  roomMentionOption,
+  containsRoomMention,
   reconcileMentions,
   type MentionRecord
 } from './mentions.js';
@@ -133,5 +135,21 @@ describe('reconcileMentions', () => {
 describe('mentionOptionId', () => {
   it('builds stable option ids for aria-activedescendant', () => {
     expect(mentionOptionId('mentions-1', 2)).toBe('mentions-1-option-2');
+  });
+});
+
+describe('@room', () => {
+  it('suggests @room only while the query can still become "room" and the user may use it', () => {
+    expect(roomMentionOption('', true)?.user_id).toBe('@room');
+    expect(roomMentionOption('ro', true)?.user_id).toBe('@room');
+    expect(roomMentionOption('bob', true)).toBeNull();
+    expect(roomMentionOption('', false)).toBeNull();
+  });
+
+  it('finds a whole-word @room in the text', () => {
+    expect(containsRoomMention('hey @room, lunch?')).toBe(true);
+    expect(containsRoomMention('@room')).toBe(true);
+    expect(containsRoomMention('mail me@room.com')).toBe(false);
+    expect(containsRoomMention('@rooms')).toBe(false);
   });
 });

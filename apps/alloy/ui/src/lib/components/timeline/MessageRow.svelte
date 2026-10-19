@@ -2,10 +2,10 @@
   import type { TimelineItemDto } from '$lib/generated';
   import { Avatar, QuickReactions, UserName } from '../common';
   import Icon from '$lib/icons/Icon.svelte';
-  import { Reply, Pencil, Trash2, Copy, MessageSquare, Download } from '$lib/icons';
+  import { Reply, Pencil, Trash2, Copy, MessageSquare, Download, Check, CheckCheck, Users, Forward, Pin, PinOff, Flag } from '$lib/icons';
   import { timelineStore } from '$lib/stores/timeline.svelte';
   import { threadStore } from '$lib/stores/thread.svelte';
-  import { sanitizeHtml } from '$lib/content/html';
+  import { sanitizeHtml, SPOILER_SELECTOR } from '$lib/content/html';
   import { formatDay, formatTime, isEmojiOnly, isFileName } from '$lib/content/format';
   import { isHiddenState, stateEventSummary } from '$lib/content/stateEvents';
   import { prefs } from '$lib/stores/prefs.svelte';
@@ -13,30 +13,47 @@
   import { emojiPicker } from '$lib/stores/emojiPicker.svelte';
   import { interceptLinks } from '$lib/platform/links';
   import { contextmenu } from '$lib/platform/contextmenu';
+  import { doubleTap } from '$lib/platform/doubleTap';
+  import { swipe } from '$lib/platform/swipe';
+  import { focusComposer } from '$lib/platform/typeToFocus';
+  import { portal } from '$lib/platform/portal';
+  import { displayNameFor } from '$lib/platform/names';
+  import { joinNames } from '$lib/content/reactors';
+  import { membersStore } from '$lib/stores/members.svelte';
+  import { pinsStore } from '$lib/stores/pins.svelte';
+  import { forwardStore } from '$lib/stores/forward.svelte';
   import { canDownloadMedia, downloadMedia } from '$lib/platform/saveFile';
   import { firstPreviewUrl } from '$lib/content/urls';
   import { errorMessage } from '$lib/stores/errors';
   import { profileCard } from '$lib/stores/profileCard.svelte';
   import type { MenuItem, MenuOptions } from '$lib/stores/contextmenu.svelte';
   import MediaView from './MediaView.svelte';
+  import AudioPlayer from './AudioPlayer.svelte';
+  import AlbumGrid from './AlbumGrid.svelte';
+  import LocationCard from './LocationCard.svelte';
   import PollView from './PollView.svelte';
   import ReplyQuote, { quote } from './ReplyQuote.svelte';
   import LinkPreview from './LinkPreview.svelte';
+  import ReactionsSheet from './ReactionsSheet.svelte';
 
   interface Props {
     item: TimelineItemDto;
     prev: TimelineItemDto | null;
     /** Rendered inside the thread panel: room-level reply and thread actions are hidden. */
     inThread?: boolean;
+    /** Every picture of the album this row leads; the row then renders them as one grid. */
+    album?: readonly TimelineItemDto[] | null;
+    /** The row is folded into the album of an earlier row and renders nothing. */
+    albumHidden?: boolean;
   }
-  let { item, prev, inThread = false }: Props = $props();
+  let { item, prev, inThread = false, album = null, albumHidden = false }: Props = $props();
 
   // Same sender within this window continues the previous message as a compact row.
   const GROUP_MS = 7 * 60_000;
   // A removed placeholder hidden by prefs neither joins nor breaks a group.
   const isMessage = (i: TimelineItemDto | null) =>
     !!i &&
-    ['TextMessage', 'Media', 'Poll', 'Redacted', 'UnableToDecrypt'].includes(i.content.kind) &&
+    ['TextMessage', 'Media', 'Poll', 'Location', 'Redacted', 'UnableToDecrypt'].includes(i.content.kind) &&
     !(i.content.kind === 'Redacted' && !prefs.showRemovedPlaceholder);
 
   const kind = $derived(item.content.kind);
@@ -44,7 +61,8 @@
   const previewUrl = $derived(item.content.kind === 'TextMessage' ? firstPreviewUrl(item.content.data.body) : null);
   /** Rows the prefs hide entirely: removed placeholders and state events switched off. */
   const hidden = $derived(
-    (item.content.kind === 'Redacted' && !prefs.showRemovedPlaceholder) ||
+    albumHidden ||
+      (item.content.kind === 'Redacted' && !prefs.showRemovedPlaceholder) ||
       (item.content.kind === 'RoomState' && isHiddenState(item.content.data.state_type, prefs))
   );
   const grouped = $derived(
@@ -64,20 +82,26 @@
   );
   /** A picture, video or sticker sent without a caption sits straight on the timeline, with no bubble behind it. */
   const bareMedia = $derived(
-    item.content.kind === 'Media' &&
+    !!album ||
+    (item.content.kind === 'Media' &&
       ['image', 'video', 'sticker'].includes(item.content.data.media_kind ?? '') &&
       !item.reply_to &&
-      !(item.content.data.body && !isFileName(item.content.data.body))
+      !(item.content.data.body && !isFileName(item.content.data.body)))
   );
   const stateSummary = $derived(item.content.kind === 'RoomState' ? stateEventSummary(item.content.data) : null);
   const senderName = $derived(item.sender_display_name ?? item.sender);
   const failed = $derived(item.send_state.status === 'Failed');
   const sending = $derived(item.send_state.status === 'Sending');
   const canEdit = $derived(item.is_own && kind === 'TextMessage' && !!item.event_id);
-  const canAct = $derived(!!item.event_id && (kind === 'TextMessage' || kind === 'Media'));
+  const canAct = $derived(!!item.event_id && (kind === 'TextMessage' || kind === 'Media' || kind === 'Location'));
   const canCopy = $derived(kind === 'TextMessage');
   const canDownload = $derived(kind === 'Media' && canDownloadMedia());
   const highlighted = $derived(!!item.event_id && timelineStore.highlightedEventId === item.event_id);
+  const roomDetails = $derived(membersStore.detailsOf(timelineStore.roomId));
+  const canPin = $derived(canAct && (roomDetails?.can_pin ?? false));
+  const pinned = $derived(pinsStore.isPinned(timelineStore.roomId, item.event_id));
+  const canDelete = $derived(!!item.event_id && !sending && (item.is_own || (roomDetails?.can_redact_others ?? false)));
+  const selected = $derived(!!item.event_id && timelineStore.selectedIds.includes(item.event_id));
 
   let rowEl = $state<HTMLElement | undefined>();
 
@@ -93,6 +117,81 @@
     void timelineStore.toggleReaction(item, emoji);
   }
 
+  /** Display name of a room member for tooltips and the who-reacted list. */
+  function nameOf(userId: string): string {
+    const m = membersStore.membersOf(timelineStore.roomId).find((x) => x.user_id === userId);
+    return displayNameFor(userId, null, m?.display_name ?? null);
+  }
+
+  /** Other people who have read this message of yours (their receipt is on it or on a later event). */
+  const readers = $derived(item.is_own && item.event_id ? (timelineStore.readers.get(item.event_id) ?? []) : []);
+  const showTick = $derived(prefs.showReadReceipts && item.is_own && !!item.event_id && !sending && !failed);
+  const readByOthers = $derived(readers.length > 0);
+  const readerNames = $derived(readers.map(nameOf));
+  /** Stacked avatars of readers, only under your newest message and only in small rooms. */
+  const seenAvatars = $derived(
+    showTick &&
+      readByOthers &&
+      item.event_id === timelineStore.lastOwnEventId &&
+      (membersStore.detailsOf(timelineStore.roomId)?.joined_members ?? membersStore.membersOf(timelineStore.roomId).length) <= 20
+  );
+
+  // Who reacted: the sheet lists every reactor per emoji.
+  let whoOpen = $state(false);
+  let whoKey = $state<string | null>(null);
+  function openWho(key: string | null) {
+    whoKey = key;
+    whoOpen = true;
+  }
+
+  // Phones: swipe right on a message to reply to it; double-tap to react with the first quick reaction.
+  let swipeX = $state(0);
+  let swiping = $state(false);
+  const swipeOptions = $derived({
+    direction: 'right' as const,
+    threshold: 64,
+    enabled: viewport.isPhone && canAct && !inThread && !timelineStore.selecting,
+    edgeGuard: 24,
+    onmove: (offset: number) => {
+      swiping = true;
+      swipeX = offset;
+    },
+    onend: () => {
+      swiping = false;
+      swipeX = 0;
+    },
+    oncommit: () => {
+      timelineStore.startReply(item);
+      focusComposer();
+    },
+  });
+
+  let burst = $state<{ x: number; y: number; emoji: string; id: number } | null>(null);
+  let burstSeq = 0;
+  function onDoubleTap(point: { x: number; y: number }) {
+    const emoji = prefs.quickReactions[0];
+    if (!viewport.isPhone || !canAct || !emoji) return;
+    const removing = myReactions.includes(emoji);
+    reactWith(emoji);
+    if (removing || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const id = ++burstSeq;
+    burst = { ...point, emoji, id };
+    window.setTimeout(() => {
+      if (burst?.id === id) burst = null;
+    }, 650);
+  }
+
+  /** A click on a hidden spoiler reveals it; every other click follows the link rules. */
+  function onBodyClick(e: MouseEvent) {
+    const spoiler = e.target instanceof Element ? e.target.closest<HTMLElement>(SPOILER_SELECTOR) : null;
+    if (spoiler && !spoiler.hasAttribute('data-revealed')) {
+      e.preventDefault();
+      spoiler.setAttribute('data-revealed', '');
+      return;
+    }
+    interceptLinks(e);
+  }
+
   /** Reaction bar of the message menu, for messages that can be reacted to. */
   function menuOptions(): MenuOptions | undefined {
     if (!canAct) return undefined;
@@ -102,6 +201,7 @@
         active: myReactions,
         onpick: reactWith,
         onmore: () => rowEl && openReactions(rowEl.getBoundingClientRect()),
+        anchor: rowEl?.getBoundingClientRect(),
       },
     };
   }
@@ -119,6 +219,14 @@
       at = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
     }
     profileCard.open(item.sender, timelineStore.roomId, at);
+  }
+
+  /** In selection mode a click anywhere on the message toggles it instead of acting on what was clicked. */
+  function onRowClickCapture(e: MouseEvent) {
+    if (!timelineStore.selecting || !canAct || !item.event_id) return;
+    e.preventDefault();
+    e.stopPropagation();
+    timelineStore.toggleSelect(item.event_id);
   }
 
   const html = $derived(
@@ -141,6 +249,7 @@
     const replies: MenuItem[] = [];
     if (canAct && !inThread) {
       replies.push({ id: 'reply', label: 'Reply', icon: Reply, onselect: () => timelineStore.startReply(item) });
+      replies.push({ id: 'forward', label: 'Forward', icon: Forward, onselect: () => item.event_id && timelineStore.roomId && forwardStore.begin(timelineStore.roomId, [item.event_id]) });
       replies.push({ id: 'thread', label: 'Reply in thread', icon: MessageSquare, onselect: openThread });
     }
 
@@ -149,15 +258,45 @@
     copies.push({ id: 'copy-sender', label: 'Copy sender ID', icon: Copy, onselect: () => void navigator.clipboard.writeText(item.sender) });
     if (canDownload) copies.push({ id: 'download', label: 'Download', icon: Download, onselect: downloadMediaItem });
 
+    const manage: MenuItem[] = [];
+    if (canPin && item.event_id && timelineStore.roomId) {
+      const roomId = timelineStore.roomId;
+      const eventId = item.event_id;
+      manage.push(
+        pinned
+          ? { id: 'unpin', label: 'Unpin', icon: PinOff, onselect: () => void pinsStore.setPinned(roomId, eventId, false) }
+          : { id: 'pin', label: 'Pin', icon: Pin, onselect: () => void pinsStore.setPinned(roomId, eventId, true) },
+      );
+    }
+    if (canAct && item.event_id) {
+      const eventId = item.event_id;
+      manage.push({ id: 'select', label: 'Select', icon: Check, onselect: () => timelineStore.beginSelect(eventId) });
+    }
+
     const edits: MenuItem[] = [];
     if (canEdit) edits.push({ id: 'edit', label: 'Edit', icon: Pencil, onselect: () => timelineStore.startEdit(item) });
-    if (item.is_own) edits.push({ id: 'delete', label: 'Delete', icon: Trash2, danger: true, onselect: () => timelineStore.redact(item) });
+    if (canDelete) edits.push({ id: 'delete', label: 'Delete', icon: Trash2, danger: true, onselect: () => (timelineStore.pendingDelete = [item]) });
+    if (!item.is_own && canAct) edits.push({ id: 'report', label: 'Report', icon: Flag, danger: true, onselect: () => (timelineStore.pendingReport = item) });
 
     const separator: MenuItem = { separator: true };
-    const groups = [replies, copies, edits].filter((g) => g.length > 0);
+    const groups = [replies, manage, copies, edits].filter((g) => g.length > 0);
     return groups.flatMap((g, i) => (i === 0 ? g : [separator, ...g]));
   }
 </script>
+
+{#snippet tick()}
+  {#if showTick}
+    <span
+      class="tick"
+      class:read={readByOthers}
+      role="img"
+      aria-label={readByOthers ? `Seen by ${joinNames(readerNames)}` : 'Sent'}
+      data-tooltip={readByOthers ? `Seen by ${joinNames(readerNames)}` : 'Sent'}
+    >
+      <Icon icon={readByOthers ? CheckCheck : Check} size={16} />
+    </span>
+  {/if}
+{/snippet}
 
 {#if !hidden}
   {#if item.content.kind === 'DayDivider'}
@@ -169,10 +308,39 @@
 {:else if item.content.kind === 'Virtual'}
   <div class="spacer"></div>
 {:else}
-  <div class="row" class:grouped class:own={item.is_own} class:jumbo class:bare={bareMedia} class:highlighted data-layout={layout} data-event-id={item.event_id ?? undefined} bind:this={rowEl} use:contextmenu={{ items: menuItems, options: menuOptions }}>
+  <div
+    class="row"
+    class:grouped
+    class:own={item.is_own}
+    class:jumbo
+    class:bare={bareMedia}
+    class:highlighted
+    class:swiping
+    class:selecting={timelineStore.selecting && canAct}
+    class:selected
+    onclickcapture={onRowClickCapture}
+    class:mention={item.mentions_me && !item.is_own}
+    style:transform={swipeX > 0 ? `translateX(${swipeX}px)` : undefined}
+    data-layout={layout}
+    data-event-id={item.event_id ?? undefined}
+    bind:this={rowEl}
+    use:contextmenu={{ items: menuItems, options: menuOptions }}
+    use:swipe={swipeOptions}
+    use:doubleTap={onDoubleTap}
+  >
+    {#if swipeX > 0}
+      <span class="swipe-hint" class:ready={swipeX >= 64} style:opacity={Math.min(1, swipeX / 64)} aria-hidden="true">
+        <Icon icon={Reply} size={24} />
+      </span>
+    {/if}
+    {#if timelineStore.selecting && canAct}
+      <button type="button" class="select-mark" aria-label={selected ? 'Deselect message' : 'Select message'} aria-pressed={selected}>
+        <span class="select-dot"><Icon icon={Check} size={16} /></span>
+      </button>
+    {/if}
     <div class="gutter">
       {#if layout === 'irc' || (layout === 'modern' && grouped)}
-        <span class="gutter-time">{time}</span>
+        <span class="gutter-time">{time}{@render tick()}</span>
       {:else if layout === 'modern' || (!grouped && !item.is_own)}
         <button type="button" class="avatar-btn" aria-label="Show profile of {senderName}" onclick={openSenderProfile}>
           <Avatar
@@ -189,7 +357,7 @@
       {#if showHead}
         <div class="head">
           <UserName userId={item.sender} displayName={item.sender_display_name} roomId={timelineStore.roomId} interactive />
-          {#if layout !== 'bubbles'}<span class="ts">{time}</span>{/if}
+          {#if layout !== 'bubbles'}<span class="ts">{time}</span>{@render tick()}{/if}
         </div>
       {/if}
 
@@ -203,7 +371,7 @@
         {#if item.content.kind === 'TextMessage'}
           {#if html}
             <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-            <div class="body html" onclick={interceptLinks} onauxclick={interceptLinks}>{@html html}{#if item.edited}<span class="edited">(edited)</span>{/if}</div>
+            <div class="body html" onclick={onBodyClick} onauxclick={interceptLinks}>{@html html}{#if item.edited}<span class="edited">(edited)</span>{/if}</div>
           {:else}
             <div class="body">{item.content.data.body}{#if item.edited}<span class="edited">(edited)</span>{/if}</div>
           {/if}
@@ -212,16 +380,31 @@
           {/if}
         {:else if item.content.kind === 'Media'}
           <div class="block">
-            <MediaView
-              uri={item.content.data.uri}
-              mimeType={item.content.data.mime_type}
-              body={item.content.data.body ?? ''}
-              mediaKind={item.content.data.media_kind ?? 'file'}
-              sizeBytes={item.content.data.size_bytes}
-              width={item.content.data.width}
-              height={item.content.data.height}
-              thumbnailUri={item.content.data.thumbnail_uri}
-            />
+            {#if album}
+              <AlbumGrid items={album} />
+            {:else if item.content.data.media_kind === 'audio'}
+              <AudioPlayer
+                uri={item.content.data.uri}
+                mimeType={item.content.data.mime_type}
+                body={item.content.data.body ?? ''}
+                sizeBytes={item.content.data.size_bytes}
+                durationMs={item.content.data.duration_ms ?? null}
+                waveform={item.content.data.waveform ?? null}
+                voice={item.content.data.voice ?? false}
+              />
+            {:else}
+              <MediaView
+                eventId={item.event_id}
+                uri={item.content.data.uri}
+                mimeType={item.content.data.mime_type}
+                body={item.content.data.body ?? ''}
+                mediaKind={item.content.data.media_kind ?? 'file'}
+                sizeBytes={item.content.data.size_bytes}
+                width={item.content.data.width}
+                height={item.content.data.height}
+                thumbnailUri={item.content.data.thumbnail_uri}
+              />
+            {/if}
             {#if item.content.data.media_kind === 'image' && item.content.data.body && !isFileName(item.content.data.body)}
               <div class="body caption">{item.content.data.body}{#if item.edited}<span class="edited">(edited)</span>{/if}</div>
             {/if}
@@ -232,6 +415,15 @@
           <div class="body muted">Waiting for this message. Verify this device to read it.</div>
         {:else if item.content.kind === 'Poll'}
           <div class="block"><PollView {item} poll={item.content.data} /></div>
+        {:else if item.content.kind === 'Location'}
+          <div class="block">
+            <LocationCard
+              geoUri={item.content.data.geo_uri}
+              description={item.content.data.description}
+              live={item.content.data.live ?? false}
+              liveUntil={item.content.data.live_until_millis ?? null}
+            />
+          </div>
         {:else}
           <div class="body muted">This message type is not supported yet.</div>
         {/if}
@@ -262,6 +454,8 @@
                 onclick={() => void timelineStore.toggleReaction(item, r.key)}
                 aria-pressed={r.by_me}
                 aria-label="{r.key} {r.count}"
+                data-tooltip={joinNames(r.senders.map(nameOf))}
+                use:contextmenu={() => [{ id: 'who', label: 'See who reacted', icon: Users, onselect: () => openWho(r.key) }]}
               >
                 <span>{r.key}</span><span class="count">{r.count}</span>
               </button>
@@ -269,8 +463,17 @@
           </div>
         {/if}
 
-        <span class="bubble-time">{time}</span>
+        <span class="bubble-time">{time}{@render tick()}</span>
       </div>
+      {#if seenAvatars}
+        <div class="seen" data-tooltip="Seen by {joinNames(readerNames)}">
+          {#each readers.slice(0, 3) as userId (userId)}
+            {@const m = membersStore.membersOf(timelineStore.roomId).find((x) => x.user_id === userId)}
+            <Avatar {userId} displayName={m?.display_name ?? null} src={m?.avatar_url ?? null} size={16} />
+          {/each}
+          {#if readers.length > 3}<span class="seen-more">+{readers.length - 3}</span>{/if}
+        </div>
+      {/if}
     </div>
 
     {#if canAct}
@@ -297,8 +500,8 @@
             <Icon icon={Pencil} size={16} />
           </button>
         {/if}
-        {#if item.is_own}
-          <button type="button" aria-label="Delete" title="Delete" onclick={() => timelineStore.redact(item)}>
+        {#if canDelete}
+          <button type="button" aria-label="Delete" title="Delete" onclick={() => (timelineStore.pendingDelete = [item])}>
             <Icon icon={Trash2} size={16} />
           </button>
         {/if}
@@ -306,6 +509,12 @@
 
     {/if}
   </div>
+  {#if whoOpen}
+    <ReactionsSheet {item} open={whoOpen} initialKey={whoKey} onclose={() => (whoOpen = false)} />
+  {/if}
+  {#if burst}
+    <span class="burst" style:left="{burst.x}px" style:top="{burst.y}px" aria-hidden="true" use:portal>{burst.emoji}</span>
+  {/if}
 {/if}
 {/if}
 
@@ -332,6 +541,121 @@
   }
   .row.highlighted {
     background: var(--alloy-color-accent-subtle);
+  }
+  /* A message that mentions you carries an accent edge. */
+  .row.mention {
+    box-shadow: inset 3px 0 0 var(--alloy-color-accent-primary);
+  }
+  /* Multi-select: a round check sits at the left edge and a tap anywhere on the message toggles it. */
+  .row.selecting {
+    cursor: pointer;
+    padding-left: calc(var(--alloy-layout-row-pad-x) + 44px);
+  }
+  .row.selected {
+    background: var(--alloy-color-accent-subtle);
+  }
+  .select-mark {
+    position: absolute;
+    top: 0;
+    left: 0;
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+  }
+  .select-dot {
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    border: 2px solid var(--alloy-color-border-prominent);
+    border-radius: var(--alloy-radii-full);
+    color: transparent;
+  }
+  .row.selected .select-dot {
+    border-color: var(--alloy-color-accent-primary);
+    background: var(--alloy-color-accent-primary);
+    color: var(--alloy-color-text-on-accent);
+  }
+  /* Phone swipe-to-reply: the row follows the finger and springs back on release. */
+  .row {
+    transition: transform var(--alloy-motion-duration-normal) ease-out;
+  }
+  .row.swiping {
+    transition: none;
+  }
+  .swipe-hint {
+    position: absolute;
+    top: 50%;
+    left: calc(-1 * var(--alloy-spacing-scale-8));
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--alloy-radii-full);
+    background: var(--alloy-color-surface-subtle);
+    color: var(--alloy-color-text-muted);
+    translate: 0 -50%;
+    pointer-events: none;
+  }
+  .swipe-hint.ready {
+    background: var(--alloy-color-accent-subtle);
+    color: var(--alloy-color-accent-primary);
+  }
+  .tick {
+    display: inline-flex;
+    margin-left: var(--alloy-spacing-scale-1);
+    vertical-align: middle;
+    color: var(--alloy-color-text-muted);
+  }
+  .tick.read {
+    color: var(--alloy-color-accent-primary);
+  }
+  .seen {
+    display: flex;
+    align-items: center;
+    align-self: flex-end;
+    margin-top: 2px;
+  }
+  .seen > :global(* + *) {
+    margin-left: -6px;
+  }
+  .seen > :global(*) {
+    border-radius: var(--alloy-radii-full);
+    box-shadow: 0 0 0 2px var(--alloy-color-surface-canvas);
+  }
+  .seen-more {
+    margin-left: var(--alloy-spacing-scale-1);
+    font-size: var(--alloy-typography-size-xs);
+    color: var(--alloy-color-text-muted);
+  }
+  .burst {
+    position: fixed;
+    z-index: 120;
+    font-size: 56px;
+    line-height: 1;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    animation: alloy-burst 600ms ease-out forwards;
+  }
+  @keyframes alloy-burst {
+    0% {
+      opacity: 0;
+      scale: 0.3;
+    }
+    30% {
+      opacity: 1;
+      scale: 1.25;
+    }
+    100% {
+      opacity: 0;
+      scale: 1;
+      translate: 0 -28px;
+    }
   }
   .gutter {
     flex: none;
@@ -407,6 +731,16 @@
   .body.html :global(a) {
     color: var(--alloy-color-accent-primary);
     text-decoration: underline;
+  }
+  .body.html :global(span[data-mx-spoiler]:not([data-revealed])) {
+    border-radius: var(--alloy-radii-sm);
+    background: var(--alloy-color-surface-active);
+    filter: blur(6px);
+    cursor: pointer;
+    user-select: none;
+  }
+  .body.html :global(span[data-mx-spoiler]:not([data-revealed])) :global(a) {
+    pointer-events: none;
   }
   .body.html :global(blockquote) {
     margin: var(--alloy-spacing-scale-1) 0;
@@ -742,6 +1076,12 @@
 
   /* Touch devices have no hover: gutter times stay visible. */
   @media (hover: none) {
+    /* A long press opens the message menu (which has Copy text), not the system selection handles. */
+    .row {
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
+    }
     .row .gutter-time {
       opacity: 1;
     }

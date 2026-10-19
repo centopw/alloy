@@ -37,6 +37,7 @@
         },
         { action: 'Pick the highlighted mention', chords: [['Tab'], ['Enter']] },
         { action: 'Move through mention suggestions', chords: [['↑'], ['↓']] },
+        { action: 'Edit your last message (empty field)', chords: [['↑']] },
         { action: 'Cancel reply or edit', chords: [['Esc']] },
       ],
     },

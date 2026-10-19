@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Button } from '$lib/components/common';
+  import { Button, Modal, TextField } from '$lib/components/common';
   import { SettingButtonRow, SettingGroup } from '$lib/components/settings/controls';
   import { client } from '$lib/ipc';
   import type { DeviceDto } from '$lib/generated/index.js';
@@ -62,8 +62,59 @@
     onclose();
     void verification.requestVerification();
   }
+
+  // Signing a session out needs the account password (the server asks for it before deleting devices).
+  let pendingSignOut = $state<{ ids: string[]; label: string } | null>(null);
+  let password = $state('');
+  let signOutBusy = $state(false);
+  let signOutError = $state<string | null>(null);
+  const others = $derived(devices.filter((d) => !d.is_current));
+
+  function askSignOut(ids: string[], label: string) {
+    pendingSignOut = { ids, label };
+    password = '';
+    signOutError = null;
+  }
+
+  async function confirmSignOut() {
+    if (!pendingSignOut || signOutBusy) return;
+    signOutBusy = true;
+    signOutError = null;
+    try {
+      const res = await client.deleteDevices(pendingSignOut.ids, password);
+      if (res.type === 'AuthRequired') throw new Error('Enter your account password to sign sessions out.');
+      expect(res, 'DevicesDeleted');
+      pendingSignOut = null;
+      await load();
+    } catch (e) {
+      signOutError = errorMessage(e);
+    } finally {
+      signOutBusy = false;
+    }
+  }
 </script>
 
+{#snippet signOutDialog()}
+  <Modal open={pendingSignOut !== null} title="Sign out" onclose={() => (pendingSignOut = null)} width="420px">
+    <form
+      class="signout"
+      onsubmit={(e) => {
+        e.preventDefault();
+        void confirmSignOut();
+      }}
+    >
+      <p>{pendingSignOut?.label}</p>
+      <TextField bind:value={password} type="password" aria-label="Account password" placeholder="Account password" autocomplete="current-password" />
+      {#if signOutError}<p class="error" role="alert">{signOutError}</p>{/if}
+      <div class="actions">
+        <Button variant="ghost" type="button" onclick={() => (pendingSignOut = null)}>Cancel</Button>
+        <Button variant="danger" type="submit" disabled={signOutBusy || password === ''}>Sign out</Button>
+      </div>
+    </form>
+  </Modal>
+{/snippet}
+
+{@render signOutDialog()}
 <section class="section">
   <SettingGroup title="This session">
     {#if current}
@@ -114,11 +165,21 @@
                 <span class="mono">{device.last_seen_ip}</span>
               {/if}
             </div>
+            {#if !device.is_current}
+              <Button variant="ghost" size="sm" onclick={() => askSignOut([device.device_id], `Sign ${device.display_name ?? device.device_id} out of this account.`)}>
+                Sign out
+              </Button>
+            {/if}
           </li>
         {/each}
       </ul>
-      <div>
+      <div class="footer-actions">
         <Button variant="ghost" size="sm" onclick={() => void load()}>Refresh</Button>
+        {#if others.length > 0}
+          <Button variant="danger" size="sm" onclick={() => askSignOut(others.map((d) => d.device_id), `Sign ${others.length} other ${others.length === 1 ? 'session' : 'sessions'} out of this account.`)}>
+            Sign out all other sessions
+          </Button>
+        {/if}
       </div>
     {/if}
   </SettingGroup>
@@ -206,5 +267,23 @@
     margin: 0;
     color: var(--alloy-color-status-error);
     overflow-wrap: anywhere;
+  }
+  .signout {
+    display: flex;
+    flex-direction: column;
+    gap: var(--alloy-spacing-scale-3);
+  }
+  .signout p {
+    margin: 0;
+  }
+  .actions,
+  .footer-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: var(--alloy-spacing-scale-2);
+  }
+  .footer-actions {
+    justify-content: space-between;
   }
 </style>

@@ -58,6 +58,24 @@ await fetch(`${HS}/_matrix/client/v3/rooms/${encodeURIComponent(room.room_id)}/s
   headers: { 'content-type': 'application/json', authorization: `Bearer ${v.token}` },
   body: JSON.stringify({ msgtype: 'm.text', body: 'Hi from bob' }),
 });
+const pinRoom = await api('/createRoom', { name: 'Pin Room', invite: [u.id], power_level_content_override: { users: { [u.id]: 100 } } }, v.token);
+await api(`/join/${encodeURIComponent(pinRoom.room_id)}`, {}, u.token);
+await fetch(`${HS}/_matrix/client/v3/rooms/${encodeURIComponent(pinRoom.room_id)}/send/m.room.message/p1`, {
+  method: 'PUT',
+  headers: { 'content-type': 'application/json', authorization: `Bearer ${v.token}` },
+  body: JSON.stringify({ msgtype: 'm.text', body: 'pin target alloy-pin' }),
+});
+// Three pictures sent in a row without captions: the timeline folds them into one album.
+const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+const upload = await fetch(`${HS}/_matrix/media/v3/upload?filename=a.png`, { method: 'POST', headers: { 'content-type': 'image/png', authorization: `Bearer ${v.token}` }, body: png });
+const mxc = (await upload.json()).content_uri;
+for (const n of [1, 2, 3]) {
+  await fetch(`${HS}/_matrix/client/v3/rooms/${encodeURIComponent(pinRoom.room_id)}/send/m.room.message/img${n}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${v.token}` },
+    body: JSON.stringify({ msgtype: 'm.image', body: `IMG_000${n}.png`, url: mxc, info: { mimetype: 'image/png', w: 1, h: 1, size: png.length } }),
+  });
+}
 
 const dirName = `dir-e2e-${Date.now()}`;
 await api('/createRoom', { name: dirName, visibility: 'public', preset: 'public_chat' }, v.token);
@@ -152,6 +170,25 @@ try {
     await page.waitForFunction(() => document.body.innerText.includes('Hi from bob'), { timeout: 60000 });
     await settle();
     await audit('2-chat');
+    step('mobile: long-press a message floats the quick reactions beside it');
+    await settle();
+    const cdp = await page.createCDPSession();
+    const pressAt = await page.evaluate(() => { const r = [...document.querySelectorAll('.row[data-event-id]')].find((e) => e.textContent.includes('Hi from bob')).querySelector('.body').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [pressAt] });
+    await new Promise((r) => setTimeout(r, 800));
+    await page.waitForSelector('.reaction-float button[aria-label^="React with"]', { visible: true, timeout: 5000 });
+    const floatBox = await page.$eval('.reaction-float', (el) => { const b = el.getBoundingClientRect(); return { l: b.left, r: b.right, t: b.top, b: b.bottom, sheetTop: document.querySelector('.context-menu.sheet')?.getBoundingClientRect().top ?? 0 }; });
+    if (floatBox.l < 0 || floatBox.r > 390 || floatBox.t < 0 || floatBox.b > floatBox.sheetTop) throw new Error(`reaction pill outside its area: ${JSON.stringify(floatBox)}`);
+    await audit('2b-long-press');
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await page.evaluate(() => document.querySelector('.sheet-scrim')?.click()); await settle();
+    step('mobile: swipe a message to the right replies to it');
+    const swipeAt = await page.evaluate(() => { const r = [...document.querySelectorAll('.row[data-event-id]')].find((e) => e.textContent.includes('Hi from bob')).getBoundingClientRect(); return { x: 60, y: r.y + r.height / 2 }; });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [swipeAt] });
+    for (let dx = 10; dx <= 110; dx += 10) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: swipeAt.x + dx, y: swipeAt.y }] }); await new Promise((r) => setTimeout(r, 16)); }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await page.waitForFunction(() => document.querySelector('.composer .banner')?.textContent.includes('Replying to'), { timeout: 5000 });
+    await page.click('.composer .banner button[aria-label="Cancel reply"]'); await settle();
     step('mobile: composer focus');
     await page.tap('textarea[aria-label^=Message]'); await settle();
     await page.type('textarea[aria-label^=Message]', 'phone message with a fairly long text to see wrapping behaviour in the composer area');
@@ -233,6 +270,20 @@ try {
   await linkRow.asElement().hover();
   await page.evaluate((row) => row.querySelector('.toolbar button[aria-label^="React with"]').click(), linkRow);
   await page.waitForFunction((row) => row.querySelector('.chip.mine'), { timeout: 30000 }, linkRow);
+
+  step('live: a message sent by the other user while the room is open arrives without reopening');
+  await fetch(`${HS}/_matrix/client/v3/rooms/${encodeURIComponent(room.room_id)}/send/m.room.message/live1`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${v.token}` },
+    body: JSON.stringify({ msgtype: 'm.text', body: 'live ping alloy-live' }),
+  });
+  await page.waitForFunction(() => document.body.innerText.includes('live ping alloy-live'), { timeout: 60000 });
+
+  step('read receipts: the tick doubles once the other user has read my message');
+  const ownEventId = await page.evaluate(() => [...document.querySelectorAll('.row.own[data-event-id]')].pop().dataset.eventId);
+  await page.waitForFunction(() => document.querySelector('.row.own[data-event-id] .tick'), { timeout: 30000 });
+  await api(`/rooms/${encodeURIComponent(room.room_id)}/receipt/m.read/${encodeURIComponent(ownEventId)}`, {}, v.token);
+  await page.waitForFunction((id) => document.querySelector(`.row[data-event-id="${CSS.escape(id)}"] .tick.read`), { timeout: 30000 }, ownEventId);
 
   step('hover an icon button shows a tooltip');
   await page.hover('button[aria-label="Search in room"]');
@@ -321,6 +372,9 @@ try {
     const row = [...document.querySelectorAll('.row.own')].find((r) => r.textContent.includes('Hello edited'));
     row.querySelector('button[aria-label=Delete]').click();
   });
+  // Deleting asks first: Matrix removes the message for everyone.
+  await page.waitForSelector('[role=dialog][aria-label="Delete for everyone?"], [role=dialog]', { visible: true, timeout: 10000 });
+  await page.evaluate(() => [...document.querySelectorAll('[role=dialog] button')].find((b) => /^Delete$/.test(b.textContent.trim())).click());
   await page.waitForFunction(() => document.body.innerText.includes('Message deleted'), { timeout: 30000 });
 
   step('invitation: accept it from the room list');
@@ -357,6 +411,109 @@ try {
   await page.keyboard.press('Enter');
   await page.waitForFunction(() => [...document.querySelectorAll('button.row .title')].some((e) => e.textContent === 'Renamed by E2E'), { timeout: 30000 });
 
+
+  // A second room with U as admin (unencrypted), for pins, forwarding, favourites, drafts and message search.
+  step('pins: pin a message, see the pinned bar, unpin from the list');
+  const menuOn = async (selector, label) => {
+    await page.evaluate((sel) => {
+      const el = document.querySelector(sel);
+      const r = el.getBoundingClientRect();
+      el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 20, clientY: r.top + 10 }));
+    }, selector);
+    await page.waitForSelector('[role=menu] [role=menuitem]', { visible: true, timeout: 5000 });
+    await page.evaluate((text) => [...document.querySelectorAll('[role=menuitem]')].find((e) => e.textContent.trim() === text).click(), label);
+  };
+  const rowKey = async (title) => page.evaluate((t) => { const el = [...document.querySelectorAll('button.row')].find((e) => e.textContent.includes(t)); el.setAttribute('data-e2e', t); return t; }, title);
+  await rowKey('Pin Room');
+  await page.click('button.row[data-e2e="Pin Room"]');
+  await page.waitForFunction(() => document.body.innerText.includes('pin target alloy-pin'), { timeout: 60000 });
+  const markMsg = () => page.evaluate(() => { const r = [...document.querySelectorAll('.row[data-event-id]')].find((x) => x.textContent.includes('pin target alloy-pin')); r.setAttribute('data-e2e-msg', '1'); });
+  await markMsg();
+  await menuOn('.row[data-e2e-msg]', 'Pin');
+  await page.waitForFunction(() => document.querySelector('[role=region][aria-label="Pinned messages"]')?.innerText.includes('Pinned message'), { timeout: 30000 });
+  await uxShot(page, 'pinned-bar');
+
+  step('albums: pictures sent together form one grid that opens a gallery');
+  await page.waitForFunction(() => document.querySelectorAll('.album .tile').length === 3, { timeout: 30000 });
+  await uxShot(page, 'album');
+  await page.click('.album .tile');
+  await page.waitForFunction(() => document.querySelector('[role=dialog][aria-modal=true]')?.innerText.includes('1 / 3'), { timeout: 30000 });
+  await page.keyboard.press('ArrowRight');
+  await page.waitForFunction(() => document.querySelector('[role=dialog][aria-modal=true]')?.innerText.includes('2 / 3'), { timeout: 10000 });
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.querySelector('[role=dialog][aria-modal=true]'), { timeout: 10000 });
+
+  step('mentions: a message that mentions me carries the mention edge');
+  await fetch(`${HS}/_matrix/client/v3/rooms/${encodeURIComponent(pinRoom.room_id)}/send/m.room.message/m1`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${v.token}` },
+    body: JSON.stringify({ msgtype: 'm.text', body: `hey ${uName} alloy-mention`, 'm.mentions': { user_ids: [u.id] } }),
+  });
+  await page.waitForFunction(() => [...document.querySelectorAll('.row.mention')].some((r) => r.textContent.includes('alloy-mention')), { timeout: 60000 });
+  await page.click('[role=region][aria-label="Pinned messages"] button[aria-label="All pinned messages"]');
+  await page.waitForSelector('[role=dialog] button[aria-label="Unpin message"]', { visible: true, timeout: 10000 });
+  await page.click('[role=dialog] button[aria-label="Unpin message"]');
+  await page.waitForFunction(() => !document.querySelector('[role=region][aria-label="Pinned messages"]'), { timeout: 30000 });
+  await page.keyboard.press('Escape');
+
+  step('forward a message to another room');
+  await menuOn('.row[data-e2e-msg]', 'Forward');
+  await page.waitForSelector('[role=dialog] .room', { visible: true, timeout: 10000 });
+  await page.evaluate(() => [...document.querySelectorAll('[role=dialog] .room')].find((r) => r.textContent.includes('From Bob')).querySelector('button').click());
+  await page.waitForFunction(() => [...document.querySelectorAll('[role=dialog] .room')].find((r) => r.textContent.includes('From Bob'))?.querySelector('button')?.textContent.trim() === 'Sent', { timeout: 30000 });
+  await page.keyboard.press('Escape');
+  await rowKey('From Bob');
+  await page.click('button.row[data-e2e="From Bob"]');
+  await page.waitForFunction(() => document.querySelector('button[aria-label="Room info for From Bob"]'), { timeout: 15000 });
+  await page.waitForFunction(() => [...document.querySelectorAll('.row[data-event-id]')].some((r) => r.textContent.includes('pin target alloy-pin')), { timeout: 60000 });
+
+  // Rows are rebuilt when they move between sections, so each helper marks the row again first.
+  const roomMenuOn = async (title, label) => {
+    await rowKey(title);
+    await menuOn(`button.row[data-e2e="${title}"]`, label);
+  };
+  const clickRoom = async (title) => {
+    await rowKey(title);
+    await page.click(`button.row[data-e2e="${title}"]`);
+  };
+  const chip = (name) => page.evaluate((n) => [...document.querySelectorAll('.chip')].find((c) => c.textContent.trim() === n).click(), name);
+  const hasRow = (title) => page.waitForFunction((t) => [...document.querySelectorAll('button.row')].some((e) => e.textContent.includes(t)), { timeout: 15000 }, title);
+
+  step('chat list: pin to top, archive, mark as unread');
+  await roomMenuOn('Pin Room', 'Pin to top');
+  await page.waitForFunction(() => document.querySelector('section[aria-label="Pinned"]')?.innerText.includes('Pin Room'), { timeout: 15000 });
+  await roomMenuOn('Pin Room', 'Unpin from top');
+  await page.waitForFunction(() => !document.querySelector('section[aria-label="Pinned"]'), { timeout: 15000 });
+  await roomMenuOn('Pin Room', 'Archive');
+  await page.waitForFunction(() => ![...document.querySelectorAll('button.row')].some((e) => e.textContent.includes('Pin Room')), { timeout: 15000 });
+  await chip('Archive');
+  await hasRow('Pin Room');
+  await roomMenuOn('Pin Room', 'Unarchive');
+  await chip('All');
+  await hasRow('Pin Room');
+  await roomMenuOn('Pin Room', 'Mark as unread');
+  await page.waitForFunction(() => !!document.querySelector('button.row[data-e2e="Pin Room"] .dot.accent'), { timeout: 15000 });
+  await clickRoom('Pin Room');
+  await page.waitForFunction(() => !document.querySelector('button.row[data-e2e="Pin Room"] .dot.accent'), { timeout: 15000 });
+
+  step('drafts: unsent text shows in the list and returns when you come back');
+  await page.click('textarea[aria-label^=Message]');
+  await page.type('textarea[aria-label^=Message]', 'my unsent thought');
+  await clickRoom('From Bob');
+  await rowKey('Pin Room');
+  await page.waitForFunction(() => document.querySelector('button.row[data-e2e="Pin Room"] .draft') && document.querySelector('button.row[data-e2e="Pin Room"]').innerText.includes('my unsent thought'), { timeout: 15000 });
+  await clickRoom('Pin Room');
+  await page.waitForFunction(() => document.querySelector('textarea[aria-label^=Message]').value === 'my unsent thought', { timeout: 15000 });
+  await page.$eval('textarea[aria-label^=Message]', (el) => { el.value = ''; el.dispatchEvent(new Event('input', { bubbles: true })); });
+
+  step('search all chats: a message from another room is found and opens its room');
+  await clickRoom('From Bob');
+  await page.waitForFunction(() => document.querySelector('textarea[aria-label^=Message]'), { timeout: 15000 });
+  await page.type('input[aria-label="Search rooms"]', 'alloy-pin');
+  await page.waitForFunction(() => [...document.querySelectorAll('section[aria-label="Messages"] .hit')].some((b) => b.textContent.includes('Pin Room')), { timeout: 30000 });
+  await page.evaluate(() => [...document.querySelectorAll('section[aria-label="Messages"] .hit')].find((b) => b.textContent.includes('Pin Room')).click());
+  await page.waitForFunction(() => document.querySelector('button[aria-label="Room info for Pin Room"]'), { timeout: 30000 });
+  await page.$eval('input[aria-label="Search rooms"]', (el) => { el.value = ''; el.dispatchEvent(new Event('input', { bubbles: true })); });
   step('the sidebar can be resized with the keyboard');
   const handle = '[role=separator][aria-label="Resize sidebar"]';
   const widthOf = () => page.$eval(handle, (el) => ({ now: Number(el.getAttribute('aria-valuenow')), left: el.getBoundingClientRect().left }));

@@ -65,4 +65,16 @@ describe("sanitizeHtml", () => {
     expect(body.querySelector("strong")?.textContent).toBe("bold");
     expect(body.querySelector("code")?.textContent).toBe("x");
   });
+
+  it("keeps the Matrix spoiler marker on spans", () => {
+    const body = render('<p>a <span data-mx-spoiler="why">secret</span> b</p>');
+
+    expect(body.querySelector("span")?.hasAttribute("data-mx-spoiler")).toBe(true);
+  });
+
+  it("still drops other data attributes", () => {
+    const body = render('<span data-evil="1">x</span>');
+
+    expect(body.querySelector("span")?.hasAttribute("data-evil")).toBe(false);
+  });
 });

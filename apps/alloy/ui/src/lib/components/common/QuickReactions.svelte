@@ -76,9 +76,9 @@
     outline-offset: -2px;
   }
 
-  /* Phone sheet: evenly spread, 44px targets, larger glyphs. */
+  /* Phone floating pill: 44px targets, larger glyphs. */
   .bar.touch {
-    justify-content: space-between;
+    justify-content: flex-start;
     gap: 0;
   }
 

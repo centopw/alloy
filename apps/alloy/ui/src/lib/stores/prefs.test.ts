@@ -122,6 +122,7 @@ describe('defaults', () => {
       fontScale: 100,
       timeFormat: 'auto',
       bigEmoji: true,
+      showReadReceipts: true,
       notifyDesktop: true,
       notifySound: true,
       notifyPreview: true,
@@ -145,6 +146,8 @@ describe('defaults', () => {
       autoDownloadUpdates: false,
       roomSort: 'activity',
       quickReactions: ['\u{1F44D}', '\u2764\uFE0F', '\u{1F602}', '\u{1F62E}', '\u{1F622}', '\u{1F64F}'],
+      voiceSpeed: '1',
+      mutedUntil: {},
     });
   });
 
@@ -165,6 +168,7 @@ describe('defaults', () => {
     expect(store.roomSort).toBe('activity');
     expect(store.enterToSend).toBe(true);
     expect(store.get('notifyDesktop')).toBe(true);
+    expect(store.voiceSpeed).toBe('1');
     expect(store.ready).toBe(false);
   });
 });
@@ -180,6 +184,8 @@ describe('validation', () => {
     expect(isValidPref('timeFormat', 'iso')).toBe(false);
     expect(isValidPref('linkPreviews', 'always')).toBe(true);
     expect(isValidPref('linkPreviews', 'yes')).toBe(false);
+    expect(isValidPref('voiceSpeed', '1.5')).toBe(true);
+    expect(isValidPref('voiceSpeed', '3')).toBe(false);
   });
 
   it('accepts only booleans for boolean keys', () => {

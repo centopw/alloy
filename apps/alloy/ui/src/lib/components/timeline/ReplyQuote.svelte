@@ -64,6 +64,7 @@
     const c = it.content;
     if (c.kind === 'TextMessage') return c.data.body;
     if (c.kind === 'Media') return c.data.body || 'Attachment';
+    if (c.kind === 'Location') return c.data.description || 'Location';
     return '';
   }
 </script>

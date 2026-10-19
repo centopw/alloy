@@ -84,11 +84,35 @@ export function placeFlyout(
   return { x, y };
 }
 
+/**
+ * Place the floating phone reaction bar of `size` beside the pressed message `anchor`: centred above
+ * it, flipping below when there is no room, and kept between `limits.top` and `limits.bottom` (the
+ * top of the action sheet) so it never covers the sheet or the status bar.
+ */
+export function placeReactionBar(
+  anchor: MenuAnchor,
+  size: MenuSize,
+  viewport: MenuViewport,
+  limits: { top: number; bottom: number },
+  margin = 8,
+  gap = 8,
+): MenuPoint {
+  const maxX = viewport.width - size.width - margin;
+  const x = maxX < margin ? margin : Math.max(margin, Math.min(anchor.x + anchor.width / 2 - size.width / 2, maxX));
+  let y = anchor.y - size.height - gap;
+  if (y < limits.top) y = anchor.y + anchor.height + gap;
+  y = Math.max(limits.top, Math.min(y, limits.bottom - size.height - gap));
+  return { x, y };
+}
+
 /** What a `use:contextmenu` element offers: rows, optionally with menu options (the reaction bar). */
 export interface ContextMenuSource {
   items: () => MenuItem[];
   options?: () => MenuOptions | undefined;
 }
+
+/** Touch presses already claimed by an inner `use:contextmenu` node; outer nodes ignore them. */
+const claimedPresses = new WeakSet<Event>();
 
 /** Svelte action: wire a node to the global context menu. The factory returns [] to opt out. */
 export function contextmenu(node: HTMLElement, factory: (() => MenuItem[]) | ContextMenuSource) {
@@ -126,7 +150,9 @@ export function contextmenu(node: HTMLElement, factory: (() => MenuItem[]) | Con
   }
 
   function onPointerDown(e: PointerEvent) {
-    if (e.pointerType !== 'touch' || !e.isPrimary) return;
+    if (e.pointerType !== 'touch' || !e.isPrimary || claimedPresses.has(e)) return;
+    if (getItems().length === 0) return;
+    claimedPresses.add(e);
     cancelPress();
     suppressClick = false;
     pressStart = { x: e.clientX, y: e.clientY };

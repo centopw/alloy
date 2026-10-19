@@ -3,12 +3,19 @@ import { client } from '$lib/ipc';
 import { isAndroid } from './capabilities';
 import { isTauriRuntime, localFileUrl } from './files';
 
-/**
- * Whether the Download action is offered. Android's native save path (SAF create-document plus a
- * content:// write) has not been verified on a device, so the action stays hidden there.
- */
+/** The native helper the Android shell injects into the WebView (see `DownloadBridge.kt`). */
+interface AndroidDownloadBridge {
+  saveToDownloads(path: string, name: string, mime: string): string;
+}
+
+function androidBridge(): AndroidDownloadBridge | null {
+  const bridge = (window as Window & { AlloyAndroid?: AndroidDownloadBridge }).AlloyAndroid;
+  return typeof bridge?.saveToDownloads === 'function' ? bridge : null;
+}
+
+/** Whether the Download action is offered: everywhere except an Android build without the native helper. */
 export function canDownloadMedia(): boolean {
-  return !isTauriRuntime() || !isAndroid();
+  return !isTauriRuntime() || !isAndroid() || androidBridge() !== null;
 }
 
 /** Fetch a remote media file into the local cache and return its absolute local path. */
@@ -21,10 +28,16 @@ export async function fetchMediaPath(uri: string, mimeType: string): Promise<str
 }
 
 /**
- * Save a cached file. Tauri shows the native save dialog and resolves false when cancelled.
- * The browser starts a download and always resolves true.
+ * Save a cached file. Desktop shows the native save dialog and resolves false when cancelled; Android
+ * copies into the public Downloads folder; the browser starts a download. Rejects with a readable message on failure.
  */
-export async function saveMediaFile(localPath: string, suggestedName: string): Promise<boolean> {
+export async function saveMediaFile(localPath: string, suggestedName: string, mimeType = ''): Promise<boolean> {
+  const android = isTauriRuntime() && isAndroid() ? androidBridge() : null;
+  if (android) {
+    const failure = android.saveToDownloads(localPath, suggestedName, mimeType);
+    if (failure) throw new Error(failure);
+    return true;
+  }
   if (isTauriRuntime()) return invoke<boolean>('save_media', { localPath, suggestedName });
   const link = document.createElement('a');
   link.href = await localFileUrl(localPath);
@@ -39,5 +52,5 @@ export async function downloadMedia(
   mimeType: string,
   suggestedName: string
 ): Promise<boolean> {
-  return saveMediaFile(await fetchMediaPath(uri, mimeType), suggestedName);
+  return saveMediaFile(await fetchMediaPath(uri, mimeType), suggestedName, mimeType);
 }

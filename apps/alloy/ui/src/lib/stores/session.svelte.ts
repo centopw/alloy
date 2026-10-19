@@ -2,6 +2,9 @@ import { client } from '../ipc/index.js';
 import type { Account } from '../generated/index.js';
 import { errorMessage, expect } from './errors.js';
 import { membersStore } from './members.svelte.js';
+import { pinsStore } from './pins.svelte.js';
+import { draftsStore } from './drafts.svelte.js';
+import { liveLocation } from './liveLocation.svelte.js';
 
 export type Phase = 'booting' | 'onboarding' | 'ready';
 
@@ -68,9 +71,13 @@ class SessionStore {
   async logout() {
     const acc = this.account;
     if (!acc) return;
+    // The share ends first: after logout the engine could no longer tell the room it stopped.
+    await liveLocation.stop();
     await client.logout(acc.id);
     this.account = null;
     membersStore.reset();
+    pinsStore.reset();
+    draftsStore.reset();
     this.phase = 'onboarding';
   }
 }

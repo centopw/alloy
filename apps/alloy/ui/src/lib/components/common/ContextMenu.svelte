@@ -4,7 +4,7 @@
   import { Check, ChevronLeft, ChevronRight, Plus } from '$lib/icons';
   import { portal } from '$lib/platform/portal';
   import { pushBack } from '$lib/platform/backstack';
-  import { placeAnchor, placeFlyout, placeMenu } from '$lib/platform/contextmenu';
+  import { placeAnchor, placeFlyout, placeMenu, placeReactionBar } from '$lib/platform/contextmenu';
   import {
     contextMenu,
     isSeparator,
@@ -12,6 +12,7 @@
     resolveSubmenuItems,
     submenuView,
     type MenuAction,
+    type MenuAnchor,
     type MenuItem,
     type MenuPoint,
     type MenuSearchCreate,
@@ -149,6 +150,37 @@
       },
       destroy() {
         if (menuEls.get(depth) === node) menuEls.delete(depth);
+      },
+    };
+  }
+
+  /** Phone: float the quick-reaction pill beside the pressed message, clear of the action sheet. */
+  function placeFloat(node: HTMLElement, anchor: MenuAnchor | undefined) {
+    let live = true;
+    const apply = async () => {
+      await tick();
+      if (!live) return;
+      const sheetHeight = menuEls.get(0)?.offsetHeight ?? 0;
+      const inset = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--alloy-safe-area-top')) || 0;
+      const screen = { width: window.innerWidth, height: window.innerHeight };
+      const target = anchor ?? { x: 0, y: screen.height / 2, width: screen.width, height: 0 };
+      const p = placeReactionBar(
+        target,
+        { width: node.offsetWidth, height: node.offsetHeight },
+        screen,
+        { top: inset + 56, bottom: screen.height - sheetHeight },
+      );
+      node.style.left = `${p.x}px`;
+      node.style.top = `${p.y}px`;
+    };
+    void apply();
+    return {
+      update(next: MenuAnchor | undefined) {
+        anchor = next;
+        void apply();
+      },
+      destroy() {
+        live = false;
       },
     };
   }
@@ -478,7 +510,7 @@
       use:placeLevel={{ depth, rows: view.rows }}
       onpointerenter={cancelHover}
     >
-      {#if depth === 0 && contextMenu.options?.reactions}
+      {#if depth === 0 && !viewport.isPhone && contextMenu.options?.reactions}
         {@const reactions = contextMenu.options.reactions}
         <div class="reaction-bar" role="none">
           <QuickReactions
@@ -583,6 +615,24 @@
       {/if}
     </div>
   {/each}
+  {#if viewport.isPhone && levels.length === 0 && contextMenu.options?.reactions}
+    {@const reactions = contextMenu.options.reactions}
+    <div class="reaction-float" role="none" data-context-menu use:portal use:placeFloat={reactions.anchor}>
+      <QuickReactions
+        emojis={reactions.emojis}
+        active={reactions.active}
+        size="touch"
+        onpick={(emoji) => {
+          contextMenu.close();
+          reactions.onpick(emoji);
+        }}
+        onmore={() => {
+          contextMenu.close();
+          reactions.onmore();
+        }}
+      />
+    </div>
+  {/if}
 {/if}
 
 <style>
@@ -695,8 +745,26 @@
   .reaction-bar {
     padding: var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-1);
   }
-  .sheet .reaction-bar {
-    padding: var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-2);
+
+  /* Phone: the quick reactions float beside the pressed message as a pill, above the action sheet. */
+  .reaction-float {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 111;
+    display: flex;
+    max-width: calc(100vw - 2 * var(--alloy-spacing-scale-2));
+    padding: var(--alloy-spacing-scale-1);
+    overflow-x: auto;
+    scrollbar-width: none;
+    border: 1px solid var(--alloy-color-border-subtle);
+    border-radius: var(--alloy-radii-full);
+    background: var(--alloy-color-surface-elevated);
+    box-shadow: var(--alloy-elevation-lg);
+    animation: alloy-fade-in var(--alloy-motion-duration-normal) ease-out backwards;
+  }
+  .reaction-float::-webkit-scrollbar {
+    display: none;
   }
 
   /* Phone: the menu is a bottom action sheet. Rows are 44px for touch; the Cancel row closes it. */

@@ -25,7 +25,7 @@
 
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { Icon, X, ChevronLeft, Play, File, ExternalLink, Image, Download, Copy, Link, MessageSquare, User, Search, Lock, Bell, BellOff } from '$lib/icons';
+  import { Icon, X, ChevronLeft, Play, File, ExternalLink, Image, Download, Copy, Link, MessageSquare, User, Search, Lock, Bell, BellOff, Ban, ShieldAlert, UserMinus } from '$lib/icons';
   import { formatBytes, formatDay } from '$lib/content/format';
   import { viewport } from '$lib/stores/viewport.svelte';
   import { copyText } from '$lib/platform/clipboard';
@@ -37,6 +37,8 @@
   import { membersStore, memberLabel } from '$lib/stores/members.svelte';
   import { profileCard } from '$lib/stores/profileCard.svelte';
   import { errorMessage } from '$lib/stores/errors';
+  import { session } from '$lib/stores/session.svelte';
+  import { moderationOptions } from '$lib/content/moderation';
   import type { RoomInfoTab } from '$lib/stores/ui.svelte';
   import type { RoomMediaItem, RoomMediaKind } from '$lib/generated/protocol';
   import { contextmenu } from '$lib/platform/contextmenu';
@@ -44,7 +46,7 @@
   import { userProfile } from '$lib/stores/userProfile.svelte';
   import type { MenuItem } from '$lib/stores/contextmenu.svelte';
   import type { RoomMemberDto } from '$lib/generated';
-  import { Avatar, Button, SegmentedControl, TextArea, TextField, UserName } from '../common';
+  import { Avatar, Button, ConfirmDialog, SegmentedControl, TextArea, TextField, UserName } from '../common';
   import { copyItems, notifyItems, notifyLabel, openMenuFrom, roomPictureItems } from './roomMenus';
   import MediaViewer, { fetchMediaFile } from '../timeline/MediaViewer.svelte';
 
@@ -295,6 +297,7 @@
       { title: 'Moderator', members: joined.filter((m) => m.power_level >= 50 && m.power_level < 100).sort(byName) },
       { title: 'Members', members: joined.filter((m) => m.power_level < 50).sort(byName) },
       { title: 'Invited', members: members.filter((m) => m.membership === 'Invited').sort(byName) },
+      { title: 'Banned', members: members.filter((m) => m.membership === 'Banned').sort(byName) },
     ].filter((g) => g.members.length > 0),
   );
   const ordered = $derived(groups.flatMap((g) => g.members));
@@ -352,7 +355,55 @@
     return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
   }
 
+  /** A moderation action waiting for confirmation. */
+  type PendingAction = { kind: 'kick' | 'ban' | 'unban' | 'block'; member: RoomMemberDto };
+  let pendingAction = $state<PendingAction | null>(null);
+
+  const ACTION_COPY: Record<PendingAction['kind'], { title: string; confirm: string; message: (name: string) => string }> = {
+    kick: { title: 'Remove from room', confirm: 'Remove', message: (n) => `${n} will be removed from this room. They can join again if the room allows it.` },
+    ban: { title: 'Ban from room', confirm: 'Ban', message: (n) => `${n} will be removed and cannot rejoin until unbanned.` },
+    unban: { title: 'Unban', confirm: 'Unban', message: (n) => `${n} will be able to join this room again.` },
+    block: { title: 'Block user', confirm: 'Block', message: (n) => `You will no longer see messages from ${n} in any room. You can unblock them in Settings.` },
+  };
+
+  async function runAction() {
+    const action = pendingAction;
+    if (!action) return;
+    const id = action.member.user_id;
+    if (action.kind === 'kick') expect(await client.kickUser(roomId, id), 'UserKicked');
+    else if (action.kind === 'ban') expect(await client.banUser(roomId, id), 'UserBanned');
+    else if (action.kind === 'unban') expect(await client.unbanUser(roomId, id), 'UserUnbanned');
+    else expect(await client.ignoreUser(id), 'UserIgnored');
+    if (action.kind !== 'block') await membersStore.loadMembers(roomId, true);
+  }
+
+  async function setLevel(m: RoomMemberDto, level: number) {
+    membersActionError = null;
+    try {
+      expect(await client.setPowerLevel(roomId, m.user_id, level), 'PowerLevelSet');
+      await membersStore.loadMembers(roomId, true);
+    } catch (e) {
+      membersActionError = errorMessage(e);
+    }
+  }
+
   function memberMenu(m: RoomMemberDto): MenuItem[] {
+    const mod = moderationOptions(membersStore.detailsOf(roomId), m, session.account?.user_id ?? null);
+    const moderation: MenuItem[] = [];
+    if (mod.levels.length > 0) {
+      moderation.push({
+        id: 'power',
+        label: 'Change role',
+        icon: ShieldAlert,
+        submenu: {
+          items: mod.levels.map((l): MenuItem => ({ id: `role-${l.level}`, label: `Make ${l.label.toLowerCase()}`, onselect: () => void setLevel(m, l.level) })),
+        },
+      });
+    }
+    if (mod.kick) moderation.push({ id: 'kick', label: 'Remove from room', icon: UserMinus, danger: true, onselect: () => (pendingAction = { kind: 'kick', member: m }) });
+    if (mod.ban) moderation.push({ id: 'ban', label: 'Ban from room', icon: Ban, danger: true, onselect: () => (pendingAction = { kind: 'ban', member: m }) });
+    if (mod.unban) moderation.push({ id: 'unban', label: 'Unban', icon: Ban, onselect: () => (pendingAction = { kind: 'unban', member: m }) });
+    const isSelf = m.user_id === session.account?.user_id;
     return [
       {
         id: 'view-profile',
@@ -366,6 +417,8 @@
       { id: 'message', label: 'Message', icon: MessageSquare, onselect: () => void messageMember(m.user_id) },
       { separator: true },
       { id: 'copy-user-id', label: 'Copy user ID', icon: Copy, onselect: () => void copyText(m.user_id).catch(() => undefined) },
+      ...(isSelf ? [] : [{ id: 'block', label: 'Block user', icon: Ban, danger: true, onselect: () => (pendingAction = { kind: 'block' as const, member: m }) }]),
+      ...(moderation.length > 0 ? [{ separator: true } as MenuItem, ...moderation] : []),
     ];
   }
 </script>
@@ -669,14 +722,25 @@
   </div>
 </section>
 
+{#if pendingAction}
+  {@const copy = ACTION_COPY[pendingAction.kind]}
+  <ConfirmDialog
+    open
+    title={copy.title}
+    message={copy.message(memberLabel(pendingAction.member))}
+    confirmLabel={copy.confirm}
+    danger={pendingAction.kind !== 'unban'}
+    onconfirm={runAction}
+    onclose={() => (pendingAction = null)}
+  />
+{/if}
+
 {#if viewer}
   <MediaViewer
     open={true}
     onclose={() => (viewer = null)}
-    uri={viewer.uri}
-    mimeType={viewer.mimeType}
-    body={viewer.body}
-    mediaKind={viewer.mediaKind}
+    items={[{ eventId: null, uri: viewer.uri, mimeType: viewer.mimeType, body: viewer.body, mediaKind: viewer.mediaKind, sender: '', senderName: null, timestampMillis: 0 }]}
+    index={0}
   />
 {/if}
 

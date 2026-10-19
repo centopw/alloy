@@ -17,11 +17,24 @@ export function isAndroid(
   if (platform && /android/i.test(platform)) return true;
   return /android/i.test(userAgent);
 }
+/**
+ * Detects if voice recording is supported by checking MediaRecorder and getUserMedia.
+ * Supports explicit overrides for deterministic unit testing.
+ */
+export function isVoiceMessagesSupported(
+  mediaRecorderDefined: boolean = typeof MediaRecorder !== 'undefined',
+  hasGetUserMedia: boolean = typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia
+): boolean {
+  return mediaRecorderDefined && hasGetUserMedia;
+}
+
+export const voiceMessages: boolean = typeof MediaRecorder !== 'undefined' && typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
 
 export interface PlatformEnv {
   phone: boolean;
   android: boolean;
   tauri: boolean;
+  voiceMessages?: boolean;
 }
 
 export interface PlatformCapabilities {
@@ -43,6 +56,8 @@ export interface PlatformCapabilities {
   systemTray: boolean;
   /** In-place update install and background download (desktop app only; Android opens the release page). */
   autoDownloadUpdates: boolean;
+  /** Voice message recording with microphone access. */
+  voiceMessages: boolean;
 }
 
 /**
@@ -60,6 +75,7 @@ export function capabilities(env: PlatformEnv): PlatformCapabilities {
     windowFocusOptions: isDesktop,
     systemTray: env.tauri && isDesktop,
     autoDownloadUpdates: env.tauri && isDesktop,
+    voiceMessages: env.voiceMessages ?? isVoiceMessagesSupported(),
   };
 }
 
@@ -71,6 +87,7 @@ export function currentEnv(phone: boolean = viewport.isPhone): PlatformEnv {
     phone,
     android: isAndroid(),
     tauri: isTauriShell(),
+    voiceMessages: isVoiceMessagesSupported(),
   };
 }
 

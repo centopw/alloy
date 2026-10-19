@@ -124,6 +124,11 @@
       checked={prefs.bigEmoji}
       onchange={(v) => prefs.set('bigEmoji', v)}
     />
+    <SettingToggle
+      label="Show who has read your messages"
+      checked={prefs.showReadReceipts}
+      onchange={(v) => prefs.set('showReadReceipts', v)}
+    />
   </SettingGroup>
 
   <SettingGroup title="Text and time">

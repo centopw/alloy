@@ -97,3 +97,17 @@ export function reconcileMentions(text: string, recorded: readonly MentionRecord
 export function mentionOptionId(listId: string, index: number): string {
   return `${listId}-option-${index}`;
 }
+
+/** Stand-in "member" for the `@room` suggestion; it is never a real Matrix user id. */
+export const ROOM_MENTION_ID = '@room';
+
+/** The `@room` suggestion when `query` could still become "room" and the user may ping everyone, else null. */
+export function roomMentionOption(query: string, allowed: boolean): RoomMemberDto | null {
+  if (!allowed || !'room'.startsWith(query.trim().toLowerCase())) return null;
+  return { user_id: ROOM_MENTION_ID, display_name: 'room', avatar_url: null, power_level: 0, membership: 'Joined' };
+}
+
+/** Whether `text` contains `@room` as a whole word at a word start (it pings everyone in the room). */
+export function containsRoomMention(text: string): boolean {
+  return /(?<!\S)@room(?![\p{L}\p{N}_])/u.test(text);
+}

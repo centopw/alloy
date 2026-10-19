@@ -12,6 +12,14 @@
   import ThreadPanel from '../timeline/ThreadPanel.svelte';
   import Composer from '../composer/Composer.svelte';
   import UploadStrip from '../composer/UploadStrip.svelte';
+  import PinnedBar from '../timeline/PinnedBar.svelte';
+  import SelectionBar from '../timeline/SelectionBar.svelte';
+  import ForwardDialog from '../timeline/ForwardDialog.svelte';
+  import DeleteConfirm from '../timeline/DeleteConfirm.svelte';
+  import ReportConfirm from '../timeline/ReportConfirm.svelte';
+  import LiveLocationBanner from '../timeline/LiveLocationBanner.svelte';
+  import { timelineStore } from '$lib/stores/timeline.svelte';
+  import { startMuteTimer } from '$lib/stores/muteTimer.svelte';
   import ResizeHandle from '../common/ResizeHandle.svelte';
   import NewRoomDialog from './NewRoomDialog.svelte';
   import DirectoryDialog from './DirectoryDialog.svelte';
@@ -119,6 +127,9 @@
     };
   });
 
+  // Timed mutes end on their own; this restores the room's notifications.
+  $effect(() => startMuteTimer());
+
   // A thread belongs to the room it was opened in. Untracked so the effect runs only when the
   // active room changes, not on every thread state update.
   $effect(() => {
@@ -203,6 +214,9 @@
 
 <div class="frame">
 <ChangelogDialog />
+<ForwardDialog />
+<DeleteConfirm />
+<ReportConfirm />
 <div
   class="shell"
   data-layout={breakpoint}
@@ -245,7 +259,13 @@
 
   <main class="chat">
     {#if active && activeId}
-      <ChatHeader room={active} onback={backToList} />
+      {#if timelineStore.selecting}
+        <SelectionBar />
+      {:else}
+        <ChatHeader room={active} onback={backToList} />
+      {/if}
+      <PinnedBar roomId={activeId} />
+      <LiveLocationBanner />
       <Timeline roomId={activeId} title={roomTitle(active)} isDirect={active.is_direct} encrypted={active.encrypted} />
       <UploadStrip roomId={activeId} />
       <Composer roomId={activeId} />

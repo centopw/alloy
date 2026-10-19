@@ -10,9 +10,11 @@
   import { isHiddenState } from '$lib/content/stateEvents';
   import TypingIndicator from './TypingIndicator.svelte';
   import Icon from '$lib/icons/Icon.svelte';
-  import { ArrowDown } from '$lib/icons';
+  import { ArrowDown, AtSign } from '$lib/icons';
   import MessageRow from './MessageRow.svelte';
+  import { groupAlbums } from '$lib/content/albums';
   import { contextmenu } from '$lib/platform/contextmenu';
+  import { badgeLabel, countArrivals } from './arrivals';
   import type { MenuItem } from '$lib/stores/contextmenu.svelte';
 
   interface Props {
@@ -27,6 +29,9 @@
   let atBottom = $state(true);
   let viewportHeight = $state(0);
   let shift = $state(false);
+  /** Messages from others that arrived while scrolled up, and which of them mention the user. */
+  let unseen = $state(0);
+  let mentionIds = $state<string[]>([]);
 
   // Virtual items (read marker, timeline start) carry no content worth a row. Hidden state events
   // and removed messages are dropped here, before virtualization, so VList indices match rows.
@@ -39,11 +44,17 @@
       return true;
     }),
   );
+  /** Runs of captionless pictures fold into one grid row. */
+  const albums = $derived(groupAlbums(rows));
 
   // Only `roomId` may retrigger this: the store reads/writes its own state while opening.
   $effect(() => {
     const id = roomId;
-    untrack(() => void timelineStore.open(id));
+    untrack(() => {
+      unseen = 0;
+      mentionIds = [];
+      void timelineStore.open(id);
+    });
     return () => untrack(() => void timelineStore.close());
   });
 
@@ -72,6 +83,13 @@
       void tick().then(() => requestAnimationFrame(() => (shift = false)));
     } else if (ownSend || (appended && atBottom) || (lastLen === 0 && len > 0)) {
       void tick().then(() => vlist?.scrollToIndex(len - 1, { align: 'end' }));
+    }
+    if (appended && !ownSend && !atBottom && lastLen > 0) {
+      const arrived = countArrivals(rows.slice(lastLen));
+      untrack(() => {
+        unseen += arrived.count;
+        mentionIds = [...mentionIds, ...arrived.mentions];
+      });
     }
     lastFirst = first;
     lastLen = len;
@@ -148,12 +166,24 @@
     const distance = vlist.getScrollSize() - (offset + vlist.getViewportSize());
     bottomGap = Math.max(0, distance);
     atBottom = distance < 80;
+    if (atBottom && (unseen > 0 || mentionIds.length > 0)) {
+      unseen = 0;
+      mentionIds = [];
+    }
     if (atBottom) void timelineStore.markRead();
     if (offset < 200) void timelineStore.loadOlder();
   }
 
   function toBottom() {
     vlist?.scrollToIndex(rows.length - 1, { align: 'end', smooth: true });
+  }
+
+  /** Scroll to the oldest unseen message that mentions the user. */
+  function toMention() {
+    const [next, ...rest] = mentionIds;
+    if (!next) return;
+    mentionIds = rest;
+    timelineStore.jumpTo(next);
   }
 
   /** Set on each press so the background menu yields to a message row that owns the press. */
@@ -201,6 +231,8 @@
             <MessageRow
               {item}
               prev={index > 0 ? rows[index - 1] : null}
+              album={albums.leads.get(item.internal_id) ?? null}
+              albumHidden={albums.hidden.has(item.internal_id)}
             />
           </div>
         {/snippet}
@@ -208,9 +240,18 @@
     {/if}
 
     {#if !atBottom && rows.length > 0}
-      <button class="latest" type="button" onclick={toBottom} aria-label="Jump to latest message">
-        <Icon icon={ArrowDown} size={20} />
-      </button>
+      <div class="fabs">
+        {#if mentionIds.length > 0}
+          <button class="fab" type="button" onclick={toMention} aria-label="Jump to next mention" data-tooltip="Next mention">
+            <Icon icon={AtSign} size={20} />
+            <span class="badge">{badgeLabel(mentionIds.length)}</span>
+          </button>
+        {/if}
+        <button class="fab" type="button" onclick={toBottom} aria-label={unseen > 0 ? `Jump to latest message, ${unseen} new` : 'Jump to latest message'}>
+          <Icon icon={ArrowDown} size={20} />
+          {#if unseen > 0}<span class="badge">{badgeLabel(unseen)}</span>{/if}
+        </button>
+      </div>
     {/if}
 
     {#if timelineStore.error}
@@ -246,10 +287,17 @@
     text-align: center;
     color: var(--alloy-color-text-secondary);
   }
-  .latest {
+  .fabs {
     position: absolute;
     right: var(--alloy-layout-gutter);
     bottom: var(--alloy-spacing-scale-4);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--alloy-spacing-scale-2);
+  }
+  .fab {
+    position: relative;
     width: 40px;
     height: 40px;
     border-radius: var(--alloy-radii-full);
@@ -261,8 +309,24 @@
     cursor: pointer;
     box-shadow: var(--alloy-elevation-md);
   }
+  .badge {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 var(--alloy-spacing-scale-1);
+    box-sizing: border-box;
+    border-radius: var(--alloy-radii-full);
+    background: var(--alloy-color-accent-primary);
+    color: var(--alloy-color-text-on-accent);
+    font-size: var(--alloy-typography-size-xs);
+    line-height: 20px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
   @media (max-width: 899px) {
-    .latest {
+    .fab {
       width: 44px;
       height: 44px;
     }

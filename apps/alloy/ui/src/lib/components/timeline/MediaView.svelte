@@ -1,8 +1,10 @@
 <script lang="ts">
+  import { timelineStore } from '$lib/stores/timeline.svelte';
   import { client } from '$lib/ipc';
   import { formatBytes } from '$lib/content/format';
   import { localFileUrl } from '$lib/platform/files';
   import { prefs } from '$lib/stores/prefs.svelte';
+  import { viewerItemsFrom, indexOfEvent } from '$lib/content/mediaItems';
   import MediaViewer, { fetchMediaFile } from './MediaViewer.svelte';
 
   interface Props {
@@ -15,7 +17,10 @@
     height?: number | null;
     /** Server-provided poster for videos. */
     thumbnailUri?: string | null;
+    /** Optional event ID for gallery building. */
+    eventId?: string | null;
   }
+
   let {
     uri,
     mimeType,
@@ -25,15 +30,19 @@
     width = null,
     height = null,
     thumbnailUri = null,
+    eventId = null,
   }: Props = $props();
 
   let src = $state<string | null>(null);
   let failed = $state(false);
   let viewerOpen = $state(false);
+  let viewerItems = $state<ReturnType<typeof viewerItemsFrom>>([]);
+  let viewerIndex = $state(0);
 
   const visual = $derived(mediaKind === 'image' || mediaKind === 'sticker');
   const video = $derived(mediaKind === 'video');
-  const openable = $derived(mediaKind === 'image' || video || mediaKind === 'audio');
+  // Audio and file items do NOT open the viewer
+  const openable = $derived(mediaKind === 'image' || video);
   // Images thumbnail their own media; videos use their poster when one exists.
   const thumbSource = $derived(visual ? uri : video ? thumbnailUri : null);
   const thumbMime = $derived(visual ? mimeType : 'image/jpeg');
@@ -101,6 +110,30 @@
     };
   });
 
+  function openViewer() {
+    // Build gallery from timeline when opening
+    viewerItems = viewerItemsFrom(timelineStore.items);
+    viewerIndex = indexOfEvent(viewerItems, eventId, uri);
+
+    // If not found in gallery, fall back to single-item mode
+    if (viewerIndex < 0) {
+      viewerItems = [
+        {
+          eventId: eventId || null,
+          uri,
+          mimeType,
+          body,
+          mediaKind,
+          sender: '',
+          senderName: null,
+          timestampMillis: Date.now(),
+        },
+      ];
+      viewerIndex = 0;
+    }
+
+    viewerOpen = true;
+  }
 </script>
 
 {#snippet frameContent()}
@@ -123,7 +156,7 @@
       type="button"
       style="aspect-ratio: {aspect};"
       aria-label="Open {body || mediaKind}"
-      onclick={() => (viewerOpen = true)}
+      onclick={openViewer}
     >
       {@render frameContent()}
     </button>
@@ -134,7 +167,7 @@
   {/if}
 {:else}
   {#if openable}
-    <button class="file" type="button" onclick={() => (viewerOpen = true)}>
+    <button class="file" type="button" onclick={openViewer}>
       <span class="file-name">{body || 'Attachment'}</span>
       <span class="file-meta">{formatBytes(sizeBytes)}</span>
     </button>
@@ -150,10 +183,8 @@
   <MediaViewer
     open={viewerOpen}
     onclose={() => (viewerOpen = false)}
-    {uri}
-    {mimeType}
-    {body}
-    {mediaKind}
+    items={viewerItems}
+    index={viewerIndex}
   />
 {/if}
 
@@ -166,63 +197,76 @@
     overflow: hidden;
   }
   .frame-open {
-    display: block;
-    padding: 0;
-    border: 0;
-    background: transparent;
-    font: inherit;
-    color: inherit;
-    text-align: inherit;
     cursor: pointer;
   }
-  .frame-open:focus-visible {
+  .frame-open:hover {
+    opacity: 0.85;
+  }
+  .frame-open {
+    padding: 0;
+    border: none;
+    background: none;
+  }
+  button.frame-open:focus-visible {
     outline: 2px solid var(--alloy-color-accent-primary);
     outline-offset: 2px;
+    border-radius: var(--alloy-radii-lg);
   }
-  img,
-  video,
+
   canvas {
     width: 100%;
     height: 100%;
-    object-fit: contain;
-    display: block;
   }
+
+  img,
+  video {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .file {
+    display: flex;
+    flex-direction: column;
+    gap: var(--alloy-spacing-scale-1);
+    align-items: flex-start;
+    padding: var(--alloy-spacing-scale-2);
+    border: 1px solid var(--alloy-color-border-subtle);
+    border-radius: var(--alloy-radii-md);
+    background: var(--alloy-color-surface-elevated);
+  }
+
+  button.file {
+    cursor: pointer;
+    text-align: left;
+  }
+
+  button.file:hover {
+    background: var(--alloy-color-surface-hover);
+  }
+
+  button.file:focus-visible {
+    outline: 2px solid var(--alloy-color-accent-primary);
+    outline-offset: -2px;
+  }
+
+  .file-name {
+    font-size: var(--alloy-typography-size-sm);
+    font-weight: var(--alloy-typography-weight-semibold);
+    color: var(--alloy-color-text-primary);
+    word-break: break-word;
+  }
+
+  .file-meta {
+    font-size: var(--alloy-typography-size-xs);
+    color: var(--alloy-color-text-secondary);
+  }
+
   .placeholder {
     width: 100%;
     height: 100%;
-    min-height: 80px;
-    border-radius: var(--alloy-radii-lg);
-    background: var(--alloy-color-surface-subtle);
-  }
-  .file {
-    display: flex;
-    align-items: center;
-    gap: var(--alloy-spacing-scale-2);
-    padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
-    border: 1px solid var(--alloy-color-border-subtle);
-    border-radius: var(--alloy-radii-lg);
-    background: transparent;
-    color: inherit;
-    font: inherit;
-    cursor: pointer;
-    max-width: 100%;
-  }
-  .file-name {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    min-width: 0;
-  }
-  .file-meta {
-    color: var(--alloy-color-text-secondary);
-    font-size: var(--alloy-typography-size-sm);
-  }
-  @media (max-width: 899px) {
-    .frame {
-      max-width: 100%;
-    }
-    .file {
-      min-height: 44px;
-    }
+    background: linear-gradient(135deg, transparent 48%, var(--alloy-color-text-secondary) 49%, var(--alloy-color-text-secondary) 51%, transparent 52%);
+    opacity: 0.1;
   }
 </style>

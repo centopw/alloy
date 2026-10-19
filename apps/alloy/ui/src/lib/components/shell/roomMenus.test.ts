@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RoomSummary } from '$lib/generated';
-import type { MenuAction, MenuItem } from '$lib/stores/contextmenu.svelte';
+import { resolveSubmenuItems, type MenuAction, type MenuItem } from '$lib/stores/contextmenu.svelte';
 import { copyItems, notifyItems, notifyLabel, roomPictureItems } from './roomMenus';
 
 const mocks = vi.hoisted(() => ({
@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   notifySaving: vi.fn(() => false),
   notifySet: vi.fn(async (_roomId: string, _level: string | null) => undefined),
   openRoomInfo: vi.fn(),
+  muteRoom: vi.fn(async (_roomId: string, _ms: number | null) => undefined),
+  setRoomLevel: vi.fn(async (_roomId: string, _level: string | null) => undefined),
 }));
 
 vi.mock('$lib/platform/clipboard', () => ({ copyText: mocks.copyText }));
@@ -36,6 +38,7 @@ vi.mock('$lib/stores/roomNotify.svelte', () => ({
   },
 }));
 vi.mock('$lib/stores/ui.svelte', () => ({ ui: { openRoomInfo: mocks.openRoomInfo } }));
+vi.mock('$lib/stores/muteTimer.svelte', () => ({ muteRoom: mocks.muteRoom, setRoomLevel: mocks.setRoomLevel }));
 
 function room(overrides: Partial<RoomSummary> = {}): RoomSummary {
   return { id: '!room:example.org', name: 'Room', direct_user_id: null, ...overrides } as RoomSummary;
@@ -76,10 +79,20 @@ describe('notifyItems', () => {
 
   it('writes the chosen level, or null for the default', () => {
     const items = actions(notifyItems('!r:x'));
-    items.find((i) => i.id === 'notify-Mute')?.onselect?.();
+    items.find((i) => i.id === 'notify-Mentions')?.onselect?.();
     items.find((i) => i.id === 'notify-default')?.onselect?.();
-    expect(mocks.notifySet).toHaveBeenNthCalledWith(1, '!r:x', 'Mute');
-    expect(mocks.notifySet).toHaveBeenNthCalledWith(2, '!r:x', null);
+    expect(mocks.setRoomLevel).toHaveBeenNthCalledWith(1, '!r:x', 'Mentions');
+    expect(mocks.setRoomLevel).toHaveBeenNthCalledWith(2, '!r:x', null);
+  });
+
+  it('offers timed mutes from the Mute row and mutes for the chosen time', () => {
+    const mute = actions(notifyItems('!r:x')).find((i) => i.id === 'notify-Mute');
+    const durations = actions(resolveSubmenuItems(mute!.submenu!));
+    expect(durations.map((i) => i.label)).toEqual(['For 1 hour', 'For 8 hours', 'For 24 hours', 'Until I turn it back on']);
+    durations[1].onselect?.();
+    durations[3].onselect?.();
+    expect(mocks.muteRoom).toHaveBeenNthCalledWith(1, '!r:x', 8 * 3_600_000);
+    expect(mocks.muteRoom).toHaveBeenNthCalledWith(2, '!r:x', null);
   });
 
   it('disables every choice while a write is in flight', () => {

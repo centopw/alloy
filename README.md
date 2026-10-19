@@ -32,12 +32,15 @@ Use your existing Matrix account (matrix.org, your company's server, your own) o
 
 ## What you can do
 
-- **Chat with anyone on Matrix**, in private encrypted rooms, group rooms and direct messages. Reply, edit,
-  delete, react with any emoji, start threads, create polls, share files, photos and videos.
+- **Chat with anyone on Matrix**, in private encrypted rooms, group rooms and direct messages. Reply (swipe a
+  message on a phone), edit, delete, react with one tap, pin messages, forward, start threads, create polls, send
+  voice messages, albums of photos, files and your location, and see when your messages have been read.
 - **Find things fast.** Search your rooms from the sidebar (or with Ctrl/Cmd+K). Search *inside* a chat
   for words or for who said them, and jump straight to the message.
 - **Stay organised.** Make your own tags (for example "Work", "Family"), colour them, put rooms under them,
   and filter or sort your room list by tag, unread, name or recent activity.
+- **Keep chats in order.** Pin or archive a chat, mark it unread, mute it for an hour or a day, and unsent text
+  waits for you as a draft.
 - **Make it yours.** Dark theme, three message layouts (modern, chat bubbles or compact), text size,
   notification levels per room, and a settings page where every switch really does something.
   Your preferences follow you to your other devices.

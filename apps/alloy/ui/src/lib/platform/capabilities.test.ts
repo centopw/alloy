@@ -3,6 +3,7 @@ import {
   capabilities,
   filterSettingsGroups,
   isAndroid,
+  isVoiceMessagesSupported,
   SETTINGS_GROUPS_DEF,
   type RawSettingsGroup,
 } from './capabilities';
@@ -47,6 +48,7 @@ describe('capabilities', () => {
       windowFocusOptions: true,
       systemTray: true,
       autoDownloadUpdates: true,
+      voiceMessages: false,
     });
   });
 
@@ -62,6 +64,7 @@ describe('capabilities', () => {
       windowFocusOptions: true,
       systemTray: false,
       autoDownloadUpdates: false,
+      voiceMessages: false,
     });
   });
 
@@ -77,6 +80,7 @@ describe('capabilities', () => {
       windowFocusOptions: false,
       systemTray: false,
       autoDownloadUpdates: false,
+      voiceMessages: false,
     });
   });
 
@@ -92,6 +96,7 @@ describe('capabilities', () => {
       windowFocusOptions: false,
       systemTray: false,
       autoDownloadUpdates: false,
+      voiceMessages: false,
     });
   });
 
@@ -107,7 +112,31 @@ describe('capabilities', () => {
       windowFocusOptions: false,
       systemTray: false,
       autoDownloadUpdates: false,
+      voiceMessages: false,
     });
+  });
+
+  it('respects explicit voiceMessages override in env', () => {
+    const caps = capabilities({ phone: false, android: false, tauri: true, voiceMessages: true });
+    expect(caps.voiceMessages).toBe(true);
+  });
+});
+
+describe('isVoiceMessagesSupported', () => {
+  it('returns true when both MediaRecorder and getUserMedia are available', () => {
+    expect(isVoiceMessagesSupported(true, true)).toBe(true);
+  });
+
+  it('returns false when MediaRecorder is not available', () => {
+    expect(isVoiceMessagesSupported(false, true)).toBe(false);
+  });
+
+  it('returns false when getUserMedia is not available', () => {
+    expect(isVoiceMessagesSupported(true, false)).toBe(false);
+  });
+
+  it('returns false when neither is available', () => {
+    expect(isVoiceMessagesSupported(false, false)).toBe(false);
   });
 });
 

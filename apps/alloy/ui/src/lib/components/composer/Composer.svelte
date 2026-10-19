@@ -1,12 +1,18 @@
 <script lang="ts">
   import { timelineStore } from '$lib/stores/timeline.svelte';
+  import { draftsStore } from '$lib/stores/drafts.svelte';
   import { threadStore } from '$lib/stores/thread.svelte';
   import { roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
   import { client } from '$lib/ipc';
   import { prefs } from '$lib/stores/prefs.svelte';
   import Icon from '$lib/icons/Icon.svelte';
-  import { ChartBar, Paperclip, Plus, Send, Smile, X } from '$lib/icons';
-  import { canPickFiles, pickFile } from '$lib/platform/files';
+  import { ChartBar, MapPin, Navigation, Paperclip, Plus, Send, Smile, Type, X } from '$lib/icons';
+  import { canPickFiles, isTauriRuntime, pickFiles } from '$lib/platform/files';
+  import { isVoiceMessagesSupported } from '$lib/platform/capabilities';
+  import { canLocate } from '$lib/platform/geolocation';
+  import { liveLocation } from '$lib/stores/liveLocation.svelte';
+  import LocationDialog from './LocationDialog.svelte';
+  import VoiceRecorder from './VoiceRecorder.svelte';
   import { contextmenu } from '$lib/platform/contextmenu';
   import { viewport } from '$lib/stores/viewport.svelte';
   import { contextMenu, type MenuItem } from '$lib/stores/contextmenu.svelte';
@@ -20,11 +26,17 @@
     mentionOptionId,
     rankMembers,
     reconcileMentions,
+    roomMentionOption,
+    containsRoomMention,
+    ROOM_MENTION_ID,
     type ActiveMention,
     type MentionRecord
   } from '$lib/stores/mentions';
   import MentionPicker from './MentionPicker.svelte';
   import PollDialog from './PollDialog.svelte';
+  import FormatToolbar from './FormatToolbar.svelte';
+  import { wrapKindForKey, wrapSelection, type WrapKind } from '$lib/content/markdownWrap';
+  import { Button, Modal, TextField } from '../common';
 
   interface Props {
     roomId: string;
@@ -38,6 +50,7 @@
   let field: HTMLTextAreaElement | undefined = $state();
   let mention = $state<ActiveMention | null>(null);
   let pollOpen = $state(false);
+  let locationOpen = $state(false);
   // Key (`start:query`) of a mention dismissed with Escape; it reopens once the query changes.
   let mentionDismissed = $state<string | null>(null);
   let mentionIndex = $state(0);
@@ -50,6 +63,46 @@
   const editing = $derived(threadRoot ? null : timelineStore.editing);
   const composing = $derived(!!(replying || editing));
   const canSend = $derived(text.trim().length > 0);
+  /** The microphone stands in for Send while there is nothing to send (not while editing or in a thread). */
+  let recording = $state(false);
+  const canRecord = $derived(!threadRoot && !editing && !canSend && isTauriRuntime() && isVoiceMessagesSupported());
+
+  // Formatting: a floating toolbar over a selection on desktop, an "Aa" row on phones, plus shortcuts.
+  let selected = $state(false);
+  let formatOpen = $state(false);
+  let linkOpen = $state(false);
+  let linkUrl = $state('');
+  let linkRange = { start: 0, end: 0 };
+  const showFormat = $derived(!threadRoot && !recording && (viewport.isPhone ? formatOpen : selected));
+
+  function syncSelection() {
+    selected = !!field && field.selectionEnd > field.selectionStart;
+  }
+
+  async function applyWrap(kind: WrapKind, url = '', range?: { start: number; end: number }) {
+    if (!field) return;
+    const r = wrapSelection(text, range?.start ?? field.selectionStart, range?.end ?? field.selectionEnd, kind, url);
+    text = r.text;
+    await tick();
+    field.focus();
+    field.setSelectionRange(r.start, r.end);
+    syncSelection();
+    onInput();
+  }
+
+  function onWrap(kind: WrapKind) {
+    if (kind !== 'link') return void applyWrap(kind);
+    linkRange = { start: field?.selectionStart ?? 0, end: field?.selectionEnd ?? 0 };
+    linkUrl = 'https://';
+    linkOpen = true;
+  }
+
+  function confirmLink() {
+    const url = linkUrl.trim();
+    linkOpen = false;
+    if (url && url !== 'https://') void applyWrap('link', url, linkRange);
+    else field?.focus();
+  }
   const roomName = $derived.by(() => {
     const active = roomsStore.active;
     return active && active.id === roomId ? roomTitle(active) : null;
@@ -66,8 +119,13 @@
     return hintSend ? `${base}. Ctrl+Enter or Cmd+Enter to send` : base;
   });
   const mentionKey = (m: ActiveMention) => `${m.start}:${m.query}`;
+  const canMentionRoom = $derived(membersStore.detailsOf(roomId)?.can_mention_room ?? false);
   const candidates = $derived(
-    mention ? rankMembers(membersStore.membersOf(roomId), mention.query, MENTION_LIMIT) : []
+    mention
+      ? [roomMentionOption(mention.query, canMentionRoom), ...rankMembers(membersStore.membersOf(roomId), mention.query, MENTION_LIMIT)]
+          .filter((m): m is RoomMemberDto => m !== null)
+          .slice(0, MENTION_LIMIT)
+      : []
   );
   const pickerOpen = $derived(
     mention !== null && candidates.length > 0 && mentionKey(mention) !== mentionDismissed
@@ -83,10 +141,27 @@
     }
   });
 
-  // Switching rooms starts with a clean composer and loads that room's members for mentions.
+  // Whether this room's saved draft has been read; typing is only saved after that, so an empty
+  // field never overwrites a draft that has not loaded yet.
+  let draftReady = $state(false);
+
+  async function restoreDraft(id: string) {
+    const draft = await draftsStore.load(id);
+    if (roomId !== id) return;
+    if (draft && !draft.editOf && text === '') {
+      text = draft.text;
+      void tickResize();
+    }
+    draftReady = true;
+  }
+
+  // Switching rooms starts with that room's draft (or a clean composer) and loads its members for mentions.
+  // Leaving a room saves its draft at once.
   $effect(() => {
-    void roomId;
+    const id = roomId;
+    const inThread = !!threadRoot;
     text = '';
+    draftReady = false;
     untrack(() => emojiPicker.close());
     mention = null;
     mentionDismissed = null;
@@ -94,6 +169,19 @@
     // Without loaded members the picker stays empty; sending is unaffected.
     // Untracked: the cache read inside must not make members arriving later wipe the draft.
     untrack(() => void membersStore.loadMembers(roomId).catch(() => {}));
+    if (!inThread) untrack(() => void restoreDraft(id));
+    return () => {
+      if (inThread || !untrack(() => draftReady) || untrack(() => editing)) return;
+      draftsStore.flushPending(id, untrack(() => text), { replyTo: untrack(() => replying?.event_id ?? null) });
+    };
+  });
+
+  // The text of an unsent message is kept per room, shortly after typing stops.
+  $effect(() => {
+    const current = text;
+    const id = roomId;
+    if (threadRoot || editing || !draftReady) return;
+    untrack(() => draftsStore.save(id, current, { replyTo: replying?.event_id ?? null }));
   });
 
   // Typing notices follow the sendTyping preference. When it is off nothing is sent, and any
@@ -151,6 +239,14 @@
     const active = activeMention(text, caret);
     mention = null;
     if (!active) return;
+    if (member.user_id === ROOM_MENTION_ID) {
+      const insertRoom = '@room ';
+      text = text.slice(0, active.start) + insertRoom + text.slice(caret);
+      await tick();
+      field?.setSelectionRange(active.start + insertRoom.length, active.start + insertRoom.length);
+      onInput();
+      return;
+    }
     const label = memberLabel(member);
     const insert = `@${label} `;
     text = text.slice(0, active.start) + insert + text.slice(caret);
@@ -171,14 +267,15 @@
     if (!canSend) return;
     const body = text;
     const mentions = reconcileMentions(body, mentionRecords);
+    const mentionRoom = canMentionRoom && containsRoomMention(body);
     text = '';
     mentionRecords = [];
     mention = null;
     clearTimeout(typingTimer);
     setTyping(false);
     await tickResize();
-    if (threadRoot) await threadStore.send(body, mentions);
-    else await timelineStore.send(body, mentions);
+    if (threadRoot) await threadStore.send(body, mentions, mentionRoom);
+    else await timelineStore.send(body, mentions, mentionRoom);
   }
 
   async function tickResize() {
@@ -187,6 +284,15 @@
   }
 
   function onKeydown(e: KeyboardEvent) {
+    // Ctrl/Cmd shortcuts for formatting the selection.
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.isComposing && !threadRoot) {
+      const kind = wrapKindForKey(e.key, e.shiftKey);
+      if (kind) {
+        e.preventDefault();
+        onWrap(kind);
+        return;
+      }
+    }
     if (pickerOpen && !e.isComposing) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
@@ -205,6 +311,15 @@
       if (e.key === 'Escape') {
         e.preventDefault();
         dismissMention();
+        return;
+      }
+    }
+    // Up arrow in an empty field edits your newest message (Telegram, Slack).
+    if (e.key === 'ArrowUp' && !e.isComposing && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey && !threadRoot && !composing && text === '') {
+      const last = timelineStore.items.findLast((i) => i.is_own && i.content.kind === 'TextMessage' && !!i.event_id);
+      if (last) {
+        e.preventDefault();
+        timelineStore.startEdit(last);
         return;
       }
     }
@@ -227,17 +342,40 @@
     }
   }
 
+  /** Picks one or more files and sends them in the order chosen; pictures sent together form an album. */
   async function attach() {
-    const path = await pickFile();
-    if (path) await timelineStore.sendFile(path);
+    for (const path of await pickFiles()) await timelineStore.sendFile(path);
   }
 
-  // Phones keep File and Poll behind the + button so the composer row stays uncluttered.
+  // Location choices: send where you are now, or share it live for a while.
+  function locationItems(): MenuItem[] {
+    const live: MenuItem = {
+      id: 'live-location',
+      label: 'Share live location',
+      icon: Navigation,
+      submenu: {
+        items: [
+          { id: 'live-15', label: 'For 15 minutes', onselect: () => void liveLocation.start(roomId, 15 * 60_000) },
+          { id: 'live-60', label: 'For 1 hour', onselect: () => void liveLocation.start(roomId, 60 * 60_000) },
+          { id: 'live-480', label: 'For 8 hours', onselect: () => void liveLocation.start(roomId, 8 * 60 * 60_000) },
+        ],
+      },
+    };
+    return [{ id: 'send-location', label: 'Send my location', icon: MapPin, onselect: () => (locationOpen = true) }, live];
+  }
+
+  function openLocationMenu(e: MouseEvent) {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    contextMenu.open(locationItems(), { x: r.left, y: r.top }, { anchor: { x: r.left, y: r.top, width: r.width, height: r.height }, ariaLabel: 'Share location' });
+  }
+
+  // Phones keep File, Poll and Location behind the + button so the composer row stays uncluttered.
   function openAttachMenu(e: MouseEvent) {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const file = { id: 'file', label: 'File', icon: Paperclip, onselect: () => void attach() };
     const poll = { id: 'poll', label: 'Poll', icon: ChartBar, onselect: () => (pollOpen = true) };
-    contextMenu.open(canPickFiles() ? [file, poll] : [poll], { x: r.left, y: r.top });
+    const place = canLocate() ? locationItems() : [];
+    contextMenu.open(canPickFiles() ? [file, poll, ...place] : [poll, ...place], { x: r.left, y: r.top });
   }
 
   // Right-click on a composer button offers exactly the action that button performs.
@@ -293,6 +431,11 @@
 </script>
 
 <div class="composer" class:attached={composing}>
+  {#if showFormat}
+    <div class="format" class:floating={!viewport.isPhone}>
+      <FormatToolbar onwrap={onWrap} />
+    </div>
+  {/if}
   {#if composing}
     <div class="banner">
       <div class="banner-text">
@@ -315,7 +458,7 @@
     </div>
   {/if}
 
-  <div class="field">
+  <div class="field" class:recording>
     {#if canPickFiles() && !threadRoot && !viewport.isPhone}
       <button type="button" class="round" aria-label="Attach file" title="Attach file" onclick={attach} use:contextmenu={attachMenu}>
         <Icon icon={Plus} size={20} />
@@ -337,9 +480,15 @@
       <button type="button" class="round" aria-label="Create poll" title="Create poll" onclick={() => (pollOpen = true)}>
         <Icon icon={ChartBar} size={20} />
       </button>
+      {#if canLocate()}
+        <button type="button" class="round" aria-label="Share location" aria-haspopup="menu" data-tooltip="Share location" onclick={openLocationMenu}>
+          <Icon icon={MapPin} size={20} />
+        </button>
+      {/if}
     {/if}
     {#if !threadRoot}
       <PollDialog open={pollOpen} onclose={() => (pollOpen = false)} />
+      <LocationDialog open={locationOpen} {roomId} onclose={() => (locationOpen = false)} />
     {/if}
 
     <textarea
@@ -359,9 +508,27 @@
       onkeydown={onKeydown}
       onkeyup={onFieldKeyup}
       onclick={syncMention}
-      onblur={() => (mention = null)}
+      onselect={syncSelection}
+      onpointerup={syncSelection}
+      onblur={() => {
+        mention = null;
+        selected = false;
+      }}
     ></textarea>
 
+    {#if viewport.isPhone && !threadRoot}
+      <button
+        type="button"
+        class="round"
+        aria-label="Text formatting"
+        aria-pressed={formatOpen}
+        data-tooltip="Formatting"
+        onpointerdown={(e) => e.preventDefault()}
+        onclick={() => (formatOpen = !formatOpen)}
+      >
+        <Icon icon={Type} size={20} />
+      </button>
+    {/if}
     <button
       bind:this={emojiButton}
       type="button"
@@ -374,7 +541,7 @@
     >
       <Icon icon={Smile} size={20} />
     </button>
-    {#if viewport.isPhone}
+    {#if viewport.isPhone && (canSend || !canRecord)}
       <button
         type="button"
         class="send"
@@ -387,6 +554,11 @@
       >
         <Icon icon={Send} size={20} />
       </button>
+    {/if}
+    {#if canRecord || recording}
+      <div class="voice-slot" class:recording>
+        <VoiceRecorder bind:recording onsend={(clip) => timelineStore.sendVoice(clip)} onerror={(m) => (timelineStore.error = m)} />
+      </div>
     {/if}
 
     {#if pickerOpen}
@@ -401,10 +573,46 @@
   </div>
 </div>
 
+<Modal open={linkOpen} title="Add link" onclose={() => (linkOpen = false)} width="420px">
+  <form
+    class="link-form"
+    onsubmit={(e) => {
+      e.preventDefault();
+      confirmLink();
+    }}
+  >
+    <TextField bind:value={linkUrl} type="url" aria-label="Link address" placeholder="https://" autocomplete="off" />
+    <div class="link-actions">
+      <Button variant="ghost" type="button" onclick={() => (linkOpen = false)}>Cancel</Button>
+      <Button type="submit">Add link</Button>
+    </div>
+  </form>
+</Modal>
+
 <style>
   .composer {
+    position: relative;
     padding: var(--alloy-spacing-scale-3) var(--alloy-layout-gutter) var(--alloy-layout-gutter);
     background: var(--alloy-color-surface-canvas);
+  }
+  .format.floating {
+    position: absolute;
+    right: var(--alloy-layout-gutter);
+    bottom: calc(100% - var(--alloy-spacing-scale-2));
+    z-index: 5;
+  }
+  .format:not(.floating) {
+    margin-bottom: var(--alloy-spacing-scale-2);
+  }
+  .link-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--alloy-spacing-scale-3);
+  }
+  .link-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--alloy-spacing-scale-2);
   }
   .banner {
     display: flex;
@@ -448,6 +656,19 @@
   .attached .field {
     border-top-left-radius: 0;
     border-top-right-radius: 0;
+  }
+  /* While a voice message is recorded its bar takes over the whole field. */
+  .voice-slot {
+    display: contents;
+  }
+  .voice-slot.recording {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    min-width: 0;
+  }
+  .field.recording > :not(.voice-slot) {
+    display: none;
   }
   textarea {
     flex: 1;
