@@ -1,5 +1,6 @@
 //! Matrix SDK to alloy-protocol DTO mapping.
 
+use crate::room_tags::USER_ROOM_TAG_PREFIX;
 use alloy_protocol::{
     NotificationCount, RoomId, RoomMembership, RoomSummary, TimelineItemPreview, UserId,
     VectorDiffDto,
@@ -117,40 +118,82 @@ pub fn room_to_summary(room: &matrix_sdk::Room) -> RoomSummary {
         },
         favourite: Some(room.is_favourite()),
         low_priority: Some(room.is_low_priority()),
+        tags: Vec::new(),
+    }
+}
+
+/// Summary of a room including its custom tags, which the SDK reads asynchronously.
+pub async fn room_summary(room: &matrix_sdk::Room) -> RoomSummary {
+    let mut summary = room_to_summary(room);
+    summary.tags = room_tag_ids(room).await;
+    summary
+}
+
+/// Summaries of several rooms, in order.
+pub async fn room_summaries<'a>(
+    rooms: impl Iterator<Item = &'a matrix_sdk::Room>,
+) -> Vec<RoomSummary> {
+    let mut summaries = Vec::new();
+    for room in rooms {
+        summaries.push(room_summary(room).await);
+    }
+    summaries
+}
+
+/// Ids of a room's custom tags: `u.<id>` room tags with the prefix stripped.
+/// A store error is logged and reads as no tags, so one room cannot break the list.
+async fn room_tag_ids(room: &matrix_sdk::Room) -> Vec<String> {
+    use matrix_sdk::ruma::events::tag::TagName;
+    match room.tags().await {
+        Ok(Some(tags)) => tags
+            .keys()
+            .filter_map(|name| match name {
+                TagName::User(user_tag) => user_tag
+                    .as_ref()
+                    .strip_prefix(USER_ROOM_TAG_PREFIX)
+                    .map(str::to_owned),
+                _ => None,
+            })
+            .collect(),
+        Ok(None) => Vec::new(),
+        Err(e) => {
+            tracing::warn!(room = %room.room_id(), error = %e, "failed to read room tags");
+            Vec::new()
+        }
     }
 }
 
 /// Map an eyeball-im VectorDiff of matrix-sdk Rooms to a VectorDiffDto of RoomSummary.
-pub fn map_room_vector_diff(
+pub async fn map_room_vector_diff(
     diff: matrix_sdk_ui::eyeball_im::VectorDiff<matrix_sdk::Room>,
 ) -> VectorDiffDto<RoomSummary> {
     match diff {
         matrix_sdk_ui::eyeball_im::VectorDiff::Append { values } => VectorDiffDto::Append {
-            values: values.iter().map(room_to_summary).collect(),
+            values: room_summaries(values.iter()).await,
         },
         matrix_sdk_ui::eyeball_im::VectorDiff::Clear => VectorDiffDto::Clear,
         matrix_sdk_ui::eyeball_im::VectorDiff::PushFront { value } => VectorDiffDto::PushFront {
-            value: room_to_summary(&value),
+            value: room_summary(&value).await,
         },
         matrix_sdk_ui::eyeball_im::VectorDiff::PushBack { value } => VectorDiffDto::PushBack {
-            value: room_to_summary(&value),
+            value: room_summary(&value).await,
         },
         matrix_sdk_ui::eyeball_im::VectorDiff::PopFront => VectorDiffDto::PopFront,
         matrix_sdk_ui::eyeball_im::VectorDiff::PopBack => VectorDiffDto::PopBack,
         matrix_sdk_ui::eyeball_im::VectorDiff::Insert { index, value } => VectorDiffDto::Insert {
             index,
-            value: room_to_summary(&value),
+            value: room_summary(&value).await,
         },
         matrix_sdk_ui::eyeball_im::VectorDiff::Set { index, value } => VectorDiffDto::Set {
             index,
-            value: room_to_summary(&value),
+            value: room_summary(&value).await,
         },
         matrix_sdk_ui::eyeball_im::VectorDiff::Remove { index } => VectorDiffDto::Remove { index },
         matrix_sdk_ui::eyeball_im::VectorDiff::Truncate { length } => {
             VectorDiffDto::Truncate { length }
         }
         matrix_sdk_ui::eyeball_im::VectorDiff::Reset { values } => VectorDiffDto::Reset {
-            values: values.iter().map(room_to_summary).collect(),
+            values: room_summaries(values.iter()).await,
         },
     }
 }

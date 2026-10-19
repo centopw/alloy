@@ -291,7 +291,7 @@ async fn test_room_list_service() {
     alice.sync_once().await.unwrap();
     // Get room list stream BEFORE creating room
     use futures::StreamExt;
-    let (_initial_rooms, mut stream) = alice.room_list_stream();
+    let (_initial_rooms, mut stream) = alice.room_list_stream().await;
     println!("✓ Alice subscribed to room_list_stream");
 
     // Alice creates a new room

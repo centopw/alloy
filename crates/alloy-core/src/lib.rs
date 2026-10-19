@@ -8,6 +8,7 @@ pub mod mapping;
 pub mod media;
 pub mod notifications;
 pub mod room_media;
+pub mod room_tags;
 pub mod rooms;
 pub mod timeline;
 pub mod tls;
@@ -44,6 +45,8 @@ pub enum AlloyError {
     InsecureHomeserverUrl,
     #[error("Invalid room ID: {0}")]
     InvalidRoomId(String),
+    #[error("Invalid room tag: {0}")]
+    InvalidRoomTag(String),
     #[error("Base64 error: {0}")]
     Base64(#[from] base64::DecodeError),
 }

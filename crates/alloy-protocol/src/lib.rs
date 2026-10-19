@@ -245,6 +245,31 @@ pub struct RoomSummary {
     pub membership: RoomMembership,
     pub favourite: Option<bool>,
     pub low_priority: Option<bool>,
+    /// Ids of the room's custom tags (`u.<id>` room tags with the prefix stripped), sorted.
+    pub tags: Vec<String>,
+}
+
+/// A user-defined room tag, as stored in the account's tag catalogue.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct RoomTagDef {
+    pub id: String,
+    pub name: String,
+    pub colour: TagColour,
+}
+
+/// Palette colour of a room tag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "lowercase")]
+pub enum TagColour {
+    Grey,
+    Red,
+    Orange,
+    Amber,
+    Green,
+    Teal,
+    Blue,
+    Violet,
+    Pink,
 }
 
 /// One answer of a poll. `votes` is zero while results are hidden.
@@ -557,6 +582,22 @@ pub enum EngineCommand {
         room_id: RoomId,
         note: String,
     },
+    /// Reads the account's room tag catalogue (display order preserved).
+    GetTagCatalog,
+    /// Replaces the room tag catalogue; entries are validated and normalised before storing.
+    SaveTagCatalog {
+        tags: Vec<RoomTagDef>,
+    },
+    /// Assigns (`enabled: true`) or removes the custom tag `tag_id` on a room.
+    SetRoomTag {
+        room_id: RoomId,
+        tag_id: String,
+        enabled: bool,
+    },
+    /// Removes a tag from the catalogue and from every room that carries it.
+    DeleteRoomTag {
+        tag_id: String,
+    },
     /// Marks the whole room as read (read receipt at the latest event and clears the unread flag).
     MarkRoomRead {
         room_id: RoomId,
@@ -800,6 +841,10 @@ pub enum EngineResponse {
     RoomNote {
         room_id: RoomId,
         note: String,
+    },
+    /// The account's room tag catalogue, in display order.
+    TagCatalog {
+        tags: Vec<RoomTagDef>,
     },
     UserProfile {
         profile: UserProfileDto,
@@ -1085,6 +1130,8 @@ pub fn register_types() -> Types {
         .register::<NotificationCount>()
         .register::<TimelineItemPreview>()
         .register::<RoomSummary>()
+        .register::<RoomTagDef>()
+        .register::<TagColour>()
         .register::<TimelineItemContent>()
         .register::<EventSendState>()
         .register::<ThreadSummary>()
@@ -1153,6 +1200,7 @@ mod tests {
             membership: RoomMembership::Joined,
             favourite: None,
             low_priority: None,
+            tags: Vec::new(),
         };
         let json = serde_json::to_string(&summary).unwrap();
         let decoded: RoomSummary = serde_json::from_str(&json).unwrap();

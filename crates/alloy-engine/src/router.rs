@@ -53,7 +53,11 @@ impl CommandGroup {
             | EngineCommand::SetDefaultNotificationLevel { .. }
             | EngineCommand::SetMentionRules { .. }
             | EngineCommand::GetRoomNotificationLevel { .. }
-            | EngineCommand::SetRoomNotificationLevel { .. } => CommandGroup::Rooms,
+            | EngineCommand::SetRoomNotificationLevel { .. }
+            | EngineCommand::GetTagCatalog
+            | EngineCommand::SaveTagCatalog { .. }
+            | EngineCommand::SetRoomTag { .. }
+            | EngineCommand::DeleteRoomTag { .. } => CommandGroup::Rooms,
 
             EngineCommand::SubscribeTimeline { .. }
             | EngineCommand::SubscribeThread { .. }

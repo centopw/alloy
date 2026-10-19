@@ -102,6 +102,22 @@ export type EngineCommand = { action: "DiscoverHomeserver"; params: {
 	room_id: RoomId,
 	note: string,
 } } | 
+/**  Reads the account's room tag catalogue (display order preserved). */
+{ action: "GetTagCatalog" } | 
+/**  Replaces the room tag catalogue; entries are validated and normalised before storing. */
+{ action: "SaveTagCatalog"; params: {
+	tags: RoomTagDef[],
+} } | 
+/**  Assigns (`enabled: true`) or removes the custom tag `tag_id` on a room. */
+{ action: "SetRoomTag"; params: {
+	room_id: RoomId,
+	tag_id: string,
+	enabled: boolean,
+} } | 
+/**  Removes a tag from the catalogue and from every room that carries it. */
+{ action: "DeleteRoomTag"; params: {
+	tag_id: string,
+} } | 
 /**  Marks the whole room as read (read receipt at the latest event and clears the unread flag). */
 { action: "MarkRoomRead"; params: {
 	room_id: RoomId,
@@ -329,6 +345,10 @@ export type EngineResponse = { type: "HomeserverInfo"; payload: {
 { type: "RoomNote"; payload: {
 	room_id: RoomId,
 	note: string,
+} } | 
+/**  The account's room tag catalogue, in display order. */
+{ type: "TagCatalog"; payload: {
+	tags: RoomTagDef[],
 } } | { type: "UserProfile"; payload: {
 	profile: UserProfileDto,
 } } | 
@@ -606,6 +626,15 @@ export type RoomSummary = {
 	membership: RoomMembership,
 	favourite: boolean | null,
 	low_priority: boolean | null,
+	/**  Ids of the room's custom tags (`u.<id>` room tags with the prefix stripped), sorted. */
+	tags: string[],
+};
+
+/**  A user-defined room tag, as stored in the account's tag catalogue. */
+export type RoomTagDef = {
+	id: string,
+	name: string,
+	colour: TagColour,
 };
 
 export type SasEmoji = {
@@ -631,6 +660,9 @@ export type SpaceParentDto = {
 };
 
 export type SubscriptionId = string;
+
+/**  Palette colour of a room tag. */
+export type TagColour = "grey" | "red" | "orange" | "amber" | "green" | "teal" | "blue" | "violet" | "pink";
 
 export type ThreadSummary = {
 	root_event_id: EventId,

@@ -25,6 +25,7 @@ pub(crate) fn map_err(e: AlloyError) -> EngineError {
         AlloyError::Auth(m) => EngineError::auth_failed(m),
         AlloyError::RoomNotFound(r) => EngineError::not_found(format!("room {r}")),
         AlloyError::InvalidRoomId(m) => EngineError::invalid_argument(m),
+        AlloyError::InvalidRoomTag(m) => EngineError::invalid_argument(m),
         AlloyError::MatrixSdk(m) => EngineError::network_error(m),
         other => EngineError::internal_error(other.to_string()),
     }
@@ -235,6 +236,33 @@ impl GroupHandler for RoomsHandler {
                     .set_room_note(&room_id, &note)
                     .await
                     .map_err(map_err)?;
+                Ok(EngineResponse::Unit)
+            }
+            EngineCommand::GetTagCatalog => {
+                let client = ctx.active_client().await?;
+                let tags = client.get_tag_catalog().await.map_err(map_err)?;
+                Ok(EngineResponse::TagCatalog { tags })
+            }
+            EngineCommand::SaveTagCatalog { tags } => {
+                let client = ctx.active_client().await?;
+                client.save_tag_catalog(tags).await.map_err(map_err)?;
+                Ok(EngineResponse::Unit)
+            }
+            EngineCommand::SetRoomTag {
+                room_id,
+                tag_id,
+                enabled,
+            } => {
+                let client = ctx.active_client().await?;
+                client
+                    .set_room_tag(&room_id, &tag_id, enabled)
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::Unit)
+            }
+            EngineCommand::DeleteRoomTag { tag_id } => {
+                let client = ctx.active_client().await?;
+                client.delete_room_tag(&tag_id).await.map_err(map_err)?;
                 Ok(EngineResponse::Unit)
             }
             EngineCommand::MarkRoomRead { room_id } => {

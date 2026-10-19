@@ -14,7 +14,7 @@ alloy-storage = { path = "../alloy-storage" }
 matrix-sdk = { version = "0.19.1", features = ["e2e-encryption", "sqlite", "markdown"] }
 matrix-sdk-ui = "0.19.1"
 matrix-sdk-sqlite = { version = "0.19.1", features = ["bundled"] }
-tokio = { version = "1.0", features = ["sync", "rt", "time"] }
+tokio = { version = "1.0", features = ["sync", "rt", "time", "macros"] }
 futures = "0.3"
 tracing = "0.1"
 thiserror = "1.0"

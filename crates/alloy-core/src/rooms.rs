@@ -16,11 +16,14 @@ use matrix_sdk::ruma::events::room::encryption::RoomEncryptionEventContent;
 use matrix_sdk::ruma::events::room::member::MembershipState;
 use matrix_sdk::ruma::events::room::power_levels::UserPowerLevel;
 use matrix_sdk::ruma::events::{
-    AnyRoomAccountDataEventContent, InitialStateEvent, RoomAccountDataEventType, StateEventType,
+    AnyRoomAccountDataEvent, AnyRoomAccountDataEventContent, InitialStateEvent,
+    RoomAccountDataEventType, StateEventType,
 };
 use matrix_sdk::ruma::serde::Raw;
+use matrix_sdk_ui::eyeball_im::Vector;
 use matrix_sdk_ui::room_list_service::RoomListService;
 use std::path::Path;
+use tokio::sync::broadcast::error::RecvError;
 
 /// Power level reported for users with unlimited power (room creators in v12+ rooms).
 /// `Number.MAX_SAFE_INTEGER`, so it survives a round trip through JavaScript.
@@ -422,22 +425,24 @@ impl AlloyClient {
     /// Subscribe to room list changes as a stream of VectorDiffDto<RoomSummary>.
     ///
     /// Returns the initial list of rooms and a stream of diffs.
-    pub fn room_list_stream(
+    pub async fn room_list_stream(
         &self,
     ) -> (
         Vec<RoomSummary>,
-        impl futures::Stream<Item = Vec<VectorDiffDto<RoomSummary>>> + '_,
+        futures::stream::BoxStream<'_, Vec<VectorDiffDto<RoomSummary>>>,
     ) {
         let (initial, raw_stream) = self.client.rooms_stream();
-        let initial_summaries: Vec<RoomSummary> =
-            initial.iter().map(mapping::room_to_summary).collect();
+        let initial_summaries = mapping::room_summaries(initial.iter()).await;
 
-        let stream = raw_stream.map(|diffs| {
-            diffs
-                .into_iter()
-                .map(mapping::map_room_vector_diff)
-                .collect()
-        });
+        let stream = raw_stream
+            .then(|diffs| async move {
+                let mut batch = Vec::with_capacity(diffs.len());
+                for diff in diffs {
+                    batch.push(mapping::map_room_vector_diff(diff).await);
+                }
+                batch
+            })
+            .boxed();
 
         (initial_summaries, stream)
     }
@@ -487,6 +492,11 @@ impl AlloyClient {
     }
 }
 
+/// Whether a room account-data event is a room tag change (`m.tag`).
+fn is_tag_event(event: &Raw<AnyRoomAccountDataEvent>) -> bool {
+    matches!(event.deserialize(), Ok(AnyRoomAccountDataEvent::Tag(_)))
+}
+
 impl AlloyClient {
     /// Start sync (if needed) and drive the recency-sorted room list, calling `on_diffs`
     /// for every batch of DTO diffs (the first batch is the initial state).
@@ -514,14 +524,47 @@ impl AlloyClient {
             None => controller.set_filter(Box::new(filters::new_filter_non_left())),
         };
         futures::pin_mut!(stream);
-        while let Some(diffs) = stream.next().await {
-            on_diffs(
-                diffs
-                    .into_iter()
-                    .map(|d| d.map(|item| item.into_inner()))
-                    .map(mapping::map_room_vector_diff)
-                    .collect(),
-            );
+        let mut room_updates = self.client.subscribe_to_all_room_updates();
+        // Mirrors the list the diffs describe, so a tag change can be sent at the room's index.
+        let mut mirror: Vector<matrix_sdk::Room> = Vector::new();
+        loop {
+            tokio::select! {
+                diffs = stream.next() => {
+                    let Some(diffs) = diffs else { break };
+                    let mut batch = Vec::with_capacity(diffs.len());
+                    for diff in diffs {
+                        let diff = diff.map(|item| item.into_inner());
+                        batch.push(mapping::map_room_vector_diff(diff.clone()).await);
+                        diff.apply(&mut mirror);
+                    }
+                    on_diffs(batch);
+                }
+                update = room_updates.recv() => match update {
+                    Ok(updates) => {
+                        let mut batch = Vec::new();
+                        for (room_id, update) in &updates.joined {
+                            if !update.account_data.iter().any(is_tag_event) {
+                                continue;
+                            }
+                            let position = mirror
+                                .iter()
+                                .position(|room| room.room_id().as_str() == room_id.as_str());
+                            if let Some(index) = position {
+                                let value = mapping::room_summary(&mirror[index]).await;
+                                batch.push(VectorDiffDto::Set { index, value });
+                            }
+                        }
+                        if !batch.is_empty() {
+                            on_diffs(batch);
+                        }
+                    }
+                    Err(RecvError::Lagged(_)) => {
+                        let values = mapping::room_summaries(mirror.iter()).await;
+                        on_diffs(vec![VectorDiffDto::Reset { values }]);
+                    }
+                    Err(RecvError::Closed) => break,
+                },
+            }
         }
         Ok(())
     }
