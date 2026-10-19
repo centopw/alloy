@@ -26,6 +26,8 @@ pub(crate) fn map_err(e: AlloyError) -> EngineError {
         AlloyError::RoomNotFound(r) => EngineError::not_found(format!("room {r}")),
         AlloyError::InvalidRoomId(m) => EngineError::invalid_argument(m),
         AlloyError::InvalidRoomTag(m) => EngineError::invalid_argument(m),
+        AlloyError::InvalidPrefs(m) => EngineError::invalid_argument(m),
+        AlloyError::InvalidSearch(m) => EngineError::invalid_argument(m),
         AlloyError::MatrixSdk(m) => EngineError::network_error(m),
         other => EngineError::internal_error(other.to_string()),
     }
@@ -155,6 +157,30 @@ impl GroupHandler for RoomsHandler {
                     rooms: page.rooms,
                     next_batch: page.next_batch,
                     total_estimate: page.total_estimate,
+                })
+            }
+            EngineCommand::SearchRoomMessages {
+                room_id,
+                query,
+                sender,
+                limit,
+                next_batch,
+            } => {
+                let client = ctx.active_client().await?;
+                let (hits, next_batch, scope) = client
+                    .search_room_messages(
+                        &room_id,
+                        &query,
+                        sender.as_ref(),
+                        limit,
+                        next_batch.as_deref(),
+                    )
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::RoomSearchResults {
+                    hits,
+                    next_batch,
+                    scope,
                 })
             }
             EngineCommand::SetRoomName { room_id, name } => {

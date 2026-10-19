@@ -142,6 +142,18 @@ export type EngineCommand = { action: "DiscoverHomeserver"; params: {
 	from: string | null,
 	limit: number,
 } } | 
+/**
+ *  Searches the text messages of a room on the homeserver, newest first. `query` must not be
+ *  blank and `limit` is clamped to 1..=50. `next_batch` is the token of the previous page.
+ *  Encrypted rooms are not searched; the response then reports `RoomSearchScope::Unavailable`.
+ */
+{ action: "SearchRoomMessages"; params: {
+	room_id: RoomId,
+	query: string,
+	sender: UserId | null,
+	limit: number,
+	next_batch: string | null,
+} } | 
 /**  Reads the account-wide notification rules. */
 { action: "GetNotificationSettings" } | 
 /**  Sets the default level for one-to-one or group rooms (encrypted and not). */
@@ -274,6 +286,15 @@ export type EngineCommand = { action: "DiscoverHomeserver"; params: {
 } } | { action: "GetSettings" } | { action: "SetSetting"; params: {
 	key: string,
 	value_json: string,
+} } | 
+/**  Reads the account's synced preferences document (`chat.alloy.prefs`). */
+{ action: "GetAccountPrefs" } | 
+/**
+ *  Stores the account's synced preferences document. `json` must be a JSON object of at most
+ *  64 KiB with an integer `updated_at`.
+ */
+{ action: "SetAccountPrefs"; params: {
+	json: string,
 } };
 
 export type EngineError = {
@@ -311,6 +332,10 @@ export type EngineEvent = { type: "ConnectionStatus"; payload: {
 } } | { type: "ToastNotice"; payload: {
 	message: string,
 	level: string,
+} } | 
+/**  The account's synced preferences changed on another device; `json` is the new document. */
+{ type: "AccountPrefsChanged"; payload: {
+	json: string,
 } };
 
 export type EngineResponse = { type: "HomeserverInfo"; payload: {
@@ -360,6 +385,12 @@ export type EngineResponse = { type: "HomeserverInfo"; payload: {
 	room_id: RoomId,
 	items: RoomMediaItem[],
 	next_batch: string | null,
+} } | 
+/**  The page of hits returned by `SearchRoomMessages`. */
+{ type: "RoomSearchResults"; payload: {
+	hits: RoomSearchHit[],
+	next_batch: string | null,
+	scope: RoomSearchScope,
 } } | { type: "NotificationSettings"; payload: {
 	settings: NotificationSettingsDto,
 } } | { type: "RoomNotificationLevel"; payload: {
@@ -462,6 +493,10 @@ export type EngineResponse = { type: "HomeserverInfo"; payload: {
 	settings_json: string,
 } } | { type: "SettingSet"; payload: {
 	key: string,
+} } | 
+/**  The synced preferences document, or `None` when the account has never stored one. */
+{ type: "AccountPrefs"; payload: {
+	json: string | null,
 } } | { type: "Unit" };
 
 export type EventId = string;
@@ -614,6 +649,22 @@ export type RoomMemberDto = {
 
 export type RoomMembership = "Joined" | "Invited" | "Left" | "Banned";
 
+/**  One message matched by `SearchRoomMessages`. */
+export type RoomSearchHit = {
+	event_id: EventId,
+	sender: UserId,
+	sender_display_name: string | null,
+	timestamp_millis: number,
+	body: string,
+};
+
+/**  Whether a room's messages were searched on the homeserver. */
+export type RoomSearchScope = 
+/**  The homeserver searched the room's messages. */
+"Server" | 
+/**  The room is end-to-end encrypted, so the homeserver cannot search it and no search was made. */
+"Unavailable";
+
 export type RoomSummary = {
 	id: RoomId,
 	name: string | null,
@@ -628,6 +679,8 @@ export type RoomSummary = {
 	low_priority: boolean | null,
 	/**  Ids of the room's custom tags (`u.<id>` room tags with the prefix stripped), sorted. */
 	tags: string[],
+	/**  For a direct room, the other person's Matrix ID; `None` for every other room. */
+	direct_user_id: UserId | null,
 };
 
 /**  A user-defined room tag, as stored in the account's tag catalogue. */

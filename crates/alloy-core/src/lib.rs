@@ -1,6 +1,7 @@
 #![recursion_limit = "256"]
 
 pub mod account;
+pub mod account_prefs;
 pub mod auth;
 pub mod client;
 pub mod crypto;
@@ -8,6 +9,7 @@ pub mod mapping;
 pub mod media;
 pub mod notifications;
 pub mod room_media;
+pub mod room_search;
 pub mod room_tags;
 pub mod rooms;
 pub mod timeline;
@@ -47,6 +49,10 @@ pub enum AlloyError {
     InvalidRoomId(String),
     #[error("Invalid room tag: {0}")]
     InvalidRoomTag(String),
+    #[error("Invalid preferences: {0}")]
+    InvalidPrefs(String),
+    #[error("Invalid search: {0}")]
+    InvalidSearch(String),
     #[error("Base64 error: {0}")]
     Base64(#[from] base64::DecodeError),
 }

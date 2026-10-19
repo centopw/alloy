@@ -86,6 +86,9 @@ pub struct AlloyClient {
     /// as long as the client.
     pub(crate) notification_settings:
         tokio::sync::OnceCell<matrix_sdk::notification_settings::NotificationSettings>,
+    /// Newest `updated_at` of the synced preferences this client wrote or reported (0 when
+    /// none), so the server echo of its own write is not reported back as a remote change.
+    pub(crate) prefs_updated_at: std::sync::Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl AlloyClient {
@@ -156,6 +159,7 @@ impl AlloyClient {
             spaces: tokio::sync::OnceCell::new(),
             direct_rooms: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             notification_settings: tokio::sync::OnceCell::new(),
+            prefs_updated_at: Default::default(),
         })
     }
 

@@ -145,6 +145,26 @@ pub struct SessionInfoDto {
     pub backup_enabled: bool,
 }
 
+/// Whether a room's messages were searched on the homeserver.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub enum RoomSearchScope {
+    /// The homeserver searched the room's messages.
+    Server,
+    /// The room is end-to-end encrypted, so the homeserver cannot search it and no search was made.
+    Unavailable,
+}
+
+/// One message matched by `SearchRoomMessages`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct RoomSearchHit {
+    pub event_id: EventId,
+    pub sender: UserId,
+    pub sender_display_name: Option<String>,
+    #[specta(type = Number)]
+    pub timestamp_millis: u64,
+    pub body: String,
+}
+
 /// Which kind of shared content `GetRoomMedia` lists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub enum RoomMediaKind {
@@ -247,6 +267,8 @@ pub struct RoomSummary {
     pub low_priority: Option<bool>,
     /// Ids of the room's custom tags (`u.<id>` room tags with the prefix stripped), sorted.
     pub tags: Vec<String>,
+    /// For a direct room, the other person's Matrix ID; `None` for every other room.
+    pub direct_user_id: Option<UserId>,
 }
 
 /// A user-defined room tag, as stored in the account's tag catalogue.
@@ -620,6 +642,16 @@ pub enum EngineCommand {
         from: Option<String>,
         limit: u32,
     },
+    /// Searches the text messages of a room on the homeserver, newest first. `query` must not be
+    /// blank and `limit` is clamped to 1..=50. `next_batch` is the token of the previous page.
+    /// Encrypted rooms are not searched; the response then reports `RoomSearchScope::Unavailable`.
+    SearchRoomMessages {
+        room_id: RoomId,
+        query: String,
+        sender: Option<UserId>,
+        limit: u32,
+        next_batch: Option<String>,
+    },
     /// Reads the account-wide notification rules.
     GetNotificationSettings,
     /// Sets the default level for one-to-one or group rooms (encrypted and not).
@@ -790,6 +822,13 @@ pub enum EngineCommand {
         key: String,
         value_json: String,
     },
+    /// Reads the account's synced preferences document (`chat.alloy.prefs`).
+    GetAccountPrefs,
+    /// Stores the account's synced preferences document. `json` must be a JSON object of at most
+    /// 64 KiB with an integer `updated_at`.
+    SetAccountPrefs {
+        json: String,
+    },
 }
 
 // === Responses ===
@@ -858,6 +897,12 @@ pub enum EngineResponse {
         room_id: RoomId,
         items: Vec<RoomMediaItem>,
         next_batch: Option<String>,
+    },
+    /// The page of hits returned by `SearchRoomMessages`.
+    RoomSearchResults {
+        hits: Vec<RoomSearchHit>,
+        next_batch: Option<String>,
+        scope: RoomSearchScope,
     },
     NotificationSettings {
         settings: NotificationSettingsDto,
@@ -998,6 +1043,10 @@ pub enum EngineResponse {
     SettingSet {
         key: String,
     },
+    /// The synced preferences document, or `None` when the account has never stored one.
+    AccountPrefs {
+        json: Option<String>,
+    },
     Unit,
 }
 
@@ -1105,6 +1154,10 @@ pub enum EngineEvent {
         message: String,
         level: String, // "info" | "warning" | "error"
     },
+    /// The account's synced preferences changed on another device; `json` is the new document.
+    AccountPrefsChanged {
+        json: String,
+    },
 }
 
 pub fn register_types() -> Types {
@@ -1125,6 +1178,8 @@ pub fn register_types() -> Types {
         .register::<DeviceDto>()
         .register::<SessionInfoDto>()
         .register::<RoomMediaItem>()
+        .register::<RoomSearchScope>()
+        .register::<RoomSearchHit>()
         .register::<UserProfileDto>()
         .register::<SpaceParentDto>()
         .register::<NotificationCount>()
@@ -1201,6 +1256,7 @@ mod tests {
             favourite: None,
             low_priority: None,
             tags: Vec::new(),
+            direct_user_id: None,
         };
         let json = serde_json::to_string(&summary).unwrap();
         let decoded: RoomSummary = serde_json::from_str(&json).unwrap();

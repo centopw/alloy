@@ -119,6 +119,12 @@ pub fn room_to_summary(room: &matrix_sdk::Room) -> RoomSummary {
         favourite: Some(room.is_favourite()),
         low_priority: Some(room.is_low_priority()),
         tags: Vec::new(),
+        direct_user_id: room
+            .direct_targets()
+            .into_iter()
+            .filter_map(|target| matrix_sdk::ruma::OwnedUserId::try_from(target).ok())
+            .min()
+            .map(|id| UserId(id.to_string())),
     }
 }
 

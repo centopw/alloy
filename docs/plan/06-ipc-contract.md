@@ -88,6 +88,7 @@ Commands are serialized with `#[serde(tag = "action", content = "params")]`.
 | | `JoinRoom` | `{ room_id_or_alias }` | `RoomJoined { room_id }` | Joins a room by ID or alias |
 | | `LeaveRoom` | `{ room_id }` | `RoomLeft { room_id }` | Leaves or forgets a room |
 | | `CreateRoom` | `{ name, encrypted, invite? }` | `RoomCreated { room_id }` | Creates a new room with optional encryption |
+| | `SearchRoomMessages` | `{ room_id, query, sender?, limit, next_batch? }` | `RoomSearchResults { hits, next_batch?, scope }` | Server-side text search in one room (`POST /_matrix/client/v3/search`, newest first). `scope` is `Unavailable` with no hits for encrypted rooms. Blank `query` returns `invalid_argument`; `limit` is clamped to 1..=50 |
 | **Timeline** | `SubscribeTimeline` | `{ room_id }` | `TimelineSubscribed { subscription_id }` | Opens room timeline and streams diffs |
 | | `PaginateBackwards` | `{ room_id, count }` | `Unit` | Fetches historical messages from homeserver |
 | | `SendText` | `{ room_id, body, markdown?, reply_to?, mentions?, txn_id? }` | `MessageSent { room_id, txn_id, event_id }` | Sends message via send queue (generates local echo) |
@@ -115,6 +116,8 @@ Commands are serialized with `#[serde(tag = "action", content = "params")]`.
 | | `SetActiveTheme` | `{ id }` | `ThemeSetActive` | Sets active theme |
 | | `GetSettings` | *(none)* | `SettingsRetrieved { settings_json }` | Returns user preferences |
 | | `SetSetting` | `{ key, value_json }` | `SettingSet { key }` | Saves user preference |
+| | `GetAccountPrefs` | *(none)* | `AccountPrefs { json: string \| null }` | Returns the synced preferences document from the account (`chat.alloy.prefs`), or `null` when none exists |
+| | `SetAccountPrefs` | `{ json }` | `Unit` | Replaces the synced preferences document. Rejects non-object JSON, documents over 64 KiB, and a missing or non-integer `updated_at` with `invalid_argument` |
 
 ---
 
@@ -131,6 +134,7 @@ Pushed from backend over `alloy_subscribe(Channel<EngineEvent>)`. Tagged with `#
 | `TypingNotice` | `{ room_id: RoomId, users: UserId[] }` | Ephemeral typing notifications |
 | `VerificationState` | `{ user_id: UserId, device_id: string, state: VerificationState }` | Interactive device verification state machine updates |
 | `RecoveryState` | `{ state: RecoveryState }` | Server-side key backup health |
+| `AccountPrefsChanged` | `{ json: string }` | The synced preferences document changed on another device. Emitted only when `updated_at` advances, so the writing device does not receive its own echo |
 | `ToastNotice` | `{ message: string, level: string }` | Global feedback alerts |
 
 ---

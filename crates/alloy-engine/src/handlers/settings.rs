@@ -279,6 +279,22 @@ impl GroupHandler for SettingsHandler {
 
                 Ok(EngineResponse::SettingSet { key })
             }
+            EngineCommand::GetAccountPrefs => {
+                let client = ctx.active_client().await?;
+                let json = client
+                    .get_account_prefs()
+                    .await
+                    .map_err(super::rooms::map_err)?;
+                Ok(EngineResponse::AccountPrefs { json })
+            }
+            EngineCommand::SetAccountPrefs { json } => {
+                let client = ctx.active_client().await?;
+                client
+                    .set_account_prefs(&json)
+                    .await
+                    .map_err(super::rooms::map_err)?;
+                Ok(EngineResponse::Unit)
+            }
             _ => Err(EngineError::invalid_argument(format!(
                 "Command '{}' does not belong to Settings group",
                 name

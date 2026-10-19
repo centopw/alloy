@@ -46,6 +46,12 @@ async fn spawn_verification_driver(ctx: &EngineContext, client: Arc<AlloyClient>
 /// Start background crypto work for a freshly activated client: sync, recovery-state events and
 /// incoming verification requests. Called by the auth handler after login/restore.
 pub(crate) async fn start_background(ctx: &EngineContext, client: Arc<AlloyClient>) {
+    // Registered before sync so synced preferences in the initial sync are not missed.
+    let prefs_sink = ctx.sink.clone();
+    client.watch_account_prefs(Arc::new(move |json: String| {
+        prefs_sink.emit(EngineEvent::AccountPrefsChanged { json })
+    }));
+
     // Sync must run for key and verification traffic to flow.
     let _ = client.sync_service().await;
 

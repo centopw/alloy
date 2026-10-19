@@ -57,7 +57,8 @@ impl CommandGroup {
             | EngineCommand::GetTagCatalog
             | EngineCommand::SaveTagCatalog { .. }
             | EngineCommand::SetRoomTag { .. }
-            | EngineCommand::DeleteRoomTag { .. } => CommandGroup::Rooms,
+            | EngineCommand::DeleteRoomTag { .. }
+            | EngineCommand::SearchRoomMessages { .. } => CommandGroup::Rooms,
 
             EngineCommand::SubscribeTimeline { .. }
             | EngineCommand::SubscribeThread { .. }
@@ -95,7 +96,9 @@ impl CommandGroup {
             | EngineCommand::GetTheme { .. }
             | EngineCommand::SetActiveTheme { .. }
             | EngineCommand::GetSettings
-            | EngineCommand::SetSetting { .. } => CommandGroup::Settings,
+            | EngineCommand::SetSetting { .. }
+            | EngineCommand::GetAccountPrefs
+            | EngineCommand::SetAccountPrefs { .. } => CommandGroup::Settings,
         }
     }
 }
