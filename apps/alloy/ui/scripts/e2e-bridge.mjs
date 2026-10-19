@@ -694,6 +694,11 @@ try {
   console.error('E2E FAILED:', e.message, (e.stack || '').split('\n').slice(1, 4).join(' | '));
   try {
     const pages = await browser.pages();
+    const text = await pages[pages.length - 1].evaluate(() => `${document.querySelectorAll('.album .tile').length} album tiles; ${document.body.innerText.replace(/\s+/g, ' ').slice(0, 1200)}`);
+    console.error('E2E page:', text);
+  } catch {}
+  try {
+    const pages = await browser.pages();
     await pages[pages.length - 1].screenshot({ path: resolve(shots, 'e2e-failure.png') });
   } catch {}
 } finally {
