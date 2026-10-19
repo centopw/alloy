@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Security / CI
+- GitHub Actions moved off the deprecated Node 20 runtime: `actions/checkout` v7, `setup-node` v7, `setup-java` v6, `pnpm/action-setup` v6, `upload-artifact` v7.
+- The daily audit runs `cargo audit` and `cargo deny` directly instead of `rustsec/audit-check`, which opened one GitHub issue per advisory (including ones deliberately accepted in `deny.toml` / `.cargo/audit.toml`). A new or unaccepted advisory now fails the job instead.
+
 ### Fixed
 - Rooms now load their older history by themselves when the newest messages do not fill the screen (and when the window grows), instead of showing only the latest few messages until you could scroll.
 - The unread badge clears once a room is read: the newest message counts as read as soon as it is on screen (opening the room, a message arriving while you are at the bottom, returning to the window), and the room list uses the client-computed unread counts, which drop the moment the read receipt is sent, instead of homeserver counters that can stay stale.
