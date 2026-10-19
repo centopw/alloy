@@ -18,3 +18,8 @@ The maintainer supplied a workspace design spec (kept locally as `DESIGN.md`, no
 
 ## Consequences
 New menus must declare submenus instead of long flat lists; new surfaces need a menu or are covered by the guard; filled accent UI uses `accent.fill`. Not done: call/video/presence UI (the engine has none), live cross-device tag sync, visual verification of the update pill against a real feed.
+
+## Addendum (2026-10-19): search scopes, synced settings
+- **Three searches, three purposes.** Sidebar and Ctrl/Cmd+K find rooms; the header, Details and Ctrl/Cmd+F search messages inside the open chat (server search for unencrypted rooms through `SearchRoomMessages`, local search of loaded messages for encrypted ones).
+- **Settings split.** Preferences are either synced (global account data `chat.alloy.prefs`, newest `updated_at` wins, live updates through `AccountPrefsChanged`) or device-only (`DEVICE_PREF_KEYS` in `stores/prefs.svelte.ts`: layout, font size, notifications, Enter to send, autostart, update toggles).
+- **No matrix.to link features.** Links built for matrix.to point away from the user's homeserver; copy actions use IDs instead.

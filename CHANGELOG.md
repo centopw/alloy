@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Search inside a chat:** the header Search button, the Details Search button and Ctrl/Cmd+F open a message search for the current room: by text and by sender (`from:name` or the From menu), filtered by All / Media / Links / Files, with highlighted matches; clicking a result jumps to the message, loading older history if needed. Encrypted rooms (which the server cannot search) are searched on this device, with a button to search older messages. The sidebar search and Ctrl/Cmd+K remain the room switcher ("Search rooms").
+- **Settings sync across devices:** preferences that describe how you like the app (time format, room list options, sort, typing and event toggles, autoplay, ...) are stored in your Matrix account data and follow you to other devices; changes from another device apply live. Settings that depend on the device (message layout, font size, notifications, Enter to send, open at login, update toggles) stay on the device.
+- Details panel: a bell button for the room's notification level (full labels, current level checked); **Copy ID** copies the other person's Matrix ID in a DM (the room ID otherwise); one **Shared** section with Media / Links / Files tabs.
+- The room picture changes only by pressing the picture (header or Details): Replace or Remove.
+
+### Changed
+- All matrix.to "Copy link" actions (rooms, spaces, messages) are removed.
+- Buttons and inputs share one control height (36px, 44px on phones), so a field and its button line up.
+
+### Fixed
+- Choosing a tag for a room from its menu now shows at once (check mark, dots, chip counts) and rolls back on failure.
+
 ## 0.1.8 (pre-release)
 
 ### Added
