@@ -113,6 +113,7 @@
       stopUpdates();
       tags.reset();
       roomsStore.clearReadMarks();
+      prefs.signOut();
       teardownPrefs();
     };
   });

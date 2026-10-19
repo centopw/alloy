@@ -371,6 +371,33 @@ describe('engine sync', () => {
   });
 });
 
+describe('sign-out and flush', () => {
+  it('drops synced values and the sync stamp on sign-out but keeps device settings', () => {
+    const storage = memoryStorage();
+    const store = new PrefsStore(storage);
+    store.set('timeFormat', '24h');
+    store.set('fontScale', 120);
+    store.signOut();
+
+    expect(store.timeFormat).toBe(DEFAULT_PREFS.timeFormat);
+    expect(store.fontScale).toBe(120);
+    expect(storage.getItem(PREFS_SYNCED_AT_STORAGE_KEY)).toBe('0');
+  });
+
+  it('writes a pending change immediately on flush', async () => {
+    const store = new PrefsStore(memoryStorage());
+    store.set('fontScale', 110);
+    expect(saveCalls()).toHaveLength(0);
+
+    store.flush();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(saveCalls()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(PREFS_ENGINE_DEBOUNCE_MS);
+    expect(saveCalls()).toHaveLength(1);
+  });
+});
+
 describe('account sync', () => {
   const REMOTE_STAMP = 1_700_000_000_000;
 

@@ -354,6 +354,33 @@ export class PrefsStore {
   }
 
   /**
+   * Sign-out: the synced values and their timestamp belong to the account that just left, so they are
+   * dropped (device-only settings stay). Nothing is pushed; the next account starts from its own document.
+   */
+  signOut(): void {
+    clearTimeout(this.#engineTimer);
+    this.#engineTimer = undefined;
+    this.#accountDirty = false;
+    const defaults = defaultPrefsFor(viewport.isPhone);
+    for (const key of SYNCED_PREF_KEYS) (this.#values as Record<PrefKey, unknown>)[key] = defaults[key];
+    this.#syncedAt = 0;
+    this.#version++;
+    this.#writeLocal();
+  }
+
+  /**
+   * Writes a change that is still waiting out its debounce right now. Called when the window is hidden or
+   * closing, so a setting changed a moment before quitting still reaches the engine and the account.
+   */
+  flush(): void {
+    if (this.#engineTimer === undefined) return;
+    clearTimeout(this.#engineTimer);
+    this.#engineTimer = undefined;
+    void this.#pushToEngine();
+    if (this.#accountDirty) void this.#pushToAccount();
+  }
+
+  /**
    * Reconciles with the engine's device copy, then with the account's synced document. Each step keeps
    * the local values when it fails and never rejects. The first call also starts listening for synced
    * changes from other devices.
@@ -517,7 +544,13 @@ export function applyMessageLayout(layout: MessageLayout): void {
  * Keeps the document in sync with the given store. Call once from the app shell. Returns a teardown.
  */
 export function installPrefsEffects(store: PrefsStore = prefs): () => void {
-  return $effect.root(() => {
+  const flush = () => store.flush();
+  const onVisibility = () => {
+    if (document.visibilityState === 'hidden') store.flush();
+  };
+  window.addEventListener('pagehide', flush);
+  document.addEventListener('visibilitychange', onVisibility);
+  const stopEffects = $effect.root(() => {
     $effect(() => {
       applyFontScale(store.fontScale);
     });
@@ -525,4 +558,9 @@ export function installPrefsEffects(store: PrefsStore = prefs): () => void {
       applyMessageLayout(store.messageLayout);
     });
   });
+  return () => {
+    window.removeEventListener('pagehide', flush);
+    document.removeEventListener('visibilitychange', onVisibility);
+    stopEffects();
+  };
 }
