@@ -5,6 +5,10 @@ import { expect } from './errors.js';
 import { prefs } from './prefs.svelte.js';
 import { roomNotify } from './roomNotify.svelte.js';
 import { ui } from './ui.svelte.js';
+import { markFor, unreadCount, type ReadMark } from './unread.js';
+import { sortRooms } from './roomSort.js';
+import { displayTags } from './tags.js';
+import { tags } from './tags.svelte.js';
 
 export type RoomFilter = 'all' | 'unread' | 'direct' | 'rooms';
 
@@ -15,10 +19,14 @@ class RoomsStore {
   rooms = $state<RoomSummary[]>([]);
   activeRoomId = $state<string | null>(null);
   filter = $state<RoomFilter>('all');
+  /** Tag id the list is restricted to; null shows every room. */
+  tagFilter = $state<string | null>(null);
   query = $state('');
   loaded = $state(false);
   /** Joined spaces that contain each room, by room id (from the engine's space graph). */
   spaceParents = $state<Record<string, string[]>>({});
+  /** Per room: the counter and newest message when the user last read it (see `unreadCount`). */
+  private readMarks = $state<Record<string, ReadMark>>({});
 
   private sub: Subscription<RoomDiffEvent> | null = null;
   private batcher: FrameBatcher<RoomDiffEvent> | null = null;
@@ -34,21 +42,38 @@ class RoomsStore {
     const inScope = ui.scope !== 'home' && this.rooms.some((r) => r.id === ui.scope && r.is_space);
     // Home without "show all rooms" lists only rooms that belong to no joined space.
     const homeOnly = ui.scope === 'home' && !prefs.homeShowAllRooms;
-    return this.rooms.filter((r) => {
+    const listed = this.rooms.filter((r) => {
       if (r.membership !== 'Joined' && r.membership !== 'Invited') return false;
       if (r.is_space) return false;
       if (inScope && !(this.spaceParents[r.id] ?? []).includes(ui.scope)) return false;
       if (homeOnly && (this.spaceParents[r.id] ?? []).length > 0) return false;
-      if (this.filter === 'unread' && r.unread_notifications.notification_count === 0) return false;
+      if (this.filter === 'unread' && this.unreadOf(r) === 0) return false;
       if (this.filter === 'direct' && !r.is_direct) return false;
       if (this.filter === 'rooms' && r.is_direct) return false;
       return !q || roomTitle(r).toLowerCase().includes(q);
     });
+    const tagId = this.tagFilter;
+    const tagged = tagId === null ? listed : listed.filter((r) => r.tags.includes(tagId));
+    return sortRooms(tagged, prefs.roomSort, {
+      unreadOf: (r) => this.unreadOf(r),
+      titleOf: roomTitle,
+      tagOrder: displayTags(tags.defs, this.rooms).map((d) => d.id),
+    });
   });
 
-  unreadTotal = $derived(
-    this.rooms.reduce((n, r) => n + (r.unread_notifications.notification_count > 0 ? 1 : 0), 0)
-  );
+  unreadTotal = $derived(this.rooms.reduce((n, r) => n + (this.unreadOf(r) > 0 ? 1 : 0), 0));
+
+  /** Unread count to show for a room: the server's, minus what the user has already read here. */
+  unreadOf(r: RoomSummary): number {
+    return unreadCount(r, this.readMarks[r.id]);
+  }
+
+  /** Record that the user has read a room, so a stale server counter stops showing as unread. */
+  markRead(roomId: string) {
+    const r = this.rooms.find((x) => x.id === roomId);
+    if (!r || r.unread_notifications.notification_count === 0) return;
+    this.readMarks[roomId] = markFor(r);
+  }
 
   active = $derived(
     this.activeRoomId

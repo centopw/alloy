@@ -3,6 +3,7 @@ import type {
   EngineResponse,
   EngineEvent,
   RoomSummary,
+  RoomTagDef,
   TimelineItemDto,
   Account,
   SasEmoji,
@@ -155,6 +156,7 @@ const MOCK_ROOMS: RoomSummary[] = [
     membership: 'Joined',
     favourite: null,
     low_priority: null,
+    tags: [],
   },
   {
     id: '!dev:alloy.chat',
@@ -175,6 +177,7 @@ const MOCK_ROOMS: RoomSummary[] = [
     membership: 'Joined',
     favourite: true,
     low_priority: null,
+    tags: [],
   },
   {
     id: '!bob:alloy.chat',
@@ -195,6 +198,7 @@ const MOCK_ROOMS: RoomSummary[] = [
     membership: 'Joined',
     favourite: null,
     low_priority: null,
+    tags: [],
   },
 ];
 
@@ -234,6 +238,7 @@ export class MockTransport implements Transport {
   private polls = new Map<string, MockPoll>();
   private topics = new Map<string, string>();
   private notes = new Map<string, string>();
+  private tagCatalog: RoomTagDef[] = [];
   private dmRooms = new Map<string, string>([['@bob:alloy.chat', '!bob:alloy.chat']]);
   private notificationSettings: NotificationSettingsDto = {
     one_to_one: 'All',
@@ -508,6 +513,7 @@ export class MockTransport implements Transport {
           membership: 'Joined',
           favourite: null,
           low_priority: null,
+          tags: [],
         };
 
         this.rooms.push(newRoom);
@@ -554,6 +560,7 @@ export class MockTransport implements Transport {
           membership: 'Joined',
           favourite: null,
           low_priority: null,
+          tags: [],
         };
 
         this.rooms.push(newRoom);
@@ -982,6 +989,33 @@ export class MockTransport implements Transport {
         });
         return { type: 'Unit' };
 
+      case 'GetTagCatalog':
+        return { type: 'TagCatalog', payload: { tags: this.tagCatalog.map((t) => ({ ...t })) } };
+
+      case 'SaveTagCatalog':
+        this.tagCatalog = command.params.tags.map((t) => ({ ...t }));
+        return { type: 'Unit' };
+
+      case 'SetRoomTag': {
+        const room = this.rooms.find((r) => r.id === command.params.room_id);
+        if (room) {
+          const tags = new Set(room.tags);
+          if (command.params.enabled) tags.add(command.params.tag_id);
+          else tags.delete(command.params.tag_id);
+          this.patchRoom(room.id, { tags: [...tags] });
+        }
+        return { type: 'Unit' };
+      }
+
+      case 'DeleteRoomTag': {
+        const tagId = command.params.tag_id;
+        this.tagCatalog = this.tagCatalog.filter((t) => t.id !== tagId);
+        for (const room of this.rooms.filter((r) => r.tags.includes(tagId))) {
+          this.patchRoom(room.id, { tags: room.tags.filter((t) => t !== tagId) });
+        }
+        return { type: 'Unit' };
+      }
+
       case 'GetRoomNote':
         return {
           type: 'RoomNote',
@@ -1074,6 +1108,7 @@ export class MockTransport implements Transport {
           membership: 'Joined',
           favourite: null,
           low_priority: null,
+          tags: [],
         };
 
         this.rooms.push(newRoom);

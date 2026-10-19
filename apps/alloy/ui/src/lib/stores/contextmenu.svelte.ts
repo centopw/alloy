@@ -14,10 +14,26 @@ export interface MenuAction {
   shortcut?: string;
   danger?: boolean;
   disabled?: boolean;
+  /** Checkmark state. When defined the row is a menuitemradio with aria-checked and a Check icon. */
+  selected?: boolean;
   separator?: false;
   onselect?: () => void;
 }
 
+export interface MenuAnchor {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface MenuOptions {
+  anchor?: MenuAnchor;
+  matchWidth?: boolean;
+  minWidth?: number;
+  ariaLabel?: string;
+  onclose?: () => void;
+}
 export interface MenuSeparator {
   separator: true;
 }
@@ -36,6 +52,7 @@ export function isSeparator(item: MenuItem): item is MenuSeparator {
 class ContextMenuStore {
   items = $state.raw<MenuItem[]>([]);
   at = $state<MenuPoint>({ x: 0, y: 0 });
+  options = $state.raw<MenuOptions | undefined>(undefined);
   isOpen = $state(false);
   /** Element to refocus when the menu is dismissed from the keyboard. Not reactive by design. */
   returnFocus: HTMLElement | null = null;
@@ -44,7 +61,7 @@ class ContextMenuStore {
    * Open the menu with `items` at viewport coordinates `at`. Opening with no items closes the menu.
    * The focused element at the first open is remembered so keyboard dismissal can restore it.
    */
-  open(items: MenuItem[], at: MenuPoint): void {
+  open(items: MenuItem[], at: MenuPoint, options?: MenuOptions): void {
     if (items.length === 0) {
       this.close();
       return;
@@ -55,14 +72,18 @@ class ContextMenuStore {
     }
     this.items = items;
     this.at = { x: at.x, y: at.y };
+    this.options = options;
     this.isOpen = true;
   }
 
   /** Close without moving focus (pointer dismissal, blur, scroll, resize). */
   close(): void {
+    const onclose = this.options?.onclose;
     this.items = [];
+    this.options = undefined;
     this.isOpen = false;
     this.returnFocus = null;
+    onclose?.();
   }
 
   /** Close and restore focus to the element that was focused before opening (keyboard dismissal). */

@@ -4,15 +4,13 @@ export type RoomInfoTab = 'info' | 'media' | 'files' | 'links' | 'members';
 class UiStore {
   /** Developer HUD overlay (dev builds only). */
   hudVisible = $state(false);
-  /** Members panel on the right of the conversation. */
-  membersOpen = $state(typeof window === 'undefined' || window.innerWidth >= 1100);
   /** Which room-sidebar scope is selected: the home view or one space id. */
   scope = $state<'home' | string>('home');
   /** Room info panel (details, shared media, notes) on the right of the conversation. */
   roomInfoOpen = $state(false);
   roomInfoTab = $state<RoomInfoTab>('info');
 
-  /** Opens the room info panel for the active room on `tab`; it replaces the members panel. */
+  /** Opens the room info panel for the active room on `tab`. */
   openRoomInfo(tab: RoomInfoTab = 'info') {
     this.roomInfoTab = tab;
     this.roomInfoOpen = true;
@@ -22,9 +20,12 @@ class UiStore {
     this.roomInfoOpen = false;
   }
 
-  toggleRoomInfo() {
-    if (this.roomInfoOpen) this.closeRoomInfo();
-    else this.openRoomInfo();
+  toggleRoomInfo(tab: RoomInfoTab = 'info') {
+    if (this.roomInfoOpen && this.roomInfoTab === tab) {
+      this.closeRoomInfo();
+    } else {
+      this.openRoomInfo(tab);
+    }
   }
 }
 

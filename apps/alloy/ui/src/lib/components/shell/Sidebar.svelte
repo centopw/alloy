@@ -1,7 +1,9 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { Avatar, Badge } from '../common';
+  import { Avatar, Badge, Select } from '../common';
   import ConfirmDialog from '../common/ConfirmDialog.svelte';
+  import TagChip from '../tags/TagChip.svelte';
+  import TagEditDialog from '../tags/TagEditDialog.svelte';
   import Icon from '$lib/icons/Icon.svelte';
   import { Check, CheckCheck, Compass, Copy, ExternalLink, ImagePlus, Info, Link, LogOut, Lock, Pencil, Plus, Search, StickyNote, X, BellOff } from '$lib/icons';
   import { client } from '$lib/ipc';
@@ -14,6 +16,9 @@
   import { roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
   import { prefs } from '$lib/stores/prefs.svelte';
   import { roomNotify } from '$lib/stores/roomNotify.svelte';
+  import { displayTags, TAG_COLOUR_VARS } from '$lib/stores/tags';
+  import { tags } from '$lib/stores/tags.svelte';
+  import { groupRoomsByTag, ROOM_SORTS, type RoomSort } from '$lib/stores/roomSort';
   import type { NotificationLevel } from '$lib/generated';
   import { ui } from '$lib/stores/ui.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
@@ -35,6 +40,14 @@
   let inviteBusy = $state<string | null>(null);
   let renameRoomId = $state<string | null>(null);
   let pendingLeave = $state<{ id: string; title: string } | null>(null);
+  let newTagRoomId = $state<string | null>(null);
+  const SORT_LABELS: Record<RoomSort, string> = {
+    activity: 'Recent activity',
+    name: 'Name',
+    unread: 'Unread first',
+    tag: 'By tag',
+  };
+  const sortOptions = ROOM_SORTS.map((value) => ({ value, label: SORT_LABELS[value] }));
 
   async function answerInvite(roomId: string, accept: boolean) {
     inviteBusy = roomId;
@@ -64,6 +77,7 @@
   }
 
   async function markRead(roomId: string) {
+    roomsStore.markRead(roomId);
     try {
       await client.invoke({ action: 'MarkRoomRead', params: { room_id: roomId } });
     } catch {
@@ -112,7 +126,7 @@
     void roomInfo.load(r.id);
     void roomNotify.load(r.id);
     const d = roomInfo.details(r.id);
-    const unread = r.unread_notifications.notification_count;
+    const unread = roomsStore.unreadOf(r);
     return [
       { id: 'open', label: 'Open', icon: ExternalLink, onselect: () => openRoom(r.id) },
       { id: 'mark-read', label: 'Mark as read', icon: CheckCheck, disabled: unread === 0, onselect: () => void markRead(r.id) },
@@ -121,6 +135,14 @@
       notifyItem(r, 'All messages', 'All'),
       notifyItem(r, 'Mentions and keywords only', 'Mentions'),
       notifyItem(r, 'Mute', 'Mute'),
+      { separator: true },
+      ...tags.defs.map((d): MenuItem => ({
+        id: `tag-${d.id}`,
+        label: d.name,
+        selected: r.tags.includes(d.id),
+        onselect: () => void tags.setForRoom(r.id, d.id, !r.tags.includes(d.id)),
+      })),
+      { id: 'new-tag', label: 'New tag...', icon: Plus, onselect: () => (newTagRoomId = r.id) },
       { separator: true },
       { id: 'details', label: 'Room details', icon: Info, onselect: () => showRoomInfo(r.id) },
       { id: 'rename', label: 'Rename room', icon: Pencil, disabled: d !== null && !d.can_set_name, onselect: () => (renameRoomId = r.id) },
@@ -159,6 +181,15 @@
   // Without sections: invites first, then every joined room in the engine's activity order.
   const flat = $derived([...invites, ...joined]);
   const nothing = $derived(roomsStore.visible.length === 0);
+  const tagDefs = $derived(displayTags(tags.defs, roomsStore.rooms));
+  const tagById = $derived(new Map(tagDefs.map((d) => [d.id, d] as const)));
+  const tagChips = $derived(tagDefs.map((def) => ({ def, count: roomsStore.rooms.filter((r) => r.tags.includes(def.id)).length })));
+
+  // A filter on a tag that no longer exists (deleted here or elsewhere) would hide every room.
+  $effect(() => {
+    const filter = roomsStore.tagFilter;
+    if (filter !== null && !tagById.has(filter)) roomsStore.tagFilter = null;
+  });
 
   // The muted icon and the menu's current choice read these levels, so load them for the visible joined rooms.
   $effect(() => {
@@ -173,7 +204,7 @@
 </script>
 
 {#snippet roomRow(r: RoomItem)}
-  {@const unread = r.unread_notifications.notification_count}
+  {@const unread = roomsStore.unreadOf(r)}
   {@const active = r.id === roomsStore.activeRoomId}
   {@const muted = roomNotify.isMuted(r.id)}
   <button
@@ -200,6 +231,13 @@
         <time class="time" datetime={new Date(r.latest_event.timestamp_millis).toISOString()}>{formatListTime(r.latest_event.timestamp_millis)}</time>
       {/if}
       <span class="marks">
+        {#if r.tags.length > 0}
+          <span class="tag-dots" role="img" aria-label={`Tags: ${r.tags.map((id) => tagById.get(id)?.name ?? id).join(', ')}`}>
+            {#each r.tags.slice(0, 3) as id (id)}
+              <span class="tag-dot" style:background={TAG_COLOUR_VARS[tagById.get(id)?.colour ?? 'grey']}></span>
+            {/each}
+          </span>
+        {/if}
         {#if r.encrypted}
           <span class="fixed"><Icon icon={Lock} size={16} label="Encrypted" /></span>
         {/if}
@@ -234,6 +272,35 @@
   </div>
 {/snippet}
 
+{#snippet listRow(r: RoomItem)}
+  {#if r.membership === 'Invited'}
+    {@render inviteRow(r)}
+  {:else}
+    {@render roomRow(r)}
+  {/if}
+{/snippet}
+
+{#snippet roomList(list: RoomItem[])}
+  {#if prefs.roomSort === 'tag'}
+    {#each groupRoomsByTag(list, tagDefs) as group (group.tag?.id ?? '')}
+      <section class="tag-group" aria-label={group.tag?.name ?? 'Untagged'}>
+        <h4>{group.tag?.name ?? 'Untagged'}</h4>
+        <ul>
+          {#each group.rooms as r (r.id)}
+            <li>{@render listRow(r)}</li>
+          {/each}
+        </ul>
+      </section>
+    {/each}
+  {:else}
+    <ul>
+      {#each list as r (r.id)}
+        <li>{@render listRow(r)}</li>
+      {/each}
+    </ul>
+  {/if}
+{/snippet}
+
 <section class="sidebar" aria-label="Rooms">
   <header class="head">
     <h2 class="scope" title={scopeTitle}>{viewport.isPhone ? 'Chats' : scopeTitle}</h2>
@@ -253,6 +320,28 @@
     <kbd>{shortcutLabel('K')}</kbd>
   </div>
 
+  {#if tagChips.length > 0}
+    <div class="tag-filter" role="toolbar" aria-label="Filter rooms by tag">
+      <TagChip label="All" pressed={roomsStore.tagFilter === null} onclick={() => (roomsStore.tagFilter = null)} />
+      {#each tagChips as chip (chip.def.id)}
+        <TagChip
+          label={chip.def.name}
+          colour={chip.def.colour}
+          count={chip.count}
+          pressed={roomsStore.tagFilter === chip.def.id}
+          onclick={() => (roomsStore.tagFilter = roomsStore.tagFilter === chip.def.id ? null : chip.def.id)}
+        />
+      {/each}
+    </div>
+  {/if}
+
+  <div class="controls">
+    <Select id="room-sort" class="sort-select" label="Sort rooms" value={prefs.roomSort} options={sortOptions} onchange={(v) => prefs.set('roomSort', v as RoomSort)} />
+    {#if tags.error}
+      <p class="error" role="alert">{tags.error}</p>
+    {/if}
+  </div>
+
   <div class="groups">
     {#if prefs.roomListSections}
       {#if invites.length > 0}
@@ -269,31 +358,19 @@
       {#if rooms.length > 0}
         <section class="group" aria-label="Rooms">
           <h3>Rooms</h3>
-          <ul>
-            {#each rooms as r (r.id)}
-              <li>{@render roomRow(r)}</li>
-            {/each}
-          </ul>
+          {@render roomList(rooms)}
         </section>
       {/if}
 
       {#if direct.length > 0}
         <section class="group" aria-label="People">
           <h3>People</h3>
-          <ul>
-            {#each direct as r (r.id)}
-              <li>{@render roomRow(r)}</li>
-            {/each}
-          </ul>
+          {@render roomList(direct)}
         </section>
       {/if}
     {:else if flat.length > 0}
       <section class="group" aria-label="Room list">
-        <ul>
-          {#each flat as r (r.id)}
-            <li>{#if r.membership === 'Invited'}{@render inviteRow(r)}{:else}{@render roomRow(r)}{/if}</li>
-          {/each}
-        </ul>
+        {@render roomList(flat)}
       </section>
     {/if}
 
@@ -311,6 +388,15 @@
 {#if renameRoomId}
   <RenameRoomDialog roomId={renameRoomId} open onclose={() => (renameRoomId = null)} />
 {/if}
+
+<TagEditDialog
+  open={newTagRoomId !== null}
+  tag={null}
+  onclose={() => (newTagRoomId = null)}
+  onsaved={(created) => {
+    if (newTagRoomId) void tags.setForRoom(newTagRoomId, created.id, true);
+  }}
+/>
 
 <ConfirmDialog
   open={pendingLeave !== null}
@@ -387,13 +473,44 @@
     font-size: var(--alloy-typography-size-xs);
     color: var(--alloy-color-text-muted);
   }
+  .tag-filter {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--alloy-spacing-scale-1);
+    margin: 0 var(--alloy-layout-row-inset) var(--alloy-spacing-scale-2);
+  }
+  .controls {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--alloy-spacing-scale-1);
+    margin: 0 var(--alloy-layout-row-inset) var(--alloy-spacing-scale-2);
+  }
+  /* The sort control is secondary: a quiet text-style trigger, not a boxed field. */
+  .controls :global(.select-trigger.sort-select) {
+    min-height: 28px;
+    padding-inline: var(--alloy-layout-row-pad-x);
+    border-color: transparent;
+    background: transparent;
+    color: var(--alloy-color-text-secondary);
+    font-size: var(--alloy-typography-size-sm);
+  }
+  .controls :global(.select-trigger.sort-select:hover) {
+    background: var(--alloy-color-surface-hover);
+  }
+  .error {
+    margin: 0;
+    font-size: var(--alloy-typography-size-xs);
+    color: var(--alloy-color-status-error);
+  }
   .groups {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
     padding: 0 var(--alloy-layout-row-inset) var(--alloy-spacing-scale-2);
   }
-  .group h3 {
+  .group h3,
+  .group h4 {
     margin: 0;
     padding: var(--alloy-spacing-scale-3) var(--alloy-layout-row-pad-x) var(--alloy-spacing-scale-1);
     font-size: var(--alloy-typography-size-xs);
@@ -412,6 +529,15 @@
   .fixed {
     flex: none;
     display: inline-flex;
+  }
+  .tag-dots {
+    display: inline-flex;
+    gap: var(--alloy-spacing-scale-1);
+  }
+  .tag-dot {
+    width: var(--alloy-spacing-scale-2);
+    height: var(--alloy-spacing-scale-2);
+    border-radius: var(--alloy-radii-full);
   }
   .row {
     display: flex;
@@ -561,6 +687,14 @@
     .search input {
       min-height: 44px;
       font-size: var(--alloy-typography-size-lg);
+    }
+    .tag-filter,
+    .controls {
+      margin-left: var(--alloy-layout-gutter);
+      margin-right: var(--alloy-layout-gutter);
+    }
+    .controls :global(.select-trigger.sort-select) {
+      min-height: 44px;
     }
     .groups {
       padding: 0 calc(var(--alloy-layout-gutter) - var(--alloy-layout-row-pad-x)) var(--alloy-spacing-scale-2);

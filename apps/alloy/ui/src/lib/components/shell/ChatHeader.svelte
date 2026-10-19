@@ -27,22 +27,12 @@
   );
   const searchShortcut = shortcutLabel('K');
 
-  // The topic lives in the room details, which the members panel may not have loaded.
+  // The topic lives in the room details, which may not have loaded yet.
   $effect(() => {
     void membersStore.loadDetails(roomId).catch(() => {
       /* the header simply shows no topic */
     });
   });
-
-  // Members and room info share one side slot. Opening the member list from room info swaps them.
-  function toggleMembers() {
-    if (ui.roomInfoOpen) {
-      ui.closeRoomInfo();
-      ui.membersOpen = true;
-    } else {
-      ui.membersOpen = !ui.membersOpen;
-    }
-  }
 </script>
 
 <header class="head">
@@ -79,8 +69,8 @@
       type="button"
       class="icon"
       aria-label="Room info"
-      aria-pressed={ui.roomInfoOpen}
-      onclick={() => ui.toggleRoomInfo()}
+      aria-pressed={ui.roomInfoOpen && ui.roomInfoTab === 'info'}
+      onclick={() => ui.toggleRoomInfo('info')}
     >
       <Icon icon={Info} size={20} />
     </button>
@@ -89,8 +79,8 @@
       type="button"
       class="icon"
       aria-label="Member list"
-      aria-pressed={ui.membersOpen && !ui.roomInfoOpen}
-      onclick={toggleMembers}
+      aria-pressed={ui.roomInfoOpen && ui.roomInfoTab === 'members'}
+      onclick={() => ui.toggleRoomInfo('members')}
     >
       <Icon icon={Users} size={20} />
     </button>

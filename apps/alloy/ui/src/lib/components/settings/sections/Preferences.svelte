@@ -1,10 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { SettingGroup, SettingToggle } from '$lib/components/settings/controls';
-  import { getAutostart, isAutostartSupported, setAutostart } from '$lib/platform/autostart';
+  import { getAutostart, setAutostart } from '$lib/platform/autostart';
   import { prefs } from '$lib/stores/prefs.svelte';
+  import { viewport } from '$lib/stores/viewport.svelte';
+  import { capabilities, currentEnv } from '$lib/platform/capabilities';
 
-  const autostartSupported = isAutostartSupported();
+  const caps = $derived(capabilities(currentEnv(viewport.isPhone)));
   let autostartBusy = $state(false);
   let autostartError = $state<string | null>(null);
 
@@ -13,7 +15,7 @@
   }
 
   onMount(() => {
-    if (!autostartSupported) return;
+    if (!caps.autostart) return;
     let cancelled = false;
     getAutostart()
       .then((enabled) => {
@@ -43,14 +45,16 @@
 </script>
 
 <div class="section">
-  <SettingGroup title="Composer">
-    <SettingToggle
-      label="Send messages with Enter"
-      description="When off, Enter inserts a new line and Ctrl/Cmd+Enter sends."
-      checked={prefs.enterToSend}
-      onchange={(v) => prefs.set('enterToSend', v)}
-    />
-  </SettingGroup>
+  {#if caps.enterToSend}
+    <SettingGroup title="Composer">
+      <SettingToggle
+        label="Send messages with Enter"
+        description="When off, Enter inserts a new line and Ctrl/Cmd+Enter sends."
+        checked={prefs.enterToSend}
+        onchange={(v) => prefs.set('enterToSend', v)}
+      />
+    </SettingGroup>
+  {/if}
 
   <SettingGroup title="Timeline">
     <SettingToggle
@@ -91,7 +95,7 @@
     />
   </SettingGroup>
 
-  {#if autostartSupported}
+  {#if caps.autostart}
     <SettingGroup title="Startup">
       <SettingToggle
         label="Open Alloy when you log in"

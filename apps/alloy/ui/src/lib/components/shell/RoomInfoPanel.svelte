@@ -25,7 +25,7 @@
 
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { Icon, X, ChevronLeft, Play, File, Link, ExternalLink, Image, ImagePlus, Trash2, Download } from '$lib/icons';
+  import { Icon, X, ChevronLeft, Play, File, Link, ExternalLink, Image, ImagePlus, Trash2, Download, Copy, MessageSquare, User } from '$lib/icons';
   import { formatBytes, formatDay } from '$lib/content/format';
   import { viewport } from '$lib/stores/viewport.svelte';
   import { pickFile } from '$lib/platform/files';
@@ -36,7 +36,12 @@
   import { profileCard } from '$lib/stores/profileCard.svelte';
   import { errorMessage } from '$lib/stores/errors';
   import type { RoomMediaItem, RoomMediaKind } from '$lib/generated/protocol';
-  import { Avatar, Button, UserName } from '../common';
+  import { contextmenu } from '$lib/platform/contextmenu';
+  import { roomsStore } from '$lib/stores/rooms.svelte';
+  import { userProfile } from '$lib/stores/userProfile.svelte';
+  import type { MenuItem } from '$lib/stores/contextmenu.svelte';
+  import type { RoomMemberDto } from '$lib/generated';
+  import { Avatar, Button, TextArea, TextField, UserName } from '../common';
   import MediaViewer, { fetchMediaFile } from '../timeline/MediaViewer.svelte';
 
   type Tab = 'info' | 'media' | 'files' | 'links' | 'members';
@@ -242,22 +247,81 @@
     document.getElementById(`room-info-tab-${tab}`)?.focus();
   }
 
-  // Members tab state
-  $effect(() => {
-    untrack(() => void membersStore.loadMembers(roomId));
-  });
+  // Members tab state. The roster reloads on every open (forced, so never stale) and on retry;
+  // cached rows stay visible until the reply lands.
+  const members = $derived(membersStore.membersOf(roomId));
+  let membersLoading = $state(true);
+  let membersError = $state<string | null>(null);
+  let membersActionError = $state<string | null>(null);
+  // Bumping this re-runs the roster load (the retry button).
+  let membersAttempt = $state(0);
+  // Pointer position of the last right-click on a member, used to place the profile card from the menu.
+  let menuAnchor = $state({ x: 0, y: 0 });
 
-  const members = $derived(
-    membersStore
-      .membersOf(roomId)
-      .filter((m) => m.membership === 'Joined' || m.membership === 'Invited')
-      .sort((a, b) => b.power_level - a.power_level || memberLabel(a).localeCompare(memberLabel(b)))
+  function byName(a: RoomMemberDto, b: RoomMemberDto): number {
+    return memberLabel(a).localeCompare(memberLabel(b));
+  }
+
+  const joined = $derived(members.filter((m) => m.membership === 'Joined'));
+  const groups = $derived(
+    [
+      { title: 'Admin', members: joined.filter((m) => m.power_level >= 100).sort(byName) },
+      { title: 'Moderator', members: joined.filter((m) => m.power_level >= 50 && m.power_level < 100).sort(byName) },
+      { title: 'Members', members: joined.filter((m) => m.power_level < 50).sort(byName) },
+      { title: 'Invited', members: members.filter((m) => m.membership === 'Invited').sort(byName) },
+    ].filter((g) => g.members.length > 0),
   );
 
-  function roleLabel(powerLevel: number): string | null {
-    if (powerLevel >= 100) return 'Admin';
-    if (powerLevel >= 50) return 'Moderator';
-    return null;
+  $effect(() => {
+    const id = roomId;
+    void membersAttempt;
+    let current = true;
+    membersLoading = true;
+    membersError = null;
+    untrack(() => {
+      void (async () => {
+        try {
+          await membersStore.loadMembers(id, true);
+          if (current) membersLoading = false;
+        } catch (e) {
+          if (!current) return;
+          membersError = errorMessage(e);
+          membersLoading = false;
+        }
+      })();
+    });
+    return () => {
+      current = false;
+    };
+  });
+
+  /** Opens the profile card at the pointer, or at the row centre when the row was activated from the keyboard. */
+  function openMemberProfile(e: MouseEvent, userId: string) {
+    let at = { x: e.clientX, y: e.clientY };
+    if (e.detail === 0) {
+      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      at = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    }
+    membersActionError = null;
+    profileCard.open(userId, roomId, at);
+  }
+
+  async function messageMember(userId: string) {
+    membersActionError = null;
+    try {
+      roomsStore.select(await userProfile.startDirectMessage(userId));
+    } catch (e) {
+      membersActionError = errorMessage(e);
+    }
+  }
+
+  function memberMenu(m: RoomMemberDto): MenuItem[] {
+    return [
+      { id: 'view-profile', label: 'View profile', icon: User, onselect: () => profileCard.open(m.user_id, roomId, menuAnchor) },
+      { id: 'message', label: 'Message', icon: MessageSquare, onselect: () => void messageMember(m.user_id) },
+      { separator: true },
+      { id: 'copy-user-id', label: 'Copy user ID', icon: Copy, onselect: () => void navigator.clipboard.writeText(m.user_id) },
+    ];
   }
 </script>
 
@@ -311,10 +375,8 @@
       <div class="group">
         <label class="field">
           <span class="label">Name</span>
-          <input
-            class="input"
-            type="text"
-            maxlength="255"
+          <TextField
+            maxlength={255}
             bind:value={nameDraft}
             disabled={!details?.can_set_name}
             onkeydown={(e) => {
@@ -325,13 +387,7 @@
         </label>
         <label class="field">
           <span class="label">Topic</span>
-          <textarea
-            class="input"
-            rows="3"
-            bind:value={topicDraft}
-            disabled={!details?.can_set_topic}
-            onblur={commitTopic}
-          ></textarea>
+          <TextArea rows={3} bind:value={topicDraft} disabled={!details?.can_set_topic} onblur={commitTopic} />
         </label>
         {#if roomInfo.saving(roomId)}
           <p class="status" role="status">Saving…</p>
@@ -363,13 +419,12 @@
       <div class="group">
         <label class="field">
           <span class="label">Note (only visible to you)</span>
-          <textarea
-            class="input"
-            rows="4"
+          <TextArea
+            rows={4}
             value={noteDraft}
-            oninput={(e) => onNoteInput((e.currentTarget as HTMLTextAreaElement).value)}
+            oninput={(e) => onNoteInput(e.currentTarget.value)}
             onblur={() => void flushNote(roomId)}
-          ></textarea>
+          />
         </label>
         {#if noteSaving}
           <p class="status" role="status">Saving…</p>
@@ -480,30 +535,48 @@
       {/if}
       <div class="sentinel" bind:this={sentinel} aria-hidden="true"></div>
     {:else}
-      {#if members.length === 0}
-        <p class="empty">Loading members…</p>
+      {#snippet memberRow(m: RoomMemberDto)}
+        <li>
+          <button
+            type="button"
+            class="row"
+            aria-label="Open profile for {memberLabel(m)}"
+            data-user-id={m.user_id}
+            onclick={(e) => openMemberProfile(e, m.user_id)}
+            oncontextmenu={(e) => (menuAnchor = { x: e.clientX, y: e.clientY })}
+            use:contextmenu={() => memberMenu(m)}
+          >
+            <Avatar userId={m.user_id} displayName={memberLabel(m)} src={m.avatar_url} size="md" shape="circle" />
+            <span class="row-main">
+              <UserName userId={m.user_id} displayName={memberLabel(m)} roomId={roomId} />
+            </span>
+          </button>
+        </li>
+      {/snippet}
+      {#if membersError}
+        <div class="notice" role="alert">
+          <p>Could not load members: {membersError}</p>
+          <Button variant="ghost" size="sm" onclick={() => (membersAttempt += 1)}>
+            {#snippet children()}Try again{/snippet}
+          </Button>
+        </div>
+      {/if}
+      {#if membersActionError}
+        <p class="notice" role="alert">{membersActionError}</p>
+      {/if}
+      {#if membersLoading && members.length === 0}
+        <p class="status" role="status">Loading members…</p>
       {:else}
-        <ul class="list">
-          {#each members as m (m.user_id)}
-            {@const role = roleLabel(m.power_level)}
-            <li>
-              <button
-                type="button"
-                class="row"
-                aria-label="Open profile for {memberLabel(m)}"
-                onclick={(e) => profileCard.open(m.user_id, roomId, { x: e.clientX, y: e.clientY })}
-              >
-                <Avatar userId={m.user_id} displayName={memberLabel(m)} src={m.avatar_url} size="md" shape="circle" />
-                <span class="row-main">
-                  <UserName userId={m.user_id} displayName={memberLabel(m)} roomId={roomId} />
-                  <span class="row-meta">
-                    {#if m.membership === 'Invited'}Invited{:else if role}{role}{:else}Member{/if}
-                  </span>
-                </span>
-              </button>
-            </li>
-          {/each}
-        </ul>
+        {#each groups as group (group.title)}
+          <section class="group">
+            <h3 class="label">{group.title} ({group.members.length})</h3>
+            <ul class="list">
+              {#each group.members as m (m.user_id)}
+                {@render memberRow(m)}
+              {/each}
+            </ul>
+          </section>
+        {/each}
       {/if}
     {/if}
   </div>
@@ -650,23 +723,6 @@
     color: var(--alloy-text-secondary);
     font-size: var(--alloy-typography-size-xs);
     font-weight: 600;
-  }
-
-  .input {
-    width: 100%;
-    box-sizing: border-box;
-    padding: var(--alloy-space-2);
-    border: 1px solid var(--alloy-color-border-subtle);
-    border-radius: var(--alloy-radii-sm);
-    background: var(--alloy-color-surface-canvas);
-    color: var(--alloy-text-primary);
-    font: inherit;
-    resize: vertical;
-  }
-
-  .input:disabled {
-    color: var(--alloy-text-muted);
-    cursor: not-allowed;
   }
 
   .row-actions {
@@ -850,10 +906,6 @@
     .body {
       overscroll-behavior: contain;
       -webkit-overflow-scrolling: touch;
-    }
-    .input {
-      min-height: 44px;
-      font-size: var(--alloy-typography-size-lg);
     }
     .body :global(button) {
       min-height: 44px;

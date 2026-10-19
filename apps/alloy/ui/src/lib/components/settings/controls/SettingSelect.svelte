@@ -1,14 +1,11 @@
 <script lang="ts">
-  interface Option {
-    value: string;
-    label: string;
-  }
+  import { Select, type SelectOption } from '$lib/components/common';
 
   interface Props {
     label: string;
     description?: string;
     value: string;
-    options: Option[];
+    options: SelectOption[];
     onchange: (value: string) => void;
     disabled?: boolean;
   }
@@ -25,17 +22,15 @@
       <span class="description">{description}</span>
     {/if}
   </div>
-  <select
+  <Select
     id={selectId}
-    class="select"
-    {disabled}
+    {label}
     {value}
-    onchange={(event) => onchange(event.currentTarget.value)}
-  >
-    {#each options as option (option.value)}
-      <option value={option.value}>{option.label}</option>
-    {/each}
-  </select>
+    {options}
+    {onchange}
+    {disabled}
+    class="select-control"
+  />
 </div>
 
 <style>
@@ -70,25 +65,11 @@
     color: var(--alloy-color-text-secondary);
   }
 
-  .select {
-    padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
-    border: 1px solid var(--alloy-color-border-prominent);
-    border-radius: var(--alloy-radii-md);
-    background: var(--alloy-color-surface-elevated);
-    color: var(--alloy-color-text-primary);
-    font: inherit;
-    font-size: var(--alloy-typography-size-sm);
+  :global(.select-control) {
+    flex-shrink: 0;
+    max-width: 55%;
   }
 
-  .select:focus-visible {
-    outline: 2px solid var(--alloy-color-accent-primary);
-    outline-offset: 2px;
-  }
-
-  .select:disabled {
-    color: var(--alloy-color-text-muted);
-    cursor: not-allowed;
-  }
   @media (max-width: 899px) {
     .setting-row {
       min-height: 56px;
@@ -99,12 +80,6 @@
     }
     .text {
       flex: 1;
-    }
-    .select {
-      flex-shrink: 0;
-      max-width: 55%;
-      min-height: 44px;
-      font-size: 16px;
     }
   }
 </style>

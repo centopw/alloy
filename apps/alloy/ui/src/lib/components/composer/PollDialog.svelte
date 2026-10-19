@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Modal, Button, Toggle } from '../common';
+  import { Modal, Button, Toggle, TextField } from '../common';
   import { timelineStore } from '$lib/stores/timeline.svelte';
 
   const MIN_ANSWERS = 2;
@@ -68,19 +68,20 @@
   <form class="form" onsubmit={submit}>
     <label class="field">
       <span>Question</span>
-      <input type="text" bind:value={question} maxlength="300" autocomplete="off" />
+      <TextField type="text" bind:value={question} maxlength={300} autocomplete="off" />
     </label>
 
     <fieldset class="answers">
       <legend>Answers</legend>
       {#each answers as _, i (i)}
         <div class="answer-row">
-          <input
+          <TextField
             type="text"
             aria-label="Answer {i + 1}"
             bind:value={answers[i]}
-            maxlength="200"
+            maxlength={200}
             autocomplete="off"
+            class="answer-input"
           />
           <Button
             variant="ghost"
@@ -131,19 +132,6 @@
     font-size: var(--alloy-typography-size-sm);
     color: var(--alloy-color-text-secondary);
   }
-  input {
-    padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
-    font: inherit;
-    font-size: var(--alloy-typography-size-sm);
-    color: var(--alloy-color-text-primary);
-    background: var(--alloy-color-surface-subtle);
-    border: 1px solid var(--alloy-color-border-subtle);
-    border-radius: var(--alloy-radii-md);
-  }
-  input:focus-visible {
-    outline: 2px solid var(--alloy-color-accent-primary);
-    outline-offset: 1px;
-  }
   .answers {
     display: flex;
     flex-direction: column;
@@ -162,7 +150,7 @@
     align-items: center;
     gap: var(--alloy-spacing-scale-2);
   }
-  .answer-row input {
+  .answer-row :global(.answer-input) {
     flex: 1;
     min-width: 0;
   }
@@ -185,10 +173,6 @@
     gap: var(--alloy-spacing-scale-2);
   }
   @media (max-width: 899px) {
-    input {
-      min-height: 44px;
-      font-size: var(--alloy-typography-size-lg);
-    }
     .answers :global(button),
     .actions :global(button) {
       min-height: 44px;

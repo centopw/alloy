@@ -3,6 +3,8 @@
   import { SettingGroup, SettingSelect, SettingToggle } from '$lib/components/settings/controls';
   import { requestNotificationPermission } from '$lib/platform/notify';
   import { prefs } from '$lib/stores/prefs.svelte';
+  import { viewport } from '$lib/stores/viewport.svelte';
+  import { capabilities, currentEnv } from '$lib/platform/capabilities';
   import {
     notificationSettings,
     type DefaultLevel,
@@ -22,7 +24,14 @@
 
   const settings = $derived(notificationSettings.settings);
   const busy = $derived(notificationSettings.saving > 0);
-
+  const caps = $derived(capabilities(currentEnv(viewport.isPhone)));
+  const notificationTitle = $derived(caps.desktopNotifications ? 'Desktop notifications' : 'Notifications');
+  const notificationToggleLabel = $derived(
+    caps.desktopNotifications ? 'Show desktop notifications' : 'Show notifications'
+  );
+  const notificationDisabledReason = $derived(
+    caps.desktopNotifications ? 'Turn on desktop notifications first.' : 'Turn on notifications first.'
+  );
   async function changeDesktop(enabled: boolean) {
     permissionError = null;
     if (!enabled) {
@@ -87,9 +96,9 @@
     </SettingGroup>
   {/if}
 
-  <SettingGroup title="Desktop notifications">
+  <SettingGroup title={notificationTitle}>
     <SettingToggle
-      label="Show desktop notifications"
+      label={notificationToggleLabel}
       description="Show an operating system notification for new messages in rooms that notify."
       checked={prefs.notifyDesktop}
       onchange={(v) => void changeDesktop(v)}
@@ -99,7 +108,7 @@
       description="Play the system notification sound."
       checked={prefs.notifySound}
       disabled={!prefs.notifyDesktop}
-      disabledReason="Turn on desktop notifications first."
+      disabledReason={notificationDisabledReason}
       onchange={(v) => prefs.set('notifySound', v)}
     />
     <SettingToggle
@@ -107,17 +116,19 @@
       description="Include the start of the message in the notification. When off, it only says there is a new message."
       checked={prefs.notifyPreview}
       disabled={!prefs.notifyDesktop}
-      disabledReason="Turn on desktop notifications first."
+      disabledReason={notificationDisabledReason}
       onchange={(v) => prefs.set('notifyPreview', v)}
     />
-    <SettingToggle
-      label="Only when the window is unfocused"
-      description="Skip notifications while Alloy is focused. A room you are viewing never notifies while Alloy is focused."
-      checked={prefs.notifyOnlyWhenUnfocused}
-      disabled={!prefs.notifyDesktop}
-      disabledReason="Turn on desktop notifications first."
-      onchange={(v) => prefs.set('notifyOnlyWhenUnfocused', v)}
-    />
+    {#if caps.windowFocusOptions}
+      <SettingToggle
+        label="Only when the window is unfocused"
+        description="Skip notifications while Alloy is focused. A room you are viewing never notifies while Alloy is focused."
+        checked={prefs.notifyOnlyWhenUnfocused}
+        disabled={!prefs.notifyDesktop}
+        disabledReason={notificationDisabledReason}
+        onchange={(v) => prefs.set('notifyOnlyWhenUnfocused', v)}
+      />
+    {/if}
   </SettingGroup>
 
   {#if permissionError}

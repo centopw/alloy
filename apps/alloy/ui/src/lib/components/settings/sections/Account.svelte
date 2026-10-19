@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Avatar, Button } from '$lib/components/common';
+  import { Avatar, Button, TextField } from '$lib/components/common';
   import { SettingButtonRow, SettingGroup } from '$lib/components/settings/controls';
   import { client } from '$lib/ipc';
   import { pickFile } from '$lib/platform/files';
@@ -139,7 +139,7 @@
       <form class="name-form" onsubmit={saveName}>
         <label class="field">
           <span class="field-label">Display name</span>
-          <input
+          <TextField
             type="text"
             bind:value={draftName}
             autocomplete="nickname"
@@ -246,19 +246,6 @@
   .field-label {
     font-size: var(--alloy-typography-size-sm);
     color: var(--alloy-color-text-secondary);
-  }
-  input[type='text'] {
-    width: 100%;
-    font: inherit;
-    color: var(--alloy-color-text-primary);
-    background: var(--alloy-color-surface-canvas);
-    border: 1px solid var(--alloy-color-border-subtle);
-    border-radius: var(--alloy-radii-md);
-    padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
-  }
-  input[type='text']:focus-visible {
-    outline: 2px solid var(--alloy-color-accent-primary);
-    outline-offset: 2px;
   }
   .card {
     background: var(--alloy-color-surface-subtle);

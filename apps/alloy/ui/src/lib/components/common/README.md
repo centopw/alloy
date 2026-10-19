@@ -78,6 +78,18 @@ Text-first button with optional leading icon. Variants: primary (accent), ghost 
 - `children?: Snippet` - Button text/content
 - `class?: string` - CSS class
 
+### Select
+
+Accessible custom dropdown trigger (`aria-haspopup="menu"`) that opens the app-wide context menu on desktop and an action sheet on phones. Shows the selected label with a chevron, supports roving keyboard navigation, and marks the current option with a selected checkmark.
+
+### TextField
+
+Design-system text input wrapping `<input>` with support for leading icon, bindable value and element ref, error/invalid styling, and 44px touch targets on mobile.
+
+### TextArea
+
+Design-system multiline text input wrapping `<textarea>` with bindable value and element ref, token styling, error states, and optional automatic height expansion via `rows` and `maxRows`.
+
 ## Tokens Used
 
 - `--alloy-color-accent-primary`: Primary action, toggle checked state

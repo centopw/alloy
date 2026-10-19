@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Button } from '$lib/components/common';
+  import { Button, TextField } from '$lib/components/common';
   import { SettingGroup } from '$lib/components/settings/controls';
   import { client } from '$lib/ipc';
   import type { SessionInfoDto } from '$lib/generated/index.js';
@@ -144,7 +144,7 @@
           void recover();
         }}
       >
-        <input
+        <TextField
           type="password"
           bind:value={recoveryInput}
           placeholder="Recovery key"
@@ -162,7 +162,7 @@
           void enable();
         }}
       >
-        <input
+        <TextField
           type="password"
           bind:value={password}
           placeholder="Account password"
@@ -264,17 +264,6 @@
     display: flex;
     gap: var(--alloy-spacing-scale-2);
   }
-  input[type='password'] {
-    flex: 1;
-    min-width: 0;
-    font: inherit;
-    color: var(--alloy-color-text-primary);
-    background: var(--alloy-color-surface-subtle);
-    border: 1px solid var(--alloy-color-border-subtle);
-    border-radius: var(--alloy-radii-md);
-    padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
-  }
-  input[type='password']:focus-visible,
   input[type='checkbox']:focus-visible {
     outline: 2px solid var(--alloy-color-accent-primary);
     outline-offset: 2px;

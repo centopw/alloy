@@ -18,6 +18,7 @@
   import type { MenuItem } from '$lib/stores/contextmenu.svelte';
   import MediaView from './MediaView.svelte';
   import PollView from './PollView.svelte';
+  import ReplyQuote, { quote } from './ReplyQuote.svelte';
 
   interface Props {
     item: TimelineItemDto;
@@ -63,6 +64,7 @@
   const canEdit = $derived(item.is_own && kind === 'TextMessage' && !!item.event_id);
   const canAct = $derived(!!item.event_id && (kind === 'TextMessage' || kind === 'Media'));
   const canCopy = $derived(kind === 'TextMessage');
+  const highlighted = $derived(!!item.event_id && timelineStore.highlightedEventId === item.event_id);
 
   let picker = $state(false);
   let pickerPos = $state({ x: 0, y: 0 });
@@ -99,14 +101,6 @@
   function react(key: string) {
     picker = false;
     void timelineStore.toggleReaction(item, key);
-  }
-
-
-  function quote(it: TimelineItemDto): string {
-    const c = it.content;
-    if (c.kind === 'TextMessage') return c.data.body;
-    if (c.kind === 'Media') return c.data.body || 'Attachment';
-    return '';
   }
 
   /** Context-menu entries for this message. Groups that do not apply are omitted, not disabled. */
@@ -147,7 +141,7 @@
 {:else if item.content.kind === 'Virtual'}
   <div class="spacer"></div>
 {:else}
-  <div class="row" class:grouped class:own={item.is_own} class:jumbo data-layout={layout} data-event-id={item.event_id ?? undefined} bind:this={rowEl} use:contextmenu={menuItems}>
+  <div class="row" class:grouped class:own={item.is_own} class:jumbo class:highlighted data-layout={layout} data-event-id={item.event_id ?? undefined} bind:this={rowEl} use:contextmenu={menuItems}>
     <div class="gutter">
       {#if layout === 'irc' || (layout === 'modern' && grouped)}
         <span class="gutter-time">{time}</span>
@@ -173,9 +167,8 @@
 
       <div class="bubble">
         {#if item.reply_to}
-          <div class="reply">
-            <UserName userId={item.reply_to.sender} displayName={item.reply_to.sender_display_name} roomId={timelineStore.roomId} interactive />
-            <span class="reply-body">{quote(item.reply_to)}</span>
+          <div class="reply-slot">
+            <ReplyQuote replyTo={item.reply_to} inOwnBubble={layout === 'bubbles' && item.is_own} />
           </div>
         {/if}
 
@@ -312,6 +305,9 @@
       background: var(--alloy-color-surface-hover);
     }
   }
+  .row.highlighted {
+    background: var(--alloy-color-accent-subtle);
+  }
   .gutter {
     flex: none;
     width: 56px;
@@ -347,36 +343,6 @@
     font-size: var(--alloy-typography-size-xs);
     color: var(--alloy-color-text-muted);
     white-space: nowrap;
-  }
-  .reply {
-    position: relative;
-    display: flex;
-    align-items: baseline;
-    gap: var(--alloy-spacing-scale-2);
-    min-width: 0;
-    margin-bottom: 2px;
-    order: -1;
-    padding-left: var(--alloy-spacing-scale-4);
-    font-size: var(--alloy-typography-size-sm);
-  }
-  /* Curved connector: drops from the top of the quote and bends into its text. */
-  .reply::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: var(--alloy-spacing-scale-3);
-    height: 50%;
-    border-left: 2px solid var(--alloy-color-border-prominent);
-    border-bottom: 2px solid var(--alloy-color-border-prominent);
-    border-bottom-left-radius: var(--alloy-radii-sm);
-  }
-  .reply-body {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: var(--alloy-color-text-secondary);
   }
   .body {
     min-width: 0;
@@ -673,7 +639,7 @@
     flex: 1 1 0;
     min-width: 0;
   }
-  .row[data-layout='irc'] .reply,
+  .row[data-layout='irc'] .reply-slot,
   .row[data-layout='irc'] .block,
   .row[data-layout='irc'] .state,
   .row[data-layout='irc'] .failed-actions,
@@ -714,18 +680,19 @@
   .row.grouped.own[data-layout='bubbles'] .bubble {
     border-top-right-radius: var(--alloy-radii-sm);
   }
-  @media (hover: hover) {
-    .row[data-layout='bubbles']:hover .bubble-time,
-    .row[data-layout='bubbles']:focus-within .bubble-time {
-      display: block;
-      text-align: right;
-      font-size: var(--alloy-typography-size-xs);
-      color: var(--alloy-color-text-muted);
-    }
+  /* The time is always present: showing it only on hover grew the bubble and shifted every message below. */
+  .row[data-layout='bubbles'] .bubble-time {
+    display: block;
+    text-align: right;
+    font-size: var(--alloy-typography-size-xs);
+    color: var(--alloy-color-text-muted);
   }
   .row.jumbo[data-layout='bubbles'] .bubble {
     padding: 0;
     background: none;
+  }
+  .row.highlighted[data-layout='bubbles'] .bubble {
+    box-shadow: 0 0 0 2px var(--alloy-color-accent-primary);
   }
 
   /* Phone: full-width rows, 44px touch targets, reaction picker as a bottom sheet. */
@@ -812,14 +779,8 @@
     }
   }
 
-  /* Touch devices have no hover: bubble times and gutter times stay visible. */
+  /* Touch devices have no hover: gutter times stay visible. */
   @media (hover: none) {
-    .row[data-layout='bubbles'] .bubble-time {
-      display: block;
-      text-align: right;
-      font-size: var(--alloy-typography-size-xs);
-      color: var(--alloy-color-text-muted);
-    }
     .row .gutter-time {
       opacity: 1;
     }

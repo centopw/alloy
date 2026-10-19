@@ -1,14 +1,16 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import Icon from '$lib/icons/Icon.svelte';
+  import { Check } from '$lib/icons';
   import { portal } from '$lib/platform/portal';
   import { pushBack } from '$lib/platform/backstack';
-  import { placeMenu } from '$lib/platform/contextmenu';
+  import { placeAnchor, placeMenu } from '$lib/platform/contextmenu';
   import {
     contextMenu,
     isSeparator,
     type MenuAction,
     type MenuItem,
+    type MenuOptions,
     type MenuPoint,
   } from '$lib/stores/contextmenu.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
@@ -22,16 +24,39 @@
   let typed = '';
   let typedTimer: number | null = null;
 
-  /** Position the menu at contextMenu.at, flipping and clamping to the viewport after each measure. */
-  function place(node: HTMLElement, _deps: { at: MenuPoint; items: MenuItem[] }) {
+  /** Position the menu at contextMenu.at or contextMenu.options.anchor, flipping and clamping to the viewport. */
+  function place(
+    node: HTMLElement,
+    _deps: { at: MenuPoint; items: MenuItem[]; options?: MenuOptions },
+  ) {
     // Phone: the menu is a bottom sheet placed by CSS, so no coordinates are applied.
     if (viewport.isPhone) return;
     const apply = () => {
-      const p = placeMenu(
-        contextMenu.at,
-        { width: node.offsetWidth, height: node.offsetHeight },
-        { width: window.innerWidth, height: window.innerHeight },
-      );
+      const opts = contextMenu.options;
+      if (opts?.anchor && opts.matchWidth) {
+        node.style.width = `${opts.anchor.width}px`;
+        node.style.minWidth = `${opts.anchor.width}px`;
+        node.style.maxWidth = 'none';
+      } else if (opts?.minWidth) {
+        node.style.minWidth = `${opts.minWidth}px`;
+        node.style.maxWidth = '';
+        node.style.width = '';
+      } else {
+        node.style.width = '';
+        node.style.minWidth = '';
+        node.style.maxWidth = '';
+      }
+      const p = opts?.anchor
+        ? placeAnchor(
+            opts.anchor,
+            { width: node.offsetWidth, height: node.offsetHeight },
+            { width: window.innerWidth, height: window.innerHeight },
+          )
+        : placeMenu(
+            contextMenu.at,
+            { width: node.offsetWidth, height: node.offsetHeight },
+            { width: window.innerWidth, height: window.innerHeight },
+          );
       node.style.left = `${p.x}px`;
       node.style.top = `${p.y}px`;
     };
@@ -42,7 +67,9 @@
   function enabledItems(): HTMLElement[] {
     if (!menuEl) return [];
     return Array.from(
-      menuEl.querySelectorAll<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"])'),
+      menuEl.querySelectorAll<HTMLElement>(
+        '[role="menuitem"]:not([aria-disabled="true"]), [role="menuitemradio"]:not([aria-disabled="true"])',
+      ),
     );
   }
 
@@ -124,11 +151,20 @@
     (e.currentTarget as HTMLElement).focus({ preventScroll: true });
   }
 
-  // Focus the first enabled item whenever the menu opens or its items are replaced.
+  // Focus the first enabled item (or the selected item if present) whenever the menu opens or its items are replaced.
   $effect(() => {
     void contextMenu.items;
     if (!contextMenu.isOpen) return;
-    tick().then(() => enabledItems()[0]?.focus({ preventScroll: true }));
+    tick().then(() => {
+      const selected = menuEl?.querySelector<HTMLElement>(
+        '[role="menuitemradio"][aria-checked="true"]:not([aria-disabled="true"])',
+      );
+      if (selected) {
+        selected.focus({ preventScroll: true });
+      } else {
+        enabledItems()[0]?.focus({ preventScroll: true });
+      }
+    });
   });
 
   // Keep the Android Back button closing the menu before leaving the app (phone layouts only).
@@ -189,9 +225,9 @@
     class="context-menu"
     class:sheet={viewport.isPhone}
     role="menu"
-    aria-label="Actions"
+    aria-label={contextMenu.options?.ariaLabel ?? 'Actions'}
     use:portal
-    use:place={{ at: contextMenu.at, items: contextMenu.items }}
+    use:place={{ at: contextMenu.at, items: contextMenu.items, options: contextMenu.options }}
   >
     {#each contextMenu.items as item, i (i)}
       {#if isSeparator(item)}
@@ -201,8 +237,10 @@
           class="item"
           class:danger={item.danger}
           class:disabled={item.disabled}
-          role="menuitem"
+          class:selected={item.selected}
+          role={item.selected !== undefined ? 'menuitemradio' : 'menuitem'}
           tabindex="-1"
+          aria-checked={item.selected !== undefined ? (item.selected ? 'true' : 'false') : undefined}
           aria-disabled={item.disabled ? 'true' : undefined}
           aria-keyshortcuts={item.shortcut}
           onclick={() => selectByPointer(item)}
@@ -215,6 +253,8 @@
           <span class="label">{item.label}</span>
           {#if item.shortcut}
             <kbd class="shortcut">{item.shortcut}</kbd>
+          {:else if item.selected}
+            <span class="check"><Icon icon={Check} size={viewport.isPhone ? 20 : 16} /></span>
           {/if}
         </div>
       {/if}
@@ -281,6 +321,16 @@
     cursor: default;
   }
 
+  .check {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    color: var(--alloy-color-accent-primary);
+  }
+
+  .item.selected {
+    font-weight: var(--alloy-typography-weight-medium);
+  }
   .icon {
     display: inline-flex;
     flex: none;

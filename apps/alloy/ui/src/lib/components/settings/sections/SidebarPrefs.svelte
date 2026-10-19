@@ -1,10 +1,13 @@
 <script lang="ts">
   import { SettingGroup, SettingToggle } from '$lib/components/settings/controls';
   import { prefs } from '$lib/stores/prefs.svelte';
-</script>
+  import { viewport } from '$lib/stores/viewport.svelte';
+  import { capabilities, currentEnv } from '$lib/platform/capabilities';
 
+  const caps = $derived(capabilities(currentEnv(viewport.isPhone)));
+</script>
 <div class="section">
-  <SettingGroup title="Room list">
+  <SettingGroup title={caps.sidebarLayout ? 'Room list' : 'Chat list'}>
     <SettingToggle
       label="Show message previews"
       description="Show the latest message under each room name."

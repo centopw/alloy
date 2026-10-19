@@ -7,6 +7,7 @@
  */
 import { client } from '../ipc/index.js';
 import { viewport } from './viewport.svelte.js';
+import { ROOM_SORTS, type RoomSort } from './roomSort.js';
 
 export const PREFS_STORAGE_KEY = 'alloy.prefs.v1';
 export const PREFS_ENGINE_KEY = 'prefs';
@@ -39,6 +40,7 @@ export interface Prefs {
   autoplayMedia: boolean;
   enterToSend: boolean;
   launchAtLogin: boolean;
+  roomSort: RoomSort;
 }
 
 export type PrefKey = keyof Prefs;
@@ -69,6 +71,7 @@ export const DEFAULT_PREFS: Readonly<Prefs> = Object.freeze({
   autoplayMedia: false,
   enterToSend: true,
   launchAtLogin: false,
+  roomSort: 'activity',
 });
 
 /**
@@ -85,6 +88,7 @@ const ENUM_VALUES = {
   messageLayout: ['modern', 'bubbles', 'irc'],
   fontScale: [90, 100, 110, 120, 130],
   timeFormat: ['auto', '12h', '24h'],
+  roomSort: ROOM_SORTS,
 } as const satisfies Partial<{ [K in PrefKey]: readonly Prefs[K][] }>;
 
 type EnumKey = keyof typeof ENUM_VALUES;
@@ -222,6 +226,10 @@ export class PrefsStore {
   }
   get launchAtLogin(): boolean {
     return this.#values.launchAtLogin;
+  }
+
+  get roomSort(): RoomSort {
+    return this.#values.roomSort;
   }
 
   get<K extends PrefKey>(key: K): Prefs[K] {

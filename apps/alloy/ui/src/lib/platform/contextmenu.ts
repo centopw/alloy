@@ -3,7 +3,7 @@
  * Use as `<div use:contextmenu={() => buildItems()}>`; the factory runs on each trigger so the items
  * always reflect current state.
  */
-import { contextMenu, type MenuItem, type MenuPoint } from '$lib/stores/contextmenu.svelte';
+import { contextMenu, type MenuAnchor, type MenuItem, type MenuPoint } from '$lib/stores/contextmenu.svelte';
 
 const LONG_PRESS_MS = 500;
 const LONG_PRESS_SLOP_PX = 8;
@@ -34,6 +34,34 @@ export function placeMenu(
   if (y + size.height > viewport.height - margin) y = at.y - size.height;
   x = Math.max(margin, Math.min(x, viewport.width - size.width - margin));
   y = Math.max(margin, Math.min(y, viewport.height - size.height - margin));
+  return { x, y };
+}
+
+/**
+ * Place a menu of `size` relative to `anchor`: open directly below by default, matching its width
+ * when requested, flip above when it overflows bottom, and clamp inside the viewport with `margin`.
+ */
+export function placeAnchor(
+  anchor: MenuAnchor,
+  size: MenuSize,
+  viewport: MenuViewport,
+  margin = 8,
+  gap = 4,
+): MenuPoint {
+  let x = anchor.x;
+  if (x + size.width > viewport.width - margin) {
+    x = anchor.x + anchor.width - size.width;
+  }
+  x = Math.max(margin, Math.min(x, viewport.width - size.width - margin));
+
+  let y = anchor.y + anchor.height + gap;
+  if (y + size.height > viewport.height - margin) {
+    const spaceAbove = anchor.y - gap - margin;
+    const spaceBelow = viewport.height - margin - (anchor.y + anchor.height + gap);
+    if (spaceAbove >= size.height || spaceAbove > spaceBelow) {
+      y = Math.max(margin, anchor.y - size.height - gap);
+    }
+  }
   return { x, y };
 }
 

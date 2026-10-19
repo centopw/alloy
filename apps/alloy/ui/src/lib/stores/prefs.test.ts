@@ -103,6 +103,7 @@ describe('defaults', () => {
       autoplayMedia: false,
       enterToSend: true,
       launchAtLogin: false,
+      roomSort: 'activity',
     });
   });
 
@@ -117,6 +118,7 @@ describe('defaults', () => {
     expect(store.timeFormat).toBe('auto');
     expect(store.autoplayMedia).toBe(false);
     expect(store.launchAtLogin).toBe(false);
+    expect(store.roomSort).toBe('activity');
     expect(store.enterToSend).toBe(true);
     expect(store.get('notifyDesktop')).toBe(true);
     expect(store.ready).toBe(false);

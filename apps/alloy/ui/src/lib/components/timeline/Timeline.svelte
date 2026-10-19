@@ -3,7 +3,7 @@
   import { VList } from 'virtua/svelte';
   import type { VListHandle } from 'virtua/svelte';
   import type { TimelineItemDto } from '$lib/generated';
-  import { timelineStore } from '$lib/stores/timeline.svelte';
+  import { timelineStore, findRowIndexByEventId } from '$lib/stores/timeline.svelte';
   import { membersStore } from '$lib/stores/members.svelte';
   import { prefs } from '$lib/stores/prefs.svelte';
   import { isHiddenState } from '$lib/content/stateEvents';
@@ -72,6 +72,16 @@
     }
     lastFirst = first;
     lastLen = len;
+  });
+
+  // Jump to message requested by a reply quote or other caller.
+  $effect(() => {
+    const target = timelineStore.jumpTarget;
+    if (!target) return;
+    const index = findRowIndexByEventId(rows, target.eventId);
+    if (index >= 0) {
+      vlist?.scrollToIndex(index, { align: 'center' });
+    }
   });
 
   // A room opens with only its newest few events. When they do not fill the viewport there is nothing

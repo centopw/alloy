@@ -15,10 +15,21 @@
     SlidersHorizontal,
     Keyboard as KeyboardIcon,
     PanelLeft,
-    Info
+    MessageSquare,
+    Info,
+    Tag
   } from '$lib/icons';
   import { session } from '$lib/stores/session.svelte';
   import { pushBack } from '$lib/platform/backstack';
+  import { viewport } from '$lib/stores/viewport.svelte';
+  import {
+    capabilities,
+    currentEnv,
+    filterSettingsGroups,
+    SETTINGS_GROUPS_DEF,
+    type RawSettingsGroup,
+    type SettingsSectionId,
+  } from '$lib/platform/capabilities';
 import Account from './sections/Account.svelte';
 import Devices from './sections/Devices.svelte';
 import Appearance from './sections/Appearance.svelte';
@@ -29,6 +40,7 @@ import SidebarPrefs from './sections/SidebarPrefs.svelte';
 import SecurityPrivacy from './sections/SecurityPrivacy.svelte';
 import Encryption from './sections/Encryption.svelte';
 import HelpAbout from './sections/HelpAbout.svelte';
+import Tags from './sections/Tags.svelte';
 
   interface Props {
     open: boolean;
@@ -36,50 +48,49 @@ import HelpAbout from './sections/HelpAbout.svelte';
   }
   let { open, onclose }: Props = $props();
 
-  type Section =
-    | 'account'
-    | 'devices'
-    | 'appearance'
-    | 'notifications'
-    | 'preferences'
-    | 'keyboard'
-    | 'sidebar'
-    | 'security-privacy'
-    | 'encryption'
-    | 'help-about';
+  type Section = SettingsSectionId;
 
   type NavIcon = Component<{ size?: number; strokeWidth?: number; class?: string }>;
 
-  const GROUPS: { label: string; items: { id: Section; label: string; icon: NavIcon }[] }[] = [
-    {
-      label: 'User settings',
-      items: [
-        { id: 'account', label: 'Account', icon: User },
-        { id: 'devices', label: 'Devices', icon: Smartphone },
-        { id: 'security-privacy', label: 'Security & Privacy', icon: ShieldCheck },
-        { id: 'encryption', label: 'Encryption', icon: Lock },
-      ],
-    },
-    {
-      label: 'App settings',
-      items: [
-        { id: 'appearance', label: 'Appearance', icon: Palette },
-        { id: 'notifications', label: 'Notifications', icon: Bell },
-        { id: 'preferences', label: 'Preferences', icon: SlidersHorizontal },
-        { id: 'keyboard', label: 'Keyboard', icon: KeyboardIcon },
-        { id: 'sidebar', label: 'Sidebar', icon: PanelLeft },
-      ],
-    },
-    {
-      label: 'Info',
-      items: [{ id: 'help-about', label: 'Help & About', icon: Info }],
-    },
-  ];
+  // Icons for each section. The record is exhaustive, so a new section id cannot ship without one.
+  const NAV_ICONS: Record<SettingsSectionId, { icon: NavIcon; phoneIcon?: NavIcon }> = {
+    account: { icon: User },
+    devices: { icon: Smartphone },
+    'security-privacy': { icon: ShieldCheck },
+    encryption: { icon: Lock },
+    appearance: { icon: Palette },
+    notifications: { icon: Bell },
+    preferences: { icon: SlidersHorizontal },
+    keyboard: { icon: KeyboardIcon },
+    sidebar: { icon: PanelLeft, phoneIcon: MessageSquare },
+    tags: { icon: Tag },
+    'help-about': { icon: Info },
+  };
+
+  const GROUPS: RawSettingsGroup<NavIcon>[] = SETTINGS_GROUPS_DEF.map((group) => ({
+    ...group,
+    items: group.items.map((item) => ({
+      ...item,
+      icon: NAV_ICONS[item.id].icon,
+      phoneIcon: NAV_ICONS[item.id].phoneIcon,
+    })),
+  }));
+
+  const caps = $derived(capabilities(currentEnv(viewport.isPhone)));
+  const visibleGroups = $derived(filterSettingsGroups(GROUPS, caps));
+  const visibleSections = $derived(visibleGroups.flatMap((group) => group.items));
 
   let section = $state<Section>('account');
+
+  // If the stored section is no longer available after a viewport change, fall back to the first available section.
+  $effect(() => {
+    if (visibleSections.length > 0 && !visibleSections.some((item) => item.id === section)) {
+      section = visibleSections[0].id;
+    }
+  });
+
   // Shared header band: the content column title matches the nav title for the selected section.
-  const sectionLabel = $derived(GROUPS.flatMap((group) => group.items).find((item) => item.id === section)?.label ?? '');
-  // Phones show either the section list or one section; wide layouts show both side by side.
+  const sectionLabel = $derived(visibleSections.find((item) => item.id === section)?.label ?? '');
   let mobileView = $state<'nav' | 'content'>('nav');
 
   function openSection(id: Section) {
@@ -181,7 +192,7 @@ import HelpAbout from './sections/HelpAbout.svelte';
           </button>
         </header>
 
-        {#each GROUPS as group (group.label)}
+        {#each visibleGroups as group (group.label)}
           <div class="group">
             <h3 class="group-label">{group.label}</h3>
             {#each group.items as item (item.id)}
@@ -191,7 +202,9 @@ import HelpAbout from './sections/HelpAbout.svelte';
                 aria-current={section === item.id ? 'page' : undefined}
                 onclick={() => openSection(item.id)}
               >
-                <span class="nav-icon"><Icon icon={item.icon} size={20} /></span>
+                {#if item.icon}
+                  <span class="nav-icon"><Icon icon={item.icon} size={20} /></span>
+                {/if}
                 <span class="nav-label">{item.label}</span>
                 <span class="nav-chevron"><Icon icon={ChevronRight} size={20} /></span>
               </button>
@@ -234,6 +247,8 @@ import HelpAbout from './sections/HelpAbout.svelte';
               <Keyboard />
             {:else if section === 'sidebar'}
               <SidebarPrefs />
+            {:else if section === 'tags'}
+              <Tags />
             {:else if section === 'security-privacy'}
               <SecurityPrivacy />
             {:else if section === 'encryption'}

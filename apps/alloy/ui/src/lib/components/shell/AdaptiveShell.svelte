@@ -5,7 +5,6 @@
   import ChatHeader from './ChatHeader.svelte';
   import SpaceChips from './SpaceChips.svelte';
   import MobileTabBar from './MobileTabBar.svelte';
-  import MembersPanel from './MembersPanel.svelte';
   import RoomInfoPanel from './RoomInfoPanel.svelte';
   import CommandPalette from './CommandPalette.svelte';
   import Timeline from '../timeline/Timeline.svelte';
@@ -20,6 +19,7 @@
   import Hud from '../dev/Hud.svelte';
   import { pushBack } from '$lib/platform/backstack';
   import { roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
+  import { tags } from '$lib/stores/tags.svelte';
   import { layout, LAYOUT_LIMITS } from '$lib/stores/layout.svelte';
   import { ui } from '$lib/stores/ui.svelte';
   import { threadStore } from '$lib/stores/thread.svelte';
@@ -43,22 +43,18 @@
   );
 
   const active = $derived(roomsStore.active);
-  // A string-valued derived: unlike `active` (a new object on every room update) it only changes
-  // when the open room changes, so the timeline is not reopened on each unread/preview update.
   const activeId = $derived(roomsStore.active?.id ?? null);
-
   // An open thread takes the side column (wide) or the full overlay (below 1100) and hides the
-  // room info and members panels while it is open.
+  // room info panel while it is open.
   const threadOpen = $derived(Boolean(threadStore.roomId && threadStore.rootEventId));
   const threadMode = $derived<'column' | 'overlay' | 'none'>(
     !threadOpen ? 'none' : breakpoint === 'wide' ? 'column' : 'overlay'
   );
 
-  // Room info and members share one side slot; room info wins when both flags are set.
-  const infoPanel = $derived<'room-info' | 'members' | 'none'>(
-    !activeId || threadOpen ? 'none' : ui.roomInfoOpen ? 'room-info' : ui.membersOpen ? 'members' : 'none'
+  // Room info takes the side slot.
+  const infoPanel = $derived<'room-info' | 'none'>(
+    !activeId || threadOpen ? 'none' : ui.roomInfoOpen ? 'room-info' : 'none'
   );
-
   // Wide: a side column. Medium: a rounded overlay over the chat. Narrow: the same overlay, shown
   // only while a chat is open (the list pane has no chat).
   const infoMode = $derived<'column' | 'overlay' | 'none'>(
@@ -81,7 +77,7 @@
   );
   const unreadTotal = $derived(
     roomsStore.rooms.reduce(
-      (sum, r) => sum + (r.is_space ? 0 : r.unread_notifications.notification_count),
+      (sum, r) => sum + (r.is_space ? 0 : roomsStore.unreadOf(r)),
       0
     )
   );
@@ -96,12 +92,14 @@
     void prefs.load();
     verification.listen();
     void roomsStore.start();
+    void tags.load();
     void verification.refreshRecovery();
     void notificationSettings.load();
     notifier.start();
     return () => {
       notifier.stop();
       void roomsStore.stop();
+      tags.reset();
       teardownPrefs();
     };
   });
@@ -129,11 +127,10 @@
     return pushBack(() => threadStore.close());
   });
 
-  // On phones an open room info or member overlay takes a Back entry, so Back closes it before the chat.
+  // On phones an open room info overlay takes a Back entry, so Back closes it before the chat.
   $effect(() => {
     if (breakpoint !== 'narrow' || infoMode !== 'overlay') return;
     if (infoPanel === 'room-info') return pushBack(() => ui.closeRoomInfo());
-    if (infoPanel === 'members') return pushBack(() => (ui.membersOpen = false));
     return;
   });
 
@@ -246,14 +243,7 @@
 
   {#if infoMode !== 'none' && activeId}
     <div class="side">
-      {#if infoPanel === 'room-info'}
-        <RoomInfoPanel roomId={activeId} initialTab={ui.roomInfoTab} onclose={() => ui.closeRoomInfo()} />
-      {:else}
-        <MembersPanel
-          roomId={activeId}
-          onclose={infoMode === 'overlay' ? () => (ui.membersOpen = false) : undefined}
-        />
-      {/if}
+      <RoomInfoPanel roomId={activeId} initialTab={ui.roomInfoTab} onclose={() => ui.closeRoomInfo()} />
     </div>
   {/if}
   {#if threadMode !== 'none'}
@@ -382,7 +372,7 @@
   .shell[data-layout='narrow'][data-pane='chat'] .nav {
     display: none;
   }
-  /* Room info and members take the whole screen, sliding in from the right. */
+  /* Room info takes the whole screen, sliding in from the right. */
   .shell[data-layout='narrow'][data-side='overlay'] .side {
     position: fixed;
     inset: 0;

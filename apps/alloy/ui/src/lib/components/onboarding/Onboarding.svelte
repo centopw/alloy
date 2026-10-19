@@ -1,6 +1,6 @@
 <script lang="ts">
   import UpdateBanner from '../shell/UpdateBanner.svelte';
-  import { Button } from '../common';
+  import { Button, TextField } from '../common';
   import { session } from '$lib/stores/session.svelte';
   import { errorMessage } from '$lib/stores/errors';
 
@@ -50,13 +50,13 @@
       <form onsubmit={continueServer}>
         <label>
           <span>Server</span>
-          <input
+          <TextField
             type="text"
             bind:value={serverInput}
             placeholder="matrix.org or https://chat.example.com"
             autocomplete="off"
             autocapitalize="off"
-            spellcheck="false"
+            spellcheck={false}
             required
           />
         </label>
@@ -70,18 +70,18 @@
       <form onsubmit={signIn}>
         <label>
           <span>Username</span>
-          <input
+          <TextField
             type="text"
             bind:value={username}
             autocomplete="username"
             autocapitalize="off"
-            spellcheck="false"
+            spellcheck={false}
             required
           />
         </label>
         <label>
           <span>Password</span>
-          <input type="password" bind:value={password} autocomplete="current-password" required />
+          <TextField type="password" bind:value={password} autocomplete="current-password" required />
         </label>
         {#if localError}<p class="error" role="alert">{localError}</p>{/if}
         <Button type="submit" size="lg" disabled={session.busy || !username || !password}>
@@ -129,18 +129,6 @@
     font-size: 0.85rem;
     color: var(--alloy-color-text-secondary);
   }
-  input {
-    font: inherit;
-    color: var(--alloy-color-text-primary);
-    background: var(--alloy-color-surface-elevated, var(--alloy-color-surface-canvas));
-    border: 1px solid var(--alloy-color-border-subtle, rgba(128, 128, 128, 0.35));
-    border-radius: var(--alloy-radii-md, 10px);
-    padding: 10px 12px;
-  }
-  input:focus-visible {
-    outline: 2px solid var(--alloy-color-accent-primary);
-    outline-offset: 1px;
-  }
   .error {
     margin: 0;
     color: var(--alloy-color-status-error, #e5484d);
@@ -167,11 +155,6 @@
       width: 100%;
     }
     .lead {
-      font-size: var(--alloy-typography-size-lg);
-    }
-    input {
-      box-sizing: border-box;
-      min-height: 44px;
       font-size: var(--alloy-typography-size-lg);
     }
     .error {

@@ -3,6 +3,7 @@ import type { EngineEvent, TimelineItemDto } from '../generated/index.js';
 import { FrameBatcher, Subscription } from './subscription.js';
 import { errorMessage, expect } from './errors.js';
 import { uploadsStore } from './uploads.svelte.js';
+import { roomsStore } from './rooms.svelte.js';
 
 type TimelineDiffEvent = Extract<EngineEvent, { type: 'TimelineDiff' }>;
 
@@ -16,7 +17,11 @@ class TimelineStore {
   error = $state<string | null>(null);
   replyTo = $state<TimelineItemDto | null>(null);
   editing = $state<TimelineItemDto | null>(null);
+  highlightedEventId = $state<string | null>(null);
+  jumpTarget = $state<{ eventId: string; seq: number } | null>(null);
 
+  private jumpSeq = 0;
+  private highlightTimer: number | NodeJS.Timeout | null = null;
   private sub: Subscription<TimelineDiffEvent> | null = null;
   private batcher: FrameBatcher<TimelineDiffEvent> | null = null;
   private unlisten: (() => void) | null = null;
@@ -65,6 +70,12 @@ class TimelineStore {
     this.replyTo = null;
     this.editing = null;
     this.lastReceiptEvent = null;
+    if (this.highlightTimer) {
+      clearTimeout(this.highlightTimer);
+      this.highlightTimer = null;
+    }
+    this.highlightedEventId = null;
+    this.jumpTarget = null;
     if (id) await client.unsubscribe(id).catch(() => {});
   }
 
@@ -177,6 +188,7 @@ class TimelineStore {
   /** Report the newest confirmed event as read (call when the user is at the bottom). */
   async markRead() {
     if (!this.roomId) return;
+    roomsStore.markRead(this.roomId);
     for (let i = this.items.length - 1; i >= 0; i--) {
       const id = this.items[i].event_id;
       if (id) {
@@ -203,6 +215,39 @@ class TimelineStore {
     this.replyTo = null;
     this.editing = null;
   }
+
+  /** Jump to an event in the timeline, scrolling to it and briefly highlighting it. */
+  jumpTo(eventId: string) {
+    if (this.highlightTimer) {
+      clearTimeout(this.highlightTimer);
+      this.highlightTimer = null;
+    }
+    this.highlightedEventId = eventId;
+    this.jumpTarget = { eventId, seq: ++this.jumpSeq };
+    this.highlightTimer = setTimeout(() => {
+      if (this.highlightedEventId === eventId) {
+        this.highlightedEventId = null;
+      }
+    }, 2000);
+  }
+
+  /** Check if an event is currently loaded in the timeline. */
+  hasEvent(eventId: string | null | undefined): boolean {
+    if (!eventId) return false;
+    return this.items.some((item) => item.event_id === eventId);
+  }
+}
+
+/**
+ * Maps an event ID to its index in the timeline rows array.
+ * Returns -1 if the event ID is not found or invalid.
+ */
+export function findRowIndexByEventId(
+  rows: Array<{ event_id?: string | null }>,
+  eventId: string | null | undefined
+): number {
+  if (!eventId) return -1;
+  return rows.findIndex((r) => r.event_id === eventId);
 }
 
 export const timelineStore = new TimelineStore();

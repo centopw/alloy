@@ -2,6 +2,8 @@
   import { SettingGroup } from '$lib/components/settings/controls';
   import { modKey } from '$lib/platform/shortcuts';
   import { prefs } from '$lib/stores/prefs.svelte';
+  import { viewport } from '$lib/stores/viewport.svelte';
+  import { capabilities, currentEnv } from '$lib/platform/capabilities';
 
   // A chord is a list of keys pressed together. Each row lists alternative chords.
   type Chord = string[];
@@ -10,7 +12,7 @@
 
   const mod = modKey();
   const enterToSend = $derived(prefs.enterToSend);
-
+  const caps = $derived(capabilities(currentEnv(viewport.isPhone)));
   const groups: Group[] = $derived([
     {
       title: 'Global',
@@ -48,14 +50,18 @@
         { action: 'Turn a switch on or off', chords: [['Space'], ['Enter']] },
       ],
     },
-    {
-      title: 'Layout',
-      rows: [
-        { action: 'Resize a focused panel divider', chords: [['←'], ['→']] },
-        { action: 'Resize a focused panel divider in larger steps', chords: [['Shift', '←'], ['Shift', '→']] },
-        { action: 'Set a focused panel divider to its minimum or maximum width', chords: [['Home'], ['End']] },
-      ],
-    },
+    ...(caps.resizablePanels
+      ? [
+          {
+            title: 'Layout',
+            rows: [
+              { action: 'Resize a focused panel divider', chords: [['←'], ['→']] },
+              { action: 'Resize a focused panel divider in larger steps', chords: [['Shift', '←'], ['Shift', '→']] },
+              { action: 'Set a focused panel divider to its minimum or maximum width', chords: [['Home'], ['End']] },
+            ],
+          },
+        ]
+      : []),
   ]);
 </script>
 

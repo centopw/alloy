@@ -259,6 +259,17 @@ try {
   await page.click('aside[aria-label=Thread] button[aria-label="Close thread"]');
   await page.waitForFunction(() => !document.querySelector('aside[aria-label=Thread]'), { timeout: 10000 });
 
+  step('reply to a message: the quote shows the full sender name above the reply text');
+  await bobRow.asElement().hover();
+  await page.evaluate((row) => row.querySelector('button[aria-label="Reply"]').click(), bobRow);
+  await page.click('textarea[aria-label=Message]');
+  await page.type('textarea[aria-label=Message]', 'a quoted reply');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => !!document.querySelector('.reply-quote'), { timeout: 30000 });
+  const quoteText = await page.$eval('.reply-quote', (q) => q.innerText);
+  if (!quoteText.includes('e2ev') || quoteText.includes('…') && quoteText.split('\n')[0].length < 6) throw new Error(`reply quote is cramped or truncated: ${quoteText}`);
+  await uxShot(page, 'reply-quote');
+
   step('edit then delete own message');
   await page.evaluate(() => {
     const row = [...document.querySelectorAll('.row.own')].find((r) => r.textContent.includes('Hello'));
@@ -286,7 +297,7 @@ try {
   await page.waitForSelector('[role=dialog] input[type=text]');
   await page.type('[role=dialog] input[type=text]', 'Created in UI');
   await page.evaluate(() => [...document.querySelectorAll('[role=dialog] button')].find((b) => b.textContent.trim() === 'Create').click());
-  await page.waitForFunction(() => [...document.querySelectorAll('button[aria-label^="Room info for"]')].some((h) => h.getAttribute('aria-label') === 'Room info for Created in UI') && document.body.innerText.includes('End-to-end encrypted'), { timeout: 60000 });
+  await page.waitForFunction(() => [...document.querySelectorAll('button[aria-label^="Room info for"]')].some((h) => h.getAttribute('aria-label') === 'Room info for Created in UI') && !!document.querySelector('section.timeline[aria-label*="end-to-end encrypted"]'), { timeout: 60000 });
   await page.click('textarea[aria-label=Message]');
   await page.type('textarea[aria-label=Message]', 'secret hello');
   await page.keyboard.press('Enter');
@@ -343,6 +354,41 @@ try {
   await page.click('button[aria-label="Close"]');
   await page.waitForFunction(() => !document.querySelector('input[aria-label="Search public rooms"]'), { timeout: 10000 });
 
+  step('tags: create one in settings, assign it from the room menu, filter by it, delete it');
+  const openTagsSettings = async () => {
+    await page.click('button[aria-label="Settings"]');
+    await page.waitForSelector('[role=dialog]');
+    await page.evaluate(() => [...document.querySelectorAll('[role=dialog] nav button, [role=dialog] button')].find((b) => b.textContent.trim() === 'Tags').click());
+    await page.waitForFunction(() => document.querySelector('[role=dialog]').innerText.includes('New tag'), { timeout: 15000 });
+  };
+  await openTagsSettings();
+  await page.evaluate(() => [...document.querySelectorAll('[role=dialog] button')].find((b) => b.textContent.includes('New tag')).click());
+  await page.waitForSelector('[role=dialog][aria-label="New tag"] input', { visible: true, timeout: 5000 });
+  await page.type('[role=dialog][aria-label="New tag"] input', 'Work');
+  await page.click('[role=dialog][aria-label="New tag"] button[aria-label="blue"]');
+  await page.evaluate(() => [...document.querySelectorAll('[role=dialog][aria-label="New tag"] button')].find((b) => b.textContent.trim() === 'Save').click());
+  await page.waitForFunction(() => document.querySelector('[role=dialog]').innerText.includes('Work') && !document.querySelector('[role=dialog][aria-label="New tag"]'), { timeout: 15000 });
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.querySelector('[role=dialog]'), { timeout: 10000 });
+  await page.evaluate(() => {
+    const row = [...document.querySelectorAll('button.row')].find((e) => e.textContent.includes('Renamed by E2E'));
+    const r = row.getBoundingClientRect();
+    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 20, clientY: r.top + 10 }));
+  });
+  await page.waitForSelector('[role=menu] [role=menuitemradio]', { visible: true, timeout: 5000 });
+  await page.evaluate(() => [...document.querySelectorAll('[role=menuitemradio]')].find((e) => e.textContent.includes('Work')).click());
+  await page.waitForFunction(() => [...document.querySelectorAll('[role=toolbar][aria-label="Filter rooms by tag"] button')].some((b) => b.textContent.includes('Work')), { timeout: 15000 });
+  await page.evaluate(() => [...document.querySelectorAll('[role=toolbar][aria-label="Filter rooms by tag"] button')].find((b) => b.textContent.includes('Work')).click());
+  await page.waitForFunction(() => { const rows = [...document.querySelectorAll('button.row')]; return rows.length > 0 && rows.every((r) => r.textContent.includes('Renamed by E2E')); }, { timeout: 15000 });
+  await openTagsSettings();
+  await page.click('[role=dialog] button[aria-label="Delete Work"]');
+  await page.waitForSelector('[role=dialog][aria-label="Delete tag"]', { visible: true, timeout: 5000 });
+  await page.evaluate(() => [...document.querySelectorAll('[role=dialog] button')].find((b) => b.textContent.trim() === 'Delete').click());
+  await page.waitForFunction(() => ![...document.querySelectorAll('[role=toolbar][aria-label="Filter rooms by tag"] button')].some((b) => b.textContent.includes('Work')), { timeout: 15000 });
+  await page.waitForFunction(() => [...document.querySelectorAll('button.row')].some((r) => !r.textContent.includes('Renamed by E2E')), { timeout: 15000 });
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.querySelector('[role=dialog]'), { timeout: 10000 });
+
   step('settings open and sign out returns to onboarding');
   await page.click('button[aria-label="Settings"]');
   await new Promise((r) => setTimeout(r, 600));
@@ -359,7 +405,13 @@ try {
   await openPage('Appearance');
   await page.evaluate(() => [...document.querySelectorAll('[role=dialog] label')].find((l) => l.textContent.includes('Bubbles')).click());
   await page.waitForFunction(() => document.documentElement.getAttribute('data-message-layout') === 'bubbles', { timeout: 5000 });
-  await page.evaluate(() => { const sel = [...document.querySelectorAll('[role=dialog] select')].find((s) => [...s.options].some((o) => o.value === '120')); sel.value = '120'; sel.dispatchEvent(new Event('change', { bubbles: true })); });
+  // Hovering must not resize a bubble (the time used to appear only on hover and push every message down).
+  const bubbleTimeShown = await page.evaluate(() => { const t = document.querySelector('.row[data-layout="bubbles"] .bubble-time'); return !!t && getComputedStyle(t).display !== 'none'; });
+  if (!bubbleTimeShown) throw new Error('bubble time is hidden until hover: hovering would shift the layout');
+  // Our own Select: open the 'Font size' trigger, then pick the 120% item from the popup menu.
+  await page.evaluate(() => document.querySelector('[role=dialog] button[aria-label^="Font size"]').click());
+  await page.waitForSelector('[role=menuitemradio]', { visible: true, timeout: 5000 });
+  await page.evaluate(() => [...document.querySelectorAll('[role=menuitemradio]')].find((i) => i.textContent.includes('120')).click());
   await page.waitForFunction(() => document.documentElement.style.fontSize === '120%', { timeout: 5000 });
   await uxShot(page, 'settings-appearance');
   await openPage('Preferences');

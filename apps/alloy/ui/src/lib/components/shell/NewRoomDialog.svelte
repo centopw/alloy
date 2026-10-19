@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Modal, Button, Toggle, SegmentedControl } from '../common';
+  import { Modal, Button, Toggle, SegmentedControl, TextField } from '../common';
   import { client } from '$lib/ipc';
   import { roomsStore } from '$lib/stores/rooms.svelte';
   import { errorMessage } from '$lib/stores/errors';
@@ -66,13 +66,13 @@
     {#if mode === 'create'}
       <label>
         <span>Room name</span>
-        <input type="text" bind:value={name} required maxlength="100" autocomplete="off" />
+        <TextField type="text" bind:value={name} required maxlength={100} autocomplete="off" />
       </label>
       <div class="row"><span>End-to-end encrypted</span><Toggle label="End-to-end encrypted" checked={encrypted} onchange={(v) => (encrypted = v)} /></div>
     {:else}
       <label>
         <span>Room address or ID</span>
-        <input type="text" bind:value={target} placeholder="#room:server.org" required autocomplete="off" autocapitalize="off" spellcheck="false" />
+        <TextField type="text" bind:value={target} placeholder="#room:server.org" required autocomplete="off" autocapitalize="off" spellcheck={false} />
       </label>
     {/if}
     {#if error}<p class="error" role="alert">{error}</p>{/if}
@@ -109,18 +109,6 @@
     font-size: var(--alloy-typography-size-sm);
     color: var(--alloy-color-text-secondary);
   }
-  input {
-    font: inherit;
-    color: var(--alloy-color-text-primary);
-    background: var(--alloy-color-surface-canvas);
-    border: 1px solid var(--alloy-color-border-subtle);
-    border-radius: var(--alloy-radii-md);
-    padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
-  }
-  input:focus-visible {
-    outline: 2px solid var(--alloy-color-accent-primary);
-    outline-offset: 1px;
-  }
   .row {
     display: flex;
     justify-content: space-between;
@@ -136,10 +124,6 @@
     color: var(--alloy-color-status-error);
   }
   @media (max-width: 899px) {
-    input {
-      min-height: 44px;
-      font-size: var(--alloy-typography-size-lg);
-    }
     .row {
       min-height: 44px;
     }

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { Avatar, Button, Modal } from '../common';
+  import { Avatar, Button, Modal, TextField } from '../common';
   import Icon from '$lib/icons/Icon.svelte';
   import { Search, Users } from '$lib/icons';
   import { client } from '$lib/ipc';
@@ -72,10 +72,10 @@
 
 <Modal {open} title="Browse public rooms" {onclose} width="480px">
   <div class="body">
-    <div class="search">
-      <Icon icon={Search} size={16} />
-      <input
+    <div class="search-wrap">
+      <TextField
         type="search"
+        icon={Search}
         aria-label="Search public rooms"
         placeholder="Search public rooms"
         autocomplete="off"
@@ -146,25 +146,8 @@
     min-height: 0;
     overflow: auto;
   }
-  .search {
-    display: flex;
-    align-items: center;
-    gap: var(--alloy-spacing-scale-2);
+  .search-wrap {
     margin-top: var(--alloy-spacing-scale-4);
-    padding: 8px 12px;
-    color: var(--alloy-color-text-muted);
-    background: var(--alloy-color-surface-subtle);
-    border: 1px solid var(--alloy-color-border-subtle);
-    border-radius: var(--alloy-radii-md);
-  }
-  .search input {
-    flex: 1;
-    min-width: 0;
-    font: inherit;
-    color: var(--alloy-color-text-primary);
-    background: transparent;
-    border: none;
-    outline: none;
   }
   .results {
     list-style: none;
@@ -251,7 +234,7 @@
     .body {
       overflow: visible;
     }
-    .search {
+    .search-wrap {
       position: sticky;
       top: 0;
       z-index: 1;
@@ -260,10 +243,6 @@
       border: 0;
       border-radius: 0;
       background: var(--alloy-color-surface-elevated);
-    }
-    .search input {
-      min-height: 44px;
-      font-size: var(--alloy-typography-size-lg);
     }
     .results {
       max-height: none;

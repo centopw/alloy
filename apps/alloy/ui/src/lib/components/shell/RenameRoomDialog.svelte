@@ -1,6 +1,5 @@
 <script lang="ts">
-  import Modal from '../common/Modal.svelte';
-  import Button from '../common/Button.svelte';
+  import { Modal, Button, TextField } from '../common';
   import { roomInfo } from '$lib/stores/roomInfo.svelte';
   import { errorMessage } from '$lib/stores/errors';
 
@@ -60,11 +59,11 @@
   <form onsubmit={save}>
     <label class="field">
       <span>Room name</span>
-      <input
+      <TextField
         type="text"
         bind:value={draft}
         oninput={() => (dirty = true)}
-        maxlength="255"
+        maxlength={255}
         autocomplete="off"
         disabled={busy}
       />
@@ -91,20 +90,6 @@
     font-size: var(--alloy-typography-size-sm);
     color: var(--alloy-color-text-secondary);
   }
-  input {
-    box-sizing: border-box;
-    width: 100%;
-    padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
-    border: 1px solid var(--alloy-color-border-subtle);
-    border-radius: var(--alloy-radii-md);
-    background: var(--alloy-color-surface-elevated);
-    color: var(--alloy-color-text-primary);
-    font: inherit;
-  }
-  input:focus-visible {
-    outline: 2px solid var(--alloy-color-accent-primary);
-    outline-offset: 1px;
-  }
   .actions {
     display: flex;
     justify-content: flex-end;
@@ -115,10 +100,6 @@
     color: var(--alloy-color-status-error);
   }
   @media (max-width: 899px) {
-    input {
-      min-height: 44px;
-      font-size: var(--alloy-typography-size-lg);
-    }
     .actions {
       gap: var(--alloy-spacing-scale-2);
     }
