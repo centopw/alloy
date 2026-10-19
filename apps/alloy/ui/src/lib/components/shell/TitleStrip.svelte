@@ -2,10 +2,11 @@
   import ChangelogDialog from '$lib/components/updates/ChangelogDialog.svelte';
   import UpdatePill from '$lib/components/updates/UpdatePill.svelte';
   import { updatesStore } from '$lib/stores/updates.svelte';
+  import { viewport } from '$lib/stores/viewport.svelte';
 </script>
 
-<!-- The strip exists only while an update is on offer; the dialog is also opened from Help & About. -->
-{#if updatesStore.pending}
+<!-- The strip exists only on desktop while an update is on offer (phones show the pill in the Chats header); the dialog is also opened from Help & About. -->
+{#if updatesStore.pending && !viewport.isPhone}
   <header class="strip" data-tauri-drag-region>
     <span class="name">Alloy</span>
     <div class="end">

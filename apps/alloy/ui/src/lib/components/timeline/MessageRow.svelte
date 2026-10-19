@@ -2,7 +2,7 @@
   import type { TimelineItemDto } from '$lib/generated';
   import { Avatar, UserName } from '../common';
   import Icon from '$lib/icons/Icon.svelte';
-  import { Reply, Pencil, Trash2, Smile, Copy, MessageSquare } from '$lib/icons';
+  import { Reply, Pencil, Trash2, Smile, Copy, MessageSquare, Download } from '$lib/icons';
   import { timelineStore } from '$lib/stores/timeline.svelte';
   import { threadStore } from '$lib/stores/thread.svelte';
   import { sanitizeHtml } from '$lib/content/html';
@@ -13,11 +13,15 @@
   import { emojiPicker } from '$lib/stores/emojiPicker.svelte';
   import { interceptLinks } from '$lib/platform/links';
   import { contextmenu } from '$lib/platform/contextmenu';
+  import { canDownloadMedia, downloadMedia } from '$lib/platform/saveFile';
+  import { firstPreviewUrl } from '$lib/content/urls';
+  import { errorMessage } from '$lib/stores/errors';
   import { profileCard } from '$lib/stores/profileCard.svelte';
   import type { MenuItem } from '$lib/stores/contextmenu.svelte';
   import MediaView from './MediaView.svelte';
   import PollView from './PollView.svelte';
   import ReplyQuote, { quote } from './ReplyQuote.svelte';
+  import LinkPreview from './LinkPreview.svelte';
 
   interface Props {
     item: TimelineItemDto;
@@ -36,6 +40,8 @@
     !(i.content.kind === 'Redacted' && !prefs.showRemovedPlaceholder);
 
   const kind = $derived(item.content.kind);
+  /** First plain URL in a text message; drives the link preview card. */
+  const previewUrl = $derived(item.content.kind === 'TextMessage' ? firstPreviewUrl(item.content.data.body) : null);
   /** Rows the prefs hide entirely: removed placeholders and state events switched off. */
   const hidden = $derived(
     (item.content.kind === 'Redacted' && !prefs.showRemovedPlaceholder) ||
@@ -63,6 +69,7 @@
   const canEdit = $derived(item.is_own && kind === 'TextMessage' && !!item.event_id);
   const canAct = $derived(!!item.event_id && (kind === 'TextMessage' || kind === 'Media'));
   const canCopy = $derived(kind === 'TextMessage');
+  const canDownload = $derived(kind === 'Media' && canDownloadMedia());
   const highlighted = $derived(!!item.event_id && timelineStore.highlightedEventId === item.event_id);
 
   let rowEl = $state<HTMLElement | undefined>();
@@ -93,6 +100,15 @@
       : null
   );
 
+  /** Saves a media message's file through the native save dialog; failures show in the timeline toast. */
+  function downloadMediaItem() {
+    if (item.content.kind !== 'Media') return;
+    const { uri, mime_type, body } = item.content.data;
+    downloadMedia(uri, mime_type, body || 'media').catch((err: unknown) => {
+      timelineStore.error = errorMessage(err);
+    });
+  }
+
   /** Context-menu entries for this message. Groups that do not apply are omitted, not disabled. */
   function menuItems(): MenuItem[] {
     const replies: MenuItem[] = [];
@@ -105,6 +121,7 @@
     const copies: MenuItem[] = [];
     if (canCopy) copies.push({ id: 'copy-text', label: 'Copy text', icon: Copy, onselect: () => void navigator.clipboard.writeText(quote(item)) });
     copies.push({ id: 'copy-sender', label: 'Copy sender ID', icon: Copy, onselect: () => void navigator.clipboard.writeText(item.sender) });
+    if (canDownload) copies.push({ id: 'download', label: 'Download', icon: Download, onselect: downloadMediaItem });
 
     const edits: MenuItem[] = [];
     if (canEdit) edits.push({ id: 'edit', label: 'Edit', icon: Pencil, onselect: () => timelineStore.startEdit(item) });
@@ -163,6 +180,9 @@
             <div class="body html" onclick={interceptLinks} onauxclick={interceptLinks}>{@html html}{#if item.edited}<span class="edited">(edited)</span>{/if}</div>
           {:else}
             <div class="body">{item.content.data.body}{#if item.edited}<span class="edited">(edited)</span>{/if}</div>
+          {/if}
+          {#if previewUrl && timelineStore.roomId}
+            <LinkPreview url={previewUrl} roomId={timelineStore.roomId} />
           {/if}
         {:else if item.content.kind === 'Media'}
           <div class="block">

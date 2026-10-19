@@ -138,6 +138,7 @@ describe('defaults', () => {
       showRoomUpdates: true,
       jumpToBottomOnSend: true,
       autoplayMedia: false,
+      linkPreviews: 'unencrypted',
       enterToSend: true,
       launchAtLogin: false,
       autoCheckUpdates: true,
@@ -156,6 +157,7 @@ describe('defaults', () => {
     expect(store.fontScale).toBe(100);
     expect(store.timeFormat).toBe('auto');
     expect(store.autoplayMedia).toBe(false);
+    expect(store.linkPreviews).toBe('unencrypted');
     expect(store.launchAtLogin).toBe(false);
     expect(store.autoCheckUpdates).toBe(true);
     expect(store.autoDownloadUpdates).toBe(false);
@@ -175,6 +177,8 @@ describe('validation', () => {
     expect(isValidPref('fontScale', '100')).toBe(false);
     expect(isValidPref('timeFormat', '24h')).toBe(true);
     expect(isValidPref('timeFormat', 'iso')).toBe(false);
+    expect(isValidPref('linkPreviews', 'always')).toBe(true);
+    expect(isValidPref('linkPreviews', 'yes')).toBe(false);
   });
 
   it('accepts only booleans for boolean keys', () => {

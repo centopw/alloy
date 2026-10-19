@@ -1,14 +1,20 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { SettingGroup, SettingToggle } from '$lib/components/settings/controls';
+  import { SettingGroup, SettingSelect, SettingToggle } from '$lib/components/settings/controls';
   import { getAutostart, setAutostart } from '$lib/platform/autostart';
-  import { prefs } from '$lib/stores/prefs.svelte';
+  import { prefs, type LinkPreviewMode } from '$lib/stores/prefs.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
   import { capabilities, currentEnv } from '$lib/platform/capabilities';
 
   const caps = $derived(capabilities(currentEnv(viewport.isPhone)));
   let autostartBusy = $state(false);
   let autostartError = $state<string | null>(null);
+
+  const LINK_PREVIEW_OPTIONS = [
+    { value: 'off', label: 'Off' },
+    { value: 'unencrypted', label: 'Unencrypted rooms' },
+    { value: 'always', label: 'All rooms' },
+  ];
 
   function describe(err: unknown): string {
     return err instanceof Error ? err.message : String(err);
@@ -92,6 +98,13 @@
       label="Autoplay GIFs and videos"
       checked={prefs.autoplayMedia}
       onchange={(v) => prefs.set('autoplayMedia', v)}
+    />
+    <SettingSelect
+      label="Link previews"
+      description="Your homeserver fetches the page to build the preview."
+      value={prefs.linkPreviews}
+      options={LINK_PREVIEW_OPTIONS}
+      onchange={(v) => prefs.set('linkPreviews', v as LinkPreviewMode)}
     />
   </SettingGroup>
 

@@ -12,6 +12,11 @@
 
   let { children } = $props();
 
+  // Android hands the insets to the native activity (see MainActivity.kt): the web layer adds none.
+  if (typeof document !== 'undefined' && /Android/i.test(navigator.userAgent) && '__TAURI_INTERNALS__' in window) {
+    document.documentElement.dataset.insets = 'native';
+  }
+
   onMount(() => installNativeMenuGuard(document));
 </script>
 

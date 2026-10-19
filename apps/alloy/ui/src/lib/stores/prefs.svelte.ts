@@ -18,6 +18,7 @@ export const PREFS_SYNCED_AT_STORAGE_KEY = 'alloy.prefs.syncedAt.v1';
 export type MessageLayout = 'modern' | 'bubbles' | 'irc';
 export type FontScale = 90 | 100 | 110 | 120 | 130;
 export type TimeFormat = 'auto' | '12h' | '24h';
+export type LinkPreviewMode = 'off' | 'unencrypted' | 'always';
 
 export interface Prefs {
   messageLayout: MessageLayout;
@@ -40,6 +41,7 @@ export interface Prefs {
   showRoomUpdates: boolean;
   jumpToBottomOnSend: boolean;
   autoplayMedia: boolean;
+  linkPreviews: LinkPreviewMode;
   enterToSend: boolean;
   launchAtLogin: boolean;
   autoCheckUpdates: boolean;
@@ -73,6 +75,7 @@ export const DEFAULT_PREFS: Readonly<Prefs> = Object.freeze({
   showRoomUpdates: true,
   jumpToBottomOnSend: true,
   autoplayMedia: false,
+  linkPreviews: 'unencrypted',
   enterToSend: true,
   launchAtLogin: false,
   autoCheckUpdates: true,
@@ -122,6 +125,7 @@ const PREF_SCOPE: Record<PrefKey, PrefScope> = {
   showProfileChanges: 'synced',
   showRoomUpdates: 'synced',
   autoplayMedia: 'synced',
+  linkPreviews: 'synced',
   roomSort: 'synced',
 };
 
@@ -143,6 +147,7 @@ const ENUM_VALUES = {
   messageLayout: ['modern', 'bubbles', 'irc'],
   fontScale: [90, 100, 110, 120, 130],
   timeFormat: ['auto', '12h', '24h'],
+  linkPreviews: ['off', 'unencrypted', 'always'],
   roomSort: ROOM_SORTS,
 } as const satisfies Partial<{ [K in PrefKey]: readonly Prefs[K][] }>;
 
@@ -314,6 +319,9 @@ export class PrefsStore {
   }
   get autoplayMedia(): boolean {
     return this.#values.autoplayMedia;
+  }
+  get linkPreviews(): LinkPreviewMode {
+    return this.#values.linkPreviews;
   }
   get enterToSend(): boolean {
     return this.#values.enterToSend;

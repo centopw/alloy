@@ -26,6 +26,14 @@ html, body {
   --alloy-safe-area-left: env(safe-area-inset-left, 0px);
   --alloy-safe-area-right: env(safe-area-inset-right, 0px);
 }
+/* Android: MainActivity already pads the WebView by the system bars, cutout and keyboard. Newer WebViews
+   also report those insets through env(), which would add the same space twice (an empty band at the top). */
+:root[data-insets='native'] {
+  --alloy-safe-area-top: 0px;
+  --alloy-safe-area-bottom: 0px;
+  --alloy-safe-area-left: 0px;
+  --alloy-safe-area-right: 0px;
+}
 
 :root:not([data-theme]) {
   /* Fallback defaults for tokens before theme loads */

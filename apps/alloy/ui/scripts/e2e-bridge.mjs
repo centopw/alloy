@@ -205,6 +205,16 @@ try {
   await page.waitForFunction(() => [...document.querySelectorAll('.body strong')].some((e) => e.textContent === 'there'), { timeout: 30000 });
   await page.waitForFunction(() => (() => { const rows = [...document.querySelectorAll('.row.own')]; return rows.length > 0 && rows.every((r) => !r.querySelector('.state, .failed-actions')); })(), { timeout: 30000 });
 
+  step('send a link in an unencrypted room: the message renders, and any preview card is well-formed');
+  await page.type('textarea[aria-label=Message]', 'See https://example.com/alloy-e2e');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => [...document.querySelectorAll('.body')].some((e) => e.textContent.includes('alloy-e2e')), { timeout: 30000 });
+  await new Promise((r) => setTimeout(r, 2000));
+  if (await page.$('aside.link-preview')) {
+    const label = await page.$eval('aside.link-preview button.open', (b) => b.textContent.trim());
+    if (!label) throw new Error('link preview card rendered without any text');
+  }
+
   step('react to the first message');
   const bobRow = await page.evaluateHandle(() => [...document.querySelectorAll('.row')].find((r) => r.textContent.includes('Hi from bob')));
   await bobRow.asElement().hover();

@@ -331,6 +331,42 @@ export class MockTransport implements Transport {
     this.seedTimelines();
   }
 
+  /** A short, believable conversation so the demo (and the README screenshots) look alive. */
+  private demoConversation(): TimelineItemDto[] {
+    const now = Date.now();
+    const text = (n: number, sender: string, body: string, minutesAgo: number, extra: Partial<TimelineItemDto> = {}): TimelineItemDto => ({
+      internal_id: `demo_${n}`,
+      event_id: `$demo_${n}:alloy.chat`,
+      sender,
+      timestamp_millis: now - minutesAgo * 60_000,
+      content: { kind: 'TextMessage', data: { body, formatted_body: null, html_sanitized: true } },
+      send_state: { status: 'Sent', data: { event_id: `$demo_${n}:alloy.chat` } },
+      is_own: sender === MOCK_ACCOUNT.user_id,
+      reply_to: null,
+      thread_summary: null,
+      read_receipts: null,
+      ...extra,
+    });
+    const items = [
+      text(1, '@bob:alloy.chat', 'Morning! The release build finished: macOS, Windows, Linux and the Android APK.', 42),
+      text(2, '@charlie:alloy.chat', 'Nice. Did the update check pick it up on your machine?', 40),
+      text(3, MOCK_ACCOUNT.user_id, 'Yes, it shows the changelog and a "Restart to apply update" button after the download.', 38),
+      text(4, '@bob:alloy.chat', 'I tagged the rooms we use for the launch so they sort together. Search finds old messages too.', 25),
+      text(5, '@charlie:alloy.chat', 'Great, shipping the notes to the team channel now.', 12),
+    ];
+    items[2].content = {
+      kind: 'TextMessage',
+      data: {
+        body: 'Yes, it shows the changelog and a "Restart to apply update" button after the download.',
+        formatted_body: '<p>Yes, it shows the <strong>changelog</strong> and a "Restart to apply update" button after the download.</p>',
+        html_sanitized: true,
+      },
+    };
+    items[2].reactions = [{ key: '\u{1F44D}', count: 2, senders: ['@bob:alloy.chat', '@charlie:alloy.chat'], by_me: false }];
+    items[4].reply_to = items[3];
+    return items;
+  }
+
   private seedTimelines() {
     const generalItems: TimelineItemDto[] = [
       {
@@ -391,7 +427,7 @@ export class MockTransport implements Transport {
     ];
 
     this.timelineByRoom.set('!general:alloy.chat', generalItems);
-    this.timelineByRoom.set('!dev:alloy.chat', []);
+    this.timelineByRoom.set('!dev:alloy.chat', this.demoConversation());
     this.timelineByRoom.set('!bob:alloy.chat', []);
   }
 
@@ -676,47 +712,9 @@ export class MockTransport implements Transport {
         };
       }
 
-      case 'PaginateBackwards': {
-        const roomId = command.params.room_id;
-        const currentItems = this.timelineByRoom.get(roomId) ?? [];
-        const olderItem: TimelineItemDto = {
-          internal_id: `older_${Date.now()}`,
-          event_id: `$hist_${Date.now()}:alloy.chat`,
-          sender: '@charlie:alloy.chat',
-          timestamp_millis: Date.now() - 7200000,
-          content: {
-            kind: 'TextMessage',
-            data: {
-              body: 'Historical message prepended via backward pagination.',
-              formatted_body: null,
-              html_sanitized: true,
-            },
-          },
-          send_state: { status: 'Sent', data: { event_id: `$hist_${Date.now()}:alloy.chat` } },
-          is_own: false,
-          reply_to: null,
-          thread_summary: null,
-          read_receipts: null,
-        };
-
-        currentItems.unshift(olderItem);
-        this.timelineByRoom.set(roomId, currentItems);
-
-        for (const [subId, rId] of this.timelineSubscriptions.entries()) {
-          if (rId === roomId) {
-            this.emit({
-              type: 'TimelineDiff',
-              payload: {
-                subscription_id: subId,
-                room_id: roomId,
-                diff: { type: 'PushFront', content: { value: olderItem } },
-              },
-            });
-          }
-        }
-
-        return { type: 'Unit' };
-      }
+      case 'PaginateBackwards':
+        // The demo rooms hold their whole history already.
+        return { type: 'Paginated', payload: { room_id: command.params.room_id, reached_start: true } };
 
       case 'SendText': {
         const roomId = command.params.room_id;
@@ -1184,6 +1182,22 @@ export class MockTransport implements Transport {
           type: 'MediaRetrieved',
           payload: { local_path: '/tmp/alloy-mock-cache/media.png' },
         };
+
+      case 'GetUrlPreview': {
+        const url = command.params.url;
+        const preview = url.includes('example')
+          ? {
+              url,
+              title: 'Example Domain',
+              description: 'Mock link preview returned by the browser mock engine.',
+              site_name: 'Example',
+              image: null,
+              image_width: null,
+              image_height: null,
+            }
+          : null;
+        return { type: 'UrlPreview', payload: { preview } };
+      }
 
       case 'RequestSelfVerification':
         return {
