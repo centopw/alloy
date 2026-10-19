@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.9 (pre-release)
 
 ### Added
 - **Link previews:** messages with a link show a card (site, title, description, picture) built by your homeserver. Setting in Preferences: Off, Unencrypted rooms only (default), or All rooms. Right-click a card to open or copy the link, or hide it.
