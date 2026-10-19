@@ -997,8 +997,8 @@
       position: fixed;
       inset: 0;
       z-index: 50;
-      padding-top: env(safe-area-inset-top);
-      padding-bottom: env(safe-area-inset-bottom);
+      padding-top: var(--alloy-safe-area-top);
+      padding-bottom: var(--alloy-safe-area-bottom);
     }
 
     .close {
