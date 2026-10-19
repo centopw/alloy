@@ -3,6 +3,16 @@
 ## Unreleased
 
 ### Added
+- **Link previews:** messages with a link show a card (site, title, description, picture) built by your homeserver. Setting in Preferences: Off, Unencrypted rooms only (default), or All rooms. Right-click a card to open or copy the link, or hide it.
+- **Download media:** a Download button in the image/video viewer and a Download entry in the message menu save the file through the system Save dialog (desktop). Android hides the action until saving to the public Downloads folder is verified.
+- README rewritten for people, with a banner, screenshots, live project stats and an activity section; `scripts/readme-shots.mjs` regenerates the screenshots from the built-in demo data.
+
+### Fixed
+- The full-size image/video viewer fits the window instead of overflowing.
+- Android: the web layer no longer adds the status-bar inset on top of the native one (an empty band at the top on newer WebViews); the update button sits in the Chats header on phones instead of a separate strip.
+- The demo mode no longer errors when loading older messages and shows a believable conversation.
+
+### Added
 - **Search inside a chat:** the header Search button, the Details Search button and Ctrl/Cmd+F open a message search for the current room: by text and by sender (`from:name` or the From menu), filtered by All / Media / Links / Files, with highlighted matches; clicking a result jumps to the message, loading older history if needed. Encrypted rooms (which the server cannot search) are searched on this device, with a button to search older messages. The sidebar search and Ctrl/Cmd+K remain the room switcher ("Search rooms").
 - **Settings sync across devices:** preferences that describe how you like the app (time format, room list options, sort, typing and event toggles, autoplay, ...) are stored in your Matrix account data and follow you to other devices; changes from another device apply live. Settings that depend on the device (message layout, font size, notifications, Enter to send, open at login, update toggles) stay on the device.
 - Details panel: a bell button for the room's notification level (full labels, current level checked); **Copy ID** copies the other person's Matrix ID in a DM (the room ID otherwise); one **Shared** section with Media / Links / Files tabs.

@@ -1,141 +1,144 @@
+<p align="center">
+  <img src="docs/assets/banner.png" alt="Alloy: a modern, cross-platform Matrix chat client" width="100%">
+</p>
+
+<p align="center">
+  <a href="https://github.com/centopw/alloy/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/centopw/alloy?include_prereleases&label=release&color=3b82f6"></a>
+  <a href="https://github.com/centopw/alloy/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/centopw/alloy/total?color=10b981"></a>
+  <a href="https://github.com/centopw/alloy/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/centopw/alloy?style=flat&color=f59e0b"></a>
+  <a href="https://github.com/centopw/alloy/network/members"><img alt="Forks" src="https://img.shields.io/github/forks/centopw/alloy?style=flat"></a>
+  <a href="https://github.com/centopw/alloy/issues"><img alt="Open issues" src="https://img.shields.io/github/issues/centopw/alloy"></a>
+  <a href="https://github.com/centopw/alloy/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/centopw/alloy/ci.yml?branch=main&label=build"></a>
+  <a href="https://github.com/centopw/alloy/commits/main"><img alt="Last commit" src="https://img.shields.io/github/last-commit/centopw/alloy"></a>
+  <a href="https://github.com/centopw/alloy/graphs/commit-activity"><img alt="Commit activity" src="https://img.shields.io/github/commit-activity/m/centopw/alloy"></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/centopw/alloy"></a>
+  <img alt="Page views" src="https://komarev.com/ghpvc/?username=centopw-alloy&label=views&color=3b82f6&style=flat">
+</p>
+
 # Alloy
 
-**A privacy-first, customizable Matrix chat client for desktop and Android.**
+Alloy is a chat app for [Matrix](https://matrix.org), the open network that lets you talk to people on
+any server, with end-to-end encryption. It runs on **Mac, Windows, Linux and Android**, it is free and open
+source, and it **never collects any data about you**: no analytics, no tracking, no ads.
 
-Rust core, Tauri 2 shell, Svelte 5 UI. End-to-end encrypted, zero telemetry, Apache-2.0.
+Use your existing Matrix account (matrix.org, your company's server, your own) or create one on any server.
 
-> **Status: pre-release (v0.1.x).** Desktop (macOS, Windows, Linux) and Android work end to end against a
-> real homeserver: sign in, encrypted chats, threads, polls, media, notifications, updates. Push
-> notifications while the app is closed, OIDC login, search, plugins and the marketplace are not built yet.
-> See the [roadmap](#roadmap).
+> **Early release.** Alloy already does the everyday things well, but it is young: some features are still
+> missing (see [What's next](#whats-next)) and the installers are not yet signed, so your computer will ask you to confirm the first start.
 
-## What works today
+<p align="center">
+  <img src="docs/assets/screenshots/chat.png" alt="Alloy on a desktop: room list on the left, a conversation in the middle" width="100%">
+</p>
 
-**Chat**
-- Password sign-in with homeserver discovery, session restore, device verification (emoji SAS), recovery key.
-- Encrypted and plain rooms on sliding sync (MSC4186, with MSC3575 fallback), history loads as you scroll.
-- Send, edit, delete, reply, react, threads, polls, mentions, markdown, emoji, attachments with progress,
-  image/video/audio viewer, read receipts, typing indicator, unread badges that clear when you read.
-- Emoji picker with search, recents and skin tones; tiered right-click menus everywhere (never the OS menu); readable Details panel.
-- Your own room tags (name, colour, order) to organise, filter and sort the room list; replies shown as readable quotes.
-- Spaces, room directory, invites, new rooms and DMs, room info (name, topic, picture, private note,
-  media/files/links/members), profile cards, right-click and long-press menus.
+## What you can do
 
-**Look and feel**
-- Discord-style desktop layout with resizable panels; Modern, Bubbles or IRC message layouts;
-  light, dark and AMOLED themes plus one extra; font size, time format, per-user name colours.
-- A separate mobile UI under 900 px: one screen at a time, bottom tab bar, full-screen pages, bottom and
-  action sheets, 44 px touch targets, Send button, a page that never scrolls.
+- **Chat with anyone on Matrix**, in private encrypted rooms, group rooms and direct messages. Reply, edit,
+  delete, react with any emoji, start threads, create polls, share files, photos and videos.
+- **Find things fast.** Search your rooms from the sidebar (or with Ctrl/Cmd+K). Search *inside* a chat
+  for words or for who said them, and jump straight to the message.
+- **Stay organised.** Make your own tags (for example "Work", "Family"), colour them, put rooms under them,
+  and filter or sort your room list by tag, unread, name or recent activity.
+- **Make it yours.** Dark theme, three message layouts (modern, chat bubbles or compact), text size,
+  notification levels per room, and a settings page where every switch really does something.
+  Your preferences follow you to your other devices.
+- **Always know what's new.** Notifications on desktop and Android, unread counts that clear when you read,
+  typing indicators, and an update notice that shows what changed before you install.
+- **Feels right on a phone.** On Android the app turns into a proper phone app: one screen at a time, a bottom
+  tab bar, big touch targets and sheets instead of tiny menus.
 
-**Settings that do something**
-- Account (display name, avatar), devices, security and privacy, encryption keys, notifications
-  (server push rules, desktop/Android notifications, per-room levels), preferences, keyboard reference, sidebar.
+<table>
+  <tr>
+    <td width="50%"><img src="docs/assets/screenshots/search.png" alt="Searching inside a chat"><br><sub>Search inside a chat, by words or by person</sub></td>
+    <td width="50%"><img src="docs/assets/screenshots/room-menu.png" alt="The room menu with notification choices"><br><sub>Right-click a room: notifications, tags, settings</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/assets/screenshots/emoji.png" alt="The emoji picker"><br><sub>Emoji picker with search, recents and skin tones</sub></td>
+    <td width="50%"><img src="docs/assets/screenshots/settings.png" alt="The settings page"><br><sub>Settings</sub></td>
+  </tr>
+</table>
 
-**Delivery**
-- Installers for macOS (arm64, x64), Windows (exe, msi) and Linux (AppImage, deb, rpm) and a 36 MB Android APK, on the
-  [releases page](https://github.com/centopw/alloy/releases). Desktop checks for updates, shows the release notes in the app and updates in place; Android tells you when
-  a newer release exists. SBOM attached to releases. No telemetry.
+<p align="center">
+  <img src="docs/assets/screenshots/phone-chats.png" alt="Alloy on a phone: the chat list" width="32%">
+  &nbsp;
+  <img src="docs/assets/screenshots/phone-chat.png" alt="Alloy on a phone: a conversation" width="32%">
+</p>
 
-## Roadmap
+## Privacy
 
-Full plan: [docs/PLAN.md](docs/PLAN.md). Board: [github.com/users/centopw/projects/2](https://github.com/users/centopw/projects/2).
+- Your messages are protected with end-to-end encryption in encrypted rooms. Only you and the people in the
+  room can read them.
+- Alloy has **no telemetry**. It only talks to your own Matrix server.
+- Link previews are built by your server, and are off in encrypted rooms unless you turn them on.
+- On desktop, your login and encryption keys are kept in the system's secure storage (Keychain, Credential Manager, Secret Service).
 
-| Train | Scope | State |
+## Install
+
+Download the file for your system from the **[Releases page](https://github.com/centopw/alloy/releases)**.
+
+| System | File | First start |
 |---|---|---|
-| P0 Foundations | workspace, spikes, CI, gate G0 | done |
-| **v0.1 Desktop MVP** | the list above | **done** (v0.1.0 to v0.1.4) |
-| **v0.2 to v0.4 Android and parity** | UnifiedPush/FCM push, OIDC login, mobile gestures, real-device perf (G1), a11y audit, encrypted search, QR login, voice messages, i18n and RTL, theme/keybinding JSON packages | in progress |
-| v0.5 Plugins | sandboxed WASM plugins (Wasmtime host exists), 12 UI extension slots, capability prompts | planned |
-| v1.0 Marketplace | signed packages and index, signed installers, Flathub/winget/Homebrew/F-Droid | planned |
-| Post-1.0 | web, calls (MatrixRTC), multi-account, widgets, iOS | planned |
+| **macOS** | `Alloy_…_aarch64.dmg` (Apple chips) or `…_x64.dmg` (Intel) | Drag Alloy to Applications, then right-click it and choose **Open**. If macOS says the app is "damaged", run `xattr -dr com.apple.quarantine /Applications/Alloy.app` in Terminal. |
+| **Windows** | `Alloy_…_x64-setup.exe` (or `.msi`) | If SmartScreen warns, choose **More info**, then **Run anyway**. |
+| **Linux** | `.AppImage`, `.deb` or `.rpm` | Make the AppImage executable, or install the package. |
+| **Android** | `alloy-android.apk` | Allow installing from your browser when asked. Android 7 or newer. |
 
-Not yet signed with paid developer certificates, so every release is marked pre-release.
+Why the warnings? Alloy is not yet signed with the paid developer certificates Apple and Microsoft ask for.
+That is only a matter of paperwork; the code is open and every release lists a checksum file you can verify.
 
-## Installing a release
+**Updates:** on desktop, Alloy checks for updates by itself, shows you the release notes and updates in place.
+On Android it tells you when a new version exists and opens the download page. Because the Android file is
+signed with a temporary key for now, uninstall the old version before installing a new one.
 
-Builds are on the [releases page](https://github.com/centopw/alloy/releases):
+## What's next
 
-- **macOS:** drag Alloy to Applications, then right-click it and choose Open (or allow it under
-  System Settings > Privacy & Security > Open Anyway). From a terminal:
-  `xattr -dr com.apple.quarantine /Applications/Alloy.app`. Use 0.1.2 or newer (0.1.1 had an unsealed bundle).
-- **Windows:** `.exe` installer or `.msi`; SmartScreen may warn, choose More info, then Run anyway.
-- **Linux:** AppImage, `.deb` or `.rpm`.
-- **Android:** the APK is signed with a throwaway key, so uninstall the old version before installing a new one.
-  Needs Android 7.0 (API 24) or newer; the Android 10+ low-end target is the one we tune for.
+Alloy is developed in the open and the plan is public: **[roadmap](docs/PLAN.md)** and
+**[project board](https://github.com/users/centopw/projects/2)**. Coming up:
 
-Once installed, desktop builds update themselves from Settings > Help & About.
+- Notifications on Android when the app is closed (without needing Google services)
+- Signing in through your server's web login (needed for matrix.org-style single sign-on)
+- Searching old messages in encrypted rooms, voice messages, QR code sign-in, more languages
+- Your own themes and shortcuts from simple files, then plugins and a community marketplace
+- Voice and video calls, web version and multiple accounts (later)
 
-## Development
+## Project activity
 
-### Prerequisites
+<p align="center">
+  <a href="https://star-history.com/#centopw/alloy&Date"><img alt="Star history" src="https://api.star-history.com/svg?repos=centopw/alloy&type=Date&theme=dark" width="70%"></a>
+</p>
 
-- **Rust** 1.90+ (rustfmt, clippy) and **Node.js** 22+ with **pnpm** 9+ (`npm`, `yarn`, `bun` are not used)
-- **just** (task runner), **cargo-deny**, **cargo-audit**
-- **Docker** for the local Synapse used by integration and E2E tests
-- Android builds: Android SDK, NDK 27 and `rustup target add aarch64-linux-android`
+- [Latest releases](https://github.com/centopw/alloy/releases) and the [changelog](CHANGELOG.md)
+- [Recent commits](https://github.com/centopw/alloy/commits/main) and [contributors](https://github.com/centopw/alloy/graphs/contributors)
+- [Issues](https://github.com/centopw/alloy/issues) and the [project board](https://github.com/users/centopw/projects/2)
 
-### Run it
+## Help and feedback
+
+- Found a bug or want a feature? [Open an issue](https://github.com/centopw/alloy/issues).
+- Security problem? Please use [GitHub Security Advisories](SECURITY.md) instead of a public issue.
+- Want to help? Read [CONTRIBUTING.md](CONTRIBUTING.md). Everyone is welcome under the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## For developers
+
+Alloy is written in Rust (the Matrix part) with a Tauri 2 app shell and a Svelte 5 interface.
 
 ```bash
 git clone https://github.com/centopw/alloy.git && cd alloy
-just hooks                 # commit-message hook (Conventional Commits)
-just synapse-up            # local homeserver on :8008 (users alice and bob, password testpassword123!)
+just hooks          # commit message checks
+just synapse-up     # a local test server (users alice and bob, password testpassword123!)
 cd apps/alloy && pnpm install && (cd ui && pnpm install)
-pnpm tauri dev             # desktop app
-pnpm tauri android build --apk --debug --target aarch64   # Android debug APK
+pnpm tauri dev      # run the desktop app
 ```
 
-### Checks (all enforced in CI)
-
-```bash
-just ci                    # everything below
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-ALLOY_TEST_HS=http://localhost:8008 cargo test --workspace --no-fail-fast
-cargo deny check && cargo audit
-cd apps/alloy/ui && pnpm check && pnpm test && pnpm build
-node scripts/e2e-bridge.mjs                              # UI + engine + Synapse, desktop
-E2E_MOBILE=1 E2E_STRICT=1 node scripts/e2e-bridge.mjs    # phone audit: no page scroll, 44 px targets
-```
-
-Other recipes: `just --list`. Releasing: [docs/RELEASING.md](docs/RELEASING.md).
-
-## Architecture
-
-```
-apps/alloy
-  ui/            Svelte 5 + TypeScript (runes only), tokens -> CSS variables, virtua timeline
-  src-tauri/     Tauri 2 shell: IPC glue, updater, notifications, Android project
-        | typed commands + VectorDiff events (alloy-protocol, TS types generated by specta)
-crates/
-  alloy-protocol   DTOs and commands shared with the UI
-  alloy-engine     command handlers, subscriptions, event sink
-  alloy-core       matrix-sdk / matrix-sdk-ui wrapper: sync, timeline, crypto, media, TLS
-  alloy-storage    SDK store + OS keychain (Android: file store)
-  alloy-theme      design-token schema and CSS generator
-  alloy-plugin     Wasmtime component host (limits, capabilities); not yet wired in
-  alloy-bridge     dev WebSocket bridge used by the browser E2E
-packages/          bundled themes, sample plugin     schemas/   JSON Schemas
-```
-
-Data flow is one way: UI -> IPC -> `alloy-engine` -> `matrix-sdk` -> `eyeball-im` diffs -> `VectorDiffDto` ->
-Svelte reactive arrays. `#![forbid(unsafe_code)]` everywhere.
-
-## Documentation
+You need Rust 1.90+, Node 22+ with pnpm, [just](https://github.com/casey/just) and Docker (for the test server).
+Android builds also need the Android SDK and NDK 27.
 
 | | |
 |---|---|
-| [Master plan and roadmap](docs/PLAN.md) | decisions D1 to D14, phases, what changed, what is next |
-| [Decision records](docs/decisions/README.md) | [0001 visual language](docs/decisions/0001-ui-visual-language.md), [0002 layout](docs/decisions/0002-discord-style-layout.md), [0003 UX review](docs/decisions/0003-ux-review-2026-10.md), [0004 functional settings](docs/decisions/0004-functional-settings.md), [0005 mobile shell](docs/decisions/0005-mobile-first-shell.md), [0006 shared controls, tags, one members UI](docs/decisions/0006-shared-controls-tags-and-one-members-ui.md), [0007 design spec, menus, emoji, updates](docs/decisions/0007-design-spec-menus-emoji-updates.md) |
-| [Detail docs](docs/plan/) | UI stack, core, extensibility, security and delivery, UX, IPC contract, theming |
-| [Releasing](docs/RELEASING.md) · [CI](docs/CI.md) · [Tracking](docs/TRACKING.md) | pipelines, update feed, board workflow |
-| [Changelog](CHANGELOG.md) | per release |
-
-## Contributing, conduct, security
-
-[CONTRIBUTING.md](CONTRIBUTING.md) (Conventional Commits, issue-first workflow) · [Code of Conduct](CODE_OF_CONDUCT.md) ·
-[SECURITY.md](SECURITY.md): report vulnerabilities through GitHub Security Advisories or hiep@hce.vn with `[SECURITY]`.
-Accepted dependency advisories, each with its reason, are listed in `deny.toml` and `.cargo/audit.toml`.
+| Everything CI runs | `just ci`, plus `pnpm check && pnpm test && pnpm build` in `apps/alloy/ui` |
+| Try the UI without a server | `pnpm dev` in `apps/alloy/ui` (uses demo data) |
+| Refresh the screenshots above | `pnpm build && node scripts/readme-shots.mjs` in `apps/alloy/ui` |
+| Master plan and decisions | [docs/PLAN.md](docs/PLAN.md), [docs/decisions/](docs/decisions/README.md) |
+| How releases work | [docs/RELEASING.md](docs/RELEASING.md) |
+| Changelog | [CHANGELOG.md](CHANGELOG.md) |
 
 ## License
 
