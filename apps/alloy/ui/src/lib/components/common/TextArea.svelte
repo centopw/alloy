@@ -69,6 +69,7 @@
   {rows}
   class={['text-area', className].filter(Boolean).join(' ')}
   class:invalid
+  class:grows={shouldAutoGrow}
   aria-invalid={invalid ? 'true' : undefined}
   oninput={handleInput}
   {...rest}
@@ -90,6 +91,11 @@
     appearance: none;
     -webkit-appearance: none;
     outline: none;
+    resize: vertical;
+  }
+
+  /* An auto-growing field sizes itself, so it has no manual resize grip. */
+  .text-area.grows {
     resize: none;
   }
 
