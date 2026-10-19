@@ -82,6 +82,31 @@ pub struct RoomDetails {
     pub can_set_topic: bool,
     #[serde(default)]
     pub can_set_avatar: bool,
+    /// Whether the active account can pin messages (power >= `m.room.pinned_events`).
+    #[serde(default)]
+    pub can_pin: bool,
+    /// Whether the active account can redact others' messages (power >= `redact`).
+    #[serde(default)]
+    pub can_redact_others: bool,
+    /// Whether the active account can use `@room` mentions (power >= `notifications.room`).
+    #[serde(default)]
+    pub can_mention_room: bool,
+    /// Event IDs of currently pinned messages (oldest first).
+    #[serde(default)]
+    pub pinned_event_ids: Vec<EventId>,
+    /// Active account's power level in the room.
+    #[serde(default)]
+    #[specta(type = Number)]
+    pub my_power_level: i64,
+    /// Whether the active account can kick users (power >= kick level).
+    #[serde(default)]
+    pub can_kick: bool,
+    /// Whether the active account can ban users (power >= ban level).
+    #[serde(default)]
+    pub can_ban: bool,
+    /// Whether the active account can change power levels (power >= power levels state event level).
+    #[serde(default)]
+    pub can_set_power_levels: bool,
 }
 
 /// How loudly a room (or a kind of room) notifies, as stored in the account's push rules.
@@ -157,6 +182,19 @@ pub enum RoomSearchScope {
 /// One message matched by `SearchRoomMessages`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct RoomSearchHit {
+    pub event_id: EventId,
+    pub sender: UserId,
+    pub sender_display_name: Option<String>,
+    #[specta(type = Number)]
+    pub timestamp_millis: u64,
+    pub body: String,
+}
+
+/// One message matched across rooms by `SearchAllMessages`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct GlobalSearchHit {
+    pub room_id: RoomId,
+    pub room_name: Option<String>,
     pub event_id: EventId,
     pub sender: UserId,
     pub sender_display_name: Option<String>,
@@ -269,6 +307,12 @@ pub struct RoomSummary {
     pub tags: Vec<String>,
     /// For a direct room, the other person's Matrix ID; `None` for every other room.
     pub direct_user_id: Option<UserId>,
+    /// Whether the room is marked as unread by the user (creates bold row with accent dot).
+    #[serde(default)]
+    pub marked_unread: bool,
+    /// First 80 chars of the room's draft message, if any.
+    #[serde(default)]
+    pub draft: Option<String>,
 }
 
 /// A user-defined room tag, as stored in the account's tag catalogue.
@@ -330,6 +374,10 @@ pub enum TimelineItemContent {
         #[serde(default)]
         #[specta(type = Option<Number>)]
         duration_ms: Option<u64>,
+        #[serde(default)]
+        voice: bool,
+        #[serde(default)]
+        waveform: Option<Vec<u16>>,
     },
     Reaction {
         key: String,
@@ -364,6 +412,15 @@ pub enum TimelineItemContent {
     Virtual,
     UnableToDecrypt {
         reason: String,
+    },
+    Location {
+        geo_uri: String,
+        description: Option<String>,
+        #[serde(default)]
+        live: bool,
+        #[serde(default)]
+        #[specta(type = Option<Number>)]
+        live_until_millis: Option<u64>,
     },
 }
 
@@ -418,6 +475,9 @@ pub struct TimelineItemDto {
     /// Transaction id for local echoes (use with RetrySend/CancelSend).
     #[serde(default)]
     pub transaction_id: Option<String>,
+    /// Whether this event mentions the current user (causes highlighting in the UI).
+    #[serde(default)]
+    pub mentions_me: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -534,9 +594,31 @@ pub struct UrlPreviewDto {
     pub image_height: Option<u32>,
 }
 
+/// A message draft for a room.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct DraftDto {
+    pub text: String,
+    pub reply_to: Option<EventId>,
+    pub edit_of: Option<EventId>,
+}
+
+/// Summary of a room's draft for `ListDrafts`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct DraftSummary {
+    pub room_id: RoomId,
+    pub text: String,
+}
+
+/// Failure details when forwarding an event to a target room.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct ForwardFailure {
+    pub room_id: RoomId,
+    pub error: String,
+}
+
 // === Commands ===
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "action", content = "params")]
 pub enum EngineCommand {
     // Auth
@@ -724,6 +806,8 @@ pub enum EngineCommand {
         markdown: Option<bool>,
         reply_to: Option<EventId>,
         mentions: Option<Vec<UserId>>,
+        #[serde(default)]
+        mention_room: bool,
         txn_id: Option<String>,
         /// When set, the message is posted into this thread instead of the main timeline.
         in_thread_root: Option<EventId>,
@@ -744,6 +828,50 @@ pub enum EngineCommand {
         event_id: EventId,
         key: String,
     },
+    /// Pin a message in a room (requires `can_pin`).
+    SetEventPinned {
+        room_id: RoomId,
+        event_id: EventId,
+        pinned: bool,
+    },
+    /// Load pinned messages in a room.
+    GetPinnedEvents {
+        room_id: RoomId,
+    },
+    /// Forward one or more events to one or more target rooms, stripping relations.
+    ForwardEvents {
+        room_id: RoomId,
+        event_ids: Vec<EventId>,
+        targets: Vec<RoomId>,
+    },
+    /// Set the room's favourite flag (pin to top of the list).
+    SetRoomFavourite {
+        room_id: RoomId,
+        favourite: bool,
+    },
+    /// Set the room's low-priority flag (archive).
+    SetRoomLowPriority {
+        room_id: RoomId,
+        low_priority: bool,
+    },
+    /// Set the room's marked-as-unread flag.
+    SetRoomMarkedUnread {
+        room_id: RoomId,
+        unread: bool,
+    },
+    /// Save a message draft for a room (empty text clears it).
+    SaveDraft {
+        room_id: RoomId,
+        text: String,
+        reply_to: Option<EventId>,
+        edit_of: Option<EventId>,
+    },
+    /// Load the message draft for a room.
+    GetDraft {
+        room_id: RoomId,
+    },
+    /// Load all room drafts (returns the first 80 chars of each).
+    ListDrafts,
     SendPoll {
         room_id: RoomId,
         question: String,
@@ -773,6 +901,44 @@ pub enum EngineCommand {
         file_path: String,
         mime_type: Option<String>,
         txn_id: Option<String>,
+    },
+    /// Send a voice message (audio with waveform): file must be registered for attachment.
+    SendVoice {
+        room_id: RoomId,
+        file_path: String,
+        #[specta(type = Number)]
+        duration_ms: u64,
+        waveform: Vec<u16>,
+        #[serde(default)]
+        txn_id: Option<String>,
+    },
+    /// Send a static location message.
+    SendLocation {
+        room_id: RoomId,
+        #[specta(type = Number)]
+        latitude: f64,
+        #[specta(type = Number)]
+        longitude: f64,
+        #[serde(default)]
+        #[specta(type = Option<Number>)]
+        accuracy_m: Option<f64>,
+        #[serde(default)]
+        description: Option<String>,
+    },
+    /// Start a live location share.
+    StartLiveLocation {
+        room_id: RoomId,
+        #[specta(type = Number)]
+        duration_ms: u64,
+    },
+    /// Send a location beacon update (only valid while live share is active).
+    SendLocationBeacon {
+        room_id: RoomId,
+        geo_uri: String,
+    },
+    /// Stop the active live location share in this room.
+    StopLiveLocation {
+        room_id: RoomId,
     },
     MarkRead {
         room_id: RoomId,
@@ -847,6 +1013,67 @@ pub enum EngineCommand {
     /// 64 KiB with an integer `updated_at`.
     SetAccountPrefs {
         json: String,
+    },
+    // Moderation & Account
+    /// Delete one or more of the active account's devices (login sessions).
+    /// Requires the active account's password when UIA is required.
+    DeleteDevices {
+        device_ids: Vec<String>,
+        #[serde(default)]
+        password: Option<String>,
+    },
+    /// Kick a user from a room.
+    KickUser {
+        room_id: RoomId,
+        user_id: UserId,
+        #[serde(default)]
+        reason: Option<String>,
+    },
+    /// Ban a user from a room.
+    BanUser {
+        room_id: RoomId,
+        user_id: UserId,
+        #[serde(default)]
+        reason: Option<String>,
+    },
+    /// Unban a user from a room.
+    UnbanUser {
+        room_id: RoomId,
+        user_id: UserId,
+        #[serde(default)]
+        reason: Option<String>,
+    },
+    /// Set the power level of a user in a room.
+    SetPowerLevel {
+        room_id: RoomId,
+        user_id: UserId,
+        #[specta(type = Number)]
+        level: i64,
+    },
+    /// Add a user to the active account's block list.
+    IgnoreUser {
+        user_id: UserId,
+    },
+    /// Remove a user from the active account's block list.
+    UnignoreUser {
+        user_id: UserId,
+    },
+    /// List users on the active account's block list.
+    ListIgnoredUsers,
+    /// Report a message to room moderators.
+    ReportEvent {
+        room_id: RoomId,
+        event_id: EventId,
+        #[serde(default)]
+        reason: Option<String>,
+    },
+    /// Search messages across all unencrypted rooms.
+    SearchAllMessages {
+        query: String,
+        #[serde(default)]
+        next_batch: Option<String>,
+        #[serde(default)]
+        limit: Option<u32>,
     },
 }
 
@@ -985,6 +1212,50 @@ pub enum EngineResponse {
         key: String,
         added: bool,
     },
+    /// Pin state of a message changed.
+    EventPinned {
+        room_id: RoomId,
+        event_id: EventId,
+        pinned: bool,
+    },
+    /// Pinned messages for a room (first load or refresh).
+    PinnedEvents {
+        room_id: RoomId,
+        items: Vec<TimelineItemDto>,
+    },
+    /// Events forwarded to target rooms.
+    EventsForwarded {
+        forwarded: Vec<RoomId>,
+        failed: Vec<ForwardFailure>,
+    },
+    /// Room's favourite flag changed.
+    RoomFavouriteSet {
+        room_id: RoomId,
+        favourite: bool,
+    },
+    /// Room's low-priority flag changed.
+    RoomLowPrioritySet {
+        room_id: RoomId,
+        low_priority: bool,
+    },
+    /// Room's marked-as-unread flag changed.
+    RoomMarkedUnreadSet {
+        room_id: RoomId,
+        unread: bool,
+    },
+    /// A room's draft was saved.
+    DraftSaved {
+        room_id: RoomId,
+    },
+    /// A room's draft (or None if cleared).
+    Draft {
+        room_id: RoomId,
+        draft: Option<DraftDto>,
+    },
+    /// All rooms with non-empty drafts.
+    Drafts {
+        items: Vec<DraftSummary>,
+    },
     SendRetried {
         room_id: RoomId,
         txn_id: String,
@@ -998,6 +1269,23 @@ pub enum EngineResponse {
         txn_id: String,
         /// Known only once the server confirmed the event; the timeline item carries it later.
         event_id: Option<EventId>,
+    },
+    VoiceMessageSent {
+        room_id: RoomId,
+        txn_id: String,
+        event_id: Option<EventId>,
+    },
+    LocationSent {
+        room_id: RoomId,
+    },
+    LiveLocationStarted {
+        room_id: RoomId,
+    },
+    LocationBeaconSent {
+        room_id: RoomId,
+    },
+    LiveLocationStopped {
+        room_id: RoomId,
     },
     ReadMarked {
         room_id: RoomId,
@@ -1069,6 +1357,47 @@ pub enum EngineResponse {
     /// The synced preferences document, or `None` when the account has never stored one.
     AccountPrefs {
         json: Option<String>,
+    },
+    DevicesDeleted {
+        deleted: Vec<String>,
+    },
+    AuthRequired {
+        flows: Vec<String>,
+    },
+    UserKicked {
+        room_id: RoomId,
+        user_id: UserId,
+    },
+    UserBanned {
+        room_id: RoomId,
+        user_id: UserId,
+    },
+    UserUnbanned {
+        room_id: RoomId,
+        user_id: UserId,
+    },
+    PowerLevelSet {
+        room_id: RoomId,
+        user_id: UserId,
+        #[specta(type = Number)]
+        level: i64,
+    },
+    UserIgnored {
+        user_id: UserId,
+    },
+    UserUnignored {
+        user_id: UserId,
+    },
+    IgnoredUsers {
+        user_ids: Vec<UserId>,
+    },
+    EventReported {
+        room_id: RoomId,
+        event_id: EventId,
+    },
+    AllMessagesFound {
+        hits: Vec<GlobalSearchHit>,
+        next_batch: Option<String>,
     },
     Unit,
 }
@@ -1181,6 +1510,11 @@ pub enum EngineEvent {
     AccountPrefsChanged {
         json: String,
     },
+    /// The pinned events for a room changed.
+    PinnedEventsChanged {
+        room_id: RoomId,
+        event_ids: Vec<EventId>,
+    },
 }
 
 pub fn register_types() -> Types {
@@ -1224,6 +1558,9 @@ pub fn register_types() -> Types {
         .register::<RecoveryState>()
         .register::<MediaSource>()
         .register::<UrlPreviewDto>()
+        .register::<DraftDto>()
+        .register::<DraftSummary>()
+        .register::<ForwardFailure>()
         .register::<EngineCommand>()
         .register::<EngineResponse>()
         .register::<EngineError>()
@@ -1281,6 +1618,8 @@ mod tests {
             low_priority: None,
             tags: Vec::new(),
             direct_user_id: None,
+            marked_unread: false,
+            draft: None,
         };
         let json = serde_json::to_string(&summary).unwrap();
         let decoded: RoomSummary = serde_json::from_str(&json).unwrap();

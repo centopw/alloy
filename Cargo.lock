@@ -120,6 +120,7 @@ dependencies = [
  "alloy-protocol",
  "alloy-storage",
  "async-trait",
+ "base64 0.22.1",
  "percent-encoding",
  "reqwest 0.13.5",
  "serde",

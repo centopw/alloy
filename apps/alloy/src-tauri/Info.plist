@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Microphone usage for voice message recording -->
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Alloy needs access to your microphone to record voice messages.</string>
+  
+  <!-- Location usage for location sharing -->
+  <key>NSLocationWhenInUseUsageDescription</key>
+  <string>Alloy needs access to your location to share your position in chat.</string>
+</dict>
+</plist>

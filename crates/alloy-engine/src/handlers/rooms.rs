@@ -367,6 +367,123 @@ impl GroupHandler for RoomsHandler {
                     .map_err(map_err)?;
                 Ok(EngineResponse::Unit)
             }
+            EngineCommand::SetRoomFavourite { room_id, favourite } => {
+                let client = ctx.active_client().await?;
+                client
+                    .set_room_favourite(&room_id, favourite)
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::RoomFavouriteSet { room_id, favourite })
+            }
+            EngineCommand::SetRoomLowPriority {
+                room_id,
+                low_priority,
+            } => {
+                let client = ctx.active_client().await?;
+                client
+                    .set_room_low_priority(&room_id, low_priority)
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::RoomLowPrioritySet {
+                    room_id,
+                    low_priority,
+                })
+            }
+            EngineCommand::SetRoomMarkedUnread { room_id, unread } => {
+                let client = ctx.active_client().await?;
+                client
+                    .set_room_marked_unread(&room_id, unread)
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::RoomMarkedUnreadSet { room_id, unread })
+            }
+            EngineCommand::SaveDraft {
+                room_id,
+                text,
+                reply_to,
+                edit_of,
+            } => {
+                let client = ctx.active_client().await?;
+                client
+                    .save_draft(&room_id, text, reply_to, edit_of)
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::DraftSaved { room_id })
+            }
+            EngineCommand::GetDraft { room_id } => {
+                let client = ctx.active_client().await?;
+                let draft = client.get_draft(&room_id).await.map_err(map_err)?;
+                Ok(EngineResponse::Draft { room_id, draft })
+            }
+            EngineCommand::ListDrafts => {
+                let client = ctx.active_client().await?;
+                let items = client.list_drafts().await.map_err(map_err)?;
+                Ok(EngineResponse::Drafts { items })
+            }
+            EngineCommand::KickUser {
+                room_id,
+                user_id,
+                reason,
+            } => {
+                let client = ctx.active_client().await?;
+                client
+                    .kick_user(&room_id, &user_id, reason.as_deref())
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::UserKicked { room_id, user_id })
+            }
+            EngineCommand::BanUser {
+                room_id,
+                user_id,
+                reason,
+            } => {
+                let client = ctx.active_client().await?;
+                client
+                    .ban_user(&room_id, &user_id, reason.as_deref())
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::UserBanned { room_id, user_id })
+            }
+            EngineCommand::UnbanUser {
+                room_id,
+                user_id,
+                reason,
+            } => {
+                let client = ctx.active_client().await?;
+                client
+                    .unban_user(&room_id, &user_id, reason.as_deref())
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::UserUnbanned { room_id, user_id })
+            }
+            EngineCommand::SetPowerLevel {
+                room_id,
+                user_id,
+                level,
+            } => {
+                let client = ctx.active_client().await?;
+                client
+                    .set_power_level(&room_id, &user_id, level)
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::PowerLevelSet {
+                    room_id,
+                    user_id,
+                    level,
+                })
+            }
+            EngineCommand::ReportEvent {
+                room_id,
+                event_id,
+                reason,
+            } => {
+                let client = ctx.active_client().await?;
+                client
+                    .report_event(&room_id, &event_id, reason.as_deref())
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::EventReported { room_id, event_id })
+            }
             _ => Err(EngineError::invalid_argument(format!(
                 "Command '{}' does not belong to Rooms group",
                 name

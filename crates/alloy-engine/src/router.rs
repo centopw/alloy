@@ -31,7 +31,11 @@ impl CommandGroup {
             | EngineCommand::SetDisplayName { .. }
             | EngineCommand::SetOwnAvatar { .. }
             | EngineCommand::ListDevices
-            | EngineCommand::GetSessionInfo => CommandGroup::Auth,
+            | EngineCommand::GetSessionInfo
+            | EngineCommand::DeleteDevices { .. }
+            | EngineCommand::IgnoreUser { .. }
+            | EngineCommand::UnignoreUser { .. }
+            | EngineCommand::ListIgnoredUsers => CommandGroup::Auth,
 
             EngineCommand::SubscribeRoomList { .. }
             | EngineCommand::Unsubscribe { .. }
@@ -58,7 +62,18 @@ impl CommandGroup {
             | EngineCommand::SaveTagCatalog { .. }
             | EngineCommand::SetRoomTag { .. }
             | EngineCommand::DeleteRoomTag { .. }
-            | EngineCommand::SearchRoomMessages { .. } => CommandGroup::Rooms,
+            | EngineCommand::SearchRoomMessages { .. }
+            | EngineCommand::SetRoomFavourite { .. }
+            | EngineCommand::SetRoomLowPriority { .. }
+            | EngineCommand::SetRoomMarkedUnread { .. }
+            | EngineCommand::SaveDraft { .. }
+            | EngineCommand::GetDraft { .. }
+            | EngineCommand::ListDrafts
+            | EngineCommand::KickUser { .. }
+            | EngineCommand::BanUser { .. }
+            | EngineCommand::UnbanUser { .. }
+            | EngineCommand::SetPowerLevel { .. }
+            | EngineCommand::ReportEvent { .. } => CommandGroup::Rooms,
 
             EngineCommand::SubscribeTimeline { .. }
             | EngineCommand::SubscribeThread { .. }
@@ -67,13 +82,21 @@ impl CommandGroup {
             | EngineCommand::EditMessage { .. }
             | EngineCommand::RedactEvent { .. }
             | EngineCommand::ToggleReaction { .. }
+            | EngineCommand::SetEventPinned { .. }
+            | EngineCommand::GetPinnedEvents { .. }
+            | EngineCommand::ForwardEvents { .. }
             | EngineCommand::RetrySend { .. }
             | EngineCommand::CancelSend { .. }
             | EngineCommand::MarkRead { .. }
             | EngineCommand::SetTyping { .. }
             | EngineCommand::SendPoll { .. }
             | EngineCommand::RespondToPoll { .. }
-            | EngineCommand::EndPoll { .. } => CommandGroup::Timeline,
+            | EngineCommand::EndPoll { .. }
+            | EngineCommand::SendLocation { .. }
+            | EngineCommand::StartLiveLocation { .. }
+            | EngineCommand::SendLocationBeacon { .. }
+            | EngineCommand::StopLiveLocation { .. }
+            | EngineCommand::SearchAllMessages { .. } => CommandGroup::Timeline,
 
             EngineCommand::RequestSelfVerification
             | EngineCommand::AcceptVerification { .. }
@@ -84,10 +107,10 @@ impl CommandGroup {
             | EngineCommand::EnableRecovery { .. }
             | EngineCommand::RecoverWithKey { .. }
             | EngineCommand::ResetRecovery { .. } => CommandGroup::Crypto,
-
             EngineCommand::GetMedia { .. }
             | EngineCommand::GetUrlPreview { .. }
             | EngineCommand::SendAttachment { .. }
+            | EngineCommand::SendVoice { .. }
             | EngineCommand::GetRoomMedia { .. }
             | EngineCommand::ClearMediaCache => CommandGroup::Media,
 

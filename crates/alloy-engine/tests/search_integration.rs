@@ -55,6 +55,7 @@ async fn send_text(eng: &AppEngine, room_id: &RoomId, body: &str) {
         markdown: None,
         reply_to: None,
         mentions: None,
+        mention_room: false,
         txn_id: None,
         in_thread_root: None,
     })

@@ -135,6 +135,7 @@ async fn send_edit_react_redact_and_paginate() {
             markdown: Some(false),
             reply_to: None,
             mentions: None,
+            mention_room: false,
             txn_id: None,
             in_thread_root: None,
         })
@@ -162,6 +163,7 @@ async fn send_edit_react_redact_and_paginate() {
         markdown: Some(false),
         reply_to: Some(first_id.clone()),
         mentions: None,
+        mention_room: false,
         txn_id: None,
         in_thread_root: None,
     })
@@ -271,6 +273,7 @@ async fn send_edit_react_redact_and_paginate() {
             markdown: None,
             reply_to: None,
             mentions: None,
+            mention_room: false,
             txn_id: None,
             in_thread_root: None,
         })

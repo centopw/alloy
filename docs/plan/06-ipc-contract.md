@@ -98,6 +98,11 @@ Commands are serialized with `#[serde(tag = "action", content = "params")]`.
 | | `RetrySend` | `{ room_id, txn_id }` | `SendRetried { room_id, txn_id }` | Retries a failed send transaction |
 | | `CancelSend` | `{ room_id, txn_id }` | `SendCancelled { room_id, txn_id }` | Drops a queued or failed message |
 | | `SendAttachment` | `{ room_id, file_path, mime_type?, txn_id? }` | `AttachmentSent { room_id, txn_id, event_id }` | Encrypts and uploads media attachment |
+| | `SendVoice` | `{ room_id, file_path, duration_ms, waveform, txn_id? }` | `AttachmentSent { room_id, txn_id, event_id }` | Records and uploads voice message with waveform; reuses attachment infrastructure |
+| | `SendLocation` | `{ room_id, latitude, longitude, accuracy_m?, description? }` | `LocationSent { room_id }` | Sends static location via `geo:` URI with optional accuracy and description |
+| | `StartLiveLocation` | `{ room_id, duration_ms }` | `LiveLocationStarted { room_id }` | Initiates live location share; send beacons with `SendLocationBeacon` |
+| | `SendLocationBeacon` | `{ room_id, geo_uri }` | `LocationBeaconSent { room_id }` | Updates live location (only valid during active `StartLiveLocation`) |
+| | `StopLiveLocation` | `{ room_id }` | `LiveLocationStopped { room_id }` | Terminates live location share |
 | | `MarkRead` | `{ room_id, event_id }` | `ReadMarked { room_id }` | Sends unthreaded read receipt |
 | | `SetTyping` | `{ room_id, typing }` | `TypingStatusSet { room_id }` | Sets ephemeral typing notice |
 | **Media** | `GetMedia` | `{ source, kind, width?, height? }` | `MediaRetrieved { local_path }` | Authenticated media download/thumbnail cache |
@@ -119,6 +124,16 @@ Commands are serialized with `#[serde(tag = "action", content = "params")]`.
 | | `SetSetting` | `{ key, value_json }` | `SettingSet { key }` | Saves user preference |
 | | `GetAccountPrefs` | *(none)* | `AccountPrefs { json: string \| null }` | Returns the synced preferences document from the account (`chat.alloy.prefs`), or `null` when none exists |
 | | `SetAccountPrefs` | `{ json }` | `Unit` | Replaces the synced preferences document. Rejects non-object JSON, documents over 64 KiB, and a missing or non-integer `updated_at` with `invalid_argument` |
+| **Account & Moderation** | `DeleteDevices` | `{ device_ids, password? }` | `DevicesDeleted { deleted }` \| `AuthRequired { flows }` | Deletes one or more of the account's login sessions. Returns `AuthRequired` when UIA password authentication is needed |
+| | `KickUser` | `{ room_id, user_id, reason? }` | `UserKicked { room_id, user_id }` | Kicks a user from a room (requires kick power level) |
+| | `BanUser` | `{ room_id, user_id, reason? }` | `UserBanned { room_id, user_id }` | Bans a user from a room (requires ban power level) |
+| | `UnbanUser` | `{ room_id, user_id, reason? }` | `UserUnbanned { room_id, user_id }` | Unbans a user from a room |
+| | `SetPowerLevel` | `{ room_id, user_id, level }` | `PowerLevelSet { room_id, user_id, level }` | Updates a user's power level in a room |
+| | `IgnoreUser` | `{ user_id }` | `UserIgnored { user_id }` | Adds a user to the account's server-side ignore list |
+| | `UnignoreUser` | `{ user_id }` | `UserUnignored { user_id }` | Removes a user from the account's server-side ignore list |
+| | `ListIgnoredUsers` | *(none)* | `IgnoredUsers { user_ids }` | Lists all users currently on the account's ignore list |
+| | `ReportEvent` | `{ room_id, event_id, reason? }` | `EventReported { room_id, event_id }` | Reports an event to room moderators via `Room::report_content` |
+| **Search** | `SearchAllMessages` | `{ query, next_batch?, limit? }` | `AllMessagesFound { hits, next_batch? }` | Searches text messages across all joined unencrypted rooms (`POST /_matrix/client/v3/search`, newest first) |
 
 ---
 
@@ -137,7 +152,7 @@ Pushed from backend over `alloy_subscribe(Channel<EngineEvent>)`. Tagged with `#
 | `RecoveryState` | `{ state: RecoveryState }` | Server-side key backup health |
 | `AccountPrefsChanged` | `{ json: string }` | The synced preferences document changed on another device. Emitted only when `updated_at` advances, so the writing device does not receive its own echo |
 | `ToastNotice` | `{ message: string, level: string }` | Global feedback alerts |
-
+| `PinnedEventsChanged` | `{ room_id: RoomId, event_ids: EventId[] }` | Pinned event IDs changed in a room |
 ---
 
 ## 5. Differential List Synchronization (`VectorDiffDto<T>`)

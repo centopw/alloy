@@ -189,6 +189,7 @@ async fn read_receipt_and_mark_room_read_clear_unread_count() {
                 markdown: Some(false),
                 reply_to: None,
                 mentions: None,
+                mention_room: false,
                 in_thread_root: None,
                 txn_id: None,
             })

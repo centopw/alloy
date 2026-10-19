@@ -3,8 +3,8 @@
 use crate::mapping;
 use crate::{AlloyClient, AlloyError, AlloyResult};
 use alloy_protocol::{
-    PublicRoomDto, RoomDetails, RoomId, RoomMemberDto, RoomMembership, RoomSummary, SpaceParentDto,
-    UserId, UserProfileDto, VectorDiffDto,
+    EventId, PublicRoomDto, RoomDetails, RoomId, RoomMemberDto, RoomMembership, RoomSummary,
+    SpaceParentDto, UserId, UserProfileDto, VectorDiffDto,
 };
 use futures::StreamExt;
 use matrix_sdk::RoomMemberships;
@@ -35,6 +35,13 @@ pub struct RoomAdminRights {
     pub can_set_name: bool,
     pub can_set_topic: bool,
     pub can_set_avatar: bool,
+    pub can_pin: bool,
+    pub can_redact_others: bool,
+    pub can_mention_room: bool,
+    pub my_power_level: i64,
+    pub can_kick: bool,
+    pub can_ban: bool,
+    pub can_set_power_levels: bool,
 }
 
 /// Account-data type holding the private room note as `{"note": "..."}`.
@@ -55,6 +62,13 @@ async fn room_rights(room: &matrix_sdk::Room) -> RoomAdminRights {
         can_set_name: levels.user_can_send_state(me, StateEventType::RoomName),
         can_set_topic: levels.user_can_send_state(me, StateEventType::RoomTopic),
         can_set_avatar: levels.user_can_send_state(me, StateEventType::RoomAvatar),
+        can_pin: levels.user_can_send_state(me, StateEventType::RoomPinnedEvents),
+        can_redact_others: levels.user_can_redact_event_of_other(me),
+        can_mention_room: levels.user_can_trigger_room_notification(me),
+        my_power_level: power_level_value(levels.for_user(me)),
+        can_kick: levels.user_can_kick(me),
+        can_ban: levels.user_can_ban(me),
+        can_set_power_levels: levels.user_can_send_state(me, StateEventType::RoomPowerLevels),
     }
 }
 
@@ -64,7 +78,7 @@ impl AlloyClient {
     pub async fn room_members(&self, room_id: &RoomId) -> AlloyResult<Vec<RoomMemberDto>> {
         let room = self.room(room_id)?;
         let members = room
-            .members(RoomMemberships::JOIN | RoomMemberships::INVITE)
+            .members(RoomMemberships::JOIN | RoomMemberships::INVITE | RoomMemberships::BAN)
             .await
             .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
         let mut out: Vec<RoomMemberDto> = members
@@ -76,6 +90,7 @@ impl AlloyClient {
                 power_level: power_level_value(m.power_level()),
                 membership: match m.membership() {
                     MembershipState::Invite => RoomMembership::Invited,
+                    MembershipState::Ban => RoomMembership::Banned,
                     _ => RoomMembership::Joined,
                 },
             })
@@ -147,9 +162,24 @@ impl AlloyClient {
             can_set_name: rights.can_set_name,
             can_set_topic: rights.can_set_topic,
             can_set_avatar: rights.can_set_avatar,
+            can_pin: rights.can_pin,
+            can_redact_others: rights.can_redact_others,
+            can_mention_room: rights.can_mention_room,
+            pinned_event_ids: match room.load_pinned_events().await {
+                Ok(Some(ids)) => ids.into_iter().map(|id| EventId(id.to_string())).collect(),
+                _ => room
+                    .pinned_event_ids()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|id| EventId(id.to_string()))
+                    .collect(),
+            },
+            my_power_level: rights.my_power_level,
+            can_kick: rights.can_kick,
+            can_ban: rights.can_ban,
+            can_set_power_levels: rights.can_set_power_levels,
         })
     }
-
     /// Whether the active account may change the room's name, topic and avatar.
     pub async fn room_admin_rights(&self, room_id: &RoomId) -> AlloyResult<RoomAdminRights> {
         let room = self.room(room_id)?;
@@ -257,6 +287,187 @@ impl AlloyClient {
             .await
             .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
         Ok(())
+    }
+
+    /// Set whether the room is marked as favourite (pinned to the top of the chat list).
+    pub async fn set_room_favourite(&self, room_id: &RoomId, favourite: bool) -> AlloyResult<()> {
+        let room = self.room(room_id)?;
+        room.set_is_favourite(favourite, None)
+            .await
+            .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Set whether the room is marked as low priority (archived).
+    pub async fn set_room_low_priority(
+        &self,
+        room_id: &RoomId,
+        low_priority: bool,
+    ) -> AlloyResult<()> {
+        let room = self.room(room_id)?;
+        room.set_is_low_priority(low_priority, None)
+            .await
+            .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Set or clear the marked-as-unread flag for the room.
+    pub async fn set_room_marked_unread(&self, room_id: &RoomId, unread: bool) -> AlloyResult<()> {
+        let room = self.room(room_id)?;
+        room.set_unread_flag(unread)
+            .await
+            .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Pin or unpin an event in a room.
+    pub async fn set_event_pinned(
+        &self,
+        room_id: &RoomId,
+        event_id: &EventId,
+        pinned: bool,
+    ) -> AlloyResult<()> {
+        let room = self.room(room_id)?;
+        let parsed_event_id = matrix_sdk::ruma::EventId::parse(&event_id.0)
+            .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
+        if pinned {
+            room.pin_event(&parsed_event_id)
+                .await
+                .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
+        } else {
+            room.unpin_event(&parsed_event_id)
+                .await
+                .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Currently pinned event IDs in the room (oldest first).
+    pub async fn pinned_event_ids(&self, room_id: &RoomId) -> AlloyResult<Vec<EventId>> {
+        let room = self.room(room_id)?;
+        let ids = match room.load_pinned_events().await {
+            Ok(Some(ids)) => ids,
+            _ => room.pinned_event_ids().unwrap_or_default(),
+        };
+        Ok(ids.into_iter().map(|id| EventId(id.to_string())).collect())
+    }
+
+    /// Fetch all pinned events for a room as TimelineItemDtos.
+    pub async fn get_pinned_events(
+        &self,
+        room_id: &RoomId,
+    ) -> AlloyResult<Vec<alloy_protocol::TimelineItemDto>> {
+        let room = self.room(room_id)?;
+        let pinned_ids = match room.load_pinned_events().await {
+            Ok(Some(ids)) => ids,
+            _ => room.pinned_event_ids().unwrap_or_default(),
+        };
+        let mut items = Vec::new();
+        for id in pinned_ids {
+            if let Ok(ev) = room.event(&id, None).await {
+                let sender = ev
+                    .raw()
+                    .get_field::<matrix_sdk::ruma::OwnedUserId>("sender")
+                    .ok()
+                    .flatten();
+                let mut name = None;
+                let mut avatar = None;
+                if let Some(sender) = &sender
+                    && let Ok(Some(member)) = room.get_member(sender).await
+                {
+                    name = member.display_name().map(str::to_owned);
+                    avatar = member.avatar_url().map(|u| u.to_string());
+                }
+                let event_id = EventId(id.to_string());
+                if let Some(dto) = mapping::pinned_event_to_dto(&ev, &event_id, name, avatar) {
+                    items.push(dto);
+                }
+            }
+        }
+        Ok(items)
+    }
+
+    /// Save a composer draft in the room. Empty text with no reply/edit clears it.
+    pub async fn save_draft(
+        &self,
+        room_id: &RoomId,
+        text: String,
+        reply_to: Option<EventId>,
+        edit_of: Option<EventId>,
+    ) -> AlloyResult<()> {
+        let room = self.room(room_id)?;
+        if text.trim().is_empty() && reply_to.is_none() && edit_of.is_none() {
+            room.clear_composer_draft(None)
+                .await
+                .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
+            return Ok(());
+        }
+        use matrix_sdk::{ComposerDraft, ComposerDraftType};
+        let draft_type = if let Some(edit_of) = edit_of {
+            let event_id = matrix_sdk::ruma::EventId::parse(&edit_of.0)
+                .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
+            ComposerDraftType::Edit { event_id }
+        } else if let Some(reply_to) = reply_to {
+            let event_id = matrix_sdk::ruma::EventId::parse(&reply_to.0)
+                .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
+            ComposerDraftType::Reply { event_id }
+        } else {
+            ComposerDraftType::NewMessage
+        };
+        let draft = ComposerDraft {
+            plain_text: text,
+            html_text: None,
+            draft_type,
+            attachments: vec![],
+        };
+        room.save_composer_draft(draft, None)
+            .await
+            .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Load composer draft for a room.
+    pub async fn get_draft(
+        &self,
+        room_id: &RoomId,
+    ) -> AlloyResult<Option<alloy_protocol::DraftDto>> {
+        let room = self.room(room_id)?;
+        let draft = room
+            .load_composer_draft(None)
+            .await
+            .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
+        use matrix_sdk::ComposerDraftType;
+        Ok(draft.map(|d| {
+            let (reply_to, edit_of) = match d.draft_type {
+                ComposerDraftType::Reply { event_id } => {
+                    (Some(EventId(event_id.to_string())), None)
+                }
+                ComposerDraftType::Edit { event_id } => (None, Some(EventId(event_id.to_string()))),
+                ComposerDraftType::NewMessage => (None, None),
+            };
+            alloy_protocol::DraftDto {
+                text: d.plain_text,
+                reply_to,
+                edit_of,
+            }
+        }))
+    }
+
+    /// List all rooms with non-empty composer drafts.
+    pub async fn list_drafts(&self) -> AlloyResult<Vec<alloy_protocol::DraftSummary>> {
+        let mut out = Vec::new();
+        for room in self.client.joined_rooms() {
+            if let Ok(Some(draft)) = room.load_composer_draft(None).await
+                && !draft.plain_text.trim().is_empty()
+            {
+                out.push(alloy_protocol::DraftSummary {
+                    room_id: RoomId(room.room_id().to_string()),
+                    text: draft.plain_text.chars().take(80).collect(),
+                });
+            }
+        }
+        out.sort_by(|a, b| a.room_id.0.cmp(&b.room_id.0));
+        Ok(out)
     }
 
     /// Profile of a user. With `room_id`, also the user's membership and power level in that room.
@@ -676,5 +887,126 @@ impl AlloyClient {
             next_batch: response.next_batch,
             total_estimate: response.total_room_count_estimate.map(u64::from),
         })
+    }
+
+    /// Kick a user from a room.
+    pub async fn kick_user(
+        &self,
+        room_id: &RoomId,
+        user_id: &UserId,
+        reason: Option<&str>,
+    ) -> AlloyResult<()> {
+        let room = self.room(room_id)?;
+        let parsed_user = matrix_sdk::ruma::UserId::parse(&user_id.0)
+            .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
+        room.kick_user(&parsed_user, reason)
+            .await
+            .map_err(|e| AlloyError::MatrixSdk(e.to_string()))
+    }
+
+    /// Ban a user from a room.
+    pub async fn ban_user(
+        &self,
+        room_id: &RoomId,
+        user_id: &UserId,
+        reason: Option<&str>,
+    ) -> AlloyResult<()> {
+        let room = self.room(room_id)?;
+        let parsed_user = matrix_sdk::ruma::UserId::parse(&user_id.0)
+            .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
+        room.ban_user(&parsed_user, reason)
+            .await
+            .map_err(|e| AlloyError::MatrixSdk(e.to_string()))
+    }
+
+    /// Unban a user from a room.
+    pub async fn unban_user(
+        &self,
+        room_id: &RoomId,
+        user_id: &UserId,
+        reason: Option<&str>,
+    ) -> AlloyResult<()> {
+        let room = self.room(room_id)?;
+        let parsed_user = matrix_sdk::ruma::UserId::parse(&user_id.0)
+            .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
+        room.unban_user(&parsed_user, reason)
+            .await
+            .map_err(|e| AlloyError::MatrixSdk(e.to_string()))
+    }
+
+    /// Set the power level of a user in a room.
+    pub async fn set_power_level(
+        &self,
+        room_id: &RoomId,
+        user_id: &UserId,
+        level: i64,
+    ) -> AlloyResult<()> {
+        let room = self.room(room_id)?;
+        let parsed_user = matrix_sdk::ruma::UserId::parse(&user_id.0)
+            .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
+        let int_level = matrix_sdk::ruma::Int::try_from(level)
+            .map_err(|_| AlloyError::MatrixSdk("power level out of range".to_string()))?;
+        room.update_power_levels(vec![(&parsed_user, int_level)])
+            .await
+            .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Report an event to room moderators.
+    pub async fn report_event(
+        &self,
+        room_id: &RoomId,
+        event_id: &EventId,
+        reason: Option<&str>,
+    ) -> AlloyResult<()> {
+        let room = self.room(room_id)?;
+        let parsed_event_id = matrix_sdk::ruma::OwnedEventId::try_from(event_id.0.as_str())
+            .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
+        room.report_content(parsed_event_id, reason.map(str::to_string))
+            .await
+            .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Start sharing live location in a room. Returns once the share can take beacons: the SDK only sends one
+    /// after its own `beacon_info` state event has come back through sync, so this waits for that (up to 15 s).
+    pub async fn start_live_location(&self, room_id: &RoomId, duration_ms: u64) -> AlloyResult<()> {
+        let room = self.room(room_id)?;
+        room.start_live_location_share(duration_ms, None)
+            .await
+            .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
+        let me = room.own_user_id().to_owned();
+        for _ in 0..75 {
+            let synced = room
+                .get_state_event_static_for_key::<matrix_sdk::ruma::events::beacon_info::BeaconInfoEventContent, _>(&me)
+                .await
+                .is_ok_and(|event| event.is_some());
+            if synced {
+                return Ok(());
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+        Err(AlloyError::MatrixSdk(
+            "The live location share was created but has not synced yet. Try again in a moment."
+                .to_owned(),
+        ))
+    }
+
+    /// Send a location beacon update for an active live location share.
+    pub async fn send_location_beacon(&self, room_id: &RoomId, geo_uri: &str) -> AlloyResult<()> {
+        let room = self.room(room_id)?;
+        room.send_location_beacon(geo_uri.to_owned())
+            .await
+            .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Stop sharing live location in a room.
+    pub async fn stop_live_location(&self, room_id: &RoomId) -> AlloyResult<()> {
+        let room = self.room(room_id)?;
+        room.stop_live_location_share()
+            .await
+            .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
+        Ok(())
     }
 }

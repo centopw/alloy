@@ -16,11 +16,11 @@ pub mod timeline;
 pub mod tls;
 pub mod url_preview;
 
+pub use account::DeleteDevicesOutcome;
 pub use alloy_protocol::*;
 pub use alloy_storage::{InMemorySecretStore, SecretStore, StorageError};
 pub use client::*;
 pub use crypto::{ActiveVerification, VerificationCallback, VerificationUpdate};
-pub use mapping::*;
 
 use thiserror::Error;
 

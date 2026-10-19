@@ -191,6 +191,58 @@ impl AlloyClient {
         let _ = forward.await;
         result
     }
+    /// Send a voice message. `waveform` is a vec of u16 values in range 0..=1024.
+    /// Converts to f32 (0.0..=1.0) for the matrix-sdk. Returns when upload + send finished.
+    pub async fn send_voice(
+        &self,
+        room_id: &RoomId,
+        file_path: &Path,
+        duration_ms: u64,
+        waveform: Vec<u16>,
+        txn_id: Option<&str>,
+        mut on_progress: impl FnMut(u64, u64) + Send + 'static,
+    ) -> AlloyResult<()> {
+        self.ensure_encryption_state(room_id).await?;
+        let timeline = self.cached_timeline(room_id).await?;
+
+        // Convert waveform from 0..=1024 to 0.0..=1.0
+        let waveform_f32 = waveform
+            .into_iter()
+            .map(|v| (v.min(1024) as f32) / 1024.0)
+            .collect();
+
+        let mut config = matrix_sdk_ui::timeline::AttachmentConfig::default();
+        if let Some(txn) = txn_id {
+            config.txn_id = Some(matrix_sdk::ruma::OwnedTransactionId::from(txn));
+        }
+
+        // Set attachment info: Voice with waveform and duration.
+        config.info = Some(matrix_sdk::attachment::AttachmentInfo::Voice(
+            matrix_sdk::attachment::BaseAudioInfo {
+                duration: Some(std::time::Duration::from_millis(duration_ms)),
+                size: None,
+                waveform: Some(waveform_f32),
+            },
+        ));
+
+        // Caption ensures body = "Voice message" and filename is preserved.
+        config.caption = Some(
+            matrix_sdk::ruma::events::room::message::TextMessageEventContent::plain(
+                "Voice message",
+            ),
+        );
+
+        let upload = timeline.send_attachment(file_path, "audio/ogg".parse().unwrap(), config);
+        let mut progress = upload.subscribe_to_send_progress();
+        let forward = tokio::spawn(async move {
+            while let Some(p) = progress.next().await {
+                on_progress(p.current as u64, p.total as u64);
+            }
+        });
+        let result = upload.await.map_err(sdk);
+        let _ = forward.await;
+        result
+    }
 }
 
 pub(crate) fn mime_guess_from_path(path: &Path) -> mime::Mime {

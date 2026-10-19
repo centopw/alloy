@@ -67,8 +67,10 @@ pub fn run() {
             let _ = std::fs::create_dir_all(&data_dir);
 
             let secret_store = open_secret_store(&data_dir)?;
-
-            let ctx = EngineContext::new(data_dir, secret_store);
+            let ctx = EngineContext::new(data_dir.clone(), secret_store);
+            let temp_voice_path = data_dir.join(save::TEMP_VOICE_DIR);
+            let _ = std::fs::create_dir_all(&temp_voice_path);
+            let _ = ctx.allow_attachment_root(&temp_voice_path);
             let engine = Arc::new(AppEngine::new(ctx));
 
             app.manage(AppState { engine });
@@ -79,7 +81,9 @@ pub fn run() {
             alloy_invoke,
             alloy_subscribe,
             pick::pick_attachment,
+            pick::pick_attachments,
             save::save_media,
+            save::write_temp_file,
             update::check_update,
             update::download_update,
             update::apply_update,

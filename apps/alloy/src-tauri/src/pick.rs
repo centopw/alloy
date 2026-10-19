@@ -36,19 +36,47 @@ pub async fn pick_attachment(app: AppHandle) -> Result<Option<String>, String> {
         .map_err(|e| e.to_string())?
 }
 
-fn pick_blocking(app: &AppHandle) -> Result<Option<String>, String> {
-    let state = app.state::<AppState>();
-    let ctx = state.engine.context();
-    let picks_root = app
+/// Opens the picker for several files at once. Empty when the user cancels.
+#[tauri::command]
+pub async fn pick_attachments(app: AppHandle) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || pick_many_blocking(&app))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn picks_root(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let root = app
         .path()
         .app_cache_dir()
         .map_err(|e| e.to_string())?
         .join(PICKS_DIR);
-    prune_old_picks(&picks_root, SystemTime::now());
+    prune_old_picks(&root, SystemTime::now());
+    Ok(root)
+}
 
+fn pick_blocking(app: &AppHandle) -> Result<Option<String>, String> {
+    let root = picks_root(app)?;
     let Some(picked) = app.dialog().file().blocking_pick_file() else {
         return Ok(None);
     };
+    resolve_picked(app, &root, picked).map(Some)
+}
+
+fn pick_many_blocking(app: &AppHandle) -> Result<Vec<String>, String> {
+    let root = picks_root(app)?;
+    let Some(picked) = app.dialog().file().blocking_pick_files() else {
+        return Ok(Vec::new());
+    };
+    picked
+        .into_iter()
+        .map(|file| resolve_picked(app, &root, file))
+        .collect()
+}
+
+/// Makes one picked file sendable: desktop paths are registered as they are, URIs are copied into the pick cache.
+fn resolve_picked(app: &AppHandle, picks_root: &Path, picked: FilePath) -> Result<String, String> {
+    let state = app.state::<AppState>();
+    let ctx = state.engine.context();
     match picked {
         FilePath::Path(path) => {
             // The user picked this file explicitly, so the engine may send exactly this file.
@@ -56,10 +84,9 @@ fn pick_blocking(app: &AppHandle) -> Result<Option<String>, String> {
                 .map_err(|e| format!("picked file is not readable: {e}"))?;
             path.into_os_string()
                 .into_string()
-                .map(Some)
                 .map_err(|_| "picked file path is not valid UTF-8".to_owned())
         }
-        uri @ FilePath::Url(_) => copy_into_pick_dir(app, ctx, &picks_root, uri).map(Some),
+        uri @ FilePath::Url(_) => copy_into_pick_dir(app, ctx, picks_root, uri),
     }
 }
 

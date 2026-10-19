@@ -125,6 +125,8 @@ pub fn room_to_summary(room: &matrix_sdk::Room) -> RoomSummary {
             .filter_map(|target| matrix_sdk::ruma::OwnedUserId::try_from(target).ok())
             .min()
             .map(|id| UserId(id.to_string())),
+        marked_unread: room.is_marked_unread(),
+        draft: None,
     }
 }
 
@@ -287,6 +289,8 @@ fn map_message_type(msgtype: &MessageType) -> TimelineItemContent {
         width: w,
         height: h,
         duration_ms: dur,
+        voice: false,
+        waveform: None,
     };
     let dim = |v: Option<matrix_sdk::ruma::UInt>| v.and_then(|u| u32::try_from(u64::from(u)).ok());
     match msgtype {
@@ -322,18 +326,43 @@ fn map_message_type(msgtype: &MessageType) -> TimelineItemContent {
         }
         MessageType::Audio(c) => {
             let info = c.info.as_deref();
-            media(
-                &c.source,
-                info.and_then(|i| i.mimetype.clone()),
-                info.and_then(|i| i.size).map(u64::from),
-                None,
-                c.body.as_str(),
-                "audio",
-                None,
-                None,
-                info.and_then(|i| i.duration).map(|d| d.as_millis() as u64),
-            )
+            let voice = c.voice.is_some();
+            let waveform: Option<Vec<u16>> = c.audio.as_ref().map(|a| {
+                a.waveform
+                    .iter()
+                    .map(|w| u64::from(w.get()) as u16)
+                    .collect()
+            });
+            let duration = info
+                .and_then(|i| i.duration)
+                .or_else(|| c.audio.as_ref().map(|a| a.duration))
+                .map(|d| d.as_millis() as u64);
+            TimelineItemContent::Media {
+                uri: media_source_string(&c.source),
+                mime_type: info
+                    .and_then(|i| i.mimetype.clone())
+                    .unwrap_or_else(|| "audio/ogg".into()),
+                size_bytes: info.and_then(|i| i.size).map(u64::from).unwrap_or(0),
+                thumbnail_uri: None,
+                body: c.body.clone(),
+                media_kind: "audio".into(),
+                width: None,
+                height: None,
+                duration_ms: duration,
+                voice,
+                waveform,
+            }
         }
+        MessageType::Location(c) => TimelineItemContent::Location {
+            geo_uri: c.geo_uri.clone(),
+            description: if c.body.is_empty() {
+                None
+            } else {
+                Some(c.body.clone())
+            },
+            live: false,
+            live_until_millis: None,
+        },
         MessageType::File(c) => {
             let info = c.info.as_deref();
             media(
@@ -404,6 +433,8 @@ fn map_content(
                         width: c.info.width.and_then(|u| u32::try_from(u64::from(u)).ok()),
                         height: c.info.height.and_then(|u| u32::try_from(u64::from(u)).ok()),
                         duration_ms: None,
+                        voice: false,
+                        waveform: None,
                     },
                     false,
                 )
@@ -468,7 +499,23 @@ fn map_content(
                 },
                 false,
             ),
-            MsgLikeKind::Other(_) | MsgLikeKind::LiveLocation(_) => (
+            MsgLikeKind::LiveLocation(l) => {
+                let geo_uri = l
+                    .latest_location()
+                    .map(|b| b.geo_uri().to_owned())
+                    .unwrap_or_default();
+                let until = u64::from(l.ts().0).saturating_add(l.timeout().as_millis() as u64);
+                (
+                    TimelineItemContent::Location {
+                        geo_uri,
+                        description: l.description().map(str::to_owned),
+                        live: l.is_live(),
+                        live_until_millis: Some(until),
+                    },
+                    false,
+                )
+            }
+            MsgLikeKind::Other(_) => (
                 TimelineItemContent::RoomState {
                     state_type: "unsupported".into(),
                     content_json: String::new(),
@@ -859,6 +906,7 @@ fn embedded_to_dto(id: &str, e: &EmbeddedEvent, my_user_id: Option<&str>) -> Tim
         edited,
         reactions: vec![],
         transaction_id: None,
+        mentions_me: false,
     }
 }
 
@@ -892,6 +940,7 @@ pub fn timeline_item_to_dto(item: &TimelineItem, my_user_id: Option<&str>) -> Ti
         edited: false,
         reactions: vec![],
         transaction_id: None,
+        mentions_me: false,
     }
 }
 
@@ -952,7 +1001,74 @@ fn event_to_dto(
         edited,
         reactions,
         transaction_id: ev.transaction_id().map(|t| t.to_string()),
+        mentions_me: ev.is_highlighted(),
     }
+}
+
+/// Minimal TimelineItemDto for a pinned event loaded through `room.event(&id, None)`.
+pub fn pinned_event_to_dto(
+    event: &matrix_sdk::deserialized_responses::TimelineEvent,
+    event_id: &EventId,
+    sender_name: Option<String>,
+    sender_avatar: Option<String>,
+) -> Option<TimelineItemDto> {
+    use matrix_sdk::ruma::events::{
+        AnySyncMessageLikeEvent, AnySyncTimelineEvent, SyncMessageLikeEvent,
+    };
+    let ev = event.raw().deserialize().ok()?;
+    let timestamp_millis = u64::from(ev.origin_server_ts().0);
+    let sender = UserId(ev.sender().to_string());
+    let (body, formatted_body) = match &ev {
+        AnySyncTimelineEvent::MessageLike(AnySyncMessageLikeEvent::RoomMessage(
+            SyncMessageLikeEvent::Original(m),
+        )) => match &m.content.relates_to {
+            Some(matrix_sdk::ruma::events::room::message::Relation::Replacement(r)) => {
+                let fmt = match &r.new_content.msgtype {
+                    MessageType::Text(t) => t.formatted.as_ref().map(|f| f.body.clone()),
+                    _ => None,
+                };
+                (r.new_content.msgtype.body().to_owned(), fmt)
+            }
+            _ => {
+                let fmt = match &m.content.msgtype {
+                    MessageType::Text(t) => t.formatted.as_ref().map(|f| f.body.clone()),
+                    _ => None,
+                };
+                (m.content.body().to_owned(), fmt)
+            }
+        },
+        AnySyncTimelineEvent::MessageLike(AnySyncMessageLikeEvent::RoomEncrypted(_)) => {
+            ("Encrypted message".to_owned(), None)
+        }
+        AnySyncTimelineEvent::MessageLike(AnySyncMessageLikeEvent::Sticker(_)) => {
+            ("Sticker".to_owned(), None)
+        }
+        _ => return None,
+    };
+    Some(TimelineItemDto {
+        internal_id: event_id.0.clone(),
+        event_id: Some(event_id.clone()),
+        sender,
+        timestamp_millis,
+        content: TimelineItemContent::TextMessage {
+            body,
+            formatted_body,
+            html_sanitized: true,
+        },
+        send_state: EventSendState::Sent {
+            event_id: event_id.clone(),
+        },
+        is_own: false,
+        reply_to: None,
+        thread_summary: None,
+        read_receipts: None,
+        sender_display_name: sender_name,
+        sender_avatar_url: sender_avatar,
+        edited: false,
+        reactions: vec![],
+        transaction_id: None,
+        mentions_me: false,
+    })
 }
 
 #[cfg(test)]

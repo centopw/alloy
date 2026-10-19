@@ -244,8 +244,12 @@ export class MockTransport implements Transport {
   private polls = new Map<string, MockPoll>();
   private topics = new Map<string, string>();
   private notes = new Map<string, string>();
-  private tagCatalog: RoomTagDef[] = [];
   private dmRooms = new Map<string, string>([['@bob:alloy.chat', '!bob:alloy.chat']]);
+  private draftsByRoom = new Map<string, { text: string; reply_to?: string | null; edit_of?: string | null }>();
+  private pinnedsByRoom = new Map<string, string[]>(); // room_id -> list of event_ids (oldest first)
+  private roomFavourites = new Map<string, boolean>(); // room_id -> is_favourite
+  private roomLowPriorities = new Map<string, boolean>(); // room_id -> is_low_priority
+  private tagCatalog: RoomTagDef[] = [];
   private notificationSettings: NotificationSettingsDto = {
     one_to_one: 'All',
     group: 'Mentions',
@@ -345,6 +349,7 @@ export class MockTransport implements Transport {
       reply_to: null,
       thread_summary: null,
       read_receipts: null,
+      mentions_me: false,
       ...extra,
     });
     const items = [
@@ -385,6 +390,7 @@ export class MockTransport implements Transport {
         reply_to: null,
         thread_summary: null,
         read_receipts: null,
+        mentions_me: false,
       },
       {
         internal_id: 'item_2',
@@ -404,6 +410,7 @@ export class MockTransport implements Transport {
         reply_to: null,
         thread_summary: null,
         read_receipts: ['@alice:alloy.chat'],
+        mentions_me: false,
       },
       {
         internal_id: 'item_3',
@@ -423,6 +430,7 @@ export class MockTransport implements Transport {
         reply_to: null,
         thread_summary: null,
         read_receipts: ['@bob:alloy.chat'],
+        mentions_me: false,
       },
     ];
 
@@ -744,6 +752,7 @@ export class MockTransport implements Transport {
           reply_to: rootItem,
           thread_summary: null,
           read_receipts: null,
+          mentions_me: false,
         };
 
         const currentItems = this.timelineByRoom.get(roomId) ?? [];
@@ -916,6 +925,7 @@ export class MockTransport implements Transport {
           reply_to: null,
           thread_summary: null,
           read_receipts: null,
+          mentions_me: false,
         };
         const items = this.timelineByRoom.get(roomId) ?? [];
         items.push(item);
@@ -995,6 +1005,42 @@ export class MockTransport implements Transport {
           },
         };
       }
+
+      case 'SendVoice': {
+        const eventId = `$voice_${Date.now()}:alloy.chat`;
+        return {
+          type: 'AttachmentSent',
+          payload: {
+            room_id: command.params.room_id,
+            txn_id: command.params.txn_id ?? `txn_${Date.now()}`,
+            event_id: eventId,
+          },
+        };
+      }
+
+      case 'SendLocation':
+        return {
+          type: 'LocationSent',
+          payload: { room_id: command.params.room_id },
+        };
+
+      case 'StartLiveLocation':
+        return {
+          type: 'LiveLocationStarted',
+          payload: { room_id: command.params.room_id },
+        };
+
+      case 'SendLocationBeacon':
+        return {
+          type: 'LocationBeaconSent',
+          payload: { room_id: command.params.room_id },
+        };
+
+      case 'StopLiveLocation':
+        return {
+          type: 'LiveLocationStopped',
+          payload: { room_id: command.params.room_id },
+        };
 
       case 'MarkRead':
         return {
@@ -1100,6 +1146,10 @@ export class MockTransport implements Transport {
               can_set_name: true,
               can_set_topic: true,
               can_set_avatar: true,
+              can_pin: true,
+              can_redact_others: true,
+              can_mention_room: true,
+              pinned_event_ids: this.pinnedsByRoom.get(roomId) ?? [],
             },
           },
         };
@@ -1456,6 +1506,166 @@ export class MockTransport implements Transport {
         const freed = this.mediaCacheBytes;
         this.mediaCacheBytes = 0;
         return { type: 'MediaCacheCleared', payload: { freed_bytes: freed } };
+      }
+
+      case 'SetEventPinned': {
+        const roomId = command.params.room_id;
+        const eventId = command.params.event_id;
+        const pinned = command.params.pinned;
+        const pins = this.pinnedsByRoom.get(roomId) ?? [];
+        if (pinned && !pins.includes(eventId)) {
+          pins.push(eventId);
+          this.pinnedsByRoom.set(roomId, pins);
+        } else if (!pinned) {
+          const idx = pins.indexOf(eventId);
+          if (idx !== -1) pins.splice(idx, 1);
+          this.pinnedsByRoom.set(roomId, pins);
+        }
+        return { type: 'EventPinned', payload: { room_id: roomId, event_id: eventId, pinned } };
+      }
+
+      case 'GetPinnedEvents': {
+        const roomId = command.params.room_id;
+        const pins = this.pinnedsByRoom.get(roomId) ?? [];
+        const items: TimelineItemDto[] = pins.map((eid) => {
+          const found = this.timelineByRoom.get(roomId)?.find((i) => i.event_id === eid);
+          return found ?? {
+            internal_id: `pinned_${eid}`,
+            event_id: eid,
+            sender: '@alice:alloy.chat',
+            timestamp_millis: Date.now() - 86400000,
+            content: {
+              kind: 'TextMessage',
+              data: {
+                body: '[pinned message]',
+                formatted_body: null,
+                html_sanitized: false,
+              },
+            },
+            send_state: { status: 'Sent', data: { event_id: eid } },
+            is_own: false,
+            reply_to: null,
+            thread_summary: null,
+            read_receipts: null,
+            mentions_me: false,
+          };
+        });
+        return { type: 'PinnedEvents', payload: { room_id: roomId, items } };
+      }
+
+      case 'ForwardEvents': {
+        const forwarded = command.params.targets;
+        const failed: { room_id: string; error: string }[] = [];
+        return { type: 'EventsForwarded', payload: { forwarded, failed } };
+      }
+
+      case 'SetRoomFavourite': {
+        const roomId = command.params.room_id;
+        const favourite = command.params.favourite;
+        this.roomFavourites.set(roomId, favourite);
+        this.patchRoom(roomId, { favourite });
+        return { type: 'RoomFavouriteSet', payload: { room_id: roomId, favourite } };
+      }
+
+      case 'SetRoomLowPriority': {
+        const roomId = command.params.room_id;
+        const low_priority = command.params.low_priority;
+        this.roomLowPriorities.set(roomId, low_priority);
+        this.patchRoom(roomId, { low_priority });
+        return { type: 'RoomLowPrioritySet', payload: { room_id: roomId, low_priority } };
+      }
+
+      case 'SetRoomMarkedUnread': {
+        const roomId = command.params.room_id;
+        const unread = command.params.unread;
+        this.patchRoom(roomId, { marked_unread: unread });
+        return { type: 'RoomMarkedUnreadSet', payload: { room_id: roomId, unread } };
+      }
+
+      case 'SaveDraft': {
+        const roomId = command.params.room_id;
+        const { text, reply_to, edit_of } = command.params;
+        if (text.trim().length === 0 && !reply_to && !edit_of) {
+          this.draftsByRoom.delete(roomId);
+        } else {
+          this.draftsByRoom.set(roomId, { text, reply_to, edit_of });
+        }
+        return { type: 'DraftSaved', payload: { room_id: roomId } };
+      }
+
+      case 'GetDraft': {
+        const roomId = command.params.room_id;
+        const draft = this.draftsByRoom.get(roomId);
+        const dto = draft
+          ? { text: draft.text, reply_to: draft.reply_to ?? null, edit_of: draft.edit_of ?? null }
+          : null;
+        return { type: 'Draft', payload: { room_id: roomId, draft: dto } };
+      }
+
+      case 'ListDrafts': {
+        const items = Array.from(this.draftsByRoom.entries()).map(([room_id, { text }]) => ({
+          room_id,
+          text: text.slice(0, 80),
+        }));
+        return { type: 'Drafts', payload: { items } };
+      }
+
+      case 'DeleteDevices': {
+        const deleted = command.params.device_ids;
+        return { type: 'DevicesDeleted', payload: { deleted } };
+      }
+
+      case 'KickUser': {
+        const { room_id, user_id } = command.params;
+        return { type: 'UserKicked', payload: { room_id, user_id } };
+      }
+
+      case 'BanUser': {
+        const { room_id, user_id } = command.params;
+        return { type: 'UserBanned', payload: { room_id, user_id } };
+      }
+
+      case 'UnbanUser': {
+        const { room_id, user_id } = command.params;
+        return { type: 'UserUnbanned', payload: { room_id, user_id } };
+      }
+
+      case 'SetPowerLevel': {
+        const { room_id, user_id, level } = command.params;
+        return { type: 'PowerLevelSet', payload: { room_id, user_id, level } };
+      }
+
+      case 'IgnoreUser': {
+        const { user_id } = command.params;
+        return { type: 'UserIgnored', payload: { user_id } };
+      }
+
+      case 'UnignoreUser': {
+        const { user_id } = command.params;
+        return { type: 'UserUnignored', payload: { user_id } };
+      }
+
+      case 'ListIgnoredUsers':
+        return { type: 'IgnoredUsers', payload: { user_ids: [] } };
+
+      case 'ReportEvent': {
+        const { room_id, event_id } = command.params;
+        return { type: 'EventReported', payload: { room_id, event_id } };
+      }
+
+      case 'SearchAllMessages': {
+        const hits = [
+          {
+            room_id: '!example:localhost',
+            room_name: 'Example Room',
+            event_id: '$example_event',
+            sender: '@alice:localhost',
+            sender_display_name: 'Alice',
+            timestamp_millis: Date.now(),
+            body: `Message containing "${command.params.query}"`,
+          },
+        ];
+        return { type: 'AllMessagesFound', payload: { hits, next_batch: null } };
       }
 
       default: {

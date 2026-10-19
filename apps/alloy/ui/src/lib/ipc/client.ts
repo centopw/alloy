@@ -203,6 +203,7 @@ export class AlloyClient {
       mentions?: UserId[] | null;
       txn_id?: string | null;
       in_thread_root?: EventId | null;
+      mention_room?: boolean;
     }
   ) {
     return this.transport.invoke({
@@ -215,6 +216,7 @@ export class AlloyClient {
         mentions: opts?.mentions ?? null,
         txn_id: opts?.txn_id ?? null,
         in_thread_root: opts?.in_thread_root ?? null,
+        mention_room: opts?.mention_room ?? false,
       },
     });
   }
@@ -302,6 +304,140 @@ export class AlloyClient {
     });
   }
 
+  async sendVoice(
+    room_id: RoomId,
+    file_path: string,
+    duration_ms: number,
+    waveform: number[],
+    txn_id?: string | null
+  ) {
+    return this.transport.invoke({
+      action: 'SendVoice',
+      params: {
+        room_id,
+        file_path,
+        duration_ms,
+        waveform,
+        txn_id: txn_id ?? null,
+      },
+    });
+  }
+
+  async sendLocation(
+    room_id: RoomId,
+    latitude: number,
+    longitude: number,
+    opts?: {
+      accuracy_m?: number | null;
+      description?: string | null;
+    }
+  ) {
+    return this.transport.invoke({
+      action: 'SendLocation',
+      params: {
+        room_id,
+        latitude,
+        longitude,
+        accuracy_m: opts?.accuracy_m ?? null,
+        description: opts?.description ?? null,
+      },
+    });
+  }
+
+  async startLiveLocation(room_id: RoomId, duration_ms: number) {
+    return this.transport.invoke({
+      action: 'StartLiveLocation',
+      params: { room_id, duration_ms },
+    });
+  }
+
+  async sendLocationBeacon(room_id: RoomId, geo_uri: string) {
+    return this.transport.invoke({
+      action: 'SendLocationBeacon',
+      params: { room_id, geo_uri },
+    });
+  }
+
+  async stopLiveLocation(room_id: RoomId) {
+    return this.transport.invoke({
+      action: 'StopLiveLocation',
+      params: { room_id },
+    });
+  }
+
+  async setEventPinned(room_id: RoomId, event_id: EventId, pinned: boolean) {
+    return this.transport.invoke({
+      action: 'SetEventPinned',
+      params: { room_id, event_id, pinned },
+    });
+  }
+
+  async getPinnedEvents(room_id: RoomId) {
+    return this.transport.invoke({
+      action: 'GetPinnedEvents',
+      params: { room_id },
+    });
+  }
+
+  async forwardEvents(room_id: RoomId, event_ids: EventId[], targets: RoomId[]) {
+    return this.transport.invoke({
+      action: 'ForwardEvents',
+      params: { room_id, event_ids, targets },
+    });
+  }
+
+  async setRoomFavourite(room_id: RoomId, favourite: boolean) {
+    return this.transport.invoke({
+      action: 'SetRoomFavourite',
+      params: { room_id, favourite },
+    });
+  }
+
+  async setRoomLowPriority(room_id: RoomId, low_priority: boolean) {
+    return this.transport.invoke({
+      action: 'SetRoomLowPriority',
+      params: { room_id, low_priority },
+    });
+  }
+
+  async setRoomMarkedUnread(room_id: RoomId, unread: boolean) {
+    return this.transport.invoke({
+      action: 'SetRoomMarkedUnread',
+      params: { room_id, unread },
+    });
+  }
+
+  async saveDraft(
+    room_id: RoomId,
+    text: string,
+    opts?: {
+      reply_to?: EventId | null;
+      edit_of?: EventId | null;
+    }
+  ) {
+    return this.transport.invoke({
+      action: 'SaveDraft',
+      params: {
+        room_id,
+        text,
+        reply_to: opts?.reply_to ?? null,
+        edit_of: opts?.edit_of ?? null,
+      },
+    });
+  }
+
+  async getDraft(room_id: RoomId) {
+    return this.transport.invoke({
+      action: 'GetDraft',
+      params: { room_id },
+    });
+  }
+
+  async listDrafts() {
+    return this.transport.invoke({
+      action: 'ListDrafts',
+    });
+  }
   async markRead(room_id: RoomId, event_id: EventId) {
     return this.transport.invoke({
       action: 'MarkRead',
@@ -442,6 +578,77 @@ export class AlloyClient {
         key,
         value_json: JSON.stringify(value),
       },
+    });
+  }
+
+  // === Account & Safety ===
+
+  async deleteDevices(device_ids: string[], password: string | null = null) {
+    return this.transport.invoke({
+      action: 'DeleteDevices',
+      params: { device_ids, password },
+    });
+  }
+
+  async kickUser(room_id: RoomId, user_id: UserId, reason: string | null = null) {
+    return this.transport.invoke({
+      action: 'KickUser',
+      params: { room_id, user_id, reason },
+    });
+  }
+
+  async banUser(room_id: RoomId, user_id: UserId, reason: string | null = null) {
+    return this.transport.invoke({
+      action: 'BanUser',
+      params: { room_id, user_id, reason },
+    });
+  }
+
+  async unbanUser(room_id: RoomId, user_id: UserId, reason: string | null = null) {
+    return this.transport.invoke({
+      action: 'UnbanUser',
+      params: { room_id, user_id, reason },
+    });
+  }
+
+  async setPowerLevel(room_id: RoomId, user_id: UserId, level: number) {
+    return this.transport.invoke({
+      action: 'SetPowerLevel',
+      params: { room_id, user_id, level },
+    });
+  }
+
+  async ignoreUser(user_id: UserId) {
+    return this.transport.invoke({
+      action: 'IgnoreUser',
+      params: { user_id },
+    });
+  }
+
+  async unignoreUser(user_id: UserId) {
+    return this.transport.invoke({
+      action: 'UnignoreUser',
+      params: { user_id },
+    });
+  }
+
+  async listIgnoredUsers() {
+    return this.transport.invoke({
+      action: 'ListIgnoredUsers',
+    });
+  }
+
+  async reportEvent(room_id: RoomId, event_id: EventId, reason: string | null = null) {
+    return this.transport.invoke({
+      action: 'ReportEvent',
+      params: { room_id, event_id, reason },
+    });
+  }
+
+  async searchAllMessages(query: string, next_batch: string | null = null, limit?: number) {
+    return this.transport.invoke({
+      action: 'SearchAllMessages',
+      params: { query, next_batch, limit },
     });
   }
 }

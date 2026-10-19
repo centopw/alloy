@@ -183,6 +183,7 @@ async fn thread_reply_reaches_thread_subscription_and_root_summary() {
             markdown: Some(false),
             reply_to: None,
             mentions: None,
+            mention_room: false,
             txn_id: None,
             in_thread_root: None,
         })
@@ -225,6 +226,7 @@ async fn thread_reply_reaches_thread_subscription_and_root_summary() {
         markdown: Some(false),
         reply_to: None,
         mentions: None,
+        mention_room: false,
         txn_id: None,
         in_thread_root: Some(root_id.clone()),
     })

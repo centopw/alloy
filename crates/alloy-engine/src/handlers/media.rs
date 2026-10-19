@@ -126,6 +126,56 @@ impl GroupHandler for MediaHandler {
                     event_id: None,
                 })
             }
+            EngineCommand::SendVoice {
+                room_id,
+                file_path,
+                duration_ms,
+                waveform,
+                txn_id,
+            } => {
+                let path = PathBuf::from(&file_path);
+                if !ctx.attachment_path_allowed(&path) {
+                    return Err(EngineError::forbidden(format!(
+                        "attachment {file_path} is not registered for sending"
+                    )));
+                }
+                if !path.is_file() {
+                    return Err(EngineError::not_found(format!("file {file_path}")));
+                }
+                let client = ctx.active_client().await?;
+                let txn_id = txn_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+                let sink = ctx.sink.clone();
+                let (event_room, event_txn) = (room_id.clone(), txn_id.clone());
+                let mut last_emit: Option<std::time::Instant> = None;
+                client
+                    .send_voice(
+                        &room_id,
+                        &path,
+                        duration_ms,
+                        waveform,
+                        Some(&txn_id),
+                        move |sent, total| {
+                            let done = sent >= total;
+                            let due = last_emit.is_none_or(|t| t.elapsed() >= PROGRESS_INTERVAL);
+                            if done || due {
+                                last_emit = Some(std::time::Instant::now());
+                                sink.emit(EngineEvent::UploadProgress {
+                                    room_id: event_room.clone(),
+                                    txn_id: event_txn.clone(),
+                                    sent_bytes: sent,
+                                    total_bytes: total,
+                                });
+                            }
+                        },
+                    )
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::AttachmentSent {
+                    room_id,
+                    txn_id,
+                    event_id: None,
+                })
+            }
             EngineCommand::GetRoomMedia {
                 room_id,
                 kind,

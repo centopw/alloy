@@ -32,6 +32,7 @@ alloy-storage = { path = "../../../crates/alloy-storage", features = ["keyring"]
 tokio = { version = "1", features = ["sync", "rt"] }
 async-trait = "0.1"
 uuid = { version = "1", features = ["v4"] }
+base64 = "0.22"
 tracing = "0.1"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]

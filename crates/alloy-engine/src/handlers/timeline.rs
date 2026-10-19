@@ -73,6 +73,7 @@ impl GroupHandler for TimelineHandler {
                 markdown,
                 reply_to,
                 mentions,
+                mention_room,
                 txn_id: _,
                 in_thread_root,
             } => {
@@ -87,6 +88,7 @@ impl GroupHandler for TimelineHandler {
                         markdown.unwrap_or(false),
                         reply_to.as_ref(),
                         mentions.as_deref(),
+                        mention_room,
                         in_thread_root.as_ref(),
                     )
                     .await
@@ -138,6 +140,46 @@ impl GroupHandler for TimelineHandler {
                     key,
                     added,
                 })
+            }
+            EngineCommand::SetEventPinned {
+                room_id,
+                event_id,
+                pinned,
+            } => {
+                let client = ctx.active_client().await?;
+                client
+                    .set_event_pinned(&room_id, &event_id, pinned)
+                    .await
+                    .map_err(map_err)?;
+                if let Ok(event_ids) = client.pinned_event_ids(&room_id).await {
+                    ctx.sink
+                        .emit(alloy_protocol::EngineEvent::PinnedEventsChanged {
+                            room_id: room_id.clone(),
+                            event_ids,
+                        });
+                }
+                Ok(EngineResponse::EventPinned {
+                    room_id,
+                    event_id,
+                    pinned,
+                })
+            }
+            EngineCommand::GetPinnedEvents { room_id } => {
+                let client = ctx.active_client().await?;
+                let items = client.get_pinned_events(&room_id).await.map_err(map_err)?;
+                Ok(EngineResponse::PinnedEvents { room_id, items })
+            }
+            EngineCommand::ForwardEvents {
+                room_id,
+                event_ids,
+                targets,
+            } => {
+                let client = ctx.active_client().await?;
+                let (forwarded, failed) = client
+                    .forward_events(&room_id, &event_ids, &targets)
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::EventsForwarded { forwarded, failed })
             }
             EngineCommand::RetrySend { room_id, txn_id } => {
                 let client = ctx.active_client().await?;
@@ -224,6 +266,56 @@ impl GroupHandler for TimelineHandler {
                     .await
                     .map_err(map_err)?;
                 Ok(EngineResponse::Unit)
+            }
+            EngineCommand::SendLocation {
+                room_id,
+                latitude,
+                longitude,
+                accuracy_m,
+                description,
+            } => {
+                let client = ctx.active_client().await?;
+                client
+                    .send_location(&room_id, latitude, longitude, accuracy_m, description)
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::LocationSent { room_id })
+            }
+            EngineCommand::StartLiveLocation {
+                room_id,
+                duration_ms,
+            } => {
+                let client = ctx.active_client().await?;
+                client
+                    .start_live_location(&room_id, duration_ms)
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::LiveLocationStarted { room_id })
+            }
+            EngineCommand::SendLocationBeacon { room_id, geo_uri } => {
+                let client = ctx.active_client().await?;
+                client
+                    .send_location_beacon(&room_id, &geo_uri)
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::LocationBeaconSent { room_id })
+            }
+            EngineCommand::StopLiveLocation { room_id } => {
+                let client = ctx.active_client().await?;
+                client.stop_live_location(&room_id).await.map_err(map_err)?;
+                Ok(EngineResponse::LiveLocationStopped { room_id })
+            }
+            EngineCommand::SearchAllMessages {
+                query,
+                next_batch,
+                limit,
+            } => {
+                let client = ctx.active_client().await?;
+                let (hits, next_batch) = client
+                    .search_all_messages(&query, limit, next_batch.as_deref())
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::AllMessagesFound { hits, next_batch })
             }
             _ => Err(EngineError::invalid_argument(format!(
                 "Command '{}' does not belong to Timeline group",

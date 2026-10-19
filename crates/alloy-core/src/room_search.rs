@@ -156,6 +156,103 @@ impl AlloyClient {
         let (hits, next_batch) = map_response(response)?;
         Ok((hits, next_batch, RoomSearchScope::Server))
     }
+
+    /// Searches all unencrypted rooms for text messages, newest first.
+    ///
+    /// Only unencrypted rooms are searched (the homeserver cannot index encrypted ones).
+    /// `next_batch` is the token returned by the previous page. The returned token is `None`
+    /// once no further pages exist.
+    pub async fn search_all_messages(
+        &self,
+        query: &str,
+        limit: Option<u32>,
+        next_batch: Option<&str>,
+    ) -> AlloyResult<(Vec<alloy_protocol::GlobalSearchHit>, Option<String>)> {
+        validate_query(query)?;
+        let limit = clamp_limit(limit.unwrap_or(20));
+
+        let mut filter = RoomEventFilter::default();
+        filter.limit = Some(UInt::from(limit));
+
+        let mut event_context = EventContext::new();
+        event_context.before_limit = UInt::from(0u32);
+        event_context.after_limit = UInt::from(0u32);
+        event_context.include_profile = true;
+
+        let mut criteria = Criteria::new(query.to_owned());
+        criteria.filter = filter;
+        criteria.order_by = Some(OrderBy::Recent);
+        criteria.event_context = event_context;
+
+        let mut categories = Categories::new();
+        categories.room_events = Some(criteria);
+
+        let mut request = Request::new(categories);
+        request.next_batch = next_batch.map(str::to_owned);
+
+        let response = self
+            .client
+            .send(request)
+            .await
+            .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
+
+        let results = response.search_categories.room_events;
+        let mut hits = Vec::with_capacity(results.results.len());
+        let rooms = self.client.joined_rooms();
+        let room_info: std::collections::HashMap<_, _> = rooms
+            .iter()
+            .map(|r| {
+                let name = r
+                    .cached_display_name()
+                    .map(|n| n.to_string())
+                    .or_else(|| r.name());
+                let encrypted = r.encryption_state().is_encrypted();
+                (r.room_id().to_owned(), (name, encrypted))
+            })
+            .collect();
+        for result in results.results {
+            let Some(raw) = result.result else {
+                continue;
+            };
+            let event = raw
+                .deserialize()
+                .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
+            let AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomMessage(
+                MessageLikeEvent::Original(message),
+            )) = event
+            else {
+                continue;
+            };
+            if matches!(message.content.relates_to, Some(Relation::Replacement(_))) {
+                continue;
+            }
+
+            let sender_display_name = result
+                .context
+                .profile_info
+                .get(&message.sender)
+                .and_then(|profile| profile.displayname.clone());
+
+            let (room_name, encrypted) = match room_info.get(&message.room_id) {
+                Some((name, enc)) => (name.clone(), *enc),
+                None => (None, false),
+            };
+            if encrypted {
+                continue;
+            }
+            hits.push(alloy_protocol::GlobalSearchHit {
+                room_id: RoomId(message.room_id.to_string()),
+                room_name,
+                event_id: EventId(message.event_id.to_string()),
+                sender: UserId(message.sender.to_string()),
+                sender_display_name,
+                timestamp_millis: millis(message.origin_server_ts),
+                body: message.content.body().to_owned(),
+            });
+        }
+
+        Ok((hits, results.next_batch))
+    }
 }
 
 #[cfg(test)]

@@ -3,6 +3,7 @@ package chat.alloy
 import android.graphics.Color
 import android.os.Bundle
 import android.view.View
+import android.webkit.WebView
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.core.view.ViewCompat
@@ -27,5 +28,10 @@ class MainActivity : TauriActivity() {
       view.setPadding(bars.left, bars.top, bars.right, maxOf(bars.bottom, ime.bottom))
       insets
     }
+  }
+
+  // Lets the web UI save cached media into the public Downloads folder (see DownloadBridge).
+  override fun onWebViewCreate(webView: WebView) {
+    webView.addJavascriptInterface(DownloadBridge(applicationContext), "AlloyAndroid")
   }
 }

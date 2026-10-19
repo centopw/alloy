@@ -33,6 +33,19 @@ export type DeviceDto = {
 	verified: boolean,
 };
 
+/**  A message draft for a room. */
+export type DraftDto = {
+	text: string,
+	reply_to: EventId | null,
+	edit_of: EventId | null,
+};
+
+/**  Summary of a room's draft for `ListDrafts`. */
+export type DraftSummary = {
+	room_id: RoomId,
+	text: string,
+};
+
 export type EngineCommand = { action: "DiscoverHomeserver"; params: {
 	input: string,
 } } | { action: "LoginPassword"; params: {
@@ -205,6 +218,7 @@ export type EngineCommand = { action: "DiscoverHomeserver"; params: {
 	markdown: boolean | null,
 	reply_to: EventId | null,
 	mentions: UserId[] | null,
+	mention_room?: boolean,
 	txn_id: string | null,
 	/**  When set, the message is posted into this thread instead of the main timeline. */
 	in_thread_root: EventId | null,
@@ -221,7 +235,51 @@ export type EngineCommand = { action: "DiscoverHomeserver"; params: {
 	room_id: RoomId,
 	event_id: EventId,
 	key: string,
-} } | { action: "SendPoll"; params: {
+} } | 
+/**  Pin a message in a room (requires `can_pin`). */
+{ action: "SetEventPinned"; params: {
+	room_id: RoomId,
+	event_id: EventId,
+	pinned: boolean,
+} } | 
+/**  Load pinned messages in a room. */
+{ action: "GetPinnedEvents"; params: {
+	room_id: RoomId,
+} } | 
+/**  Forward one or more events to one or more target rooms, stripping relations. */
+{ action: "ForwardEvents"; params: {
+	room_id: RoomId,
+	event_ids: EventId[],
+	targets: RoomId[],
+} } | 
+/**  Set the room's favourite flag (pin to top of the list). */
+{ action: "SetRoomFavourite"; params: {
+	room_id: RoomId,
+	favourite: boolean,
+} } | 
+/**  Set the room's low-priority flag (archive). */
+{ action: "SetRoomLowPriority"; params: {
+	room_id: RoomId,
+	low_priority: boolean,
+} } | 
+/**  Set the room's marked-as-unread flag. */
+{ action: "SetRoomMarkedUnread"; params: {
+	room_id: RoomId,
+	unread: boolean,
+} } | 
+/**  Save a message draft for a room (empty text clears it). */
+{ action: "SaveDraft"; params: {
+	room_id: RoomId,
+	text: string,
+	reply_to: EventId | null,
+	edit_of: EventId | null,
+} } | 
+/**  Load the message draft for a room. */
+{ action: "GetDraft"; params: {
+	room_id: RoomId,
+} } | 
+/**  Load all room drafts (returns the first 80 chars of each). */
+{ action: "ListDrafts" } | { action: "SendPoll"; params: {
 	room_id: RoomId,
 	question: string,
 	answers: string[],
@@ -245,6 +303,36 @@ export type EngineCommand = { action: "DiscoverHomeserver"; params: {
 	file_path: string,
 	mime_type: string | null,
 	txn_id: string | null,
+} } | 
+/**  Send a voice message (audio with waveform): file must be registered for attachment. */
+{ action: "SendVoice"; params: {
+	room_id: RoomId,
+	file_path: string,
+	duration_ms: number,
+	waveform: number[],
+	txn_id?: string | null,
+} } | 
+/**  Send a static location message. */
+{ action: "SendLocation"; params: {
+	room_id: RoomId,
+	latitude: number,
+	longitude: number,
+	accuracy_m?: number | null,
+	description?: string | null,
+} } | 
+/**  Start a live location share. */
+{ action: "StartLiveLocation"; params: {
+	room_id: RoomId,
+	duration_ms: number,
+} } | 
+/**  Send a location beacon update (only valid while live share is active). */
+{ action: "SendLocationBeacon"; params: {
+	room_id: RoomId,
+	geo_uri: string,
+} } | 
+/**  Stop the active live location share in this room. */
+{ action: "StopLiveLocation"; params: {
+	room_id: RoomId,
 } } | { action: "MarkRead"; params: {
 	room_id: RoomId,
 	event_id: EventId,
@@ -299,6 +387,60 @@ export type EngineCommand = { action: "DiscoverHomeserver"; params: {
  */
 { action: "SetAccountPrefs"; params: {
 	json: string,
+} } | 
+/**
+ *  Delete one or more of the active account's devices (login sessions).
+ *  Requires the active account's password when UIA is required.
+ */
+{ action: "DeleteDevices"; params: {
+	device_ids: string[],
+	password?: string | null,
+} } | 
+/**  Kick a user from a room. */
+{ action: "KickUser"; params: {
+	room_id: RoomId,
+	user_id: UserId,
+	reason?: string | null,
+} } | 
+/**  Ban a user from a room. */
+{ action: "BanUser"; params: {
+	room_id: RoomId,
+	user_id: UserId,
+	reason?: string | null,
+} } | 
+/**  Unban a user from a room. */
+{ action: "UnbanUser"; params: {
+	room_id: RoomId,
+	user_id: UserId,
+	reason?: string | null,
+} } | 
+/**  Set the power level of a user in a room. */
+{ action: "SetPowerLevel"; params: {
+	room_id: RoomId,
+	user_id: UserId,
+	level: number,
+} } | 
+/**  Add a user to the active account's block list. */
+{ action: "IgnoreUser"; params: {
+	user_id: UserId,
+} } | 
+/**  Remove a user from the active account's block list. */
+{ action: "UnignoreUser"; params: {
+	user_id: UserId,
+} } | 
+/**  List users on the active account's block list. */
+{ action: "ListIgnoredUsers" } | 
+/**  Report a message to room moderators. */
+{ action: "ReportEvent"; params: {
+	room_id: RoomId,
+	event_id: EventId,
+	reason?: string | null,
+} } | 
+/**  Search messages across all unencrypted rooms. */
+{ action: "SearchAllMessages"; params: {
+	query: string,
+	next_batch?: string | null,
+	limit?: number | null,
 } };
 
 export type EngineError = {
@@ -340,6 +482,11 @@ export type EngineEvent = { type: "ConnectionStatus"; payload: {
 /**  The account's synced preferences changed on another device; `json` is the new document. */
 { type: "AccountPrefsChanged"; payload: {
 	json: string,
+} } | 
+/**  The pinned events for a room changed. */
+{ type: "PinnedEventsChanged"; payload: {
+	room_id: RoomId,
+	event_ids: EventId[],
 } };
 
 export type EngineResponse = { type: "HomeserverInfo"; payload: {
@@ -444,6 +591,50 @@ export type EngineResponse = { type: "HomeserverInfo"; payload: {
 	event_id: EventId,
 	key: string,
 	added: boolean,
+} } | 
+/**  Pin state of a message changed. */
+{ type: "EventPinned"; payload: {
+	room_id: RoomId,
+	event_id: EventId,
+	pinned: boolean,
+} } | 
+/**  Pinned messages for a room (first load or refresh). */
+{ type: "PinnedEvents"; payload: {
+	room_id: RoomId,
+	items: TimelineItemDto[],
+} } | 
+/**  Events forwarded to target rooms. */
+{ type: "EventsForwarded"; payload: {
+	forwarded: RoomId[],
+	failed: ForwardFailure[],
+} } | 
+/**  Room's favourite flag changed. */
+{ type: "RoomFavouriteSet"; payload: {
+	room_id: RoomId,
+	favourite: boolean,
+} } | 
+/**  Room's low-priority flag changed. */
+{ type: "RoomLowPrioritySet"; payload: {
+	room_id: RoomId,
+	low_priority: boolean,
+} } | 
+/**  Room's marked-as-unread flag changed. */
+{ type: "RoomMarkedUnreadSet"; payload: {
+	room_id: RoomId,
+	unread: boolean,
+} } | 
+/**  A room's draft was saved. */
+{ type: "DraftSaved"; payload: {
+	room_id: RoomId,
+} } | 
+/**  A room's draft (or None if cleared). */
+{ type: "Draft"; payload: {
+	room_id: RoomId,
+	draft: DraftDto | null,
+} } | 
+/**  All rooms with non-empty drafts. */
+{ type: "Drafts"; payload: {
+	items: DraftSummary[],
 } } | { type: "SendRetried"; payload: {
 	room_id: RoomId,
 	txn_id: string,
@@ -455,6 +646,18 @@ export type EngineResponse = { type: "HomeserverInfo"; payload: {
 	txn_id: string,
 	/**  Known only once the server confirmed the event; the timeline item carries it later. */
 	event_id: EventId | null,
+} } | { type: "VoiceMessageSent"; payload: {
+	room_id: RoomId,
+	txn_id: string,
+	event_id: EventId | null,
+} } | { type: "LocationSent"; payload: {
+	room_id: RoomId,
+} } | { type: "LiveLocationStarted"; payload: {
+	room_id: RoomId,
+} } | { type: "LocationBeaconSent"; payload: {
+	room_id: RoomId,
+} } | { type: "LiveLocationStopped"; payload: {
+	room_id: RoomId,
 } } | { type: "ReadMarked"; payload: {
 	room_id: RoomId,
 } } | { type: "TypingStatusSet"; payload: {
@@ -505,6 +708,35 @@ export type EngineResponse = { type: "HomeserverInfo"; payload: {
 /**  The synced preferences document, or `None` when the account has never stored one. */
 { type: "AccountPrefs"; payload: {
 	json: string | null,
+} } | { type: "DevicesDeleted"; payload: {
+	deleted: string[],
+} } | { type: "AuthRequired"; payload: {
+	flows: string[],
+} } | { type: "UserKicked"; payload: {
+	room_id: RoomId,
+	user_id: UserId,
+} } | { type: "UserBanned"; payload: {
+	room_id: RoomId,
+	user_id: UserId,
+} } | { type: "UserUnbanned"; payload: {
+	room_id: RoomId,
+	user_id: UserId,
+} } | { type: "PowerLevelSet"; payload: {
+	room_id: RoomId,
+	user_id: UserId,
+	level: number,
+} } | { type: "UserIgnored"; payload: {
+	user_id: UserId,
+} } | { type: "UserUnignored"; payload: {
+	user_id: UserId,
+} } | { type: "IgnoredUsers"; payload: {
+	user_ids: UserId[],
+} } | { type: "EventReported"; payload: {
+	room_id: RoomId,
+	event_id: EventId,
+} } | { type: "AllMessagesFound"; payload: {
+	hits: GlobalSearchHit[],
+	next_batch: string | null,
 } } | { type: "Unit" };
 
 export type EventId = string;
@@ -517,6 +749,23 @@ export type EventSendState = { status: "Sending"; data: {
 	error: string,
 	can_retry: boolean,
 } };
+
+/**  Failure details when forwarding an event to a target room. */
+export type ForwardFailure = {
+	room_id: RoomId,
+	error: string,
+};
+
+/**  One message matched across rooms by `SearchAllMessages`. */
+export type GlobalSearchHit = {
+	room_id: RoomId,
+	room_name: string | null,
+	event_id: EventId,
+	sender: UserId,
+	sender_display_name: string | null,
+	timestamp_millis: number,
+	body: string,
+};
 
 export type MediaSource = { kind: "Remote"; data: {
 	uri: string,
@@ -610,6 +859,22 @@ export type RoomDetails = {
 	can_set_name?: boolean,
 	can_set_topic?: boolean,
 	can_set_avatar?: boolean,
+	/**  Whether the active account can pin messages (power >= `m.room.pinned_events`). */
+	can_pin?: boolean,
+	/**  Whether the active account can redact others' messages (power >= `redact`). */
+	can_redact_others?: boolean,
+	/**  Whether the active account can use `@room` mentions (power >= `notifications.room`). */
+	can_mention_room?: boolean,
+	/**  Event IDs of currently pinned messages (oldest first). */
+	pinned_event_ids?: EventId[],
+	/**  Active account's power level in the room. */
+	my_power_level?: number,
+	/**  Whether the active account can kick users (power >= kick level). */
+	can_kick?: boolean,
+	/**  Whether the active account can ban users (power >= ban level). */
+	can_ban?: boolean,
+	/**  Whether the active account can change power levels (power >= power levels state event level). */
+	can_set_power_levels?: boolean,
 };
 
 export type RoomId = string;
@@ -689,6 +954,10 @@ export type RoomSummary = {
 	tags: string[],
 	/**  For a direct room, the other person's Matrix ID; `None` for every other room. */
 	direct_user_id: UserId | null,
+	/**  Whether the room is marked as unread by the user (creates bold row with accent dot). */
+	marked_unread?: boolean,
+	/**  First 80 chars of the room's draft message, if any. */
+	draft?: string | null,
 };
 
 /**  A user-defined room tag, as stored in the account's tag catalogue. */
@@ -748,6 +1017,8 @@ export type TimelineItemContent = { kind: "TextMessage"; data: {
 	width?: number | null,
 	height?: number | null,
 	duration_ms?: number | null,
+	voice?: boolean,
+	waveform?: number[] | null,
 } } | { kind: "Reaction"; data: {
 	key: string,
 	count: number,
@@ -771,6 +1042,11 @@ export type TimelineItemContent = { kind: "TextMessage"; data: {
 	timestamp_millis: number,
 } } | { kind: "Virtual" } | { kind: "UnableToDecrypt"; data: {
 	reason: string,
+} } | { kind: "Location"; data: {
+	geo_uri: string,
+	description: string | null,
+	live?: boolean,
+	live_until_millis?: number | null,
 } };
 
 export type TimelineItemDto = {
@@ -790,6 +1066,8 @@ export type TimelineItemDto = {
 	reactions?: ReactionSummary[],
 	/**  Transaction id for local echoes (use with RetrySend/CancelSend). */
 	transaction_id?: string | null,
+	/**  Whether this event mentions the current user (causes highlighting in the UI). */
+	mentions_me?: boolean,
 };
 
 export type TimelineItemPreview = {

@@ -243,6 +243,39 @@ impl GroupHandler for AuthHandler {
                 let info = client.session_info().await.map_err(map_err)?;
                 Ok(EngineResponse::SessionInfo { info })
             }
+            EngineCommand::DeleteDevices {
+                device_ids,
+                password,
+            } => {
+                let client = ctx.active_client().await?;
+                match client
+                    .delete_devices(&device_ids, password.as_deref())
+                    .await
+                {
+                    Ok(alloy_core::DeleteDevicesOutcome::Deleted(deleted)) => {
+                        Ok(EngineResponse::DevicesDeleted { deleted })
+                    }
+                    Ok(alloy_core::DeleteDevicesOutcome::AuthRequired(flows)) => {
+                        Ok(EngineResponse::AuthRequired { flows })
+                    }
+                    Err(e) => Err(map_err(e)),
+                }
+            }
+            EngineCommand::IgnoreUser { user_id } => {
+                let client = ctx.active_client().await?;
+                client.ignore_user(&user_id).await.map_err(map_err)?;
+                Ok(EngineResponse::UserIgnored { user_id })
+            }
+            EngineCommand::UnignoreUser { user_id } => {
+                let client = ctx.active_client().await?;
+                client.unignore_user(&user_id).await.map_err(map_err)?;
+                Ok(EngineResponse::UserUnignored { user_id })
+            }
+            EngineCommand::ListIgnoredUsers => {
+                let client = ctx.active_client().await?;
+                let user_ids = client.list_ignored_users().await.map_err(map_err)?;
+                Ok(EngineResponse::IgnoredUsers { user_ids })
+            }
             _ => Err(EngineError::invalid_argument(format!(
                 "Command '{}' does not belong to Auth group",
                 name
