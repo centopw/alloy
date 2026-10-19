@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (pre-release)
 
 ### Added
 - **Messenger and Telegram style conversations** (ADR 0008):
