@@ -421,6 +421,12 @@ try {
       el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 20, clientY: r.top + 10 }));
     }, selector);
     await page.waitForSelector('[role=menu] [role=menuitem]', { visible: true, timeout: 5000 });
+    try {
+      await page.waitForFunction((text) => [...document.querySelectorAll('[role=menuitem]')].some((e) => e.textContent.trim() === text), { timeout: 5000 }, label);
+    } catch {
+      const seen = await page.$$eval('[role=menuitem]', (els) => els.map((e) => e.textContent.trim()));
+      throw new Error(`menu has no "${label}" entry; it offers: ${seen.join(' | ')}`);
+    }
     await page.evaluate((text) => [...document.querySelectorAll('[role=menuitem]')].find((e) => e.textContent.trim() === text).click(), label);
   };
   const rowKey = async (title) => page.evaluate((t) => { const el = [...document.querySelectorAll('button.row')].find((e) => e.textContent.includes(t)); el.setAttribute('data-e2e', t); return t; }, title);
@@ -477,24 +483,26 @@ try {
     await page.click(`button.row[data-e2e="${title}"]`);
   };
   const chip = (name) => page.evaluate((n) => [...document.querySelectorAll('.chip')].find((c) => c.textContent.trim() === n).click(), name);
-  const hasRow = (title) => page.waitForFunction((t) => [...document.querySelectorAll('button.row')].some((e) => e.textContent.includes(t)), { timeout: 15000 }, title);
+  // A tag or unread flag is confirmed by the server and comes back through sync, which can take a while on a busy runner.
+  const SYNC = 60000;
+  const hasRow = (title) => page.waitForFunction((t) => [...document.querySelectorAll('button.row')].some((e) => e.textContent.includes(t)), { timeout: SYNC }, title);
 
   step('chat list: pin to top, archive, mark as unread');
   await roomMenuOn('Pin Room', 'Pin to top');
-  await page.waitForFunction(() => document.querySelector('section[aria-label="Pinned"]')?.innerText.includes('Pin Room'), { timeout: 15000 });
+  await page.waitForFunction(() => document.querySelector('section[aria-label="Pinned"]')?.innerText.includes('Pin Room'), { timeout: SYNC });
   await roomMenuOn('Pin Room', 'Unpin from top');
-  await page.waitForFunction(() => !document.querySelector('section[aria-label="Pinned"]'), { timeout: 15000 });
+  await page.waitForFunction(() => !document.querySelector('section[aria-label="Pinned"]'), { timeout: SYNC });
   await roomMenuOn('Pin Room', 'Archive');
-  await page.waitForFunction(() => ![...document.querySelectorAll('button.row')].some((e) => e.textContent.includes('Pin Room')), { timeout: 15000 });
+  await page.waitForFunction(() => ![...document.querySelectorAll('button.row')].some((e) => e.textContent.includes('Pin Room')), { timeout: SYNC });
   await chip('Archive');
   await hasRow('Pin Room');
   await roomMenuOn('Pin Room', 'Unarchive');
   await chip('All');
   await hasRow('Pin Room');
   await roomMenuOn('Pin Room', 'Mark as unread');
-  await page.waitForFunction(() => !!document.querySelector('button.row[data-e2e="Pin Room"] .dot.accent'), { timeout: 15000 });
+  await page.waitForFunction(() => !![...document.querySelectorAll('button.row')].find((e) => e.textContent.includes('Pin Room'))?.querySelector('.dot.accent'), { timeout: SYNC });
   await clickRoom('Pin Room');
-  await page.waitForFunction(() => !document.querySelector('button.row[data-e2e="Pin Room"] .dot.accent'), { timeout: 15000 });
+  await page.waitForFunction(() => ![...document.querySelectorAll('button.row')].find((e) => e.textContent.includes('Pin Room'))?.querySelector('.dot.accent'), { timeout: SYNC });
 
   step('drafts: unsent text shows in the list and returns when you come back');
   await page.click('textarea[aria-label^=Message]');

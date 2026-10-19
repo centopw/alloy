@@ -102,13 +102,15 @@ class TimelineStore {
 
   /** Load older history. */
   async loadOlder(count = 30) {
-    if (!this.roomId || this.paginating || this.reachedStart) return;
+    const roomId = this.roomId;
+    if (!roomId || this.paginating || this.reachedStart) return;
     this.paginating = true;
     try {
-      const res = expect(await client.paginateBackwards(this.roomId, count), 'Paginated');
-      this.reachedStart = res.payload.reached_start;
+      const res = expect(await client.paginateBackwards(roomId, count), 'Paginated');
+      // The user may have switched rooms meanwhile: another room's start says nothing about this one.
+      if (this.roomId === roomId) this.reachedStart = res.payload.reached_start;
     } catch (e) {
-      this.error = errorMessage(e);
+      if (this.roomId === roomId) this.error = errorMessage(e);
     } finally {
       this.paginating = false;
     }

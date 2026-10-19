@@ -1,5 +1,28 @@
-import { describe, expect, it } from 'vitest';
-import { findRowIndexByEventId } from './timeline.svelte';
+import { describe, expect, it, vi } from 'vitest';
+import { timelineStore, findRowIndexByEventId } from './timeline.svelte';
+
+const ipc = vi.hoisted(() => ({ paginate: vi.fn() }));
+vi.mock('../ipc/index.js', () => ({
+  client: { paginateBackwards: ipc.paginate },
+  applyDiff: vi.fn(),
+}));
+
+describe('loadOlder', () => {
+  it('keeps the start-of-room answer of a room the user has already left', async () => {
+    const answer = Promise.withResolvers<{ type: 'Paginated'; payload: { room_id: string; reached_start: boolean } }>();
+    ipc.paginate.mockReturnValueOnce(answer.promise);
+    timelineStore.roomId = '!short:hs';
+    timelineStore.reachedStart = false;
+    const pending = timelineStore.loadOlder();
+
+    timelineStore.roomId = '!long:hs';
+    answer.resolve({ type: 'Paginated', payload: { room_id: '!short:hs', reached_start: true } });
+    await pending;
+
+    expect(timelineStore.reachedStart).toBe(false);
+    expect(timelineStore.paginating).toBe(false);
+  });
+});
 
 describe('findRowIndexByEventId', () => {
   const rows = [{ event_id: '$a' }, { event_id: null }, { event_id: '$b' }];
