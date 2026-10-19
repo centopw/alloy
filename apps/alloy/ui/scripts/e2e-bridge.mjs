@@ -417,6 +417,17 @@ try {
   });
   await page.waitForFunction(() => [...document.querySelectorAll('[role=menuitem]')].some((e) => e.textContent.includes('Delete tag')), { timeout: 5000 });
   await uxShot(page, 'context-menu-tag-chip');
+  // 'Manage tags...' opens Settings directly on the Tags page.
+  await page.evaluate(() => [...document.querySelectorAll('[role=menuitem]')].find((e) => e.textContent.includes('Manage tags')).click());
+  await page.waitForFunction(() => document.querySelector('[role=dialog]')?.innerText.includes('New tag'), { timeout: 10000 });
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.querySelector('[role=dialog]'), { timeout: 10000 });
+  await page.evaluate(() => {
+    const chip = [...document.querySelectorAll('[role=toolbar][aria-label="Filter rooms by tag"] button')].find((b) => b.textContent.includes('Urgent'));
+    const r = chip.getBoundingClientRect();
+    chip.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 5, clientY: r.top + 5 }));
+  });
+  await page.waitForFunction(() => [...document.querySelectorAll('[role=menuitem]')].some((e) => e.textContent.includes('Delete tag')), { timeout: 5000 });
   await page.evaluate(() => [...document.querySelectorAll('[role=menuitem]')].find((e) => e.textContent.includes('Delete tag')).click());
   await page.waitForSelector('[role=dialog]', { visible: true, timeout: 5000 });
   await page.evaluate(() => [...document.querySelectorAll('[role=dialog] button')].find((b) => b.textContent.trim() === 'Delete tag').click());
