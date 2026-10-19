@@ -16,6 +16,7 @@ Rust core, Tauri 2 shell, Svelte 5 UI. End-to-end encrypted, zero telemetry, Apa
 - Encrypted and plain rooms on sliding sync (MSC4186, with MSC3575 fallback), history loads as you scroll.
 - Send, edit, delete, reply, react, threads, polls, mentions, markdown, emoji, attachments with progress,
   image/video/audio viewer, read receipts, typing indicator, unread badges that clear when you read.
+- Emoji picker with search, recents and skin tones; tiered right-click menus everywhere (never the OS menu); readable Details panel.
 - Your own room tags (name, colour, order) to organise, filter and sort the room list; replies shown as readable quotes.
 - Spaces, room directory, invites, new rooms and DMs, room info (name, topic, picture, private note,
   media/files/links/members), profile cards, right-click and long-press menus.
@@ -32,7 +33,7 @@ Rust core, Tauri 2 shell, Svelte 5 UI. End-to-end encrypted, zero telemetry, Apa
 
 **Delivery**
 - Installers for macOS (arm64, x64), Windows (exe, msi) and Linux (AppImage, deb, rpm) and a 36 MB Android APK, on the
-  [releases page](https://github.com/centopw/alloy/releases). Desktop updates itself; Android tells you when
+  [releases page](https://github.com/centopw/alloy/releases). Desktop checks for updates, shows the release notes in the app and updates in place; Android tells you when
   a newer release exists. SBOM attached to releases. No telemetry.
 
 ## Roadmap
@@ -125,7 +126,7 @@ Svelte reactive arrays. `#![forbid(unsafe_code)]` everywhere.
 | | |
 |---|---|
 | [Master plan and roadmap](docs/PLAN.md) | decisions D1 to D14, phases, what changed, what is next |
-| [Decision records](docs/decisions/README.md) | [0001 visual language](docs/decisions/0001-ui-visual-language.md), [0002 layout](docs/decisions/0002-discord-style-layout.md), [0003 UX review](docs/decisions/0003-ux-review-2026-10.md), [0004 functional settings](docs/decisions/0004-functional-settings.md), [0005 mobile shell](docs/decisions/0005-mobile-first-shell.md), [0006 shared controls, tags, one members UI](docs/decisions/0006-shared-controls-tags-and-one-members-ui.md) |
+| [Decision records](docs/decisions/README.md) | [0001 visual language](docs/decisions/0001-ui-visual-language.md), [0002 layout](docs/decisions/0002-discord-style-layout.md), [0003 UX review](docs/decisions/0003-ux-review-2026-10.md), [0004 functional settings](docs/decisions/0004-functional-settings.md), [0005 mobile shell](docs/decisions/0005-mobile-first-shell.md), [0006 shared controls, tags, one members UI](docs/decisions/0006-shared-controls-tags-and-one-members-ui.md), [0007 design spec, menus, emoji, updates](docs/decisions/0007-design-spec-menus-emoji-updates.md) |
 | [Detail docs](docs/plan/) | UI stack, core, extensibility, security and delivery, UX, IPC contract, theming |
 | [Releasing](docs/RELEASING.md) · [CI](docs/CI.md) · [Tracking](docs/TRACKING.md) | pipelines, update feed, board workflow |
 | [Changelog](CHANGELOG.md) | per release |

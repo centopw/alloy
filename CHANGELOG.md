@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Redesign (ADR 0007):** the workspace follows the new design spec: flat docked panes with hairline borders, 68px rail, 240px list pane with All / Direct / Channels / Unread chips, a single scrolling Details panel (About, Private note, Shared media, Files, Links, Members with "View all"), 6px-radius inputs and composer, one blue accent.
+- **Tiered room menu:** Mark as read, Notifications, Tags, Room settings, Copy, Leave. Hovering Notifications, Tags, Room settings or Copy opens a small menu beside it. The Tags menu is scrollable, has a search field, and typing a new name offers "Create tag" (Enter). There is no "Open" entry any more.
+- **No native right-click menus anywhere.** Every surface has our own quick menu: tag chips (rename, colour, move, delete), filter chips, sort button, space rail, chat header, composer buttons, timeline background, and text fields (Cut/Copy/Paste/Select all), links and selections.
+- **Emoji picker:** category tabs, search, recently used, skin tones, keyboard navigation; used by the composer and by reactions.
+- **Updates:** automatic check every 6 hours (toggle), automatic download (toggle, desktop), native changelog dialog with the release notes ("View on GitHub" stays available), an "Update" button in a slim title strip that becomes "Restart to apply update" after the download.
+
+### Fixed
+- A room you read stays read after a restart (read marks are stored on the device).
+- Manage tags opens Settings directly on the Tags page.
+- Buttons and filter chips are full-size touch targets on phones.
+
 ## 0.1.7 (pre-release)
 
 ### Added
