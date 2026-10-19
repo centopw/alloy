@@ -53,8 +53,8 @@
   .text-field {
     box-sizing: border-box;
     width: 100%;
-    min-height: 36px;
-    padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
+    height: var(--alloy-layout-control-height);
+    padding: 0 var(--alloy-spacing-scale-3);
     border: 1px solid var(--alloy-color-border-prominent);
     border-radius: var(--alloy-radii-md);
     background: var(--alloy-color-surface-elevated);
@@ -116,7 +116,6 @@
 
   @media (max-width: 899px) {
     .text-field {
-      min-height: 44px;
       font-size: 16px;
     }
   }

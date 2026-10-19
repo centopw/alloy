@@ -25,10 +25,10 @@
 
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { Icon, X, ChevronLeft, Play, File, Link, ExternalLink, Image, ImagePlus, Trash2, Download, Copy, MessageSquare, User, Search, Lock } from '$lib/icons';
+  import { Icon, X, ChevronLeft, Play, File, ExternalLink, Image, Download, Copy, Link, MessageSquare, User, Search, Lock, Bell, BellOff } from '$lib/icons';
   import { formatBytes, formatDay } from '$lib/content/format';
   import { viewport } from '$lib/stores/viewport.svelte';
-  import { pickFile } from '$lib/platform/files';
+  import { copyText } from '$lib/platform/clipboard';
   import { openExternal } from '$lib/platform/links';
   import { pushBack } from '$lib/platform/backstack';
   import { roomInfo } from '$lib/stores/roomInfo.svelte';
@@ -38,13 +38,14 @@
   import { profileCard } from '$lib/stores/profileCard.svelte';
   import { errorMessage } from '$lib/stores/errors';
   import type { RoomInfoTab } from '$lib/stores/ui.svelte';
-  import type { NotificationLevel, RoomMediaItem, RoomMediaKind } from '$lib/generated/protocol';
+  import type { RoomMediaItem, RoomMediaKind } from '$lib/generated/protocol';
   import { contextmenu } from '$lib/platform/contextmenu';
   import { roomsStore } from '$lib/stores/rooms.svelte';
   import { userProfile } from '$lib/stores/userProfile.svelte';
   import type { MenuItem } from '$lib/stores/contextmenu.svelte';
   import type { RoomMemberDto } from '$lib/generated';
-  import { Avatar, Button, Select, TextArea, TextField, UserName, type SelectOption } from '../common';
+  import { Avatar, Button, SegmentedControl, TextArea, TextField, UserName } from '../common';
+  import { copyItems, notifyItems, notifyLabel, openMenuFrom, roomPictureItems } from './roomMenus';
   import MediaViewer, { fetchMediaFile } from '../timeline/MediaViewer.svelte';
 
   type MediaView = 'media' | 'files' | 'links';
@@ -75,12 +76,18 @@
   /** Rows shown on the overview before "View all" opens the full list. */
   const PREVIEW = { media: 6, files: 3, links: 3, members: 5 } as const;
 
-  const NOTIFY_OPTIONS: SelectOption[] = [
-    { value: 'default', label: 'Use default' },
-    { value: 'All', label: 'All messages' },
-    { value: 'Mentions', label: 'Mentions and keywords only' },
-    { value: 'Mute', label: 'Mute' },
+  /** Shared-media tabs in display order. */
+  const SHARED_TABS: { value: MediaView; label: string }[] = [
+    { value: 'media', label: 'Media' },
+    { value: 'links', label: 'Links' },
+    { value: 'files', label: 'Files' },
   ];
+
+  const EMPTY_TEXT: Record<MediaView, string> = {
+    media: 'No shared media yet',
+    files: 'No shared files yet',
+    links: 'No shared links yet',
+  };
 
   function isMediaView(v: View): v is MediaView {
     return v === 'media' || v === 'files' || v === 'links';
@@ -180,34 +187,13 @@
     await roomInfo.setTopic(roomId, next);
   }
 
-  async function changeAvatar() {
-    const path = await pickFile();
-    if (path) await roomInfo.setAvatar(roomId, path);
-  }
-
-  async function removeAvatar() {
-    await roomInfo.setAvatar(roomId, null);
-  }
-
-  // Room notifications. Unknown until the room is read; the select stays blank meanwhile.
-  const notifyValue = $derived.by(() => {
-    const isDefault = roomNotify.isDefault(roomId);
-    if (isDefault === null) return '';
-    return isDefault ? 'default' : (roomNotify.levelOf(roomId) ?? '');
-  });
-
+  // Room notifications load so the bell shows the current level.
   $effect(() => {
     const id = roomId;
     untrack(() => void roomNotify.load(id));
   });
 
-  function setNotify(value: string) {
-    void roomNotify.set(roomId, value === 'default' ? null : (value as NotificationLevel));
-  }
-
-  function copyLink() {
-    void navigator.clipboard.writeText(`https://matrix.to/#/${roomId}`);
-  }
+  const room = $derived(roomsStore.rooms.find((r) => r.id === roomId));
 
   // Media state. The overview previews all three kinds; a sub-view loads only its own kind.
   const mediaState = $derived({
@@ -215,6 +201,9 @@
     files: roomMedia.view(roomId, 'Files'),
     links: roomMedia.view(roomId, 'Links'),
   });
+  let sharedTab = $state<MediaView>('media');
+  const sharedCurrent = $derived(mediaState[sharedTab]);
+  const sharedHasItems = $derived(SHARED_TABS.some(({ value }) => mediaState[value].items.length > 0));
   const current = $derived(isMediaView(view) ? mediaState[view] : null);
   let sentinel = $state<HTMLElement | null>(null);
   let viewer = $state<{
@@ -376,7 +365,7 @@
       },
       { id: 'message', label: 'Message', icon: MessageSquare, onselect: () => void messageMember(m.user_id) },
       { separator: true },
-      { id: 'copy-user-id', label: 'Copy user ID', icon: Copy, onselect: () => void navigator.clipboard.writeText(m.user_id) },
+      { id: 'copy-user-id', label: 'Copy user ID', icon: Copy, onselect: () => void copyText(m.user_id).catch(() => undefined) },
     ];
   }
 </script>
@@ -463,6 +452,22 @@
   </li>
 {/snippet}
 
+{#snippet sharedItems(kind: MediaView, items: RoomMediaItem[])}
+  {#if kind === 'media'}
+    {@render mediaGrid(items)}
+  {:else}
+    <ul class="list">
+      {#each items as item (item.event_id)}
+        {#if kind === 'files'}
+          {@render fileRow(item)}
+        {:else}
+          {@render linkRow(item)}
+        {/if}
+      {/each}
+    </ul>
+  {/if}
+{/snippet}
+
 <section class="details" aria-label="Room info" bind:this={panel}>
   <header class="bar">
     {#if view !== 'overview'}
@@ -485,7 +490,22 @@
 
     {#if view === 'overview'}
       <div class="identity">
-        <Avatar userId={roomId} displayName={details?.name ?? ''} src={details?.avatar_url ?? null} size="xl" shape="rounded" />
+        {#snippet avatarView()}
+          <Avatar userId={roomId} displayName={details?.name ?? ''} src={details?.avatar_url ?? null} size="xl" shape="rounded" />
+        {/snippet}
+        {#if details?.can_set_avatar}
+          <button
+            type="button"
+            class="picture-btn"
+            aria-label="Room picture options"
+            title="Room picture options"
+            onclick={(e) => openMenuFrom(e.currentTarget, roomPictureItems(roomId), 'Room picture')}
+          >
+            {@render avatarView()}
+          </button>
+        {:else}
+          {@render avatarView()}
+        {/if}
         <p class="name">{details?.name || 'Unnamed room'}</p>
         {#if details?.canonical_alias}<p class="id">{details.canonical_alias}</p>{/if}
         {#if details}
@@ -502,18 +522,20 @@
             {#snippet children()}Search{/snippet}
           </Button>
         {/if}
-        <Button variant="ghost" size="sm" icon={Copy} onclick={copyLink}>
-          {#snippet children()}Copy link{/snippet}
-        </Button>
-        <div class="notify">
-          <Select
-            label="Notifications"
-            value={notifyValue}
-            options={NOTIFY_OPTIONS}
-            disabled={roomNotify.saving(roomId)}
-            onchange={setNotify}
-          />
-        </div>
+        {#if room}
+          <Button variant="ghost" size="sm" icon={Copy} onclick={(e) => openMenuFrom(e.currentTarget, copyItems(room), 'Copy ID')}>
+            {#snippet children()}Copy ID{/snippet}
+          </Button>
+        {/if}
+        <button
+          type="button"
+          class="icon-btn"
+          aria-label={notifyLabel(roomId)}
+          title={notifyLabel(roomId)}
+          onclick={(e) => openMenuFrom(e.currentTarget, notifyItems(roomId), 'Notifications')}
+        >
+          <Icon icon={roomNotify.isMuted(roomId) ? BellOff : Bell} size={20} />
+        </button>
       </div>
 
       <section class="section" aria-labelledby="room-info-about">
@@ -537,21 +559,6 @@
           <span class="label">Topic</span>
           <TextArea rows={3} bind:value={topicDraft} disabled={!details?.can_set_topic} onblur={commitTopic} />
         </label>
-        <div class="picture">
-          <span class="label">Room picture</span>
-          {#if details?.can_set_avatar}
-            <Button variant="ghost" size="sm" icon={ImagePlus} onclick={changeAvatar}>
-              {#snippet children()}Change picture{/snippet}
-            </Button>
-            {#if details.avatar_url}
-              <Button variant="ghost" size="sm" icon={Trash2} onclick={removeAvatar}>
-                {#snippet children()}Remove picture{/snippet}
-              </Button>
-            {/if}
-          {:else}
-            <p class="hint">Only room admins can change the picture.</p>
-          {/if}
-        </div>
         {#if roomInfo.saving(roomId)}
           <p class="status" role="status">Saving…</p>
         {/if}
@@ -578,47 +585,22 @@
         {/if}
       </section>
 
-      {#if mediaState.media.items.length > 0}
-        <section class="section">
+      {#if sharedHasItems}
+        <section class="section" aria-labelledby="room-info-shared">
           <div class="section-head">
-            <h3 class="heading">Shared media</h3>
-            <Button variant="ghost" size="sm" onclick={() => (view = 'media')}>
-              {#snippet children()}{viewAll(mediaState.media.items.length, mediaState.media.done)}{/snippet}
-            </Button>
+            <h3 class="heading" id="room-info-shared">Shared</h3>
+            {#if sharedCurrent.items.length > 0}
+              <Button variant="ghost" size="sm" onclick={() => (view = sharedTab)}>
+                {#snippet children()}{viewAll(sharedCurrent.items.length, sharedCurrent.done)}{/snippet}
+              </Button>
+            {/if}
           </div>
-          {@render mediaGrid(mediaState.media.items.slice(0, PREVIEW.media))}
-        </section>
-      {/if}
-
-      {#if mediaState.files.items.length > 0}
-        <section class="section">
-          <div class="section-head">
-            <h3 class="heading">Files &amp; documents</h3>
-            <Button variant="ghost" size="sm" onclick={() => (view = 'files')}>
-              {#snippet children()}{viewAll(mediaState.files.items.length, mediaState.files.done)}{/snippet}
-            </Button>
-          </div>
-          <ul class="list">
-            {#each mediaState.files.items.slice(0, PREVIEW.files) as item (item.event_id)}
-              {@render fileRow(item)}
-            {/each}
-          </ul>
-        </section>
-      {/if}
-
-      {#if mediaState.links.items.length > 0}
-        <section class="section">
-          <div class="section-head">
-            <h3 class="heading">Shared links</h3>
-            <Button variant="ghost" size="sm" onclick={() => (view = 'links')}>
-              {#snippet children()}{viewAll(mediaState.links.items.length, mediaState.links.done)}{/snippet}
-            </Button>
-          </div>
-          <ul class="list">
-            {#each mediaState.links.items.slice(0, PREVIEW.links) as item (item.event_id)}
-              {@render linkRow(item)}
-            {/each}
-          </ul>
+          <SegmentedControl options={SHARED_TABS} value={sharedTab} label="Shared content" onchange={(v) => (sharedTab = v as MediaView)} />
+          {#if sharedCurrent.items.length > 0}
+            {@render sharedItems(sharedTab, sharedCurrent.items.slice(0, PREVIEW[sharedTab]))}
+          {:else}
+            <p class="empty">{EMPTY_TEXT[sharedTab]}</p>
+          {/if}
         </section>
       {/if}
 
@@ -642,32 +624,11 @@
         <p class="notice" role="alert">{current.error}</p>
       {/if}
 
-      {#if view === 'media'}
-        {#if current.items.length > 0}
-          {@render mediaGrid(current.items)}
-        {:else if current.done && !current.loading}
-          <p class="empty">No shared media yet</p>
-        {/if}
-      {:else if view === 'files'}
-        {#if current.items.length > 0}
-          <ul class="list">
-            {#each current.items as item (item.event_id)}
-              {@render fileRow(item)}
-            {/each}
-          </ul>
-        {:else if current.done && !current.loading}
-          <p class="empty">No shared files yet</p>
-        {/if}
-      {:else}
-        {#if current.items.length > 0}
-          <ul class="list">
-            {#each current.items as item (item.event_id)}
-              {@render linkRow(item)}
-            {/each}
-          </ul>
-        {:else if current.done && !current.loading}
-          <p class="empty">No shared links yet</p>
-        {/if}
+      {@const kind = view as MediaView}
+      {#if current.items.length > 0}
+        {@render sharedItems(kind, current.items)}
+      {:else if current.done && !current.loading}
+        <p class="empty">{EMPTY_TEXT[kind]}</p>
       {/if}
 
       {#if current.loading}
@@ -816,11 +777,6 @@
     gap: var(--alloy-spacing-scale-2);
   }
 
-  .notify {
-    flex: 1 1 200px;
-    min-width: 0;
-  }
-
   .section {
     display: flex;
     flex-direction: column;
@@ -853,11 +809,18 @@
     min-width: 0;
   }
 
-  .picture {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--alloy-spacing-scale-2);
+  .picture-btn {
+    display: inline-flex;
+    padding: 0;
+    border: 0;
+    border-radius: var(--alloy-radii-sm);
+    background: none;
+    cursor: pointer;
+  }
+
+  .picture-btn:focus-visible {
+    outline: 2px solid var(--alloy-color-accent-primary);
+    outline-offset: 2px;
   }
 
   .card {
@@ -885,7 +848,6 @@
     font-size: var(--alloy-typography-size-xs);
   }
 
-  .hint,
   .status,
   .empty {
     margin: 0;

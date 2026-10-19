@@ -19,6 +19,7 @@
       rows: [
         { action: 'Jump to a conversation or command', chords: [[mod, 'K']] },
         { action: 'Open settings', chords: [[mod, ',']] },
+        ...(caps.keyboardShortcuts ? [{ action: 'Search in the open conversation', chords: [[mod, 'F']] }] : []),
       ],
     },
     {

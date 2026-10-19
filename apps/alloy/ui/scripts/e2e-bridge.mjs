@@ -187,6 +187,17 @@ try {
   await page.evaluate(() => [...document.querySelectorAll('button.row')].find((e) => e.textContent.includes('From Bob')).click());
   await page.waitForFunction(() => document.body.innerText.includes('Hi from bob'), { timeout: 60000 });
 
+  step('search in the open room: find a message by its text, jump to it, close with Escape');
+  await page.click('button[aria-label="Search in room"]');
+  await page.waitForSelector('aside[aria-label="Search in room"]', { visible: true, timeout: 15000 });
+  await page.type('aside[aria-label="Search in room"] input[aria-label="Search messages"]', 'from bob');
+  await page.waitForFunction(() => [...document.querySelectorAll('aside[aria-label="Search in room"] button.hit')].some((b) => b.textContent.includes('Hi from bob')), { timeout: 30000 });
+  await page.evaluate(() => [...document.querySelectorAll('aside[aria-label="Search in room"] button.hit')].find((b) => b.textContent.includes('Hi from bob')).click());
+  await new Promise((r) => setTimeout(r, 800));
+  if (!(await page.$('aside[aria-label="Search in room"]'))) throw new Error('search panel closed after a desktop jump');
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.querySelector('aside[aria-label="Search in room"]'), { timeout: 5000 });
+
   step('send a markdown message: local echo then confirmed, rendered as formatted html');
   await page.click('textarea[aria-label=Message]');
   await page.type('textarea[aria-label=Message]', 'Hello **there**');
@@ -207,7 +218,7 @@ try {
   await page.waitForFunction(() => document.querySelector('.chip.mine'), { timeout: 30000 });
 
   step('hover an icon button shows a tooltip');
-  await page.hover('button[aria-label="Search"]');
+  await page.hover('button[aria-label="Search in room"]');
   await page.waitForSelector('[role=tooltip]', { visible: true, timeout: 5000 });
   await page.waitForFunction(() => document.querySelector('[role=tooltip]')?.textContent.includes('Search'), { timeout: 5000 });
   await page.mouse.move(5, 5);

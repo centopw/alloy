@@ -231,6 +231,26 @@ class TimelineStore {
     }, 2000);
   }
 
+  /**
+   * Jump to an event, paging back through history until it is loaded. Resolves false when the
+   * event cannot be reached: the room changed, history started, the page cap was hit, or a load failed.
+   */
+  async jumpToEvent(eventId: string, maxPages = 30): Promise<boolean> {
+    const roomId = this.roomId;
+    for (let page = 0; page <= maxPages; page++) {
+      if (!roomId || this.roomId !== roomId) return false;
+      if (this.hasEvent(eventId)) {
+        this.jumpTo(eventId);
+        return true;
+      }
+      if (this.reachedStart || this.paginating || page === maxPages) return false;
+      const errorBefore = this.error;
+      await this.loadOlder();
+      if (this.error !== errorBefore) return false;
+    }
+    return false;
+  }
+
   /** Check if an event is currently loaded in the timeline. */
   hasEvent(eventId: string | null | undefined): boolean {
     if (!eventId) return false;

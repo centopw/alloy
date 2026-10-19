@@ -5,11 +5,9 @@
   import TagChip from '../tags/TagChip.svelte';
   import TagEditDialog from '../tags/TagEditDialog.svelte';
   import Icon from '$lib/icons/Icon.svelte';
-  import { ArrowUpDown, Bell, BellOff, Check, CheckCheck, ChevronDown, ChevronUp, Compass, Copy, ImagePlus, Info, Link, LogOut, Lock, Palette, Pencil, Plus, Search, Settings, StickyNote, Tag, Trash2, X } from '$lib/icons';
+  import { ArrowUpDown, Bell, BellOff, Check, CheckCheck, ChevronDown, ChevronUp, Compass, Copy, Info, LogOut, Lock, Palette, Pencil, Plus, Search, Settings, StickyNote, Tag, Trash2, X } from '$lib/icons';
   import { client } from '$lib/ipc';
-  import { copyText } from '$lib/platform/clipboard';
   import { contextmenu } from '$lib/platform/contextmenu';
-  import { pickFile } from '$lib/platform/files';
   import { shortcutLabel } from '$lib/platform/shortcuts';
   import { contextMenu, type MenuItem } from '$lib/stores/contextmenu.svelte';
   import { expect } from '$lib/stores/errors';
@@ -20,12 +18,13 @@
   import { displayTags, TAG_COLOUR_VARS, TAG_COLOURS } from '$lib/stores/tags';
   import { tags } from '$lib/stores/tags.svelte';
   import { groupRoomsByTag, ROOM_SORTS, type RoomSort } from '$lib/stores/roomSort';
-  import type { NotificationLevel, TagColour } from '$lib/generated';
+  import type { TagColour } from '$lib/generated';
   import { ui } from '$lib/stores/ui.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
   import { formatListTime } from '$lib/content/format';
   import RenameRoomDialog from './RenameRoomDialog.svelte';
   import UserPanel from './UserPanel.svelte';
+  import { copyItems, notifyItems } from './roomMenus';
 
   interface Props {
     onselect?: (roomId: string) => void;
@@ -85,18 +84,6 @@
     }
   }
 
-  async function changePicture(roomId: string) {
-    try {
-      const path = await pickFile();
-      if (!path) return;
-      await roomInfo.setAvatar(roomId, path);
-      // Failures are kept on the room's info state; the details panel shows them.
-      if (roomInfo.error(roomId)) showRoomInfo(roomId);
-    } catch {
-      showRoomInfo(roomId);
-    }
-  }
-
   async function leaveRoom(roomId: string) {
     expect(await client.invoke({ action: 'LeaveRoom', params: { room_id: roomId } }), 'RoomLeft');
     if (roomsStore.activeRoomId === roomId) roomsStore.select(null);
@@ -106,19 +93,6 @@
     if (pendingLeave) await leaveRoom(pendingLeave.id);
   }
 
-  /** One level choice of a room's Notifications submenu; the level in effect is the selected row. */
-  function notifyItem(r: RoomItem, label: string, target: NotificationLevel | null): MenuItem {
-    const isDefault = roomNotify.isDefault(r.id);
-    const current = target === null ? isDefault === true : isDefault === false && roomNotify.levelOf(r.id) === target;
-    return {
-      id: `notify-${target ?? 'default'}`,
-      label,
-      selected: current,
-      disabled: roomNotify.saving(r.id),
-      onselect: () => void roomNotify.set(r.id, target),
-    };
-  }
-
   /** Tag ids of a room as they are now, so the Tags submenu reflects each toggle. */
   function liveTags(roomId: string): readonly string[] {
     return roomsStore.rooms.find((x) => x.id === roomId)?.tags ?? [];
@@ -126,7 +100,7 @@
 
   async function createTagFor(roomId: string, name: string) {
     const created = await tags.create(name, 'blue');
-    if (created) await tags.setForRoom(roomId, created.id, true);
+    if (created) await roomsStore.setRoomTag(roomId, created.id, true);
   }
 
   function roomItems(r: RoomItem): MenuItem[] {
@@ -142,12 +116,7 @@
         label: 'Notifications',
         icon: Bell,
         submenu: {
-          items: () => [
-            notifyItem(r, 'Use default', null),
-            notifyItem(r, 'All messages', 'All'),
-            notifyItem(r, 'Mentions and keywords only', 'Mentions'),
-            notifyItem(r, 'Mute', 'Mute'),
-          ],
+          items: () => notifyItems(r.id),
         },
       },
       {
@@ -163,7 +132,7 @@
                 label: def.name,
                 selected: on,
                 keepOpen: true,
-                onselect: () => void tags.setForRoom(r.id, def.id, !on),
+                onselect: () => void roomsStore.setRoomTag(r.id, def.id, !on),
               };
             }),
           search: {
@@ -182,13 +151,6 @@
           items: [
             { id: 'details', label: 'Room details', icon: Info, onselect: () => showRoomInfo(r.id) },
             { id: 'rename', label: 'Rename room', icon: Pencil, disabled: d !== null && !d.can_set_name, onselect: () => (renameRoomId = r.id) },
-            {
-              id: 'picture',
-              label: 'Change room picture',
-              icon: ImagePlus,
-              disabled: d !== null && !d.can_set_avatar,
-              onselect: () => void changePicture(r.id),
-            },
             { id: 'note', label: 'Edit note', icon: StickyNote, onselect: () => showRoomInfo(r.id) },
           ],
         },
@@ -198,10 +160,7 @@
         label: 'Copy',
         icon: Copy,
         submenu: {
-          items: [
-            { id: 'copy-link', label: 'Copy room link', icon: Link, onselect: () => void copyText(`https://matrix.to/#/${r.id}`).catch(() => undefined) },
-            { id: 'copy-id', label: 'Copy room ID', icon: Copy, onselect: () => void copyText(r.id).catch(() => undefined) },
-          ],
+          items: copyItems(r),
         },
       },
       { separator: true },
@@ -681,7 +640,7 @@
     display: flex;
     flex: 1;
     min-width: 0;
-    gap: var(--alloy-spacing-scale-1);
+    gap: 2px;
     overflow-x: auto;
     scrollbar-width: none;
   }
@@ -694,7 +653,7 @@
   .chip {
     flex: none;
     height: 26px;
-    padding: 0 var(--alloy-spacing-scale-2);
+    padding: 0 6px;
     border: 0;
     border-radius: var(--alloy-radii-sm);
     background: transparent;

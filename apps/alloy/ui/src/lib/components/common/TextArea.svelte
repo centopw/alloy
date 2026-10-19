@@ -79,7 +79,6 @@
   .text-area {
     box-sizing: border-box;
     width: 100%;
-    min-height: 36px;
     padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
     border: 1px solid var(--alloy-color-border-prominent);
     border-radius: var(--alloy-radii-md);
@@ -127,7 +126,6 @@
 
   @media (max-width: 899px) {
     .text-area {
-      min-height: 44px;
       font-size: 16px;
     }
   }

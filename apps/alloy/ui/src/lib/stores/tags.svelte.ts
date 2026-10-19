@@ -94,7 +94,7 @@ class TagStore {
     }
   }
 
-  /** Assigns or removes a tag on one room. Room tag lists update from the engine's room diff. */
+  /** Engine call that assigns or removes a tag on one room. Callers update the room list (see RoomsStore.setRoomTag). */
   async setForRoom(roomId: string, tagId: string, enabled: boolean): Promise<boolean> {
     try {
       expect(

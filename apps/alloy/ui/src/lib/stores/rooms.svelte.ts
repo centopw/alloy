@@ -163,6 +163,27 @@ class RoomsStore {
     this.activeRoomId = roomId;
     this.lastActive = this.rooms.find((r) => r.id === roomId) ?? null;
   }
+
+  /**
+   * Assigns or removes a tag on a room at once, so the list, tag chips and tag menu agree before the
+   * engine answers. A refused write restores the previous tags; the engine's room diff stays authoritative.
+   */
+  async setRoomTag(roomId: string, tagId: string, enabled: boolean): Promise<boolean> {
+    const room = this.rooms.find((r) => r.id === roomId);
+    if (!room) return tags.setForRoom(roomId, tagId, enabled);
+    const previous = [...room.tags];
+    const next = enabled ? [...new Set([...previous, tagId])] : previous.filter((id) => id !== tagId);
+    this.#setTags(roomId, next);
+    const ok = await tags.setForRoom(roomId, tagId, enabled);
+    if (!ok) this.#setTags(roomId, previous);
+    return ok;
+  }
+
+  /** Replaces one room's tag list. Looked up by id each time because diffs replace entries by index. */
+  #setTags(roomId: string, next: string[]) {
+    const index = this.rooms.findIndex((r) => r.id === roomId);
+    if (index !== -1) this.rooms[index] = { ...this.rooms[index], tags: next };
+  }
 }
 
 export function roomTitle(r: RoomSummary): string {

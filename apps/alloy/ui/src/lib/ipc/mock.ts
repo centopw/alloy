@@ -21,6 +21,9 @@ import type {
   EngineError,
 } from '../generated/index.js';
 import type { Transport, EventHandler, Unsubscribe } from './transport.js';
+type SearchRoomMessagesParams = Extract<EngineCommand, { action: 'SearchRoomMessages' }>['params'];
+type RoomSearchResults = Extract<EngineResponse, { type: 'RoomSearchResults' }>['payload'];
+type RoomSearchHit = RoomSearchResults['hits'][number];
 
 const MOCK_ACCOUNT: Account = {
   id: 'acc_alice',
@@ -157,6 +160,7 @@ const MOCK_ROOMS: RoomSummary[] = [
     favourite: null,
     low_priority: null,
     tags: [],
+    direct_user_id: null,
   },
   {
     id: '!dev:alloy.chat',
@@ -178,6 +182,7 @@ const MOCK_ROOMS: RoomSummary[] = [
     favourite: true,
     low_priority: null,
     tags: [],
+    direct_user_id: null,
   },
   {
     id: '!bob:alloy.chat',
@@ -199,6 +204,7 @@ const MOCK_ROOMS: RoomSummary[] = [
     favourite: null,
     low_priority: null,
     tags: [],
+    direct_user_id: null,
   },
 ];
 
@@ -406,7 +412,34 @@ export class MockTransport implements Transport {
     }
   }
 
+  /** Encrypted rooms report Unavailable, as the homeserver cannot search them; the UI then searches locally. */
+  private searchRoomMessages(params: SearchRoomMessagesParams): RoomSearchResults {
+    const room = this.rooms.find((r) => r.id === params.room_id);
+    if (!room || room.encrypted) return { hits: [], next_batch: null, scope: 'Unavailable' };
+    const needle = params.query.toLowerCase();
+    const hits: RoomSearchHit[] = [];
+    for (const item of this.timelineByRoom.get(params.room_id) ?? []) {
+      if (item.event_id === null || item.content.kind !== 'TextMessage') continue;
+      const body = item.content.data.body;
+      if (!body.toLowerCase().includes(needle)) continue;
+      if (params.sender !== null && item.sender !== params.sender) continue;
+      hits.push({
+        event_id: item.event_id,
+        sender: item.sender,
+        sender_display_name: item.sender_display_name ?? null,
+        timestamp_millis: item.timestamp_millis,
+        body,
+      });
+    }
+    // Newest first, as the homeserver returns them.
+    hits.reverse();
+    return { hits: hits.slice(0, params.limit), next_batch: null, scope: 'Server' };
+  }
+
   async invoke(command: EngineCommand): Promise<EngineResponse> {
+    if (command.action === 'SearchRoomMessages') {
+      return { type: 'RoomSearchResults', payload: this.searchRoomMessages(command.params) };
+    }
     switch (command.action) {
       case 'DiscoverHomeserver':
         return {
@@ -514,6 +547,7 @@ export class MockTransport implements Transport {
           favourite: null,
           low_priority: null,
           tags: [],
+          direct_user_id: null,
         };
 
         this.rooms.push(newRoom);
@@ -561,6 +595,7 @@ export class MockTransport implements Transport {
           favourite: null,
           low_priority: null,
           tags: [],
+          direct_user_id: null,
         };
 
         this.rooms.push(newRoom);
@@ -1109,6 +1144,7 @@ export class MockTransport implements Transport {
           favourite: null,
           low_priority: null,
           tags: [],
+          direct_user_id: null,
         };
 
         this.rooms.push(newRoom);
@@ -1324,6 +1360,12 @@ export class MockTransport implements Transport {
           type: 'SettingSet',
           payload: { key: command.params.key },
         };
+
+      case 'GetAccountPrefs':
+        return { type: 'AccountPrefs', payload: { json: null } };
+
+      case 'SetAccountPrefs':
+        return { type: 'Unit' };
 
       case 'GetNotificationSettings':
         return {

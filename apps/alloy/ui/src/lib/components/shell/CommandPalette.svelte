@@ -71,8 +71,8 @@
           bind:this={input}
           bind:value={query}
           onkeydown={onKey}
-          placeholder="Jump to a conversation"
-          aria-label="Jump to a conversation"
+          placeholder="Search rooms"
+          aria-label="Search rooms"
           role="combobox"
           aria-expanded="true"
           aria-controls="palette-results"

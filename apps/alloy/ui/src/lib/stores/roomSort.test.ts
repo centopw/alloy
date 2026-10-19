@@ -20,6 +20,7 @@ function room(
     favourite: null,
     low_priority: null,
     tags: p.tags ?? [],
+    direct_user_id: null,
   };
 }
 

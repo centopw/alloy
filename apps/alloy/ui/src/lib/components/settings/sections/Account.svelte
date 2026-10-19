@@ -146,7 +146,7 @@
             disabled={savingName}
           />
         </label>
-        <Button type="submit" size="sm" disabled={!nameChanged || busy}>
+        <Button type="submit" disabled={!nameChanged || busy}>
           {savingName ? 'Saving...' : 'Save'}
         </Button>
       </form>
@@ -284,8 +284,8 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 28px;
-    height: 28px;
+    width: var(--alloy-layout-control-height-sm);
+    height: var(--alloy-layout-control-height-sm);
     padding: 0;
     border: none;
     border-radius: var(--alloy-radii-full);

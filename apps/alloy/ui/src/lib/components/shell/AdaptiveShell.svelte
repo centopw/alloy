@@ -6,6 +6,7 @@
   import SpaceChips from './SpaceChips.svelte';
   import MobileTabBar from './MobileTabBar.svelte';
   import RoomInfoPanel from './RoomInfoPanel.svelte';
+  import RoomSearchPanel from './RoomSearchPanel.svelte';
   import CommandPalette from './CommandPalette.svelte';
   import Timeline from '../timeline/Timeline.svelte';
   import ThreadPanel from '../timeline/ThreadPanel.svelte';
@@ -18,6 +19,7 @@
   import VerificationDialog from '../settings/VerificationDialog.svelte';
   import Hud from '../dev/Hud.svelte';
   import { pushBack } from '$lib/platform/backstack';
+  import { capabilities, currentEnv } from '$lib/platform/capabilities';
   import { roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
   import { tags } from '$lib/stores/tags.svelte';
   import { layout, LAYOUT_LIMITS } from '$lib/stores/layout.svelte';
@@ -58,9 +60,9 @@
     !threadOpen ? 'none' : breakpoint === 'wide' ? 'column' : 'overlay'
   );
 
-  // Room info takes the side slot.
-  const infoPanel = $derived<'room-info' | 'none'>(
-    !activeId || threadOpen ? 'none' : ui.roomInfoOpen ? 'room-info' : 'none'
+  // Room search and room info share the side slot. Opening one closes the other in the ui store.
+  const infoPanel = $derived<'room-search' | 'room-info' | 'none'>(
+    !activeId || threadOpen ? 'none' : ui.roomSearchOpen ? 'room-search' : ui.roomInfoOpen ? 'room-info' : 'none'
   );
   // Wide: a side column. Medium: a rounded overlay over the chat. Narrow: the same overlay, shown
   // only while a chat is open (the list pane has no chat).
@@ -79,6 +81,7 @@
 
   // Phones (<= 899px) swap the rail for a space strip and add a bottom tab bar.
   const phone = $derived(viewport.isPhone);
+  const caps = $derived(capabilities(currentEnv(viewport.isPhone)));
   const tabActive = $derived<'chats' | 'discover' | 'settings'>(
     directoryOpen ? 'discover' : settingsOpen ? 'settings' : 'chats'
   );
@@ -123,12 +126,17 @@
     });
   });
 
-  // Room info belongs to the room it was opened for, the same way a thread does.
+  // Room info and room search belong to the room they were opened for, the same way a thread does.
   $effect(() => {
     void activeId;
     untrack(() => {
       if (ui.roomInfoOpen) ui.closeRoomInfo();
+      if (ui.roomSearchOpen) ui.closeRoomSearch();
     });
+  });
+  // An open thread takes the side slot, so room search closes when a thread opens.
+  $effect(() => {
+    if (threadOpen && ui.roomSearchOpen) ui.closeRoomSearch();
   });
 
   // On phones an open thread takes a Back entry, so Back closes the thread before the chat.
@@ -137,9 +145,10 @@
     return pushBack(() => threadStore.close());
   });
 
-  // On phones an open room info overlay takes a Back entry, so Back closes it before the chat.
+  // On phones an open room info or room search overlay takes a Back entry, so Back closes it before the chat.
   $effect(() => {
     if (breakpoint !== 'narrow' || infoMode !== 'overlay') return;
+    if (infoPanel === 'room-search') return pushBack(() => ui.closeRoomSearch());
     if (infoPanel === 'room-info') return pushBack(() => ui.closeRoomInfo());
     return;
   });
@@ -176,6 +185,9 @@
     if (mod && e.key.toLowerCase() === 'k') {
       e.preventDefault();
       paletteOpen = !paletteOpen;
+    } else if (mod && e.key.toLowerCase() === 'f' && activeId && caps.keyboardShortcuts) {
+      e.preventDefault();
+      ui.toggleRoomSearch();
     } else if (mod && e.key === ',') {
       e.preventDefault();
       openSettings();
@@ -229,7 +241,7 @@
 
   <main class="chat">
     {#if active && activeId}
-      <ChatHeader room={active} onback={backToList} onsearch={() => (paletteOpen = true)} />
+      <ChatHeader room={active} onback={backToList} />
       <Timeline roomId={activeId} title={roomTitle(active)} isDirect={active.is_direct} encrypted={active.encrypted} />
       <UploadStrip roomId={activeId} />
       <Composer roomId={activeId} />
@@ -253,9 +265,13 @@
     />
   {/if}
 
-  {#if infoMode !== 'none' && activeId}
+  {#if infoMode !== 'none' && active && activeId}
     <div class="side">
-      <RoomInfoPanel roomId={activeId} initialTab={ui.roomInfoTab} onclose={() => ui.closeRoomInfo()} onsearch={() => (paletteOpen = true)} />
+      {#if infoPanel === 'room-search'}
+        <RoomSearchPanel roomId={activeId} title={roomTitle(active)} onclose={() => ui.closeRoomSearch()} />
+      {:else}
+        <RoomInfoPanel roomId={activeId} initialTab={ui.roomInfoTab} onclose={() => ui.closeRoomInfo()} onsearch={() => ui.openRoomSearch()} />
+      {/if}
     </div>
   {/if}
   {#if threadMode !== 'none'}

@@ -1,16 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const invoke = vi.fn();
+const subscribe = vi.fn();
 
 vi.mock('../ipc/index.js', () => ({
-  client: { invoke: (...args: unknown[]) => invoke(...args) },
+  client: {
+    invoke: (...args: unknown[]) => invoke(...args),
+    subscribe: (...args: unknown[]) => subscribe(...args),
+  },
 }));
 
 import {
   DEFAULT_PREFS,
+  DEVICE_PREF_KEYS,
   PREFS_ENGINE_DEBOUNCE_MS,
   PREFS_ENGINE_KEY,
   PREFS_STORAGE_KEY,
+  PREFS_SYNCED_AT_STORAGE_KEY,
+  SYNCED_PREF_KEYS,
   type PrefKey,
   PrefsStore,
   isValidPref,
@@ -46,17 +53,47 @@ function storedPrefs(storage: MemoryStorage): unknown {
   return raw === undefined ? undefined : JSON.parse(raw);
 }
 
-function saveCalls(): unknown[][] {
-  return invoke.mock.calls.filter(([req]: unknown[]) => {
-    if (typeof req !== 'object' || req === null || !('action' in req)) return false;
-    return req.action === 'SetSetting';
-  });
+/** A request the store sent to the engine through `client.invoke`. */
+interface SentRequest {
+  action: string;
+  params?: { json?: string };
 }
+
+function sentRequests(action: string): SentRequest[] {
+  return (invoke.mock.calls as [SentRequest][]).map(([req]) => req).filter((req) => req.action === action);
+}
+
+function saveCalls(): SentRequest[] {
+  return sentRequests('SetSetting');
+}
+
+/** Documents pushed to the account, in order, including attempts that failed. */
+function pushedAccountDocs(): unknown[] {
+  return sentRequests('SetAccountPrefs').map((req) => JSON.parse(req.params?.json ?? 'null'));
+}
+
+let remoteDoc: unknown = null;
+let accountSaveFails = false;
 
 beforeEach(() => {
   vi.useFakeTimers();
   invoke.mockReset();
-  invoke.mockResolvedValue({ type: 'SettingSet', payload: { key: PREFS_ENGINE_KEY } });
+  subscribe.mockReset();
+  remoteDoc = null;
+  accountSaveFails = false;
+  invoke.mockImplementation(async (req: { action: string }) => {
+    switch (req.action) {
+      case 'GetSettings':
+        return settingsResponse({});
+      case 'GetAccountPrefs':
+        return { type: 'AccountPrefs', payload: { json: remoteDoc === null ? null : JSON.stringify(remoteDoc) } };
+      case 'SetAccountPrefs':
+        if (accountSaveFails) throw new Error('offline');
+        return { type: 'Unit' };
+      default:
+        return { type: 'SettingSet', payload: { key: PREFS_ENGINE_KEY } };
+    }
+  });
 });
 
 afterEach(() => {
@@ -262,7 +299,7 @@ describe('engine sync', () => {
 
     await vi.advanceTimersByTimeAsync(1);
     expect(saveCalls()).toHaveLength(1);
-    expect(invoke).toHaveBeenLastCalledWith({
+    expect(saveCalls()[0]).toEqual({
       action: 'SetSetting',
       params: {
         key: PREFS_ENGINE_KEY,
@@ -281,7 +318,7 @@ describe('engine sync', () => {
     expect(store.bigEmoji).toBe(false);
   });
 
-  it('merges the engine entry over defaults and writes it locally without saving back', async () => {
+  it('merges the engine entry over defaults and writes it locally', async () => {
     invoke.mockResolvedValueOnce(
       settingsResponse({ [PREFS_ENGINE_KEY]: { fontScale: 130, notifySound: false, bogus: 1 } }),
     );
@@ -294,7 +331,6 @@ describe('engine sync', () => {
     expect(store.notifySound).toBe(false);
     expect(store.messageLayout).toBe('modern');
     expect(storedPrefs(storage)).toEqual({ ...DEFAULT_PREFS, fontScale: 130, notifySound: false });
-    expect(saveCalls()).toHaveLength(0);
     expect(store.ready).toBe(true);
   });
 
@@ -332,5 +368,127 @@ describe('engine sync', () => {
     expect(store.fontScale).toBe(120);
     await vi.advanceTimersByTimeAsync(PREFS_ENGINE_DEBOUNCE_MS);
     expect(saveCalls()).toHaveLength(1);
+  });
+});
+
+describe('account sync', () => {
+  const REMOTE_STAMP = 1_700_000_000_000;
+
+  it('keeps the device and synced scopes disjoint and complete', () => {
+    expect([...DEVICE_PREF_KEYS, ...SYNCED_PREF_KEYS].sort()).toEqual(Object.keys(DEFAULT_PREFS).sort());
+  });
+
+  it('adopts a newer account document on load without pushing it back', async () => {
+    remoteDoc = { updated_at: REMOTE_STAMP, timeFormat: '24h', bigEmoji: false };
+    const storage = memoryStorage();
+    const store = new PrefsStore(storage);
+    await store.load();
+    await vi.advanceTimersByTimeAsync(PREFS_ENGINE_DEBOUNCE_MS);
+
+    expect(store.timeFormat).toBe('24h');
+    expect(store.bigEmoji).toBe(false);
+    expect(storage.data.get(PREFS_SYNCED_AT_STORAGE_KEY)).toBe(String(REMOTE_STAMP));
+    expect(pushedAccountDocs()).toEqual([]);
+  });
+
+  it('pushes local synced values, not device values, when the account has no document', async () => {
+    const store = new PrefsStore(memoryStorage());
+    store.set('bigEmoji', false);
+    store.set('fontScale', 120);
+    await store.load();
+    await vi.advanceTimersByTimeAsync(PREFS_ENGINE_DEBOUNCE_MS);
+
+    const [doc] = pushedAccountDocs();
+    expect(doc).toMatchObject({ bigEmoji: false });
+    expect(doc).not.toHaveProperty('fontScale');
+    expect(doc).toHaveProperty('updated_at', expect.any(Number));
+  });
+
+  it('does not push to the account when only device preferences change', async () => {
+    const store = new PrefsStore(memoryStorage());
+    store.set('fontScale', 110);
+    store.set('notifySound', false);
+    await vi.advanceTimersByTimeAsync(PREFS_ENGINE_DEBOUNCE_MS);
+
+    expect(sentRequests('SetAccountPrefs')).toEqual([]);
+    expect(saveCalls()).toHaveLength(1);
+  });
+
+  it('pushes one document per debounced change and ignores the echo of its own write', async () => {
+    const store = new PrefsStore(memoryStorage());
+    await store.load();
+    store.set('showTyping', false);
+    await vi.advanceTimersByTimeAsync(PREFS_ENGINE_DEBOUNCE_MS);
+
+    const pushed = pushedAccountDocs();
+    expect(pushed).toHaveLength(1);
+    const [onEvent] = subscribe.mock.calls[0];
+    onEvent({ type: 'AccountPrefsChanged', payload: { json: JSON.stringify(pushed[0]) } });
+    await vi.advanceTimersByTimeAsync(PREFS_ENGINE_DEBOUNCE_MS);
+
+    expect(pushedAccountDocs()).toHaveLength(1);
+    expect(store.showTyping).toBe(false);
+  });
+
+  it('drops invalid values from a remote document', async () => {
+    remoteDoc = { updated_at: REMOTE_STAMP, timeFormat: 'bogus', bigEmoji: 'no', showTyping: false };
+    const store = new PrefsStore(memoryStorage());
+    await store.load();
+
+    expect(store.timeFormat).toBe(DEFAULT_PREFS.timeFormat);
+    expect(store.bigEmoji).toBe(DEFAULT_PREFS.bigEmoji);
+    expect(store.showTyping).toBe(false);
+  });
+
+  it('keeps the local values and retries on the next change when the account save fails', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const store = new PrefsStore(memoryStorage());
+    await store.load();
+    accountSaveFails = true;
+    await vi.advanceTimersByTimeAsync(PREFS_ENGINE_DEBOUNCE_MS);
+    expect(warn).toHaveBeenCalled();
+
+    accountSaveFails = false;
+    store.set('bigEmoji', false);
+    await vi.advanceTimersByTimeAsync(PREFS_ENGINE_DEBOUNCE_MS);
+
+    expect(pushedAccountDocs()).toHaveLength(2);
+    expect(pushedAccountDocs()[1]).toMatchObject({ bigEmoji: false });
+  });
+
+  it('adopts a newer change from another device while running', async () => {
+    const store = new PrefsStore(memoryStorage());
+    await store.load();
+    const [onEvent] = subscribe.mock.calls[0];
+    onEvent({
+      type: 'AccountPrefsChanged',
+      payload: { json: JSON.stringify({ updated_at: Date.now() + 60_000, timeFormat: '24h' }) },
+    });
+
+    expect(store.timeFormat).toBe('24h');
+  });
+
+  it('ignores an older change from another device while a local change is pending', async () => {
+    const store = new PrefsStore(memoryStorage());
+    await store.load();
+    store.set('timeFormat', '12h');
+    const [onEvent] = subscribe.mock.calls[0];
+    onEvent({
+      type: 'AccountPrefsChanged',
+      payload: { json: JSON.stringify({ updated_at: REMOTE_STAMP, timeFormat: '24h' }) },
+    });
+
+    expect(store.timeFormat).toBe('12h');
+  });
+
+  it('stamps a reset of every key as a synced change', async () => {
+    remoteDoc = { updated_at: REMOTE_STAMP, bigEmoji: false };
+    const store = new PrefsStore(memoryStorage());
+    await store.load();
+    store.reset();
+    await vi.advanceTimersByTimeAsync(PREFS_ENGINE_DEBOUNCE_MS);
+
+    expect(pushedAccountDocs()).toHaveLength(1);
+    expect(pushedAccountDocs()[0]).toMatchObject({ bigEmoji: store.bigEmoji });
   });
 });

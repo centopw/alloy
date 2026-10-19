@@ -1,9 +1,10 @@
 <script lang="ts">
   import type { RoomSummary } from '$lib/generated/protocol';
   import { Avatar } from '../common';
+  import { roomInfo } from '$lib/stores/roomInfo.svelte';
+  import { copyItems, openMenuFrom, roomPictureItems } from './roomMenus';
   import Icon from '$lib/icons/Icon.svelte';
-  import { CheckCheck, ChevronLeft, Copy, Info, Link, Search, Users } from '$lib/icons';
-  import { copyText } from '$lib/platform/clipboard';
+  import { CheckCheck, ChevronLeft, Info, Search, Users } from '$lib/icons';
   import { contextmenu } from '$lib/platform/contextmenu';
   import { shortcutLabel } from '$lib/platform/shortcuts';
   import type { MenuItem } from '$lib/stores/contextmenu.svelte';
@@ -15,26 +16,20 @@
   interface Props {
     room: RoomSummary;
     onback?: () => void;
-    onsearch?: () => void;
   }
-  let { room, onback, onsearch }: Props = $props();
+  let { room, onback }: Props = $props();
 
   const roomId = $derived(room.id);
   const title = $derived(roomTitle(room));
   const topic = $derived(membersStore.detailsOf(roomId)?.topic?.trim() || null);
   const phone = $derived(viewport.isPhone);
   const members = $derived(membersStore.detailsOf(roomId)?.joined_members ?? null);
+  const canSetPicture = $derived(roomInfo.details(roomId)?.can_set_avatar ?? false);
   // Phones have no inline topic divider, so the second line carries the topic, else the member count.
   const subtitle = $derived(
     topic ?? (members === null ? null : `${members} ${members === 1 ? 'member' : 'members'}`),
   );
-  const searchShortcut = shortcutLabel('K');
-
-  function copyQuietly(text: string) {
-    copyText(text).catch(() => {
-      /* the clipboard refused the write; the menu has no other channel to report it */
-    });
-  }
+  const searchShortcut = shortcutLabel('F');
 
   function headerMenu(): MenuItem[] {
     return [
@@ -44,17 +39,10 @@
         label: 'Search in room',
         icon: Search,
         shortcut: searchShortcut,
-        disabled: !onsearch,
-        onselect: () => onsearch?.(),
+        onselect: () => ui.openRoomSearch(),
       },
       { separator: true },
-      {
-        id: 'copy-link',
-        label: 'Copy room link',
-        icon: Link,
-        onselect: () => copyQuietly(`https://matrix.to/#/${roomId}`),
-      },
-      { id: 'copy-id', label: 'Copy room ID', icon: Copy, onselect: () => copyQuietly(roomId) },
+      ...copyItems(room),
       { separator: true },
       {
         id: 'mark-read',
@@ -72,36 +60,54 @@
       /* the header simply shows no topic */
     });
   });
+
+  // Picture permission comes from the room details, which the header loads for its picture menu.
+  $effect(() => {
+    void roomInfo.load(roomId);
+  });
 </script>
+
+{#snippet avatarEl()}
+  <Avatar userId={roomId} displayName={title} src={room.avatar_url} size="sm" shape="rounded" />
+{/snippet}
 
 <header class="head" use:contextmenu={headerMenu}>
   <button type="button" class="icon back" aria-label="Back to rooms" onclick={() => onback?.()} use:contextmenu={() => [{ id: 'back', label: 'Back to rooms', icon: ChevronLeft, onselect: () => onback?.() }]}>
     <Icon icon={ChevronLeft} size={20} />
   </button>
   <h2 class="heading">
-    <button
-      type="button"
-      class="identity"
-      aria-label="Room info for {title}"
-      data-tooltip="Room info"
-      onclick={() => ui.toggleRoomInfo()}
-    >
-      <Avatar userId={roomId} displayName={title} src={room.avatar_url} size="sm" shape="rounded" />
-      {#if phone}
-        <span class="stack">
-          <span class="title">{title}</span>
-          {#if subtitle}
-            <span class="sub">{subtitle}</span>
-          {/if}
-        </span>
-      {:else}
-        <span class="title">{title}</span>
-        {#if topic}
-          <span class="divider" aria-hidden="true"></span>
-          <span class="topic">{topic}</span>
-        {/if}
+    <div class="identity">
+      {#if canSetPicture}
+        <button
+          type="button"
+          class="picture-btn"
+          aria-label="Room picture options"
+          title="Room picture options"
+          onclick={(e) => openMenuFrom(e.currentTarget, roomPictureItems(roomId), 'Room picture')}
+        >
+          {@render avatarEl()}
+        </button>
       {/if}
-    </button>
+      <button type="button" class="info-btn" aria-label="Room info for {title}" data-tooltip="Room info" onclick={() => ui.toggleRoomInfo()}>
+        {#if !canSetPicture}
+          <span class="avatar-slot">{@render avatarEl()}</span>
+        {/if}
+        {#if phone}
+          <span class="stack">
+            <span class="title">{title}</span>
+            {#if subtitle}
+              <span class="sub">{subtitle}</span>
+            {/if}
+          </span>
+        {:else}
+          <span class="title">{title}</span>
+          {#if topic}
+            <span class="divider" aria-hidden="true"></span>
+            <span class="topic">{topic}</span>
+          {/if}
+        {/if}
+      </button>
+    </div>
   </h2>
   <div class="actions">
     <button
@@ -129,10 +135,11 @@
     <button
       type="button"
       class="icon"
-      use:contextmenu={() => [{ id: 'search', label: 'Search in room', icon: Search, onselect: () => onsearch?.() }]}
-      aria-label="Search"
+      use:contextmenu={() => [{ id: 'search', label: 'Search in room', icon: Search, onselect: () => ui.openRoomSearch() }]}
+      aria-label="Search in room"
+      data-tooltip="Search in room"
       data-shortcut={searchShortcut}
-      onclick={() => onsearch?.()}
+      onclick={() => ui.openRoomSearch()}
     >
       <Icon icon={Search} size={20} />
     </button>
@@ -165,6 +172,14 @@
     width: 100%;
     min-width: 0;
     height: 100%;
+  }
+  .info-btn {
+    display: flex;
+    flex: 1 1 0;
+    align-items: center;
+    gap: var(--alloy-spacing-scale-2);
+    min-width: 0;
+    height: 100%;
     padding: 0;
     border: 0;
     background: transparent;
@@ -173,13 +188,25 @@
     text-align: left;
     cursor: pointer;
   }
-  .identity > :first-child {
+  .avatar-slot,
+  .picture-btn {
+    display: inline-flex;
     flex: none;
   }
-  .identity:hover .title {
+  .picture-btn {
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 0;
+    border-radius: var(--alloy-radii-sm);
+    background: transparent;
+    cursor: pointer;
+  }
+  .info-btn:hover .title {
     text-decoration: underline;
   }
-  .identity:focus-visible {
+  .info-btn:focus-visible,
+  .picture-btn:focus-visible {
     outline: 2px solid var(--alloy-color-accent-primary);
     outline-offset: 2px;
   }
@@ -262,8 +289,12 @@
       width: 44px;
       height: 44px;
     }
-    .identity {
+    .info-btn {
       gap: var(--alloy-spacing-scale-3);
+    }
+    .picture-btn {
+      width: 44px;
+      height: 44px;
     }
     .stack {
       display: flex;

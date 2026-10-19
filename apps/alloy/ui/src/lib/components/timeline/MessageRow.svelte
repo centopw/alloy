@@ -2,7 +2,7 @@
   import type { TimelineItemDto } from '$lib/generated';
   import { Avatar, UserName } from '../common';
   import Icon from '$lib/icons/Icon.svelte';
-  import { Reply, Pencil, Trash2, Smile, Copy, Link, MessageSquare } from '$lib/icons';
+  import { Reply, Pencil, Trash2, Smile, Copy, MessageSquare } from '$lib/icons';
   import { timelineStore } from '$lib/stores/timeline.svelte';
   import { threadStore } from '$lib/stores/thread.svelte';
   import { sanitizeHtml } from '$lib/content/html';
@@ -95,7 +95,6 @@
 
   /** Context-menu entries for this message. Groups that do not apply are omitted, not disabled. */
   function menuItems(): MenuItem[] {
-    const roomId = timelineStore.roomId;
     const replies: MenuItem[] = [];
     if (canAct && !inThread) {
       replies.push({ id: 'reply', label: 'Reply', icon: Reply, onselect: () => timelineStore.startReply(item) });
@@ -105,10 +104,6 @@
 
     const copies: MenuItem[] = [];
     if (canCopy) copies.push({ id: 'copy-text', label: 'Copy text', icon: Copy, onselect: () => void navigator.clipboard.writeText(quote(item)) });
-    if (roomId && item.event_id) {
-      const link = `https://matrix.to/#/${roomId}/${item.event_id}`;
-      copies.push({ id: 'copy-link', label: 'Copy link', icon: Link, onselect: () => void navigator.clipboard.writeText(link) });
-    }
     copies.push({ id: 'copy-sender', label: 'Copy sender ID', icon: Copy, onselect: () => void navigator.clipboard.writeText(item.sender) });
 
     const edits: MenuItem[] = [];

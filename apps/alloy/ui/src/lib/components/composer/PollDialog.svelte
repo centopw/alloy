@@ -85,7 +85,6 @@
           />
           <Button
             variant="ghost"
-            size="sm"
             ariaLabel="Remove answer {i + 1}"
             disabled={answers.length <= MIN_ANSWERS}
             onclick={() => removeAnswer(i)}

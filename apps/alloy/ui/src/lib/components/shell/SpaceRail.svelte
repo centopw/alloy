@@ -1,9 +1,9 @@
 <script lang="ts">
   import { Avatar } from '../common';
   import Icon from '$lib/icons/Icon.svelte';
-  import { CheckCheck, House, Link, Plus } from '$lib/icons';
+  import { CheckCheck, House, Plus } from '$lib/icons';
   import type { RoomSummary } from '$lib/generated/protocol';
-  import { copyText } from '$lib/platform/clipboard';
+  import { copyItems } from './roomMenus';
   import { contextmenu } from '$lib/platform/contextmenu';
   import type { MenuItem } from '$lib/stores/contextmenu.svelte';
   import { roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
@@ -53,16 +53,8 @@
         disabled: unreadRooms(space.id).length === 0,
         onselect: () => markUnread(space.id),
       },
-      {
-        id: 'copy-link',
-        label: 'Copy space link',
-        icon: Link,
-        onselect: () => {
-          copyText(`https://matrix.to/#/${space.id}`).catch(() => {
-            /* the clipboard refused the write; the menu has no other channel to report it */
-          });
-        },
-      },
+      { separator: true },
+      ...copyItems(space),
     ];
   }
 

@@ -35,18 +35,6 @@
     md: 20,
     lg: 24
   };
-
-  const paddings: Record<string, string> = {
-    sm: '4px 10px',
-    md: '8px 14px',
-    lg: '10px 18px'
-  };
-
-  const fontSizes: Record<string, string> = {
-    sm: 'var(--alloy-typography-size-sm, 12px)',
-    md: 'var(--alloy-typography-size-base, 14px)',
-    lg: 'var(--alloy-typography-size-lg, 16px)'
-  };
 </script>
 
 <button
@@ -57,22 +45,7 @@
   data-shortcut={shortcut}
   {onclick}
   class="alloy-button variant-{variant} size-{size} {className}"
-  style="
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    padding: {paddings[size] || paddings.md};
-    font-size: {fontSizes[size] || fontSizes.md};
-    font-weight: var(--alloy-typography-weight-medium, 500);
-    border-radius: var(--alloy-radii-md, 8px);
-    cursor: {disabled ? 'not-allowed' : 'pointer'};
-    opacity: {disabled ? 0.5 : 1};
-    transition: background-color var(--alloy-motion-duration-fast, 150ms) ease, border-color var(--alloy-motion-duration-fast, 150ms) ease;
-    user-select: none;
-    box-sizing: border-box;
-    white-space: nowrap;
-  "
+  class:icon-only={!!icon && !children}
 >
   {#if icon}
     <Icon {icon} size={iconSizes[size] || 20} strokeWidth={1.5} />
@@ -84,9 +57,44 @@
 
 <style>
   .alloy-button {
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: var(--alloy-layout-control-height);
+    padding: 0 14px;
     border: 1px solid transparent;
+    border-radius: var(--alloy-radii-md);
     font-family: inherit;
+    font-size: var(--alloy-typography-size-base, 14px);
+    font-weight: var(--alloy-typography-weight-medium, 500);
     line-height: inherit;
+    white-space: nowrap;
+    user-select: none;
+    cursor: pointer;
+    transition: background-color var(--alloy-motion-duration-fast, 150ms) ease, border-color var(--alloy-motion-duration-fast, 150ms) ease;
+  }
+  .alloy-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+  .size-sm {
+    height: var(--alloy-layout-control-height-sm);
+    padding: 0 10px;
+    font-size: var(--alloy-typography-size-sm, 12px);
+  }
+  .size-lg {
+    padding: 0 18px;
+    font-size: var(--alloy-typography-size-lg, 16px);
+  }
+  /* Icon-only buttons are square at their height. */
+  .alloy-button.icon-only {
+    width: var(--alloy-layout-control-height);
+    padding: 0;
+  }
+  .alloy-button.icon-only.size-sm {
+    width: var(--alloy-layout-control-height-sm);
   }
   .variant-primary {
     background-color: var(--alloy-color-accent-fill);
