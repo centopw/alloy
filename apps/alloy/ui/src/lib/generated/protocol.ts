@@ -258,6 +258,10 @@ export type EngineCommand = { action: "DiscoverHomeserver"; params: {
 	height: number | null,
 	/**  Used to pick the cache file extension; pass the timeline item's mime type. */
 	mime_type?: string | null,
+} } | 
+/**  Fetches the homeserver's link preview for `url`. The response is `None` when the server has no preview. */
+{ action: "GetUrlPreview"; params: {
+	url: string,
 } } | { action: "RequestSelfVerification" } | { action: "AcceptVerification"; params: {
 	user_id: UserId,
 	device_id: string,
@@ -457,6 +461,10 @@ export type EngineResponse = { type: "HomeserverInfo"; payload: {
 	room_id: RoomId,
 } } | { type: "MediaRetrieved"; payload: {
 	local_path: string,
+} } | 
+/**  `None` when the homeserver has no preview for the URL, or previews are disabled there. */
+{ type: "UrlPreview"; payload: {
+	preview: UrlPreviewDto | null,
 } } | { type: "VerificationRequested"; payload: {
 	user_id: UserId,
 	device_id: string,
@@ -788,6 +796,20 @@ export type TimelineItemPreview = {
 	sender: UserId,
 	timestamp_millis: number,
 	body: string,
+};
+
+/**
+ *  Open Graph summary of a link, as the homeserver reports it. Every field is optional: a page may not
+ *  declare it, and the image is an `mxc://` URI that is fetched through `GetMedia`.
+ */
+export type UrlPreviewDto = {
+	url: string,
+	title: string | null,
+	description: string | null,
+	site_name: string | null,
+	image: string | null,
+	image_width: number | null,
+	image_height: number | null,
 };
 
 export type UserId = string;

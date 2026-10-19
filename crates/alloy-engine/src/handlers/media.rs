@@ -72,6 +72,11 @@ impl GroupHandler for MediaHandler {
                     })
                 }
             },
+            EngineCommand::GetUrlPreview { url } => {
+                let client = ctx.active_client().await?;
+                let preview = client.url_preview(&url).await.map_err(map_err)?;
+                Ok(EngineResponse::UrlPreview { preview })
+            }
             EngineCommand::SendAttachment {
                 room_id,
                 file_path,

@@ -519,6 +519,21 @@ pub enum MediaSource {
     Remote { uri: String },
 }
 
+/// Open Graph summary of a link, as the homeserver reports it. Every field is optional: a page may not
+/// declare it, and the image is an `mxc://` URI that is fetched through `GetMedia`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct UrlPreviewDto {
+    pub url: String,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub site_name: Option<String>,
+    pub image: Option<String>,
+    #[specta(type = Option<Number>)]
+    pub image_width: Option<u32>,
+    #[specta(type = Option<Number>)]
+    pub image_height: Option<u32>,
+}
+
 // === Commands ===
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -777,6 +792,10 @@ pub enum EngineCommand {
         #[serde(default)]
         mime_type: Option<String>,
     },
+    /// Fetches the homeserver's link preview for `url`. The response is `None` when the server has no preview.
+    GetUrlPreview {
+        url: String,
+    },
     // Crypto
     RequestSelfVerification,
     AcceptVerification {
@@ -990,6 +1009,10 @@ pub enum EngineResponse {
     MediaRetrieved {
         local_path: String,
     },
+    /// `None` when the homeserver has no preview for the URL, or previews are disabled there.
+    UrlPreview {
+        preview: Option<UrlPreviewDto>,
+    },
     // Crypto / Verification
     VerificationRequested {
         user_id: UserId,
@@ -1200,6 +1223,7 @@ pub fn register_types() -> Types {
         .register::<VerificationState>()
         .register::<RecoveryState>()
         .register::<MediaSource>()
+        .register::<UrlPreviewDto>()
         .register::<EngineCommand>()
         .register::<EngineResponse>()
         .register::<EngineError>()

@@ -14,6 +14,7 @@ pub mod room_tags;
 pub mod rooms;
 pub mod timeline;
 pub mod tls;
+pub mod url_preview;
 
 pub use alloy_protocol::*;
 pub use alloy_storage::{InMemorySecretStore, SecretStore, StorageError};
@@ -53,6 +54,8 @@ pub enum AlloyError {
     InvalidPrefs(String),
     #[error("Invalid search: {0}")]
     InvalidSearch(String),
+    #[error("Invalid URL: {0}")]
+    InvalidUrl(String),
     #[error("Base64 error: {0}")]
     Base64(#[from] base64::DecodeError),
 }

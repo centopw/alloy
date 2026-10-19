@@ -86,6 +86,7 @@ impl CommandGroup {
             | EngineCommand::ResetRecovery { .. } => CommandGroup::Crypto,
 
             EngineCommand::GetMedia { .. }
+            | EngineCommand::GetUrlPreview { .. }
             | EngineCommand::SendAttachment { .. }
             | EngineCommand::GetRoomMedia { .. }
             | EngineCommand::ClearMediaCache => CommandGroup::Media,

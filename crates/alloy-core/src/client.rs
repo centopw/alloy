@@ -89,6 +89,8 @@ pub struct AlloyClient {
     /// Newest `updated_at` of the synced preferences this client wrote or reported (0 when
     /// none), so the server echo of its own write is not reported back as a remote change.
     pub(crate) prefs_updated_at: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    /// Recently fetched link previews, so the same link is not re-requested while it is still fresh.
+    pub(crate) url_previews: crate::url_preview::PreviewCache,
 }
 
 impl AlloyClient {
@@ -160,6 +162,7 @@ impl AlloyClient {
             direct_rooms: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             notification_settings: tokio::sync::OnceCell::new(),
             prefs_updated_at: Default::default(),
+            url_previews: Default::default(),
         })
     }
 

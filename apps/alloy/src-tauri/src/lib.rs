@@ -3,6 +3,7 @@
 pub mod commands;
 mod notify;
 mod pick;
+mod save;
 mod update;
 
 use alloy_engine::context::EngineContext;
@@ -78,6 +79,7 @@ pub fn run() {
             alloy_invoke,
             alloy_subscribe,
             pick::pick_attachment,
+            save::save_media,
             update::check_update,
             update::download_update,
             update::apply_update,

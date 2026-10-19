@@ -142,7 +142,7 @@ fn file_name_from_uri(uri: &FilePath) -> String {
     sanitize_file_name(&raw)
 }
 
-fn sanitize_file_name(raw: &str) -> String {
+pub(crate) fn sanitize_file_name(raw: &str) -> String {
     let last = raw.rsplit(['/', '\\']).next().unwrap_or_default();
     let cleaned: String = last
         .chars()

@@ -101,6 +101,7 @@ Commands are serialized with `#[serde(tag = "action", content = "params")]`.
 | | `MarkRead` | `{ room_id, event_id }` | `ReadMarked { room_id }` | Sends unthreaded read receipt |
 | | `SetTyping` | `{ room_id, typing }` | `TypingStatusSet { room_id }` | Sets ephemeral typing notice |
 | **Media** | `GetMedia` | `{ source, kind, width?, height? }` | `MediaRetrieved { local_path }` | Authenticated media download/thumbnail cache |
+| | `GetUrlPreview` | `{ url }` | `UrlPreview { preview? }` | Homeserver link preview (Open Graph) for an http(s) URL; `null` when none |
 | **Crypto** | `RequestSelfVerification` | *(none)* | `VerificationRequested { user_id, device_id }` | Requests verification with other owned devices |
 | | `AcceptVerification` | `{ user_id, device_id }` | `VerificationAccepted { user_id, device_id }` | Accepts incoming verification request |
 | | `StartSas` | `{ user_id, device_id }` | `SasStarted { user_id, device_id, emojis }` | Starts short auth string (SAS) flow |
