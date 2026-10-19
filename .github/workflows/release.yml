@@ -173,6 +173,11 @@ jobs:
         run: |
           gh release download "$TAG" -R "$REPO" -p latest.json -O latest.json
           jq -e '.version and (.platforms | length > 0)' latest.json
+          # The in-app changelog shows `notes`: use the release page notes (highlights, grouped commits).
+          gh release view "$TAG" -R "$REPO" --json body -q .body > notes.md
+          jq --rawfile notes notes.md '.notes = $notes' latest.json > latest.notes.json
+          mv latest.notes.json latest.json
+          jq -e '.notes | length > 0' latest.json
           gh release view updater-feed -R "$REPO" >/dev/null 2>&1 || \
             gh release create updater-feed -R "$REPO" --prerelease \
               --title "Update feed" \

@@ -69,13 +69,29 @@ This is injected into `apps/alloy/src-tauri/tauri.conf.json` by `scripts/embed-n
 
 ## 3. In-app updates (OTA)
 
-**Desktop** (macOS, Windows, Linux) uses Tauri's updater plugin. The app checks about 8 seconds
-after start (and from Settings > About) and shows a banner; "Update" downloads the package,
-verifies its minisign signature against the public key compiled into the app, installs it and
-restarts. Updates only ever come from tagged releases (`v*`), never from nightlies.
+**Desktop** (macOS, Windows, Linux) uses Tauri's updater plugin. The app checks periodically
+(setting "Automatically check for updates") and shows an "Update" button in the title strip.
+With "Download updates automatically" the package is downloaded in the background; the button then
+reads "Restart to apply update". The package is verified against the minisign public key compiled
+into the app before it is installed. Updates only ever come from tagged releases (`v*`), never from
+nightlies.
 
-**Android** cannot replace its own APK, so the app only tells the user a newer release exists
-and opens the release page (`check_update` reads the GitHub releases list). Silent in-place
+App commands (`apps/alloy/src-tauri/src/update.rs`):
+- `check_update() -> UpdateInfo { available, version, notes, can_install, url, downloaded }`.
+  `downloaded` is true when the package for that version is already stored in memory. Checking the
+  same version again keeps the stored package; a different version drops it.
+- `download_update()`: downloads and verifies the offered update without installing it. Emits
+  `update://progress` (`{ downloaded, total }`, total is `null` when unknown) while downloading and
+  `update://downloaded` (no payload) once the package is stored. Serialized: a concurrent call waits
+  for the first download. Errors when no update is offered or the platform cannot install.
+- `apply_update()`: installs the offered update (downloading it first if needed) and restarts the app.
+
+`notes` in `latest.json` is the release notes markdown shown in the in-app changelog. The release
+workflow fills it from the GitHub release body, so write the release page notes for users.
+
+**Android** cannot replace its own APK, so `can_install` is false: the app only tells the user a
+newer release exists, shows the notes, and opens the release page (`check_update` reads the GitHub
+releases list); `download_update` and `apply_update` return an error. Silent in-place
 updates need a store (Play, F-Droid) or a privileged installer. Updating the sideloaded APK also
 requires the same signing key every time, see section 5.
 
