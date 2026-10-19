@@ -3,7 +3,7 @@
  * Use as `<div use:contextmenu={() => buildItems()}>`; the factory runs on each trigger so the items
  * always reflect current state.
  */
-import { contextMenu, type MenuAnchor, type MenuItem, type MenuPoint } from '$lib/stores/contextmenu.svelte';
+import { contextMenu, type MenuAnchor, type MenuItem, type MenuOptions, type MenuPoint } from '$lib/stores/contextmenu.svelte';
 
 const LONG_PRESS_MS = 500;
 const LONG_PRESS_SLOP_PX = 8;
@@ -85,8 +85,16 @@ export function placeFlyout(
 }
 
 /** Svelte action: wire a node to the global context menu. The factory returns [] to opt out. */
-export function contextmenu(node: HTMLElement, factory: () => MenuItem[]) {
-  let getItems = factory;
+/** What a `use:contextmenu` element offers: rows, optionally with menu options (the reaction bar). */
+export interface ContextMenuSource {
+  items: () => MenuItem[];
+  options?: () => MenuOptions | undefined;
+}
+
+export function contextmenu(node: HTMLElement, factory: (() => MenuItem[]) | ContextMenuSource) {
+  let source = factory;
+  const getItems = () => (typeof source === 'function' ? source() : source.items());
+  const getOptions = () => (typeof source === 'function' ? undefined : source.options?.());
   let pressTimer: number | null = null;
   let pressStart: MenuPoint = { x: 0, y: 0 };
   let suppressClick = false;
@@ -103,7 +111,7 @@ export function contextmenu(node: HTMLElement, factory: () => MenuItem[]) {
     if (items.length === 0) return;
     e.preventDefault();
     e.stopPropagation();
-    contextMenu.open(items, { x: e.clientX, y: e.clientY });
+    contextMenu.open(items, { x: e.clientX, y: e.clientY }, getOptions());
   }
 
   function onKeyDown(e: KeyboardEvent) {
@@ -114,7 +122,7 @@ export function contextmenu(node: HTMLElement, factory: () => MenuItem[]) {
     e.preventDefault();
     e.stopPropagation();
     const r = node.getBoundingClientRect();
-    contextMenu.open(items, { x: r.left, y: r.bottom });
+    contextMenu.open(items, { x: r.left, y: r.bottom }, getOptions());
   }
 
   function onPointerDown(e: PointerEvent) {
@@ -127,7 +135,7 @@ export function contextmenu(node: HTMLElement, factory: () => MenuItem[]) {
       const items = getItems();
       if (items.length === 0) return;
       suppressClick = true;
-      contextMenu.open(items, pressStart);
+      contextMenu.open(items, pressStart, getOptions());
     }, LONG_PRESS_MS);
   }
 
@@ -154,8 +162,8 @@ export function contextmenu(node: HTMLElement, factory: () => MenuItem[]) {
   node.addEventListener('click', onClickCapture, true);
 
   return {
-    update(next: () => MenuItem[]) {
-      getItems = next;
+    update(next: (() => MenuItem[]) | ContextMenuSource) {
+      source = next;
     },
     destroy() {
       cancelPress();

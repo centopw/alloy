@@ -31,7 +31,18 @@ export interface MenuAnchor {
   height: number;
 }
 
+/** A bar of quick reactions shown above the rows of a message menu. */
+export interface MenuReactions {
+  emojis: readonly string[];
+  /** Emoji the user already reacted with. */
+  active?: readonly string[];
+  onpick: (emoji: string) => void;
+  /** Open the full emoji picker. */
+  onmore: () => void;
+}
+
 export interface MenuOptions {
+  reactions?: MenuReactions;
   anchor?: MenuAnchor;
   matchWidth?: boolean;
   minWidth?: number;

@@ -17,6 +17,7 @@ export { Reply } from '@lucide/svelte';
 export { Pencil } from '@lucide/svelte';
 export { Trash2 } from '@lucide/svelte';
 export { Smile } from '@lucide/svelte';
+export { SmilePlus } from '@lucide/svelte';
 export { Check } from '@lucide/svelte';
 export { CheckCheck } from '@lucide/svelte';
 export { Lock } from '@lucide/svelte';

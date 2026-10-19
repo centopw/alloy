@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { SettingGroup, SettingSelect, SettingToggle } from '$lib/components/settings/controls';
+  import { SettingGroup, SettingQuickReactions, SettingSelect, SettingToggle } from '$lib/components/settings/controls';
   import { getAutostart, setAutostart } from '$lib/platform/autostart';
   import { prefs, type LinkPreviewMode } from '$lib/stores/prefs.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
@@ -106,6 +106,10 @@
       options={LINK_PREVIEW_OPTIONS}
       onchange={(v) => prefs.set('linkPreviews', v as LinkPreviewMode)}
     />
+  </SettingGroup>
+
+  <SettingGroup title="Reactions">
+    <SettingQuickReactions value={prefs.quickReactions} onchange={(v) => prefs.set('quickReactions', v)} />
   </SettingGroup>
 
   {#if caps.autostart}

@@ -20,6 +20,7 @@
   } from '$lib/stores/contextmenu.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
   import TextField from './TextField.svelte';
+  import QuickReactions from './QuickReactions.svelte';
 
   const TYPEAHEAD_RESET_MS = 600;
   const HOVER_OPEN_MS = 150;
@@ -477,6 +478,26 @@
       use:placeLevel={{ depth, rows: view.rows }}
       onpointerenter={cancelHover}
     >
+      {#if depth === 0 && contextMenu.options?.reactions}
+        {@const reactions = contextMenu.options.reactions}
+        <div class="reaction-bar" role="none">
+          <QuickReactions
+            emojis={reactions.emojis}
+            active={reactions.active}
+            size={viewport.isPhone ? 'touch' : 'compact'}
+            onpick={(emoji) => {
+              contextMenu.close();
+              reactions.onpick(emoji);
+            }}
+            onmore={() => {
+              contextMenu.close();
+              reactions.onmore();
+            }}
+          />
+        </div>
+        <div class="separator" role="separator"></div>
+      {/if}
+
       {#if viewport.isPhone && f}
         <div
           class="item back"
@@ -669,6 +690,13 @@
     height: 1px;
     margin: var(--alloy-spacing-scale-1) 0;
     background: var(--alloy-color-border-subtle);
+  }
+
+  .reaction-bar {
+    padding: var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-1);
+  }
+  .sheet .reaction-bar {
+    padding: var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-2);
   }
 
   /* Phone: the menu is a bottom action sheet. Rows are 44px for touch; the Cancel row closes it. */

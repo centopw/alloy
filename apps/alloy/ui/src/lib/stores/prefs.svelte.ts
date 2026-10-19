@@ -9,6 +9,7 @@
 import { client } from '../ipc/index.js';
 import { viewport } from './viewport.svelte.js';
 import { ROOM_SORTS, type RoomSort } from './roomSort.js';
+import { DEFAULT_QUICK_REACTIONS, isQuickReactions } from '../content/quickReactions.js';
 
 export const PREFS_STORAGE_KEY = 'alloy.prefs.v1';
 export const PREFS_ENGINE_KEY = 'prefs';
@@ -47,6 +48,8 @@ export interface Prefs {
   autoCheckUpdates: boolean;
   autoDownloadUpdates: boolean;
   roomSort: RoomSort;
+  /** Emoji shown in the quick-reaction bar, in order. */
+  quickReactions: readonly string[];
 }
 
 export type PrefKey = keyof Prefs;
@@ -81,6 +84,7 @@ export const DEFAULT_PREFS: Readonly<Prefs> = Object.freeze({
   autoCheckUpdates: true,
   autoDownloadUpdates: false,
   roomSort: 'activity',
+  quickReactions: DEFAULT_QUICK_REACTIONS,
 });
 
 /**
@@ -89,6 +93,12 @@ export const DEFAULT_PREFS: Readonly<Prefs> = Object.freeze({
  */
 export function defaultPrefsFor(isPhone: boolean): Readonly<Prefs> {
   return isPhone ? { ...DEFAULT_PREFS, messageLayout: 'bubbles' } : DEFAULT_PREFS;
+}
+
+/** Equality for preference values: lists compare by content, everything else by identity. */
+function sameValue(a: unknown, b: unknown): boolean {
+  if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((v, i) => v === b[i]);
+  return a === b;
 }
 
 const PREF_KEYS = Object.keys(DEFAULT_PREFS) as PrefKey[];
@@ -127,6 +137,7 @@ const PREF_SCOPE: Record<PrefKey, PrefScope> = {
   autoplayMedia: 'synced',
   linkPreviews: 'synced',
   roomSort: 'synced',
+  quickReactions: 'synced',
 };
 
 /** Preferences that stay on this install. */
@@ -159,6 +170,7 @@ function isEnumKey(key: PrefKey): key is EnumKey {
 
 /** Whether `value` is an allowed value for `key`. Booleans and the enum sets are the only accepted types. */
 export function isValidPref(key: PrefKey, value: unknown): boolean {
+  if (key === 'quickReactions') return isQuickReactions(value);
   if (typeof DEFAULT_PREFS[key] === 'boolean') return typeof value === 'boolean';
   if (isEnumKey(key)) return (ENUM_VALUES[key] as readonly unknown[]).includes(value);
   return false;
@@ -340,13 +352,17 @@ export class PrefsStore {
     return this.#values.roomSort;
   }
 
+  get quickReactions(): readonly string[] {
+    return this.#values.quickReactions;
+  }
+
   get<K extends PrefKey>(key: K): Prefs[K] {
     return this.#values[key];
   }
 
   /** Ignores invalid values and no-op writes. */
   set<K extends PrefKey>(key: K, value: Prefs[K]): void {
-    if (!isValidPref(key, value) || this.#values[key] === value) return;
+    if (!isValidPref(key, value) || sameValue(this.#values[key], value)) return;
     this.#values[key] = value;
     this.#changed(PREF_SCOPE[key] === 'synced');
   }

@@ -7,6 +7,7 @@
 - Opening a picture or video now fills the whole window on every platform, with the picture on the plain background (Download and Close in the corner).
 - Pictures, videos and stickers sent without a caption sit straight on the timeline: no bubble or panel behind them, and a bare file name is no longer shown as a caption.
 - Phones: tapping the message box no longer jumps the conversation to older messages when the keyboard opens. You stay where you were (at the newest message, or wherever you had scrolled to), and it returns the same way when the keyboard closes.
+- **Quick reactions:** hovering a message on desktop shows your favourite emoji in its toolbar; one click reacts, and the smiley-plus button opens the full picker. On a phone, press and hold a message to get the same bar above the action sheet (Messenger style). Choose and remove your own emoji in Settings > Preferences > Reactions (synced across your devices).
 - Start typing anywhere in a conversation and the text goes into the message box, no click needed.
 
 ## 0.1.9 (pre-release)

@@ -1,8 +1,8 @@
 <script lang="ts">
   import type { TimelineItemDto } from '$lib/generated';
-  import { Avatar, UserName } from '../common';
+  import { Avatar, QuickReactions, UserName } from '../common';
   import Icon from '$lib/icons/Icon.svelte';
-  import { Reply, Pencil, Trash2, Smile, Copy, MessageSquare, Download } from '$lib/icons';
+  import { Reply, Pencil, Trash2, Copy, MessageSquare, Download } from '$lib/icons';
   import { timelineStore } from '$lib/stores/timeline.svelte';
   import { threadStore } from '$lib/stores/thread.svelte';
   import { sanitizeHtml } from '$lib/content/html';
@@ -17,7 +17,7 @@
   import { firstPreviewUrl } from '$lib/content/urls';
   import { errorMessage } from '$lib/stores/errors';
   import { profileCard } from '$lib/stores/profileCard.svelte';
-  import type { MenuItem } from '$lib/stores/contextmenu.svelte';
+  import type { MenuItem, MenuOptions } from '$lib/stores/contextmenu.svelte';
   import MediaView from './MediaView.svelte';
   import PollView from './PollView.svelte';
   import ReplyQuote, { quote } from './ReplyQuote.svelte';
@@ -86,6 +86,26 @@
     emojiPicker.open({ anchor, onpick: (emoji) => void timelineStore.toggleReaction(item, emoji) });
   }
 
+  /** Emoji this user already reacted with on the message; shown pressed in the quick bar. */
+  const myReactions = $derived((item.reactions ?? []).filter((r) => r.by_me).map((r) => r.key));
+
+  function reactWith(emoji: string) {
+    void timelineStore.toggleReaction(item, emoji);
+  }
+
+  /** Reaction bar of the message menu, for messages that can be reacted to. */
+  function menuOptions(): MenuOptions | undefined {
+    if (!canAct) return undefined;
+    return {
+      reactions: {
+        emojis: prefs.quickReactions,
+        active: myReactions,
+        onpick: reactWith,
+        onmore: () => rowEl && openReactions(rowEl.getBoundingClientRect()),
+      },
+    };
+  }
+
   function openThread() {
     const roomId = timelineStore.roomId;
     if (roomId && item.event_id) void threadStore.open(roomId, item.event_id);
@@ -123,7 +143,6 @@
       replies.push({ id: 'reply', label: 'Reply', icon: Reply, onselect: () => timelineStore.startReply(item) });
       replies.push({ id: 'thread', label: 'Reply in thread', icon: MessageSquare, onselect: openThread });
     }
-    if (canAct) replies.push({ id: 'react', label: 'React', icon: Smile, onselect: () => rowEl && openReactions(rowEl.getBoundingClientRect()) });
 
     const copies: MenuItem[] = [];
     if (canCopy) copies.push({ id: 'copy-text', label: 'Copy text', icon: Copy, onselect: () => void navigator.clipboard.writeText(quote(item)) });
@@ -150,7 +169,7 @@
 {:else if item.content.kind === 'Virtual'}
   <div class="spacer"></div>
 {:else}
-  <div class="row" class:grouped class:own={item.is_own} class:jumbo class:bare={bareMedia} class:highlighted data-layout={layout} data-event-id={item.event_id ?? undefined} bind:this={rowEl} use:contextmenu={menuItems}>
+  <div class="row" class:grouped class:own={item.is_own} class:jumbo class:bare={bareMedia} class:highlighted data-layout={layout} data-event-id={item.event_id ?? undefined} bind:this={rowEl} use:contextmenu={{ items: menuItems, options: menuOptions }}>
     <div class="gutter">
       {#if layout === 'irc' || (layout === 'modern' && grouped)}
         <span class="gutter-time">{time}</span>
@@ -256,9 +275,13 @@
 
     {#if canAct}
       <div class="toolbar" role="toolbar" aria-label="Message actions">
-        <button type="button" aria-label="React" title="React" onclick={(e) => openReactions((e.currentTarget as HTMLElement).getBoundingClientRect())}>
-          <Icon icon={Smile} size={16} />
-        </button>
+        <QuickReactions
+          emojis={prefs.quickReactions}
+          active={myReactions}
+          onpick={reactWith}
+          onmore={() => rowEl && openReactions(rowEl.getBoundingClientRect())}
+        />
+        <span class="tool-sep" aria-hidden="true"></span>
         {#if !inThread}
           <button type="button" aria-label="Reply" title="Reply" onclick={() => timelineStore.startReply(item)}>
             <Icon icon={Reply} size={16} />
@@ -501,7 +524,13 @@
       display: flex;
     }
   }
-  .toolbar button {
+  .tool-sep {
+    width: 1px;
+    height: 16px;
+    margin: 0 2px;
+    background: var(--alloy-color-border-subtle);
+  }
+  .toolbar > button {
     display: inline-grid;
     place-items: center;
     width: 28px;
@@ -513,7 +542,7 @@
     color: var(--alloy-color-text-secondary);
     cursor: pointer;
   }
-  .toolbar button:hover {
+  .toolbar > button:hover {
     background: var(--alloy-color-surface-hover);
     color: var(--alloy-color-text-primary);
   }

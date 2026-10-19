@@ -144,6 +144,7 @@ describe('defaults', () => {
       autoCheckUpdates: true,
       autoDownloadUpdates: false,
       roomSort: 'activity',
+      quickReactions: ['\u{1F44D}', '\u2764\uFE0F', '\u{1F602}', '\u{1F62E}', '\u{1F622}', '\u{1F64F}'],
     });
   });
 
@@ -521,5 +522,24 @@ describe('account sync', () => {
 
     expect(pushedAccountDocs()).toHaveLength(1);
     expect(pushedAccountDocs()[0]).toMatchObject({ bigEmoji: store.bigEmoji });
+  });
+});
+
+describe('quickReactions', () => {
+  it('accepts a distinct non-empty list and rejects an empty or malformed one', () => {
+    expect(isValidPref('quickReactions', ['\u{1F525}', '\u{1F44D}'])).toBe(true);
+    expect(isValidPref('quickReactions', [])).toBe(false);
+    expect(isValidPref('quickReactions', ['\u{1F525}', '\u{1F525}'])).toBe(false);
+    expect(isValidPref('quickReactions', 'x')).toBe(false);
+  });
+
+  it('syncs with the account and ignores a set with the same content', () => {
+    expect(SYNCED_PREF_KEYS).toContain('quickReactions');
+    const store = new PrefsStore(memoryStorage());
+    const before = store.quickReactions;
+    store.set('quickReactions', [...before]);
+    expect(store.quickReactions).toBe(before);
+    store.set('quickReactions', ['\u{1F525}']);
+    expect(store.quickReactions).toEqual(['\u{1F525}']);
   });
 });
