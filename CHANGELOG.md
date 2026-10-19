@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.8 (pre-release)
 
 ### Added
 - **Redesign (ADR 0007):** the workspace follows the new design spec: flat docked panes with hairline borders, 68px rail, 240px list pane with All / Direct / Channels / Unread chips, a single scrolling Details panel (About, Private note, Shared media, Files, Links, Members with "View all"), 6px-radius inputs and composer, one blue accent.
