@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
   import { VList } from 'virtua/svelte';
+  import { offsetForBottomGap } from './scrollAnchor';
   import type { VListHandle } from 'virtua/svelte';
   import type { TimelineItemDto } from '$lib/generated';
   import { timelineStore, findRowIndexByEventId } from '$lib/stores/timeline.svelte';
@@ -127,9 +128,25 @@
     if (newest && atBottom && windowActive && !timelineStore.loading) untrack(() => void timelineStore.markRead());
   });
 
+  // Distance between the visible bottom edge and the end of the content, kept from the last scroll.
+  let bottomGap = 0;
+  let lastViewportHeight = 0;
+
+  // The on-screen keyboard resizes the viewport from below. Hold the bottom gap so the view the user
+  // was in stays put: pinned to the newest message when at the bottom, unchanged when scrolled up.
+  $effect(() => {
+    const height = viewportHeight;
+    const previous = lastViewportHeight;
+    lastViewportHeight = height;
+    if (!vlist || previous === 0 || height === 0 || height === previous) return;
+    const list = vlist;
+    void tick().then(() => list.scrollTo(offsetForBottomGap(list.getScrollSize(), height, bottomGap)));
+  });
+
   function onScroll(offset: number) {
     if (!vlist) return;
     const distance = vlist.getScrollSize() - (offset + vlist.getViewportSize());
+    bottomGap = Math.max(0, distance);
     atBottom = distance < 80;
     if (atBottom) void timelineStore.markRead();
     if (offset < 200) void timelineStore.loadOlder();
