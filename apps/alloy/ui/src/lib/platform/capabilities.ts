@@ -1,3 +1,4 @@
+import { pushSupported } from './push';
 import { viewport } from '../stores/viewport.svelte';
 import { isTauriShell } from './notify';
 import { isAutostartSupported } from './autostart';
@@ -35,6 +36,7 @@ export interface PlatformEnv {
   android: boolean;
   tauri: boolean;
   voiceMessages?: boolean;
+  backgroundPush?: boolean;
 }
 
 export interface PlatformCapabilities {
@@ -58,6 +60,8 @@ export interface PlatformCapabilities {
   autoDownloadUpdates: boolean;
   /** Voice message recording with microphone access. */
   voiceMessages: boolean;
+  /** Background push notifications via UnifiedPush when app is closed (Android only). */
+  backgroundPush: boolean;
 }
 
 /**
@@ -76,6 +80,7 @@ export function capabilities(env: PlatformEnv): PlatformCapabilities {
     systemTray: env.tauri && isDesktop,
     autoDownloadUpdates: env.tauri && isDesktop,
     voiceMessages: env.voiceMessages ?? isVoiceMessagesSupported(),
+    backgroundPush: env.backgroundPush ?? false,
   };
 }
 
@@ -88,6 +93,7 @@ export function currentEnv(phone: boolean = viewport.isPhone): PlatformEnv {
     android: isAndroid(),
     tauri: isTauriShell(),
     voiceMessages: isVoiceMessagesSupported(),
+    backgroundPush: pushSupported(),
   };
 }
 

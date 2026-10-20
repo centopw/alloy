@@ -99,7 +99,7 @@ Alloy is developed in the open and the plan is public: **[roadmap](docs/PLAN.md)
 
 - Notifications on Android when the app is closed (without needing Google services)
 - Signing in through your server's web login (needed for matrix.org-style single sign-on)
-- Searching old messages in encrypted rooms, voice messages, QR code sign-in, more languages
+- Searching old messages in encrypted rooms, QR code sign-in, more languages
 - Your own themes and shortcuts from simple files, then plugins and a community marketplace
 - Voice and video calls, web version and multiple accounts (later)
 

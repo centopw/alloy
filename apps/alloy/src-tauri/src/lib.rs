@@ -12,6 +12,9 @@ use commands::{alloy_invoke, alloy_subscribe};
 use std::sync::Arc;
 use tauri::Manager;
 
+#[cfg(target_os = "android")]
+use alloy_ffi as _;
+
 pub struct AppState {
     pub engine: Arc<AppEngine>,
 }

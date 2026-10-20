@@ -25,6 +25,7 @@ impl AuthHandler {
 fn map_err(e: AlloyError) -> EngineError {
     match e {
         AlloyError::Auth(m) => EngineError::auth_failed(m),
+        AlloyError::AccountNotFound(m) => EngineError::not_found(m),
         AlloyError::NotLoggedIn => EngineError::auth_failed("not logged in"),
         AlloyError::InvalidHomeserverUrl => EngineError::invalid_argument("invalid homeserver"),
         AlloyError::InsecureHomeserverUrl => EngineError {
@@ -136,13 +137,13 @@ impl GroupHandler for AuthHandler {
                 Ok(EngineResponse::LoggedIn { account })
             }
             EngineCommand::RestoreSession { account_id } => {
-                let entry = index
-                    .get(&account_id.0)
-                    .ok_or_else(|| EngineError::not_found(format!("account {}", account_id.0)))?;
-                let client = open_client(ctx, &entry.homeserver_url, &entry.store_id).await?;
-                if !client.restore_session().await.map_err(map_err)? {
-                    return Err(EngineError::auth_failed("no stored session; log in again"));
-                }
+                let (client, entry) = alloy_core::restore_account(
+                    &ctx.data_dir,
+                    Some(&account_id.0),
+                    Some(Box::new(ctx.secrets.clone())),
+                )
+                .await
+                .map_err(map_err)?;
                 let account = entry.to_account();
                 ctx.set_client(Some(client)).await;
                 if ctx.background

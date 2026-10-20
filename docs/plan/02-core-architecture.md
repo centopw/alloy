@@ -436,41 +436,40 @@ pub enum PluginError {
 
 ### Notification Pipeline
 
-Mobile OS environments restrict background battery and execution time. Alloy uses a hybrid architecture:
+Mobile OS environments restrict background execution. Alloy uses UnifiedPush (Android) with `matrix-sdk-ui::NotificationClient`:
 
 ```
-[Matrix Homeserver]
-         │ (Event arrives in E2EE room)
-         ▼
-  [Push Gateway / Sygnal]
-         │
-         ├─────────────────────────────────────────┐
-         ▼                                         ▼
-   [Apple APNs]                              [Google FCM] / [UnifiedPush]
-         │                                         │
-         ▼ (Encrypted wake payload)                ▼
-[iOS: Notification Service Extension (NSE)]   [Android: Background Service]
-         │                                         │
-         └───────────────────┬─────────────────────┘
-                             ▼
-     [matrix_sdk_ui::notification_client::NotificationClient]
-                             │
-     1. Open shared SQLite key store (App Groups / Keystore)
-     2. Decrypt Megolm session payload without full sync
-     3. Render notification: "Alice: Hey, are you free?"
-     4. Complete within OS execution budget (< 30s)
+[Matrix Homeserver] ──┬─→ [UnifiedPush Distributor / ntfy]
+                      │         ↓
+                      │   [Android BroadcastReceiver]
+                      │         ↓
+                      ├──→ [alloy-ffi JNI: fetchNotification()]
+                           ├─→ restore_active_account() from data_dir
+                           ├─→ NotificationClient (MultipleProcesses)
+                           ├─→ decrypt & fetch event (≤20s timeout)
+                           ├─→ map NotificationStatus → JSON
+                           └─→ Android system notification
 ```
 
-1. **Push Gateways**:
-   - Self-hosted or community **Sygnal** push gateway instance.
-   - Support for **UnifiedPush** (F-Droid, Nextcloud, ntfy distributors) alongside standard Apple APNs and Firebase Cloud Messaging (FCM).
-2. **Notification Service Extension (NSE) on iOS**:
-   - Runs in a separate Darwin process sandbox with a strict 30-second execution window and ~30MB memory limit.
-   - Reuses `matrix-sdk-ui::notification_client::NotificationClient`.
-   - Accesses the crypto database via a shared iOS App Group directory (`group.org.alloy.app`).
-   - Fetches only the required encrypted event, decrypts the payload in-memory, updates badge count, and presents the local notification banner. Does *not* start the full sliding sync engine.
-3. **Android Background Processing**:
-   - UnifiedPush / FCM high-priority data messages wake `alloy-core` worker via Android WorkManager to fetch event and post system notifications.
+1. **UnifiedPush Integration**:
+   - No Google Firebase Cloud Messaging (FCM); uses community-run distributors (ntfy, Nextcloud, etc.).
+   - Endpoint registration: `PushNative.setPusher(dataDir, config)` calls `matrix_sdk::pusher().set()` with HTTP pusher, gateway=event_id_only format.
+   - Payload arrives on Android service, Kotlin calls `PushNative.fetchNotification(dataDir, rawJson)`.
+2. **Background Notification Fetch (alloy-ffi/JNI)**:
+   - `Java_chat_alloy_PushNative_fetchNotification(dataDir, payload)`:
+     - Parses push ref (room_id, event_id, unread count).
+     - Calls `restore_active_account(dataDir, None)` from `alloy-core` (matches engine's active-account logic; reuses `accounts.json` + FileSecretStore at `secrets.json`).
+     - Initializes tokio runtime and `NotificationClient` in `MultipleProcesses` mode (no main sync running; avoids lock contention).
+     - Enforces total timeout ≤20s; falls back to generic notification on timeout.
+     - Returns JSON: `{"status":"event","title":"...","body":"...","room_id":"...","..."}` or `{"status":"generic"}` or `{"status":"skip"}` or `{"status":"error","error":"..."}`.
+   - `Java_chat_alloy_PushNative_setPusher(dataDir, configJson)` and `removePusher()`: CRUD for pushers via `alloy-core` client.
+3. **Crypto & Decryption**:
+   - Account data dir (`/data/user/0/chat.alloy/files`) shared between app and background service.
+   - SQLite state store at `accounts/<store_id>/matrix/` encrypted with passphrase from `secrets.json`.
+   - Megolm keys are persisted; NotificationClient decrypts events in-memory without starting sync.
+4. **Android Permissions**:
+   - `android.permission.POST_NOTIFICATIONS` (API 33+) for system notification display.
+   - None for push; UnifiedPush handle registration in Kotlin.
 
 ---
 

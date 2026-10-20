@@ -1,7 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { SettingGroup, SettingSelect, SettingToggle } from '$lib/components/settings/controls';
+  import { SettingGroup, SettingSelect, SettingToggle, SettingButtonRow } from '$lib/components/settings/controls';
   import { requestNotificationPermission } from '$lib/platform/notify';
+  import { pushStore } from '$lib/stores/push.svelte';
+  import { openExternal } from '$lib/platform/links';
+  import { Icon, ExternalLink } from '$lib/icons';
   import { prefs } from '$lib/stores/prefs.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
   import { capabilities, currentEnv } from '$lib/platform/capabilities';
@@ -17,7 +20,7 @@
   ];
 
   let permissionError = $state<string | null>(null);
-
+  let pushError = $state<string | null>(null);
   onMount(() => {
     void notificationSettings.load();
   });
@@ -46,6 +49,31 @@
   function changeMention(rule: MentionRule, value: boolean) {
     void notificationSettings.setMentionRule(rule, value);
   }
+  const hasDistributors = $derived(
+    pushStore.distributors.length > 0 || pushStore.distributor !== null
+  );
+
+  const pushToggleDescription = $derived.by(() => {
+    if (!pushStore.enabled) {
+      return 'Receive notifications for new messages while Alloy is closed.';
+    }
+    if (pushStore.permission === 'denied') {
+      return 'Notification permission is blocked.';
+    }
+    if (!hasDistributors) {
+      return 'No push app installed. Install a UnifiedPush distributor to receive notifications.';
+    }
+    if (pushStore.error) {
+      return `Registration failed: ${pushStore.error}`;
+    }
+    if (!pushStore.registered) {
+      return 'Waiting for the push app…';
+    }
+    return pushStore.distributor
+      ? `Registered with ${pushStore.distributor}.`
+      : 'Registered with push app.';
+  });
+
 </script>
 
 <div class="section">
@@ -131,6 +159,55 @@
     {/if}
   </SettingGroup>
 
+  {#if caps.backgroundPush || pushStore.supported}
+    <SettingGroup title="When Alloy is closed" description="Receive background notifications via UnifiedPush without Google services.">
+      <SettingToggle
+        label="Notifications when Alloy is closed"
+        description={pushToggleDescription}
+        checked={pushStore.enabled}
+        disabled={pushStore.busy}
+        onchange={(v) => pushStore.toggle(v)}
+      />
+      {#if hasDistributors}
+        <SettingButtonRow
+          label="Push app"
+          description={pushStore.distributor ?? 'Default push app'}
+          buttonLabel="Choose push app"
+          onclick={() => pushStore.pick()}
+        />
+      {:else}
+        <div class="push-instructions">
+          <p class="push-text">
+            Alloy uses UnifiedPush to deliver notifications while closed without relying on Google services. Install a distributor such as ntfy, NextPush, or Conversations.
+          </p>
+          <a
+            href="https://unifiedpush.org/users/distributors/"
+            class="push-link"
+            onclick={(e) => {
+              e.preventDefault();
+              void openExternal('https://unifiedpush.org/users/distributors/');
+            }}
+          >
+            <span>Find a UnifiedPush distributor</span>
+            <Icon icon={ExternalLink} size={16} />
+          </a>
+        </div>
+      {/if}
+      {#if pushStore.enabled && pushStore.permission === 'denied'}
+        <div class="push-alert">
+          <p class="error" role="alert">
+            Notifications are blocked for Alloy. Open Android Settings &gt; Apps &gt; Alloy &gt; Notifications and turn on Allow notifications.
+          </p>
+        </div>
+      {/if}
+      {#if pushStore.enabled && pushStore.error}
+        <div class="push-alert">
+          <p class="error" role="alert">{pushStore.error}</p>
+        </div>
+      {/if}
+    </SettingGroup>
+  {/if}
+
   {#if permissionError}
     <p class="error" role="alert">{permissionError}</p>
   {/if}
@@ -154,5 +231,39 @@
     margin: 0;
     color: var(--alloy-color-status-error);
     line-height: var(--alloy-typography-line-height-normal);
+  }
+  .push-instructions {
+    display: flex;
+    flex-direction: column;
+    gap: var(--alloy-spacing-scale-2);
+    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-row-pad-x);
+    border-top: 1px solid var(--alloy-color-border-subtle);
+  }
+
+  .push-text {
+    margin: 0;
+    font-size: var(--alloy-typography-size-sm);
+    color: var(--alloy-color-text-secondary);
+    line-height: var(--alloy-typography-line-height-normal);
+  }
+
+  .push-link {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--alloy-spacing-scale-1);
+    font-size: var(--alloy-typography-size-sm);
+    color: var(--alloy-color-accent-primary);
+    text-decoration: none;
+    cursor: pointer;
+    min-height: 44px;
+  }
+
+  .push-link:hover {
+    text-decoration: underline;
+  }
+
+  .push-alert {
+    padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x) var(--alloy-spacing-scale-3);
+    border-top: 1px solid var(--alloy-color-border-subtle);
   }
 </style>

@@ -154,13 +154,13 @@ Highest risks: WebView perf on low-end Android (G1), Android background delivery
 |---|---|---|
 | Push notifications without Google services (UnifiedPush, optional FCM, `alloy-ffi`) | #24 | Phones get nothing while the app is closed |
 | OIDC / MAS login | #65 | matrix.org and other large servers are moving to MAS |
-| Mobile gestures (swipe to reply, pull to refresh), content:// attachments | #25, #72 | Finish the mobile shell |
+| Pull to refresh, `content://` attachments (swipe to reply shipped in 0.2.0) | #25, #72 | Finish the mobile shell |
 | Real-device G1 and idle-memory budgets | #26, #69, #70 | Confirms or triggers the D2 fallback |
 | Keyboard/screen-reader baseline, then full a11y audit | #20, #36 | Needed before 1.0; cheap now |
 | Android keystore wrapping, secret types for passwords | #74 | Security debt from #37 |
 
 ### Next (v0.2 to v0.4)
-Encrypted search (#31), QR login and verification polish (#32), voice messages (#33), Fluent i18n and RTL (#34), Tier-A packages: load theme/keybinding/slash-command JSON from disk with hot reload (#35).
+Encrypted search (#31), QR login and verification polish (#32), Fluent i18n and RTL (#34), Tier-A packages: load theme/keybinding/slash-command JSON from disk with hot reload (#35). Voice messages (#33) and the Messenger/Telegram chat parity set (ADR 0008) shipped in 0.2.0.
 
 ### Later
 v0.5 plugins (#38 to #46), v1.0 marketplace, signing and distribution (#47 to #55; signing certificates and store accounts are the user's), Post-1.0 (#56 to #60).

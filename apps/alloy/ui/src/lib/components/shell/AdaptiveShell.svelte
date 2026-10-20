@@ -43,6 +43,8 @@
   import { viewport } from '$lib/stores/viewport.svelte';
   import { updatesStore } from '$lib/stores/updates.svelte';
   import { focusComposer, shouldFocusComposer } from '$lib/platform/typeToFocus';
+  import { extractOpenRoomId, takePendingRoom } from '$lib/platform/push';
+  import { pushStore } from '$lib/stores/push.svelte';
   import ChangelogDialog from '$lib/components/updates/ChangelogDialog.svelte';
 
   let paletteOpen = $state(false);
@@ -56,7 +58,9 @@
   let directoryOpen = $state(false);
   let pane = $state<'list' | 'chat'>('list');
   let hudVisible = $state(false);
-  let innerWidth = $state(1280);
+  // Starts at the real width: a room opened from a notification at mount must already see the phone layout,
+  // or its Back entry is skipped and Back would leave the app instead of returning to the list.
+  let innerWidth = $state(typeof window === 'undefined' ? 1280 : window.innerWidth);
 
   // ADR 0002 breakpoints: wide >= 1100px, medium 900-1099px, narrow < 900px.
   const breakpoint = $derived<'wide' | 'medium' | 'narrow'>(
@@ -119,7 +123,20 @@
     void verification.refreshRecovery();
     void notificationSettings.load();
     notifier.start();
-    // Needs the server, so it only succeeds when the connection is back; everything that failed meanwhile reloads.
+    pushStore.start();
+    const pendingRoom = takePendingRoom();
+    if (pendingRoom) {
+      pick(pendingRoom);
+    }
+    const onOpenRoom = (e: Event) => {
+      const roomId = extractOpenRoomId(e instanceof CustomEvent ? e.detail : undefined);
+      if (roomId) {
+        pick(roomId);
+        // The shell has the room now; drop the copy the Android side kept for a page that was not ready.
+        takePendingRoom();
+      }
+    };
+    window.addEventListener('alloy-open-room', onOpenRoom);
     const stopConnectivity = connectivity.start(() => client.invoke({ action: 'GetTagCatalog' }));
     const stopReconnect = connectivity.onReconnect(() => {
       void tags.load();
@@ -127,8 +144,9 @@
       void notificationSettings.load();
     });
     return () => {
+      window.removeEventListener('alloy-open-room', onOpenRoom);
+      pushStore.stop();
       notifier.stop();
-      stopReconnect();
       stopConnectivity();
       void roomsStore.stop();
       stopUpdates();
@@ -200,6 +218,7 @@
   }
 
   function pick(roomId: string) {
+    showChats();
     roomsStore.select(roomId);
     paletteOpen = false;
     openChat();

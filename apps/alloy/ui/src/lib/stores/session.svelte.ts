@@ -5,6 +5,7 @@ import { membersStore } from './members.svelte.js';
 import { pinsStore } from './pins.svelte.js';
 import { draftsStore } from './drafts.svelte.js';
 import { liveLocation } from './liveLocation.svelte.js';
+import { pushStore } from './push.svelte.js';
 
 export type Phase = 'booting' | 'onboarding' | 'ready';
 
@@ -73,6 +74,8 @@ class SessionStore {
     if (!acc) return;
     // The share ends first: after logout the engine could no longer tell the room it stopped.
     await liveLocation.stop();
+    // Disable background push before logging out so homeserver pusher is cleanly removed.
+    await pushStore.disableOnSignOut().catch(() => {});
     await client.logout(acc.id);
     this.account = null;
     membersStore.reset();

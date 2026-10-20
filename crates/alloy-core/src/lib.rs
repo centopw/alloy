@@ -2,6 +2,7 @@
 
 pub mod account;
 pub mod account_prefs;
+pub mod accounts;
 pub mod auth;
 pub mod client;
 pub mod crypto;
@@ -17,6 +18,9 @@ pub mod tls;
 pub mod url_preview;
 
 pub use account::DeleteDevicesOutcome;
+pub use accounts::{
+    AccountEntry, AccountIndex, open_default_secret_store, restore_account, restore_active_account,
+};
 pub use alloy_protocol::*;
 pub use alloy_storage::{InMemorySecretStore, SecretStore, StorageError};
 pub use client::*;
@@ -40,6 +44,8 @@ pub enum AlloyError {
     Auth(String),
     #[error("Not logged in")]
     NotLoggedIn,
+    #[error("Account not found: {0}")]
+    AccountNotFound(String),
     #[error("Room not found: {0}")]
     RoomNotFound(String),
     #[error("Invalid homeserver URL")]
