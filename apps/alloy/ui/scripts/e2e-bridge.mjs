@@ -444,8 +444,20 @@ try {
     throw new Error(`menu has no "${label}" entry; it offers: ${seen.join(' | ') || 'nothing'}`);
   };
   const rowKey = async (title) => page.evaluate((t) => { const el = [...document.querySelectorAll('button.row')].find((e) => e.textContent.includes(t)); el.setAttribute('data-e2e', t); return t; }, title);
-  await rowKey('Pin Room');
-  await page.click('button.row[data-e2e="Pin Room"]');
+  // The list is rebuilt as chats move between sections: wait for the row and click it in one page task, so a
+  // list that is mid-update cannot make the row vanish between finding it and clicking it (nor shift under a pointer).
+  const clickRow = (title) =>
+    page.waitForFunction(
+      (t) => {
+        const el = [...document.querySelectorAll('button.row')].find((e) => e.textContent.includes(t));
+        if (!el) return false;
+        el.click();
+        return true;
+      },
+      { timeout: 15000 },
+      title,
+    );
+  await clickRow('Pin Room');
   await page.waitForFunction(() => document.body.innerText.includes('pin target alloy-pin'), { timeout: 60000 });
   const markMsg = () => page.evaluate(() => { const r = [...document.querySelectorAll('.row[data-event-id]')].find((x) => x.textContent.includes('pin target alloy-pin')); r.setAttribute('data-e2e-msg', '1'); });
   await markMsg();
@@ -482,8 +494,7 @@ try {
   await page.evaluate(() => [...document.querySelectorAll('[role=dialog] .room')].find((r) => r.textContent.includes('From Bob')).querySelector('button').click());
   await page.waitForFunction(() => [...document.querySelectorAll('[role=dialog] .room')].find((r) => r.textContent.includes('From Bob'))?.querySelector('button')?.textContent.trim() === 'Sent', { timeout: 30000 });
   await page.keyboard.press('Escape');
-  await rowKey('From Bob');
-  await page.click('button.row[data-e2e="From Bob"]');
+  await clickRow('From Bob');
   await page.waitForFunction(() => document.querySelector('button[aria-label="Room info for From Bob"]'), { timeout: 15000 });
   await page.waitForFunction(() => [...document.querySelectorAll('.row[data-event-id]')].some((r) => r.textContent.includes('pin target alloy-pin')), { timeout: 60000 });
 
@@ -493,8 +504,7 @@ try {
     await menuOn(`button.row[data-e2e="${title}"]`, label);
   };
   const clickRoom = async (title) => {
-    await rowKey(title);
-    await page.click(`button.row[data-e2e="${title}"]`);
+    await clickRow(title);
   };
   const chip = (name) => page.evaluate((n) => [...document.querySelectorAll('.chip')].find((c) => c.textContent.trim() === n).click(), name);
   // A tag or unread flag is confirmed by the server and comes back through sync, which can take a while on a busy runner.
