@@ -457,7 +457,21 @@ try {
       { timeout: 15000 },
       title,
     );
-  await clickRow('Pin Room');
+  // Opens a chat and waits for its header; if the click was swallowed (a dialog still closing, a list mid-update)
+  // it clicks again, so a lost click shows up as a clear error instead of a later timeout.
+  const openRoom = async (title) => {
+    for (let attempt = 0; attempt < 4; attempt++) {
+      await clickRow(title);
+      try {
+        await page.waitForSelector(`button[aria-label="Room info for ${title}"]`, { timeout: 4000 });
+        return;
+      } catch {
+        // try the click again
+      }
+    }
+    throw new Error(`the chat "${title}" did not open after four clicks`);
+  };
+  await openRoom('Pin Room');
   await page.waitForFunction(() => document.body.innerText.includes('pin target alloy-pin'), { timeout: 60000 });
   const markMsg = () => page.evaluate(() => { const r = [...document.querySelectorAll('.row[data-event-id]')].find((x) => x.textContent.includes('pin target alloy-pin')); r.setAttribute('data-e2e-msg', '1'); });
   await markMsg();
@@ -495,8 +509,8 @@ try {
   await page.evaluate(() => [...document.querySelectorAll('[role=dialog] .room')].find((r) => r.textContent.includes('From Bob')).querySelector('button').click());
   await page.waitForFunction(() => [...document.querySelectorAll('[role=dialog] .room')].find((r) => r.textContent.includes('From Bob'))?.querySelector('button')?.textContent.trim() === 'Sent', { timeout: 30000 });
   await page.keyboard.press('Escape');
-  await clickRow('From Bob');
-  await page.waitForFunction(() => document.querySelector('button[aria-label="Room info for From Bob"]'), { timeout: 15000 });
+  await page.waitForFunction(() => !document.querySelector('[role=dialog]'), { timeout: 10000 });
+  await openRoom('From Bob');
   await page.waitForFunction(() => [...document.querySelectorAll('.row[data-event-id]')].some((r) => r.textContent.includes('pin target alloy-pin')), { timeout: 60000 });
 
   // Rows are rebuilt when they move between sections, so each helper marks the row again first.
@@ -505,7 +519,7 @@ try {
     await menuOn(`button.row[data-e2e="${title}"]`, label);
   };
   const clickRoom = async (title) => {
-    await clickRow(title);
+    await openRoom(title);
   };
   const chip = (name) => page.evaluate((n) => [...document.querySelectorAll('.chip')].find((c) => c.textContent.trim() === n).click(), name);
   // A tag or unread flag is confirmed by the server and comes back through sync, which can take a while on a busy runner.
