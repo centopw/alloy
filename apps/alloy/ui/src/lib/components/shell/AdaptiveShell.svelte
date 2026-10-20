@@ -43,7 +43,7 @@
   import { viewport } from '$lib/stores/viewport.svelte';
   import { updatesStore } from '$lib/stores/updates.svelte';
   import { focusComposer, shouldFocusComposer } from '$lib/platform/typeToFocus';
-  import { extractOpenRoomId, takePendingRoom } from '$lib/platform/push';
+  import { extractOpenRoomId, setPushPreview, takePendingRoom } from '$lib/platform/push';
   import { pushStore } from '$lib/stores/push.svelte';
   import ChangelogDialog from '$lib/components/updates/ChangelogDialog.svelte';
 
@@ -58,9 +58,7 @@
   let directoryOpen = $state(false);
   let pane = $state<'list' | 'chat'>('list');
   let hudVisible = $state(false);
-  // Starts at the real width: a room opened from a notification at mount must already see the phone layout,
-  // or its Back entry is skipped and Back would leave the app instead of returning to the list.
-  let innerWidth = $state(typeof window === 'undefined' ? 1280 : window.innerWidth);
+  let innerWidth = $state(1280);
 
   // ADR 0002 breakpoints: wide >= 1100px, medium 900-1099px, narrow < 900px.
   const breakpoint = $derived<'wide' | 'medium' | 'narrow'>(
@@ -155,6 +153,11 @@
       prefs.signOut();
       teardownPrefs();
     };
+  });
+
+  // The notifications Android posts while Alloy is closed follow "Show message preview" too.
+  $effect(() => {
+    if (pushStore.supported) setPushPreview(prefs.notifyPreview);
   });
 
   // Timed mutes end on their own; this restores the room's notifications.

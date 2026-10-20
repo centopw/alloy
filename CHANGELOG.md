@@ -3,7 +3,7 @@
 ## 0.2.1 (pre-release)
 
 ### Added
-- **Notifications on Android while Alloy is closed**, without Google services (ADR 0009). Works with a UnifiedPush app such as ntfy. Turn it on in Settings > Notifications > "When Alloy is closed". New messages, including ones in encrypted rooms, show who wrote and what they said; tapping one opens that chat. Nothing is shown while the app is open, and turning it off removes the registration from your server. The text in these notifications does not follow "Show message preview" yet.
+- **Notifications on Android while Alloy is closed**, without Google services (ADR 0009). Works with a UnifiedPush app such as ntfy. Turn it on in Settings > Notifications > "When Alloy is closed". New messages, including ones in encrypted rooms, show who wrote and what they said (or only "New message" when Show message preview is off); tapping one opens that chat. Nothing is shown while the app is open, and turning it off removes the registration from your server.
 - **An offline notice.** When the connection drops, a bar says so and Alloy checks again every few seconds; settings and tags that failed to load come back by themselves when the connection returns.
 - **Paste a picture into the message box** on desktop and Android: a screenshot copied as an image, or a picture file copied in your file manager or screenshot tool (which used to paste its path as text). The picture waits above the box with a preview; press Enter or Send picture to send it, or remove it.
 

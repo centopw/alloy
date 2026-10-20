@@ -1,10 +1,28 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import {
   parsePushState,
   extractOpenRoomId,
+  setPushPreview,
   UNSUPPORTED_PUSH_STATE,
   type PushState,
 } from './push';
+
+describe('setPushPreview', () => {
+  afterEach(() => {
+    delete window.AlloyPush;
+  });
+
+  it('hands the preference to the native bridge', () => {
+    const setPreview = vi.fn();
+    window.AlloyPush = { state: () => '{}', enable() {}, disable() {}, pick() {}, setPreview };
+    setPushPreview(false);
+    expect(setPreview).toHaveBeenCalledExactlyOnceWith(false);
+  });
+
+  it('does nothing where there is no bridge', () => {
+    expect(() => setPushPreview(true)).not.toThrow();
+  });
+});
 
 describe('parsePushState', () => {
   it('parses a valid push state JSON string', () => {

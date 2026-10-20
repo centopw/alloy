@@ -220,7 +220,8 @@ class AlloyPushService : PushService() {
    */
   private fun postEventNotification(obj: org.json.JSONObject) {
     val title = obj.optString("title").ifBlank { "Alloy" }
-    val body = obj.optString("body").ifBlank { "New message" }
+    // With "Show message preview" off the text stays out of the notification, as for in-app ones.
+    val body = if (PushBridge.showPreview(this)) obj.optString("body").ifBlank { "New message" } else "New message"
     val roomId = obj.optString("room_id")
     val eventId = obj.optString("event_id")
 

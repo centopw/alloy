@@ -50,7 +50,8 @@ Implement Android background push via:
 
 - **Distributor dependency**: Requires a distributor app (e.g., ntfy client, NextPush) to be installed. If absent, UI will inform user and link to https://unifiedpush.org/users/distributors/.
 - **FCM path deferred**: v0.2.1 does not implement FCM as a fallback. A future v0.3.0 or later may add FCM push via a separate code path (conditionally compiled).
-- **Preview hiding**: Notification text always appears in system notification, even if user pref sets "hide previews." This is inherent to the platform and unavoidable without a notification listener service (which adds complexity and battery drain).
+- **Message preview**: the web UI copies "Show message preview" to the Android side (`AlloyPush.setPreview`, kept in SharedPreferences `alloy_push`). With it off, notifications posted while the app is closed show the sender or room but only say "New message". The setting reaches the native side when the app starts and whenever it changes, so a change made on another device applies after the next time the app opens here.
+- **Back from a tapped notification**: when a notification starts the app from nothing, the chat opens but Back may leave the app instead of returning to the chat list; the browser engine skips history entries added before the first touch.
 - **Single instance**: Currently supports one registration (`instance = INSTANCE_DEFAULT` in UnifiedPush). Multi-account support deferred.
 
 ## Implementation Notes

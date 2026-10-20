@@ -28,6 +28,11 @@ class PushBridge(private val context: Context) {
     private const val PREF_ENDPOINT = "endpoint"
     private const val PREF_GATEWAY = "gateway"
     private const val PREF_ERROR = "error"
+    private const val PREF_PREVIEW = "preview"
+
+    /** Whether notifications may show the message text; mirrors the "Show message preview" setting. */
+    fun showPreview(context: Context): Boolean =
+      context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getBoolean(PREF_PREVIEW, true)
 
     fun getStoredEndpoint(context: Context): String? {
       val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -134,6 +139,15 @@ class PushBridge(private val context: Context) {
   @JavascriptInterface
   fun state(): String {
     return buildStateJson(context)
+  }
+
+  /**
+   * Called by the web UI whenever "Show message preview" changes (and at start). With it off, background
+   * notifications say only that there is a new message, like the in-app ones do.
+   */
+  @JavascriptInterface
+  fun setPreview(enabled: Boolean) {
+    context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().putBoolean(PREF_PREVIEW, enabled).apply()
   }
 
   /**

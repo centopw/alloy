@@ -10,6 +10,7 @@ export interface AlloyPushBridge {
   disable(): void;
   pick(): void;
   pendingRoom?(): string;
+  setPreview?(enabled: boolean): void;
   takePendingRoom?(): string;
 }
 
@@ -181,6 +182,18 @@ export function pickPushApp(): void {
   const bridge = window.AlloyPush;
   if (typeof bridge?.pick === 'function') {
     bridge.pick();
+  }
+}
+
+/**
+ * Tells the Android side whether notifications may show the message text ("Show message preview"), so the
+ * ones posted while Alloy is closed follow the same setting as the in-app ones.
+ */
+export function setPushPreview(enabled: boolean): void {
+  if (typeof window === 'undefined') return;
+  const bridge = window.AlloyPush;
+  if (typeof bridge?.setPreview === 'function') {
+    bridge.setPreview(enabled);
   }
 }
 
