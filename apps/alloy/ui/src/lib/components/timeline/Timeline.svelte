@@ -15,6 +15,7 @@
   import { groupAlbums } from '$lib/content/albums';
   import { contextmenu } from '$lib/platform/contextmenu';
   import { badgeLabel, countArrivals } from './arrivals';
+  import { anchorsOf, detectRowChange, type RowAnchors } from './rowChange';
   import type { MenuItem } from '$lib/stores/contextmenu.svelte';
   import { refreshStore } from '$lib/stores/refresh.svelte';
 
@@ -70,30 +71,43 @@
   });
 
   // Keep the viewport stable when older history is prepended; stick to bottom for new messages.
-  let lastFirst: string | null = null;
-  let lastLen = 0;
-  $effect(() => {
-    const first = rows[0]?.internal_id ?? null;
+  // This runs before the list renders ($effect.pre): VList reads `shift` in the same pass that sees the
+  // longer data, so the flag must already be set then. Set after render (a plain $effect) it comes too late
+  // and the view jumps by the height of the loaded history wherever the webview has no scroll anchoring.
+  let anchors: RowAnchors | null = null;
+  // True from opening a room until the user first scrolls it: history that fills the window after the room
+  // opened keeps the view on the newest message. A scroll-to-bottom aimed at an index goes stale when rows are
+  // inserted above it, so it is re-aimed at the current last row on every change while this is set.
+  let sticky = false;
+  /** Any wheel, touch or pointer press on the list: the user is in charge of the scroll position from here. */
+  function onUserScroll() {
+    sticky = false;
+  }
+  $effect.pre(() => {
+    const change = detectRowChange(anchors, rows);
+    const opening = anchors === null && rows.length > 0;
+    anchors = anchorsOf(rows);
     const len = rows.length;
-    const prepended = lastFirst !== null && first !== lastFirst && len > lastLen && rows.some((r) => r.internal_id === lastFirst);
-    const appended = len > lastLen && !prepended;
-    // A new message from the signed-in user jumps to the bottom when that preference is on, even if the user had scrolled up.
-    const ownSend = appended && rows[len - 1]?.is_own === true && prefs.jumpToBottomOnSend;
-    if (prepended) {
-      shift = true;
-      void tick().then(() => requestAnimationFrame(() => (shift = false)));
-    } else if (ownSend || (appended && atBottom) || (lastLen === 0 && len > 0)) {
-      void tick().then(() => vlist?.scrollToIndex(len - 1, { align: 'end' }));
-    }
-    if (appended && !ownSend && !atBottom && lastLen > 0) {
-      const arrived = countArrivals(rows.slice(lastLen));
-      untrack(() => {
+    untrack(() => {
+      // A new message from the signed-in user jumps to the bottom when that preference is on, even if the user had scrolled up.
+      const appended = change.arrived.length > 0;
+      const ownSend = appended && change.arrived[change.arrived.length - 1]?.is_own === true && prefs.jumpToBottomOnSend;
+      if (change.prepended) {
+        shift = true;
+        void tick().then(() => requestAnimationFrame(() => (shift = false)));
+      }
+      if (opening) sticky = true;
+      if (opening || ownSend || ((appended || change.replaced) && atBottom) || (sticky && (change.prepended || appended))) {
+        void tick().then(() => vlist?.scrollToIndex(len - 1, { align: 'end' }));
+      }
+      // Only rows after the old last row are new messages; history loaded above, or rows inserted in the
+      // middle, must not raise the "jump to latest" count.
+      if (appended && !ownSend && !atBottom && !sticky) {
+        const arrived = countArrivals(change.arrived);
         unseen += arrived.count;
         mentionIds = [...mentionIds, ...arrived.mentions];
-      });
-    }
-    lastFirst = first;
-    lastLen = len;
+      }
+    });
   });
 
   // Jump to message requested by a reply quote or other caller.
@@ -191,6 +205,7 @@
   let pressedOnRow = false;
 
   function onViewportPointerDown(e: PointerEvent) {
+    onUserScroll();
     pressedOnRow = e.target instanceof Element && e.target.closest('.row') !== null;
   }
 
@@ -214,7 +229,7 @@
 </script>
 
 <section class="timeline" aria-label="Conversation with {title}, {isDirect ? 'direct message' : 'room'}, {encrypted ? 'end-to-end encrypted' : 'not encrypted'}">
-  <div class="viewport" role="presentation" bind:clientHeight={viewportHeight} onpointerdown={onViewportPointerDown} use:contextmenu={backgroundItems}>
+  <div class="viewport" role="presentation" bind:clientHeight={viewportHeight} onpointerdown={onViewportPointerDown} onwheel={onUserScroll} ontouchstart={onUserScroll} use:contextmenu={backgroundItems}>
     {#if timelineStore.loading && rows.length === 0}
       <p class="status" aria-busy="true">Loading messages</p>
     {:else if rows.length === 0}

@@ -92,6 +92,17 @@ for (let i = 1; i <= 80; i++) {
     body: JSON.stringify({ msgtype: 'm.text', body: `history ${String(i).padStart(2, '0')}` }),
   });
 }
+// A second long room that no step opens before the scroll test, so its history is still on the server and
+// scrolling up has to page it in.
+const deepRoom = await api('/createRoom', { name: 'Deep History', invite: [u.id] }, v.token);
+await api(`/join/${encodeURIComponent(deepRoom.room_id)}`, {}, u.token);
+for (let i = 1; i <= 160; i++) {
+  await fetch(`${HS}/_matrix/client/v3/rooms/${encodeURIComponent(deepRoom.room_id)}/send/m.room.message/d${i}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${v.token}` },
+    body: JSON.stringify({ msgtype: 'm.text', body: `deep ${String(i).padStart(3, '0')}` }),
+  });
+}
 
 // --- services: bridge + static UI server
 const dataDir = fs.mkdtempSync(join(os.tmpdir(), 'alloy-e2e-'));
@@ -605,6 +616,66 @@ try {
     reachedOldest = await page.evaluate(() => document.body.innerText.includes('history 01'));
   }
   if (!reachedOldest) throw new Error('scrolling up never loaded the oldest message (history 01)');
+
+  step('scrolling up through history keeps the message you are reading in place and adds no new-message count');
+  await page.waitForFunction(() => [...document.querySelectorAll('button.row .title')].some((e) => e.textContent === 'Deep History'), { timeout: 60000 });
+  await page.evaluate(() => [...document.querySelectorAll('button.row')].find((e) => e.textContent.includes('Deep History')).click());
+  await page.waitForSelector('button[aria-label="Room info for Deep History"]', { timeout: 15000 });
+  await page.waitForFunction(() => document.querySelectorAll('section.timeline .row[data-event-id]').length > 3, { timeout: 30000 });
+  // Chrome keeps the view steady on its own (scroll anchoring); macOS and Linux WebKit do not. Switch it off so the
+  // test exercises the app's own handling of prepended history.
+  await page.addStyleTag({ content: '* { overflow-anchor: none !important; }' });
+  // A user starts scrolling once the chat has appeared and stopped moving; settle on that, then scroll with a real wheel.
+  let lastTop = -1;
+  for (let stable = 0, n = 0; stable < 4 && n < 80; n++) {
+    await new Promise((r) => setTimeout(r, 150));
+    const top = await page.evaluate(() => document.querySelector('section.timeline .viewport > div')?.scrollTop ?? -1);
+    stable = top === lastTop && top > 0 ? stable + 1 : 0;
+    lastTop = top;
+  }
+  if (await page.evaluate(() => document.body.innerText.includes('deep 001'))) throw new Error('the oldest message was already loaded, so scrolling up would page in nothing');
+  const samples = [];
+  for (let i = 0; i < 40; i++) {
+    // The row nearest the middle of the view stands for "the message being read".
+    const anchor = await page.evaluate(() => {
+      const view = document.querySelector('section.timeline .viewport').getBoundingClientRect();
+      const mid = view.top + view.height / 2;
+      const rows = [...document.querySelectorAll('section.timeline .row[data-event-id]')];
+      const row = rows.sort((a, b) => Math.abs(a.getBoundingClientRect().top - mid) - Math.abs(b.getBoundingClientRect().top - mid))[0];
+      const v = document.querySelector('section.timeline .viewport > div');
+      return { id: row.dataset.eventId, top: row.getBoundingClientRect().top - view.top, scrollTop: v.scrollTop, size: v.scrollHeight };
+    });
+    const asked = Math.min(500, anchor.scrollTop);
+    // A real wheel event, like a user's: programmatic scrollTop writes do not cancel a scroll-to-bottom still running.
+    const box = await (await page.$('section.timeline .viewport')).boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.wheel({ deltaY: -500 });
+    await new Promise((r) => setTimeout(r, 1000));
+    const moved = await page.evaluate(({ id }) => {
+      const view = document.querySelector('section.timeline .viewport').getBoundingClientRect();
+      const row = document.querySelector(`section.timeline .row[data-event-id="${CSS.escape(id)}"]`);
+      return row ? { top: row.getBoundingClientRect().top - view.top, size: document.querySelector('section.timeline .viewport > div').scrollHeight } : null;
+    }, anchor);
+    // The row must slide down by what was scrolled, and not by the height of history loaded above it.
+    if (moved !== null) samples.push({ i, asked: Math.round(asked), error: Math.round(moved.top - anchor.top - asked), scrollTop: Math.round(anchor.scrollTop), badge: await page.evaluate(() => document.querySelector('.fabs .badge')?.textContent ?? null) });
+    if (await page.evaluate(() => document.body.innerText.includes('deep 001')) && anchor.scrollTop === 0) break;
+  }
+  console.log('scroll anchoring samples:', JSON.stringify(samples));
+  const worst = samples.reduce((m, s) => Math.max(m, Math.abs(s.error)), 0);
+  if (!(await page.evaluate(() => document.body.innerText.includes('deep 001')))) throw new Error(`scrolling up never paged in the oldest message: ${JSON.stringify(samples)}`);
+  if (samples.length < 3) throw new Error(`the scroll test measured only ${samples.length} scrolls`);
+  if (worst > 60) throw new Error(`the message being read jumped by ${worst}px while older history loaded: ${JSON.stringify(samples)}`);
+  const counted = samples.find((s) => s.badge);
+  if (counted) throw new Error(`scrolling up with no new message showed a new-message count of ${counted.badge}`);
+  // The count must still work for what it is for: a message from someone else while scrolled up away from the bottom.
+  for (const n of [1, 2]) {
+    await fetch(`${HS}/_matrix/client/v3/rooms/${encodeURIComponent(deepRoom.room_id)}/send/m.room.message/newer${n}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${v.token}` },
+      body: JSON.stringify({ msgtype: 'm.text', body: `deep newer ${n}` }),
+    });
+  }
+  await page.waitForFunction(() => document.querySelector('.fabs .badge')?.textContent === '2', { timeout: 30000 });
 
   step('browse the public room directory');
   await page.click('button[aria-label="Browse public rooms"]');

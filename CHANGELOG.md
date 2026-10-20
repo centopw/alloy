@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.3 (pre-release)
+
+### Fixed
+- **Scrolling up through a chat no longer jumps around.** Loading older messages put the view back at the top of what had just loaded, and a freshly opened chat could sit at its oldest loaded message instead of the newest. Older messages from the same day are now added without moving the message you are reading.
+- **The down-arrow count no longer includes messages you already read.** Loading history while scrolled up raised the "new messages" number; it now counts only messages that arrive after the newest one you have seen.
+
 ## 0.2.2 (pre-release)
 
 ### Added
