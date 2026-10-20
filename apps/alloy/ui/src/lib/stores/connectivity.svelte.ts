@@ -45,7 +45,8 @@ class Connectivity {
       await this.#probe();
       this.unreachable = false;
     } catch (e) {
-      if (isNetworkError(e)) this.unreachable = true;
+      // A refusal from the server still means it answered; only a transport failure keeps us offline.
+      this.unreachable = isNetworkError(e);
     } finally {
       this.#probing = false;
       this.#sync();

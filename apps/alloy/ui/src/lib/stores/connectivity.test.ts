@@ -61,6 +61,15 @@ describe('connectivity', () => {
     stop();
   });
 
+  it('counts a refusal from the server as reachable', async () => {
+    const stop = connectivity.start(() => Promise.reject({ code: 'forbidden', message: 'M_FORBIDDEN: not allowed' }));
+    connectivity.noteFailure({ message: RAW });
+    expect(connectivity.offline).toBe(true);
+    await vi.advanceTimersByTimeAsync(PROBE_INTERVAL_MS);
+    expect(connectivity.offline).toBe(false);
+    stop();
+  });
+
   it('follows the browser online and offline events', async () => {
     const hook = vi.fn();
     const stop = connectivity.start(() => Promise.resolve());
