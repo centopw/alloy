@@ -5,42 +5,73 @@ on:
     tags:
       - 'v*'
 
+# A second run for the same tag (a re-push) waits instead of racing the first one on release assets and latest.json.
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+# Read-only by default; the jobs that publish assets ask for write access themselves.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   create-release:
     name: Create release
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - name: Install git-cliff
+      - name: Install git-cliff and cargo-cyclonedx
         uses: taiki-e/install-action@v2
         with:
-          tool: git-cliff
+          tool: git-cliff,cargo-cyclonedx
 
       # Highlights from CHANGELOG.md, grouped commits since the previous version, a compare link and
       # the install notes. Re-runs refresh the notes of an existing release.
       - name: Create or update the pre-release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
         run: |
           git fetch --tags --force
-          scripts/release-notes.sh "${{ github.ref_name }}" > /tmp/release-notes.md
-          if gh release view "${{ github.ref_name }}" -R "${{ github.repository }}" >/dev/null 2>&1; then
-            gh release edit "${{ github.ref_name }}" -R "${{ github.repository }}" \
-              --title "Alloy ${{ github.ref_name }}" --notes-file /tmp/release-notes.md
+          scripts/release-notes.sh "$TAG" > /tmp/release-notes.md
+          if gh release view "$TAG" -R "$REPO" >/dev/null 2>&1; then
+            gh release edit "$TAG" -R "$REPO" \
+              --title "Alloy $TAG" --notes-file /tmp/release-notes.md
           else
-            gh release create "${{ github.ref_name }}" -R "${{ github.repository }}" --prerelease \
-              --title "Alloy ${{ github.ref_name }}" --notes-file /tmp/release-notes.md
+            gh release create "$TAG" -R "$REPO" --prerelease \
+              --title "Alloy $TAG" --notes-file /tmp/release-notes.md
           fi
+
+      # The SBOM only needs Cargo.lock and the package metadata, not a build, so all four platforms are
+      # generated here in seconds (with their own target, so platform-only crates are listed correctly)
+      # instead of in each slow build job.
+      - name: Generate and upload the SBOMs (CycloneDX)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          for pair in macos-arm64:aarch64-apple-darwin macos-x64:x86_64-apple-darwin \
+                      linux:x86_64-unknown-linux-gnu windows:x86_64-pc-windows-msvc; do
+            platform="${pair%%:*}"
+            target="${pair#*:}"
+            cargo cyclonedx --format json --all --target "$target"
+            cp apps/alloy/src-tauri/alloy-app.cdx.json "alloy-sbom-$platform.json"
+          done
+          gh release upload "$TAG" alloy-sbom-*.json --clobber
 
   build-tauri:
     needs: create-release
     name: Build Desktop Bundles (${{ matrix.platform }})
+    timeout-minutes: 60
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -53,6 +84,8 @@ jobs:
             platform: macos-x64
             target: x86_64-apple-darwin
             tauri_args: --target x86_64-apple-darwin
+          # Stays on 22.04 on purpose: the AppImage links the runner's glibc, and a newer image would stop
+          # it from starting on older distributions. GitHub retires this image on April 17 2027.
           - os: ubuntu-22.04
             platform: linux
             target: ''
@@ -70,7 +103,8 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      # Same key as the nightly builds, which populate it from main.
+      # Same key as the nightly builds, which populate it from main. A tag run cannot reuse anything it saves
+      # (caches are scoped to the ref), so this job only restores.
       - name: Cache cargo registry & targets
         uses: Swatinem/rust-cache@v2
         with:
@@ -96,24 +130,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
 
+      # The UI itself is built by `tauri build` (beforeBuildCommand); only its dependencies are installed here.
       - name: Install UI dependencies
         working-directory: apps/alloy/ui
         run: pnpm install --frozen-lockfile
-
-      - name: Build UI assets
-        working-directory: apps/alloy/ui
-        run: pnpm build
-
-      - name: Install cargo-cyclonedx
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-cyclonedx
-
-      - name: Generate SBOM (CycloneDX)
-        shell: bash
-        run: |
-          cargo cyclonedx --format json --all
-          cp apps/alloy/src-tauri/alloy-app.cdx.json alloy-sbom-${{ matrix.platform }}.json
 
       - name: Export signing secrets that are configured
         shell: bash
@@ -149,13 +169,7 @@ jobs:
           includeRelease: true
           includeDebug: false
           includeUpdaterJson: true
-          args: --verbose ${{ matrix.tauri_args }}
-
-      - name: Upload SBOM to the release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ github.ref_name }}" alloy-sbom-${{ matrix.platform }}.json --clobber
+          args: ${{ matrix.tauri_args }}
 
   # GitHub's `releases/latest` skips pre-releases, so the app reads its update manifest from a
   # fixed tag instead. Only the tauri-action job's latest.json is published, after every desktop
@@ -164,6 +178,9 @@ jobs:
     name: Publish update manifest
     needs: build-tauri
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
     steps:
       - name: Copy latest.json to the updater-feed release
         env:
@@ -172,7 +189,9 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           gh release download "$TAG" -R "$REPO" -p latest.json -O latest.json
-          jq -e '.version and (.platforms | length > 0)' latest.json
+          # The four builds merge their entries into this file at nearly the same moment; if two of them
+          # collide, one platform can be missing. Never publish a feed that lacks any desktop platform.
+          jq -e '.version and (.platforms | has("darwin-aarch64") and has("darwin-x86_64") and has("linux-x86_64") and has("windows-x86_64"))' latest.json
           # The in-app changelog shows `notes`: use the release page notes (highlights, grouped commits).
           gh release view "$TAG" -R "$REPO" --json body -q .body > notes.md
           jq --rawfile notes notes.md '.notes = $notes' latest.json > latest.notes.json
@@ -188,6 +207,9 @@ jobs:
     name: Build Signed Android APK
     runs-on: ubuntu-latest
     needs: create-release
+    timeout-minutes: 45
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v7
 
@@ -210,6 +232,7 @@ jobs:
         with:
           targets: aarch64-linux-android
 
+      # Same key as the nightly Android build, which populates it from main.
       - name: Cache cargo registry & targets
         uses: Swatinem/rust-cache@v2
         with:
@@ -229,13 +252,10 @@ jobs:
           cache: pnpm
           cache-dependency-path: apps/alloy/ui/pnpm-lock.yaml
 
+      # The UI itself is built by `tauri android build` (beforeBuildCommand); only its dependencies are installed here.
       - name: Install UI dependencies
         working-directory: apps/alloy/ui
         run: pnpm install --frozen-lockfile
-
-      - name: Build UI assets
-        working-directory: apps/alloy/ui
-        run: pnpm build
 
       - name: Build Android APK (release, arm64)
         working-directory: apps/alloy
@@ -266,4 +286,5 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ github.ref_name }}" alloy-android.apk SHA256SUMS --clobber
+          TAG: ${{ github.ref_name }}
+        run: gh release upload "$TAG" alloy-android.apk SHA256SUMS --clobber

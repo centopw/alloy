@@ -15,6 +15,8 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
+  # No debug info in CI builds: tests do not need it, and it was most of each 2 GB build cache and of the link time.
+  CARGO_PROFILE_DEV_DEBUG: 0
   UI_DIR: apps/alloy/ui
 
 jobs:
@@ -216,9 +218,70 @@ jobs:
         working-directory: apps/alloy
         run: pnpm tauri android build --apk --debug --target aarch64
 
-  synapse-integration:
-    name: Synapse Integration Tests
+  # Each shard starts its own Synapse, so the integration tests (about a minute each, mostly waiting on sync)
+  # run side by side instead of one after another. scripts/ci-engine-shards.sh lists the shards and fails the
+  # check below when a new test file is in none of them.
+  engine-tests:
+    name: Engine integration tests (shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Every engine test file belongs to a shard
+        run: scripts/ci-engine-shards.sh check
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry & targets
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: dev-ubuntu-latest
+          save-if: false
+
+      - name: Start Synapse Homeserver
+        run: |
+          bash tests/synapse/start.sh
+          bash tests/synapse/register_test_users.sh || true
+
+      - name: Core and push integration tests (shard 1 only)
+        if: matrix.shard == 1
+        env:
+          ALLOY_TEST_HS: http://localhost:8008
+        run: |
+          cargo test -p alloy-core --test synapse_integration -- --nocapture
+          cargo test -p alloy-push --test push_integration -- --nocapture
+
+      - name: Engine integration tests
+        env:
+          ALLOY_TEST_HS: http://localhost:8008
+        run: |
+          read -ra shard_args <<< "$(scripts/ci-engine-shards.sh "${{ matrix.shard }}")"
+          cargo test -p alloy-engine "${shard_args[@]}" -- --nocapture
+
+      - name: Dump Docker logs on failure
+        if: failure()
+        run: |
+          mkdir -p /tmp/synapse-logs
+          docker compose -f tests/synapse/docker-compose.yml logs > /tmp/synapse-logs/synapse.log 2>&1 || true
+
+      - name: Upload Synapse Docker logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: synapse-docker-logs-engine-${{ matrix.shard }}
+          path: /tmp/synapse-logs/synapse.log
+          if-no-files-found: ignore
+
+  e2e:
+    name: Full-stack E2E (UI + bridge + Synapse)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
@@ -235,16 +298,6 @@ jobs:
         run: |
           bash tests/synapse/start.sh
           bash tests/synapse/register_test_users.sh || true
-
-      - name: Run Synapse integration tests
-        env:
-          ALLOY_TEST_HS: http://localhost:8008
-        run: cargo test -p alloy-core --test synapse_integration -- --nocapture
-
-      - name: Run engine integration tests (auth, rooms, timeline, crypto, media)
-        env:
-          ALLOY_TEST_HS: http://localhost:8008
-        run: cargo test -p alloy-engine -- --nocapture
 
       - name: Build engine bridge
         run: cargo build -p alloy-bridge
@@ -292,6 +345,6 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: synapse-docker-logs
+          name: synapse-docker-logs-e2e
           path: /tmp/synapse-logs/synapse.log
           if-no-files-found: ignore
