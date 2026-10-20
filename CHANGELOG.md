@@ -3,7 +3,7 @@
 ## 0.2.4 (pre-release)
 
 ### Fixed
-- **Android: 0.2.2 and 0.2.3 could not update an installed app.** Their APKs were built with version 1 instead of 0.2.x, so Android refused to install them over 0.2.1 (a lower version code). The app version now comes from one place and the APK is checked against the release tag before it is published. If you installed 0.2.2 or 0.2.3 on Android, 0.2.4 installs over it. If you stayed on 0.2.1, install 0.2.4 directly.
+- **Android: the 0.2.2 and 0.2.3 APKs had version 1 (1.0) instead of 0.2.x.** Android does not install a lower version code over an installed app, so these two could not update 0.2.1 (version code 2001). The Android build now takes the app version from `Cargo.toml`, and the release workflow stops when the signed APK's version does not match the tag. Not yet tested on a device.
 
 ## 0.2.3 (pre-release)
 
