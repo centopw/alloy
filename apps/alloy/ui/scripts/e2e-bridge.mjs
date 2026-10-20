@@ -718,7 +718,9 @@ try {
   console.log('E2E OK');
 } catch (e) {
   failed = e;
-  console.error('E2E FAILED:', e.message, (e.stack || '').split('\n').slice(1, 4).join(' | '));
+  const frames = (e.stack || '').split('\n');
+  const where = frames.filter((l) => l.includes('e2e-bridge.mjs')).slice(0, 2).map((l) => l.trim().replace(/^.*\//, '')).join(' | ');
+  console.error('E2E FAILED:', e.message, `[at ${where || 'unknown step'}]`, frames.slice(1, 4).join(' | '));
   try {
     const pages = await browser.pages();
     const text = await pages[pages.length - 1].evaluate(() => `${document.querySelectorAll('.album .tile').length} album tiles; dialogs: ${JSON.stringify([...document.querySelectorAll('[role=dialog]')].map((d) => d.innerText.replace(/\s+/g, ' ').slice(0, 200)))}; page: ${document.body.innerText.replace(/\s+/g, ' ').slice(0, 800)}`);
