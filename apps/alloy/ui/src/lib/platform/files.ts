@@ -41,6 +41,41 @@ export async function writeTempFile(blob: Blob, extension: string): Promise<stri
   return invoke<string>('write_temp_file', { data: await blobToBase64(blob), extension });
 }
 
+/** The pictures on the clipboard as files: a screenshot copied as an image, or a picture copied from a browser. */
+export function pastedImageFiles(data: DataTransfer | null): File[] {
+  if (!data) return [];
+  return [...data.files].filter((file) => file.type.startsWith('image/'));
+}
+
+/** A file name for a pasted picture, with an extension the engine can derive its type from. */
+export function pastedImageName(file: Pick<File, 'name' | 'type'>): string {
+  if (/\.[A-Za-z0-9]{2,5}$/.test(file.name)) return file.name;
+  const extension = file.type.split('/')[1]?.replace('jpeg', 'jpg').replace(/[^a-z0-9].*$/, '') || 'png';
+  return `${file.name || 'pasted-image'}.${extension}`;
+}
+
+/**
+ * Whether pasted text could be the path of a file: one line starting with a slash, a drive letter or file://.
+ * Only a cheap pre-check; the shell decides whether it really is a picture that exists.
+ */
+export function looksLikeFilePath(text: string): boolean {
+  const line = text.trim().replace(/^["']|["']$/g, '');
+  if (line === '' || /[\r\n]/.test(line)) return false;
+  return /^(file:\/\/|\/|[A-Za-z]:[\\/])/.test(line);
+}
+
+/** Stores a pasted picture where the engine may send it. Returns its path. Desktop and Android only. */
+export async function savePastedImage(file: File): Promise<string> {
+  if (!isTauriRuntime()) throw new Error('Sending pictures needs the desktop or Android app.');
+  return invoke<string>('save_pasted_image', { data: await blobToBase64(file), fileName: pastedImageName(file) });
+}
+
+/** A sendable copy of the picture file whose path was pasted as text, or null when the text is not such a path. */
+export async function importPastedImagePath(text: string): Promise<string | null> {
+  if (!isTauriRuntime()) return null;
+  return invoke<string | null>('import_pasted_image_path', { text });
+}
+
 /** Whether attaching files is possible in this runtime. */
 export const canPickFiles = () => isTauriRuntime();
 

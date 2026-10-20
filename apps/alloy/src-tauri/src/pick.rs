@@ -44,6 +44,132 @@ pub async fn pick_attachments(app: AppHandle) -> Result<Vec<String>, String> {
         .map_err(|e| e.to_string())?
 }
 
+/// Extensions of the pictures the composer takes from the clipboard.
+const IMAGE_EXTENSIONS: [&str; 8] = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "heic", "avif"];
+/// Largest pasted picture, which bounds memory and cache use.
+const MAX_PASTED_IMAGE_BYTES: u64 = 50 * 1024 * 1024;
+
+/// Stores a picture that reached the web view as raw clipboard data (a screenshot copied as an image, a
+/// picture copied from a browser) under the pick cache, so the engine may send it. Returns its path.
+#[tauri::command]
+pub async fn save_pasted_image(
+    app: AppHandle,
+    data: String,
+    file_name: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use base64::Engine as _;
+        if data.len() as u64 > MAX_PASTED_IMAGE_BYTES / 3 * 4 + 4 {
+            return Err("that picture is too large to send".to_owned());
+        }
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(data)
+            .map_err(|e| format!("the picture is not valid: {e}"))?;
+        if bytes.is_empty() || bytes.len() as u64 > MAX_PASTED_IMAGE_BYTES {
+            return Err("that picture is empty or too large to send".to_owned());
+        }
+        let name = pasted_image_name(&file_name);
+        store_pasted(&app, &name, |dest| std::fs::write(dest, &bytes))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// A picture copied as a file (Finder, Explorer, screenshot tools) reaches the web view as its path in text.
+/// When `text` is exactly one picture path that exists, returns a sendable copy of that file; `None` when the
+/// text is not such a path, so the caller pastes it as text.
+#[tauri::command]
+pub async fn import_pasted_image_path(
+    app: AppHandle,
+    text: String,
+) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(path) = image_path_from_text(&text) else {
+            return Ok(None);
+        };
+        let size = match std::fs::metadata(&path) {
+            Ok(meta) if meta.is_file() => meta.len(),
+            _ => return Ok(None),
+        };
+        if size > MAX_PASTED_IMAGE_BYTES {
+            return Err("that picture is too large to send".to_owned());
+        }
+        let name = pasted_image_name(&path.to_string_lossy());
+        store_pasted(&app, &name, |dest| std::fs::copy(&path, dest).map(|_| ())).map(Some)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Writes a pasted picture into a fresh directory under the pick cache and returns the file's path.
+fn store_pasted(
+    app: &AppHandle,
+    name: &str,
+    write: impl FnOnce(&Path) -> io::Result<()>,
+) -> Result<String, String> {
+    let root = picks_root(app)?;
+    let state = app.state::<AppState>();
+    let ctx = state.engine.context();
+    let dir = root.join(uuid::Uuid::new_v4().to_string());
+    std::fs::create_dir_all(&dir).map_err(|e| format!("failed to create pick directory: {e}"))?;
+    // Copies live only under the pick cache, so the engine may read anything beneath it.
+    ctx.allow_attachment_root(&root)
+        .map_err(|e| format!("failed to register pick directory: {e}"))?;
+    let dest = dir.join(name);
+    if let Err(err) = write(&dest) {
+        let _ = std::fs::remove_dir_all(&dir);
+        return Err(format!("failed to save the picture: {err}"));
+    }
+    dest.into_os_string()
+        .into_string()
+        .map_err(|_| "pick cache path is not valid UTF-8".to_owned())
+}
+
+fn has_image_extension(name: &str) -> bool {
+    Path::new(name)
+        .extension()
+        .and_then(std::ffi::OsStr::to_str)
+        .is_some_and(|ext| {
+            IMAGE_EXTENSIONS
+                .iter()
+                .any(|known| known.eq_ignore_ascii_case(ext))
+        })
+}
+
+/// A safe file name for a pasted picture, always ending in a picture extension.
+fn pasted_image_name(raw: &str) -> String {
+    let name = sanitize_file_name(raw);
+    if has_image_extension(&name) {
+        name
+    } else if name == FALLBACK_NAME {
+        "pasted-image.png".to_owned()
+    } else {
+        format!("{name}.png")
+    }
+}
+
+/// The path in `text` when it is exactly one absolute picture path: plain, quoted or a `file://` URL.
+pub(crate) fn image_path_from_text(text: &str) -> Option<std::path::PathBuf> {
+    let trimmed = text.trim().trim_matches(['"', '\'']);
+    if trimmed.is_empty() || trimmed.contains(['\n', '\r']) {
+        return None;
+    }
+    let decoded;
+    let raw = if let Some(rest) = trimmed.strip_prefix("file://") {
+        let rest = rest.strip_prefix("localhost").unwrap_or(rest);
+        decoded = percent_decode_str(rest).decode_utf8().ok()?.into_owned();
+        // `file:///C:/x.png` carries the drive letter after a slash.
+        match decoded.as_bytes() {
+            [b'/', drive, b':', ..] if drive.is_ascii_alphabetic() => &decoded[1..],
+            _ => decoded.as_str(),
+        }
+    } else {
+        trimmed
+    };
+    let path = Path::new(raw);
+    (path.is_absolute() && has_image_extension(raw)).then(|| path.to_path_buf())
+}
+
 fn picks_root(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     let root = app
         .path()
@@ -228,5 +354,51 @@ mod tests {
         let out = sanitize_file_name(&long);
         assert!(out.len() <= MAX_NAME_BYTES);
         assert!(out.chars().all(|c| c == 'é'));
+    }
+
+    #[test]
+    fn pasted_text_that_is_one_absolute_picture_path_is_recognised() {
+        let png = Path::new("/Users/a/Captures/shot 1.png").to_path_buf();
+        assert_eq!(
+            image_path_from_text("/Users/a/Captures/shot 1.png\n"),
+            Some(png.clone())
+        );
+        assert_eq!(
+            image_path_from_text("\"/Users/a/Captures/shot 1.png\""),
+            Some(png.clone())
+        );
+        assert_eq!(
+            image_path_from_text("file:///Users/a/Captures/shot%201.png"),
+            Some(png.clone())
+        );
+        assert_eq!(
+            image_path_from_text("file://localhost/Users/a/Captures/shot%201.PNG"),
+            Some(Path::new("/Users/a/Captures/shot 1.PNG").to_path_buf())
+        );
+    }
+
+    #[test]
+    fn other_pasted_text_stays_text() {
+        assert_eq!(image_path_from_text("see /Users/a/x.png please"), None);
+        assert_eq!(image_path_from_text("/Users/a/x.png\n/Users/a/y.png"), None);
+        assert_eq!(
+            image_path_from_text("x.png"),
+            None,
+            "a relative name is not a file we can find"
+        );
+        assert_eq!(image_path_from_text("https://example.com/x.png"), None);
+        assert_eq!(image_path_from_text("/Users/a/notes.txt"), None);
+        assert_eq!(image_path_from_text(""), None);
+    }
+
+    #[test]
+    fn pasted_pictures_always_end_in_a_picture_extension() {
+        assert_eq!(
+            pasted_image_name("/tmp/a/Screenshot 1.JPG"),
+            "Screenshot 1.JPG"
+        );
+        assert_eq!(pasted_image_name("image"), "image.png");
+        assert_eq!(pasted_image_name(""), "pasted-image.png");
+        assert_eq!(pasted_image_name("../../evil"), "evil.png");
     }
 }

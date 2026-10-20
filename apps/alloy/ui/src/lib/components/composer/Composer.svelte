@@ -7,7 +7,17 @@
   import { prefs } from '$lib/stores/prefs.svelte';
   import Icon from '$lib/icons/Icon.svelte';
   import { ChartBar, MapPin, Navigation, Paperclip, Plus, Send, Smile, Type, X } from '$lib/icons';
-  import { canPickFiles, isTauriRuntime, pickFiles } from '$lib/platform/files';
+  import {
+    canPickFiles,
+    importPastedImagePath,
+    isTauriRuntime,
+    looksLikeFilePath,
+    pastedImageFiles,
+    pastedImageName,
+    pickFiles,
+    savePastedImage
+  } from '$lib/platform/files';
+  import { errorMessage } from '$lib/stores/errors';
   import { isVoiceMessagesSupported } from '$lib/platform/capabilities';
   import { canLocate } from '$lib/platform/geolocation';
   import { liveLocation } from '$lib/stores/liveLocation.svelte';
@@ -283,7 +293,72 @@
     resize();
   }
 
+  // Pictures pasted into the field wait here until the user sends them. A path found on the clipboard is only a
+  // suggestion of a file, so nothing leaves the device without an explicit Send.
+  interface StagedPicture {
+    path: string;
+    name: string;
+    preview: string | null;
+  }
+  let staged = $state<StagedPicture[]>([]);
+
+  function dropPreviews(items: StagedPicture[]) {
+    for (const item of items) if (item.preview) URL.revokeObjectURL(item.preview);
+  }
+
+  function unstage(path: string) {
+    dropPreviews(staged.filter((item) => item.path === path));
+    staged = staged.filter((item) => item.path !== path);
+  }
+
+  async function sendStaged() {
+    const items = staged;
+    staged = [];
+    for (const item of items) await timelineStore.sendFile(item.path);
+    dropPreviews(items);
+  }
+
+  $effect(() => () => dropPreviews(staged));
+
+  async function onPaste(e: ClipboardEvent) {
+    if (!canPickFiles() || threadRoot) return;
+    const pictures = pastedImageFiles(e.clipboardData);
+    if (pictures.length > 0) {
+      e.preventDefault();
+      for (const file of pictures) {
+        try {
+          staged.push({ path: await savePastedImage(file), name: pastedImageName(file), preview: URL.createObjectURL(file) });
+        } catch (err) {
+          timelineStore.error = errorMessage(err);
+        }
+      }
+      return;
+    }
+    const pasted = e.clipboardData?.getData('text/plain') ?? '';
+    if (!looksLikeFilePath(pasted)) return;
+    // The decision to attach needs the shell, which answers after the paste event is over: take the text out
+    // of the event now and put it back if it turns out not to be a picture.
+    e.preventDefault();
+    let path: string | null = null;
+    try {
+      path = await importPastedImagePath(pasted);
+    } catch (err) {
+      timelineStore.error = errorMessage(err);
+    }
+    if (path) {
+      staged.push({ path, name: path.split(/[\\/]/).pop() ?? path, preview: null });
+    } else {
+      field?.focus();
+      document.execCommand('insertText', false, pasted);
+    }
+  }
   function onKeydown(e: KeyboardEvent) {
+    // With a pasted picture waiting and nothing typed, Enter sends the picture.
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && staged.length > 0 && text.trim() === '') {
+      e.preventDefault();
+      void sendStaged();
+      return;
+    }
     // Ctrl/Cmd shortcuts for formatting the selection.
     if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.isComposing && !threadRoot) {
       const kind = wrapKindForKey(e.key, e.shiftKey);
@@ -458,6 +533,23 @@
     </div>
   {/if}
 
+  {#if staged.length > 0}
+    <div class="staged" role="group" aria-label="Pictures ready to send">
+      {#each staged as item (item.path)}
+        <div class="picture">
+          {#if item.preview}
+            <img src={item.preview} alt="" />
+          {/if}
+          <span class="picture-name">{item.name}</span>
+          <button type="button" class="round" aria-label="Remove {item.name}" data-tooltip="Remove" onclick={() => unstage(item.path)}>
+            <Icon icon={X} size={16} />
+          </button>
+        </div>
+      {/each}
+      <Button size="sm" onclick={() => void sendStaged()}>{staged.length === 1 ? 'Send picture' : `Send ${staged.length} pictures`}</Button>
+    </div>
+  {/if}
+
   <div class="field" class:recording>
     {#if canPickFiles() && !threadRoot && !viewport.isPhone}
       <button type="button" class="round" aria-label="Attach file" title="Attach file" onclick={attach} use:contextmenu={attachMenu}>
@@ -506,6 +598,7 @@
       aria-activedescendant={pickerOpen ? mentionOptionId(pickerId, highlighted) : undefined}
       oninput={onFieldInput}
       onkeydown={onKeydown}
+      onpaste={onPaste}
       onkeyup={onFieldKeyup}
       onclick={syncMention}
       onselect={syncSelection}
@@ -613,6 +706,37 @@
     display: flex;
     justify-content: flex-end;
     gap: var(--alloy-spacing-scale-2);
+  }
+  .staged {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--alloy-spacing-scale-2);
+    margin-bottom: var(--alloy-spacing-scale-2);
+    padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
+    background: var(--alloy-color-surface-subtle);
+    border-radius: var(--alloy-radii-lg);
+  }
+  .picture {
+    display: flex;
+    align-items: center;
+    gap: var(--alloy-spacing-scale-2);
+    min-width: 0;
+    color: var(--alloy-color-text-secondary);
+    font-size: var(--alloy-typography-size-sm);
+  }
+  .picture img {
+    width: 40px;
+    height: 40px;
+    object-fit: cover;
+    border-radius: var(--alloy-radii-md);
+  }
+  .picture-name {
+    min-width: 0;
+    max-width: 16rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .banner {
     display: flex;
