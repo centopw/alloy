@@ -356,6 +356,7 @@ mod tests {
         assert!(out.chars().all(|c| c == 'é'));
     }
 
+    #[cfg(unix)]
     #[test]
     fn pasted_text_that_is_one_absolute_picture_path_is_recognised() {
         let png = Path::new("/Users/a/Captures/shot 1.png").to_path_buf();
@@ -374,6 +375,20 @@ mod tests {
         assert_eq!(
             image_path_from_text("file://localhost/Users/a/Captures/shot%201.PNG"),
             Some(Path::new("/Users/a/Captures/shot 1.PNG").to_path_buf())
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn pasted_text_that_is_one_absolute_picture_path_is_recognised_on_windows() {
+        let png = Path::new(r"C:\Users\a\Captures\shot 1.png").to_path_buf();
+        assert_eq!(
+            image_path_from_text("C:\\Users\\a\\Captures\\shot 1.png\r\n"),
+            Some(png.clone())
+        );
+        assert_eq!(
+            image_path_from_text("file:///C:/Users/a/Captures/shot%201.png"),
+            Some(png)
         );
     }
 
