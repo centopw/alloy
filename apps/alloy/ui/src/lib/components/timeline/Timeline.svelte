@@ -55,6 +55,9 @@
     untrack(() => {
       unseen = 0;
       mentionIds = [];
+      // One Timeline serves every room: forget the previous room's rows so the next rows count as an opening.
+      anchors = null;
+      sticky = false;
       void timelineStore.open(id);
     });
     return () => untrack(() => void timelineStore.close());

@@ -676,6 +676,15 @@ try {
     });
   }
   await page.waitForFunction(() => document.querySelector('.fabs .badge')?.textContent === '2', { timeout: 30000 });
+  // Switching rooms from a scrolled-up chat must land on the newest message of the other room, with no leftover count.
+  await page.evaluate(() => [...document.querySelectorAll('button.row')].find((e) => e.textContent.includes('Pin Room')).click());
+  await page.waitForSelector('button[aria-label="Room info for Pin Room"]', { timeout: 15000 });
+  await new Promise((r) => setTimeout(r, 1500));
+  const switched = await page.evaluate(() => {
+    const v = document.querySelector('section.timeline .viewport > div');
+    return { gap: v ? v.scrollHeight - v.scrollTop - v.clientHeight : null, badge: document.querySelector('.fabs .badge')?.textContent ?? null };
+  });
+  if (switched.gap === null || switched.gap > 80 || switched.badge) throw new Error(`the next room did not open at its newest message: ${JSON.stringify(switched)}`);
 
   step('browse the public room directory');
   await page.click('button[aria-label="Browse public rooms"]');
