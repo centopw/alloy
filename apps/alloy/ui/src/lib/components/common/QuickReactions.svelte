@@ -1,7 +1,6 @@
 <script lang="ts">
   import Icon from '$lib/icons/Icon.svelte';
-  import { SmilePlus } from '$lib/icons';
-
+  import { SmilePlus, ChevronDown, Plus } from '$lib/icons';
   interface Props {
     /** Emoji to offer, in order (the user's quick-reaction list). */
     emojis: readonly string[];
@@ -31,10 +30,9 @@
     </button>
   {/each}
   <button type="button" class="more" aria-label="More reactions" data-tooltip="More reactions" onclick={onmore}>
-    <Icon icon={SmilePlus} size={size === 'touch' ? 24 : 16} />
+    <Icon icon={size === 'touch' ? Plus : ChevronDown} size={size === 'touch' ? 24 : 16} />
   </button>
 </div>
-
 <style>
   .bar {
     display: flex;

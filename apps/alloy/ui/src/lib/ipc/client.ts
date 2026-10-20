@@ -386,6 +386,11 @@ export class AlloyClient {
     });
   }
 
+  /** Restart background sync and rebuild open timelines (the manual Refresh). */
+  async refreshSync() {
+    return this.transport.invoke({ action: 'RefreshSync' });
+  }
+
   async setRoomFavourite(room_id: RoomId, favourite: boolean) {
     return this.transport.invoke({
       action: 'SetRoomFavourite',

@@ -6,7 +6,7 @@
   import { client } from '$lib/ipc';
   import { prefs } from '$lib/stores/prefs.svelte';
   import Icon from '$lib/icons/Icon.svelte';
-  import { ChartBar, MapPin, Navigation, Paperclip, Plus, Send, Smile, Type, X } from '$lib/icons';
+  import { ChartBar, Image, MapPin, Navigation, Paperclip, Plus, Send, Smile, Type, X } from '$lib/icons';
   import {
     canPickFiles,
     importPastedImagePath,
@@ -17,6 +17,8 @@
     pickFiles,
     savePastedImage
   } from '$lib/platform/files';
+  import { nativeClipboardHasImage, nativeClipboardImage } from '$lib/platform/clipboardImage';
+  import { stagePictureFromPath } from './stageHelper';
   import { errorMessage } from '$lib/stores/errors';
   import { isVoiceMessagesSupported } from '$lib/platform/capabilities';
   import { canLocate } from '$lib/platform/geolocation';
@@ -319,6 +321,17 @@
   }
 
   $effect(() => () => dropPreviews(staged));
+  async function stageFromClipboard() {
+    const rawPath = nativeClipboardImage();
+    if (!rawPath) return;
+    try {
+      const picture = await stagePictureFromPath(rawPath);
+      if (picture) staged.push(picture);
+    } catch (err) {
+      timelineStore.error = errorMessage(err);
+    }
+  }
+
 
   async function onPaste(e: ClipboardEvent) {
     if (!canPickFiles() || threadRoot) return;
@@ -335,6 +348,13 @@
       return;
     }
     const pasted = e.clipboardData?.getData('text/plain') ?? '';
+    if (pasted === '' || (nativeClipboardHasImage() && pasted.trim() === '')) {
+      if (nativeClipboardHasImage()) {
+        e.preventDefault();
+        await stageFromClipboard();
+      }
+      return;
+    }
     if (!looksLikeFilePath(pasted)) return;
     // The decision to attach needs the shell, which answers after the paste event is over: take the text out
     // of the event now and put it back if it turns out not to be a picture.
@@ -448,11 +468,23 @@
   function openAttachMenu(e: MouseEvent) {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const file = { id: 'file', label: 'File', icon: Paperclip, onselect: () => void attach() };
+    const clipboard: MenuItem = {
+      id: 'clipboard-image',
+      label: 'Picture from clipboard',
+      icon: Image,
+      onselect: () => void stageFromClipboard(),
+    };
     const poll = { id: 'poll', label: 'Poll', icon: ChartBar, onselect: () => (pollOpen = true) };
     const place = canLocate() ? locationItems() : [];
-    contextMenu.open(canPickFiles() ? [file, poll, ...place] : [poll, ...place], { x: r.left, y: r.top });
+    const fileItems = canPickFiles()
+      ? nativeClipboardHasImage()
+        ? [file, clipboard]
+        : [file]
+      : nativeClipboardHasImage()
+        ? [clipboard]
+        : [];
+    contextMenu.open([...fileItems, poll, ...place], { x: r.left, y: r.top });
   }
-
   // Right-click on a composer button offers exactly the action that button performs.
   function attachMenu(): MenuItem[] {
     return [{ id: 'attach', label: 'Attach file', icon: Paperclip, onselect: () => void attach() }];

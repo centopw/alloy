@@ -5,9 +5,10 @@
   import TagChip from '../tags/TagChip.svelte';
   import TagEditDialog from '../tags/TagEditDialog.svelte';
   import Icon from '$lib/icons/Icon.svelte';
-  import { Archive, ArchiveRestore, ArrowUpDown, Bell, BellOff, Check, CheckCheck, ChevronDown, ChevronUp, Compass, Copy, Ellipsis, Info, LogOut, Lock, Mail, Palette, Pencil, Pin, PinOff, Plus, Search, Settings, StickyNote, Tag, Trash2, X } from '$lib/icons';
+  import { Archive, ArchiveRestore, ArrowUpDown, Bell, BellOff, Check, CheckCheck, ChevronDown, ChevronUp, Compass, Copy, Ellipsis, Info, LogOut, Lock, Mail, Palette, Pencil, Pin, PinOff, Plus, RefreshCw, Search, Settings, StickyNote, Tag, Trash2, X } from '$lib/icons';
   import { client } from '$lib/ipc';
   import { contextmenu } from '$lib/platform/contextmenu';
+  import { pullToRefresh } from '$lib/platform/pullToRefresh';
   import { shortcutLabel } from '$lib/platform/shortcuts';
   import { contextMenu, type MenuItem } from '$lib/stores/contextmenu.svelte';
   import { expect } from '$lib/stores/errors';
@@ -18,6 +19,7 @@
   import { displayTags, TAG_COLOUR_VARS, TAG_COLOURS } from '$lib/stores/tags';
   import { tags } from '$lib/stores/tags.svelte';
   import { connectivity } from '$lib/stores/connectivity.svelte';
+  import { refreshStore } from '$lib/stores/refresh.svelte';
   import UpdateNotice from '../updates/UpdateNotice.svelte';
   import { groupRoomsByTag, ROOM_SORTS, type RoomSort } from '$lib/stores/roomSort';
   import type { TagColour } from '$lib/generated';
@@ -497,6 +499,16 @@
 <section class="sidebar" aria-label="Rooms">
   <header class="head" use:contextmenu={paneItems}>
     <h2 class="scope" title={scopeTitle}>{viewport.isPhone ? 'Chats' : scopeTitle}</h2>
+    <button
+      type="button"
+      class="icon"
+      aria-label="Refresh"
+      data-tooltip={refreshStore.busy ? 'Refreshing' : `Refresh (${shortcutLabel('R')})`}
+      disabled={refreshStore.busy}
+      onclick={() => void refreshStore.run()}
+    >
+      <span class:spin={refreshStore.busy}><Icon icon={RefreshCw} size={viewport.isPhone ? 20 : 16} /></span>
+    </button>
     {#if !viewport.isPhone}
       <button type="button" class="icon" aria-label="Browse public rooms" onclick={() => onbrowse?.()}>
         <Icon icon={Compass} size={20} />
@@ -506,6 +518,12 @@
       <Icon icon={Plus} size={20} />
     </button>
   </header>
+
+  {#if refreshStore.busy}
+    <p class="refreshing" role="status">Refreshing&hellip;</p>
+  {:else if refreshStore.error && !connectivity.offline}
+    <p class="error" role="alert">{refreshStore.error}</p>
+  {/if}
 
   <div class="search">
     <Icon icon={Search} size={16} />
@@ -553,7 +571,7 @@
     <p class="error" role="alert">{tags.error}</p>
   {/if}
 
-  <div class="groups" use:contextmenu={paneItems}>
+  <div class="groups" use:contextmenu={paneItems} use:pullToRefresh={{ onrefresh: () => void refreshStore.run(), enabled: viewport.isPhone }}>
     {#if prefs.roomListSections}
       {#if invites.length > 0}
         <section class="group" aria-label="Invites">
@@ -996,6 +1014,26 @@
   .invite-actions button:disabled {
     opacity: 0.6;
     cursor: default;
+  }
+  .refreshing {
+    margin: 0;
+    padding: var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-3);
+    color: var(--alloy-color-text-muted);
+    font-size: var(--alloy-typography-size-sm);
+  }
+  .spin {
+    display: grid;
+    animation: sidebar-spin 900ms linear infinite;
+  }
+  @keyframes sidebar-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .spin {
+      animation: none;
+    }
   }
   .icon {
     display: grid;

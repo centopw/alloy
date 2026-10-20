@@ -81,6 +81,7 @@ class MainActivity : TauriActivity() {
   override fun onWebViewCreate(webView: WebView) {
     this.webView = webView
     webView.addJavascriptInterface(DownloadBridge(applicationContext), "AlloyAndroid")
+    webView.addJavascriptInterface(ClipboardBridge(applicationContext), "AlloyClipboard")
     pushBridge = PushBridge(this)
     webView.addJavascriptInterface(pushBridge, "AlloyPush")
 

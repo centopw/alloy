@@ -43,6 +43,7 @@ export { Bell } from '@lucide/svelte';
 export { LogOut } from '@lucide/svelte';
 export { MessageSquare } from '@lucide/svelte';
 export { Compass } from '@lucide/svelte';
+export { RefreshCw } from '@lucide/svelte';
 export { ChartBar } from '@lucide/svelte';
 export { House } from '@lucide/svelte';
 export { File } from '@lucide/svelte';

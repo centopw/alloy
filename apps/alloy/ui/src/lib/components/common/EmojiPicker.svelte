@@ -38,9 +38,13 @@
     onclose?: () => void;
     /** Focus the search field on mount (desktop). Phones leave the keyboard down. */
     autofocus?: boolean;
+    /** Called on phones when search input is focused or blurred. */
+    onsearchfocus?: (focused: boolean) => void;
+    /** Called on phones when search query becomes active or clears. */
+    onsearching?: (active: boolean) => void;
   }
 
-  let { onpick, onclose, autofocus = false }: Props = $props();
+  let { onpick, onclose, autofocus = false, onsearchfocus, onsearching }: Props = $props();
 
   /** A renderable emoji: the display glyph for the current tone plus its label. */
   interface Cell {
@@ -95,7 +99,26 @@
   /** Group keys whose emoji grids have been rendered; the rest show placeholders. */
   const rendered = new SvelteSet<string>();
 
+  let searchFocused = $state(false);
   const searching = $derived(query.trim() !== '');
+  const hideTabs = $derived(viewport.isPhone && (searchFocused || searching));
+
+  $effect(() => {
+    onsearching?.(searching);
+  });
+
+  function onSearchFocus() {
+    searchFocused = true;
+    onsearchfocus?.(true);
+    if (typeof window !== 'undefined' && (window.scrollX !== 0 || window.scrollY !== 0)) {
+      window.scrollTo(0, 0);
+    }
+  }
+
+  function onSearchBlur() {
+    searchFocused = false;
+    onsearchfocus?.(false);
+  }
 
   function toCell(entry: EmojiEntry): Cell {
     const shown = applySkinTone(entry, tone);
@@ -216,7 +239,7 @@
         if (live) loadFailed = true;
       }
     );
-    if (autofocus) searchEl?.focus();
+    if (autofocus) searchEl?.focus({ preventScroll: true });
     return () => {
       live = false;
     };
@@ -254,7 +277,7 @@
       case 'ArrowUp':
         if (index - columns < 0) {
           e.preventDefault();
-          searchEl?.focus();
+          searchEl?.focus({ preventScroll: true });
           return;
         }
         next = index - columns;
@@ -292,13 +315,13 @@
     if (e.key === '/' || (e.key.length === 1 && e.key !== ' ')) {
       e.preventDefault();
       if (e.key !== '/') query += e.key;
-      searchEl?.focus();
+      searchEl?.focus({ preventScroll: true });
     }
   }
 
   function clearSearch() {
     query = '';
-    searchEl?.focus();
+    searchEl?.focus({ preventScroll: true });
   }
 
   function openToneMenu(e: MouseEvent) {
@@ -329,7 +352,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="emoji-picker" onkeydown={onRootKey} role="dialog" aria-label="Emoji picker" tabindex="-1">
   <div class="top">
-    <div class="tabs" role="tablist" aria-label="Emoji categories">
+    <div class="tabs" role="tablist" aria-label="Emoji categories" class:hidden={hideTabs}>
       {#each tabs as tab (tab.key)}
         <button
           type="button"
@@ -356,6 +379,8 @@
         autocomplete="off"
         spellcheck={false}
         class="search-input"
+        onfocus={onSearchFocus}
+        onblur={onSearchBlur}
       />
       {#if query !== ''}
         <button
@@ -459,6 +484,7 @@
   .emoji-picker {
     display: flex;
     flex-direction: column;
+    flex: 1 1 0;
     min-height: 0;
     height: 100%;
     background: var(--alloy-color-surface-elevated);
@@ -468,6 +494,7 @@
   }
 
   .top {
+    flex: 0 0 auto;
     display: flex;
     flex-direction: column;
     gap: var(--alloy-spacing-scale-2);
@@ -482,6 +509,10 @@
     scrollbar-width: none;
   }
   .tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .tabs.hidden {
     display: none;
   }
 
@@ -541,7 +572,7 @@
 
   .scroller {
     position: relative;
-    flex: 1 1 auto;
+    flex: 1 1 0;
     min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
@@ -599,6 +630,7 @@
   }
 
   .footer {
+    flex: 0 0 auto;
     display: flex;
     align-items: center;
     justify-content: space-between;

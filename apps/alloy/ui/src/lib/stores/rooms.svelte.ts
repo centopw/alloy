@@ -167,6 +167,19 @@ class RoomsStore {
     if (id) await client.unsubscribe(id).catch(() => {});
   }
 
+  /**
+   * Rebuilds the room list subscription (the manual Refresh) and keeps the room that is open selected.
+   * `stop()` clears the selection and the list, so it is put back as soon as the restart has begun.
+   */
+  async restart() {
+    const activeId = this.activeRoomId;
+    const last = this.lastActive;
+    const started = this.start();
+    this.activeRoomId = activeId;
+    this.lastActive = last;
+    await started;
+  }
+
   select(roomId: string | null) {
     this.activeRoomId = roomId;
     this.lastActive = this.rooms.find((r) => r.id === roomId) ?? null;

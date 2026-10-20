@@ -121,7 +121,12 @@ try {
   const page = await browser.newPage();
   const MOBILE = process.env.E2E_MOBILE === '1';
   await page.setViewport(MOBILE ? { width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true } : { width: 1280, height: 800 });
-  page.on('pageerror', (e) => console.error('pageerror:', e.message));
+  // A page error is a bug even when every step passed: collect them and fail at the end.
+  const pageErrors = [];
+  page.on('pageerror', (e) => {
+    pageErrors.push(e.message);
+    console.error('pageerror:', e.message);
+  });
   page.on('console', (m) => ['error', 'warning', 'log'].includes(m.type()) && console.error('console:', m.text()));
   if (process.env.E2E_TRACE) {
     const cdp = await page.createCDPSession();
@@ -179,11 +184,22 @@ try {
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [pressAt] });
     await new Promise((r) => setTimeout(r, 800));
     await page.waitForSelector('.reaction-float button[aria-label^="React with"]', { visible: true, timeout: 5000 });
-    const floatBox = await page.$eval('.reaction-float', (el) => { const b = el.getBoundingClientRect(); return { l: b.left, r: b.right, t: b.top, b: b.bottom, sheetTop: document.querySelector('.context-menu.sheet')?.getBoundingClientRect().top ?? 0 }; });
-    if (floatBox.l < 0 || floatBox.r > 390 || floatBox.t < 0 || floatBox.b > floatBox.sheetTop) throw new Error(`reaction pill outside its area: ${JSON.stringify(floatBox)}`);
+    const floatBox = await page.$eval('.reaction-float', (el) => {
+      const b = el.getBoundingClientRect();
+      const bottomLimit = document.querySelector('.phone-action-bar, .context-menu.sheet')?.getBoundingClientRect().top ?? 780;
+      return { l: b.left, r: b.right, t: b.top, b: b.bottom, bottomLimit };
+    });
+    if (floatBox.l < 0 || floatBox.r > 390 || floatBox.t < 0 || floatBox.b > floatBox.bottomLimit) {
+      throw new Error(`reaction pill outside its area: ${JSON.stringify(floatBox)}`);
+    }
     await audit('2b-long-press');
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-    await page.evaluate(() => document.querySelector('.sheet-scrim')?.click()); await settle();
+    await page.waitForSelector('.reaction-float button[aria-label^="React with"]', { visible: true, timeout: 5000 });
+    const laugh = await page.evaluate(() => { const b = [...document.querySelectorAll('.reaction-float button[aria-label^="React with"]')].find((e) => e.textContent.includes('\u{1F602}')).getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; });
+    await page.touchscreen.tap(laugh.x, laugh.y);
+    await page.waitForFunction(() => !document.querySelector('.sheet-scrim'), { timeout: 5000 });
+    await page.waitForFunction(() => [...document.querySelectorAll('.row[data-event-id]')].find((e) => e.textContent.includes('Hi from bob'))?.querySelector('button[aria-label^="\u{1F602}"]'), { timeout: 20000 });
+    await settle();
     step('mobile: swipe a message to the right replies to it');
     const swipeAt = await page.evaluate(() => { const r = [...document.querySelectorAll('.row[data-event-id]')].find((e) => e.textContent.includes('Hi from bob')).getBoundingClientRect(); return { x: 60, y: r.y + r.height / 2 }; });
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [swipeAt] });
@@ -216,6 +232,7 @@ try {
     await page.evaluate(() => document.querySelector('button[aria-label="Back to settings"]').click()); await settle();
     await page.evaluate(() => [...document.querySelectorAll('[role=dialog] button')].find((b) => b.textContent.trim() === 'Help & About').click()); await settle();
     await audit('10-settings-about');
+    for (const message of new Set(pageErrors)) problems.push(`page error: ${message}`);
     if (problems.length) { console.log('MOBILE PROBLEMS (' + problems.length + '):\n' + [...new Set(problems)].join('\n')); }
     console.log(problems.length ? 'E2E MOBILE AUDIT FAILED' : 'E2E OK (mobile audit)');
     await browser.close(); server.close(); bridge.kill(); fs.rmSync(dataDir, { recursive: true, force: true });
@@ -282,6 +299,7 @@ try {
   await page.waitForFunction(() => document.body.innerText.includes('live ping alloy-live'), { timeout: 60000 });
 
   step('read receipts: the tick doubles once the other user has read my message');
+  await page.waitForFunction(() => document.querySelector('.row.own[data-event-id]'), { timeout: 30000 });
   const ownEventId = await page.evaluate(() => [...document.querySelectorAll('.row.own[data-event-id]')].pop().dataset.eventId);
   await page.waitForFunction(() => document.querySelector('.row.own[data-event-id] .tick'), { timeout: 30000 });
   await api(`/rooms/${encodeURIComponent(room.room_id)}/receipt/m.read/${encodeURIComponent(ownEventId)}`, {}, v.token);
@@ -673,6 +691,28 @@ try {
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => !document.querySelector('[role=dialog]'), { timeout: 10000 });
 
+  step('right-click a message: the reaction strip above the menu applies a reaction');
+  await openRoom('From Bob');
+  await page.waitForFunction(() => [...document.querySelectorAll('.row[data-event-id]')].some((e) => e.textContent.includes('live ping alloy-live')), { timeout: 30000 });
+  const liveBox = await page.evaluate(() => { const r = [...document.querySelectorAll('.row[data-event-id]')].find((e) => e.textContent.includes('live ping alloy-live')).querySelector('.body').getBoundingClientRect(); return { x: r.x + 20, y: r.y + r.height / 2 }; });
+  await page.mouse.click(liveBox.x, liveBox.y, { button: 'right' });
+  await page.waitForSelector('.desktop-reaction-strip button[aria-label^="React with"]', { visible: true, timeout: 5000 });
+  await page.evaluate(() => [...document.querySelectorAll('.desktop-reaction-strip button[aria-label^="React with"]')].find((e) => e.textContent.includes('\u{1F62E}')).click());
+  await page.waitForFunction(() => [...document.querySelectorAll('.row[data-event-id]')].find((e) => e.textContent.includes('live ping alloy-live'))?.querySelector('button[aria-label^="\u{1F62E}"]'), { timeout: 20000 });
+
+  step('refresh: restart sync from the header button; the open chat stays open and later messages still arrive');
+  await openRoom('From Bob');
+  await page.click('button[aria-label="Refresh"]');
+  await page.waitForFunction(() => !document.querySelector('.refreshing') && !document.querySelector('button[aria-label="Refresh"]')?.disabled, { timeout: 30000 });
+  await page.waitForSelector('button[aria-label="Room info for From Bob"]', { timeout: 15000 });
+  await page.waitForFunction(() => document.body.innerText.includes('live ping alloy-live'), { timeout: 30000 });
+  await fetch(`${HS}/_matrix/client/v3/rooms/${encodeURIComponent(room.room_id)}/send/m.room.message/live2`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${v.token}` },
+    body: JSON.stringify({ msgtype: 'm.text', body: 'after refresh alloy-refresh' }),
+  });
+  await page.waitForFunction(() => document.body.innerText.includes('after refresh alloy-refresh'), { timeout: 60000 });
+
   step('settings open and sign out returns to onboarding');
   await page.click('button[aria-label="Settings"]');
   await new Promise((r) => setTimeout(r, 600));
@@ -715,6 +755,7 @@ try {
   await uxShot(page, 'settings-account');
   await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Sign out').click());
   await page.waitForSelector('input[placeholder*="matrix.org"]', { timeout: 30000 });
+  if (pageErrors.length) throw new Error(`the page reported ${pageErrors.length} error(s): ${[...new Set(pageErrors)].join(' | ')}`);
   console.log('E2E OK');
 } catch (e) {
   failed = e;
@@ -723,7 +764,7 @@ try {
   console.error('E2E FAILED:', e.message, `[at ${where || 'unknown step'}]`, frames.slice(1, 4).join(' | '));
   try {
     const pages = await browser.pages();
-    const text = await pages[pages.length - 1].evaluate(() => `${document.querySelectorAll('.album .tile').length} album tiles; dialogs: ${JSON.stringify([...document.querySelectorAll('[role=dialog]')].map((d) => d.innerText.replace(/\s+/g, ' ').slice(0, 200)))}; page: ${document.body.innerText.replace(/\s+/g, ' ').slice(0, 800)}`);
+    const text = await pages[pages.length - 1].evaluate(() => `${document.querySelectorAll('.album .tile').length} album tiles; rows=${document.querySelectorAll('.row[data-event-id]').length} own=${document.querySelectorAll('.row.own[data-event-id]').length}; timeline: ${(document.querySelector('section.timeline')?.innerText ?? '').replace(/\s+/g, ' ').slice(0, 500)}; dialogs: ${JSON.stringify([...document.querySelectorAll('[role=dialog]')].map((d) => d.innerText.replace(/\s+/g, ' ').slice(0, 200)))}; page: ${document.body.innerText.replace(/\s+/g, ' ').slice(0, 300)}`);
     console.error('E2E page:', text);
   } catch {}
   try {

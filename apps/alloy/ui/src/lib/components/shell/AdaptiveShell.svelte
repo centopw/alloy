@@ -45,6 +45,7 @@
   import { focusComposer, shouldFocusComposer } from '$lib/platform/typeToFocus';
   import { extractOpenRoomId, setPushPreview, takePendingRoom } from '$lib/platform/push';
   import { pushStore } from '$lib/stores/push.svelte';
+  import { refreshStore } from '$lib/stores/refresh.svelte';
   import ChangelogDialog from '$lib/components/updates/ChangelogDialog.svelte';
 
   let paletteOpen = $state(false);
@@ -240,6 +241,10 @@
     } else if (mod && e.key === ',') {
       e.preventDefault();
       openSettings();
+    } else if ((mod && e.key.toLowerCase() === 'r') || e.key === 'F5') {
+      // A page reload would drop the engine connection state; refresh sync and the open chat instead.
+      e.preventDefault();
+      void refreshStore.run();
     }
   }
 </script>

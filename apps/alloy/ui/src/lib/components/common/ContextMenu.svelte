@@ -1,10 +1,10 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
   import Icon from '$lib/icons/Icon.svelte';
-  import { Check, ChevronLeft, ChevronRight, Plus } from '$lib/icons';
+  import { Check, ChevronLeft, ChevronRight, Ellipsis, Plus } from '$lib/icons';
   import { portal } from '$lib/platform/portal';
   import { pushBack } from '$lib/platform/backstack';
-  import { placeAnchor, placeFlyout, placeMenu, placeReactionBar } from '$lib/platform/contextmenu';
+  import { placeAnchor, placeDesktopReactionStrip, placeFlyout, placeMenu, placeReactionBar } from '$lib/platform/contextmenu';
   import {
     contextMenu,
     isSeparator,
@@ -14,6 +14,7 @@
     type MenuAction,
     type MenuAnchor,
     type MenuItem,
+    type MenuOptions,
     type MenuPoint,
     type MenuSearchCreate,
     type MenuSubmenu,
@@ -30,6 +31,9 @@
   const ROW_SELECTOR = '.row:not([aria-disabled="true"])';
 
   const CANCEL: MenuAction = { id: 'cancel', label: 'Cancel' };
+
+  /** Stand-in while the menu closes: its options are cleared before the blocks that read them are removed. */
+  const NO_REACTIONS: NonNullable<MenuOptions['reactions']> = { emojis: [], active: [], onpick: () => {}, onmore: () => {} };
 
   /** A submenu flyout. `levels[k]` is opened from a row at depth k and is displayed at depth k + 1. */
   interface Flyout {
@@ -67,6 +71,11 @@
   /** Panel element per depth. Not reactive: only used by handlers and placement. */
   const menuEls = new Map<number, HTMLElement>();
   let scrimEl: HTMLDivElement | undefined = $state();
+  let bottomBarEl = $state<HTMLElement | undefined>();
+  let desktopStripEl = $state<HTMLElement | undefined>();
+  let showFullSheet = $state(false);
+  let openedAt = $state(0);
+  let pointerupAfterOpen = $state(false);
   let typed = '';
   let typedTimer: number | null = null;
   let hoverTimer: number | null = null;
@@ -139,6 +148,12 @@
       } else {
         p = placeMenu(contextMenu.at, size, screen);
       }
+      if (!parent && !viewport.isPhone && contextMenu.options?.reactions) {
+        const stripSpace = 44;
+        if (p.y < stripSpace + 8) {
+          p.y = Math.min(screen.height - size.height - 8, stripSpace + 8);
+        }
+      }
       node.style.left = `${p.x}px`;
       node.style.top = `${p.y}px`;
     };
@@ -160,7 +175,9 @@
     const apply = async () => {
       await tick();
       if (!live) return;
-      const sheetHeight = menuEls.get(0)?.offsetHeight ?? 0;
+      const sheetHeight = showFullSheet || !contextMenu.options?.phoneBar
+        ? (menuEls.get(0)?.offsetHeight ?? 0)
+        : (bottomBarEl?.offsetHeight ?? 72);
       const inset = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--alloy-safe-area-top')) || 0;
       const screen = { width: window.innerWidth, height: window.innerHeight };
       const target = anchor ?? { x: 0, y: screen.height / 2, width: screen.width, height: 0 };
@@ -177,6 +194,34 @@
     return {
       update(next: MenuAnchor | undefined) {
         anchor = next;
+        void apply();
+      },
+      destroy() {
+        live = false;
+      },
+    };
+  }
+
+  /** Desktop: float the quick-reaction strip directly above the root menu card. */
+  function placeDesktopStrip(node: HTMLElement) {
+    let live = true;
+    const apply = async () => {
+      await tick();
+      if (!live) return;
+      const card = menuEls.get(0);
+      if (!card) return;
+      const cardRect = card.getBoundingClientRect();
+      const cardPoint = { x: cardRect.left, y: cardRect.top };
+      const cardSize = { width: cardRect.width, height: cardRect.height };
+      const stripSize = { width: node.offsetWidth, height: node.offsetHeight };
+      const screen = { width: window.innerWidth, height: window.innerHeight };
+      const p = placeDesktopReactionStrip(cardPoint, cardSize, stripSize, screen);
+      node.style.left = `${p.x}px`;
+      node.style.top = `${p.y}px`;
+    };
+    void apply();
+    return {
+      update() {
         void apply();
       },
       destroy() {
@@ -429,15 +474,42 @@
     void contextMenu.items;
     void contextMenu.isOpen;
     untrack(() => trimLevels(0));
-    if (!contextMenu.isOpen) return;
+    if (!contextMenu.isOpen) {
+      showFullSheet = false;
+      openedAt = 0;
+      pointerupAfterOpen = false;
+      return;
+    }
+    showFullSheet = false;
+    openedAt = Date.now();
+    pointerupAfterOpen = false;
+    const onWindowPointerUp = () => {
+      pointerupAfterOpen = true;
+      window.removeEventListener('pointerup', onWindowPointerUp, true);
+    };
+    window.addEventListener('pointerup', onWindowPointerUp, true);
     tick().then(() => focusEntry(0));
+    return () => {
+      window.removeEventListener('pointerup', onWindowPointerUp, true);
+    };
   });
 
   // Keep the Android Back button closing the menu before leaving the app (phone layouts only).
   $effect(() => {
     if (!contextMenu.isOpen) return;
-    return pushBack(() => contextMenu.close());
+    return pushBack(() => {
+      if (viewport.isPhone && showFullSheet && contextMenu.options?.phoneBar) {
+        showFullSheet = false;
+      } else {
+        contextMenu.close();
+      }
+    });
   });
+
+  function onScrimClick() {
+    if (Date.now() - openedAt < 200 && !pointerupAfterOpen) return;
+    contextMenu.close();
+  }
 
   // Dismissal while open: Escape and Tab from the keyboard; outside press, scroll, blur, resize.
   // Pointer and scroll inside any panel (root or flyout) do not dismiss.
@@ -488,147 +560,219 @@
 {#if contextMenu.isOpen}
   {#if viewport.isPhone}
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-    <div class="sheet-scrim" bind:this={scrimEl} use:portal onclick={() => contextMenu.close()}></div>
-  {/if}
-  {#each renderedLevels as depth (depth)}
-    {@const f = depth > 0 ? levels[depth - 1] : undefined}
-    {@const search = f?.sub.search}
-    {@const view = panelView(depth)}
     <div
-      class="context-menu"
-      class:sheet={viewport.isPhone}
-      class:drilled={viewport.isPhone && depth > 0}
-      class:flyout={!viewport.isPhone && depth > 0}
-      role="menu"
-      tabindex="-1"
-      aria-label={f ? f.label : (contextMenu.options?.ariaLabel ?? 'Actions')}
-      data-context-menu
-      style:max-height={!viewport.isPhone && f
-        ? `min(${f.sub.maxHeight ?? FLYOUT_MAX_HEIGHT}px, calc(100dvh - 16px))`
-        : undefined}
+      class="sheet-scrim"
+      class:spotlight-scrim={!!contextMenu.options?.spotlight}
+      bind:this={scrimEl}
       use:portal
-      use:placeLevel={{ depth, rows: view.rows }}
-      onpointerenter={cancelHover}
-    >
-      {#if depth === 0 && !viewport.isPhone && contextMenu.options?.reactions}
-        {@const reactions = contextMenu.options.reactions}
-        <div class="reaction-bar" role="none">
-          <QuickReactions
-            emojis={reactions.emojis}
-            active={reactions.active}
-            size={viewport.isPhone ? 'touch' : 'compact'}
-            onpick={(emoji) => {
-              contextMenu.close();
-              reactions.onpick(emoji);
-            }}
-            onmore={() => {
-              contextMenu.close();
-              reactions.onmore();
-            }}
-          />
-        </div>
-        <div class="separator" role="separator"></div>
-      {/if}
+      onclick={onScrimClick}
+    ></div>
+    {#if contextMenu.options?.spotlight}
+      {@const spot = contextMenu.options?.spotlight ?? { x: 0, y: 0, width: 0, height: 0 }}
+      <div
+        class="spotlight"
+        data-context-menu
+        use:portal
+        style:left="{spot.x}px"
+        style:top="{spot.y}px"
+        style:width="{spot.width}px"
+        style:height="{spot.height}px"
+      ></div>
+    {/if}
+  {/if}
 
-      {#if viewport.isPhone && f}
-        <div
-          class="item back"
-          role="menuitem"
-          tabindex="-1"
-          onclick={() => closeLevel(depth)}
-          onpointermove={focusOnMove}
-          onkeydown={(e) => onChromeKeydown(e, depth, () => closeLevel(depth))}
-        >
-          <span class="icon"><Icon icon={ChevronLeft} size={20} /></span>
-          <span class="label">{f.label}</span>
-        </div>
-        <div class="separator" role="separator"></div>
-      {/if}
-
-      {#if search}
-        <div class="search" role="none">
-          <TextField
-            placeholder={search.placeholder}
-            aria-label={search.placeholder}
-            autocomplete="off"
-            value={f?.query ?? ''}
-            oninput={(e) => onSearchInput(depth, e.currentTarget.value)}
-            onkeydown={(e) => onSearchKeydown(e, depth)}
-          />
-        </div>
-      {/if}
-
-      {#if view.rows.length === 0}
-        <div class="empty" role="none">{view.query ? 'No matches' : 'Nothing to show'}</div>
-      {/if}
-
-      {#each view.rows as item, i (i)}
-        {#if isSeparator(item)}
-          <div class="separator" role="separator"></div>
-        {:else}
+  {#if !viewport.isPhone || !contextMenu.options?.phoneBar || showFullSheet}
+    {#each renderedLevels as depth (depth)}
+      {@const f = depth > 0 ? levels[depth - 1] : undefined}
+      {@const search = f?.sub.search}
+      {@const view = panelView(depth)}
+      <div
+        class="context-menu"
+        class:sheet={viewport.isPhone}
+        class:drilled={viewport.isPhone && depth > 0}
+        class:flyout={!viewport.isPhone && depth > 0}
+        role="menu"
+        tabindex="-1"
+        aria-label={f ? f.label : (contextMenu.options?.ariaLabel ?? 'Actions')}
+        data-context-menu
+        style:max-height={!viewport.isPhone && f
+          ? `min(${f.sub.maxHeight ?? FLYOUT_MAX_HEIGHT}px, calc(100dvh - 16px))`
+          : undefined}
+        use:portal
+        use:placeLevel={{ depth, rows: view.rows }}
+        onpointerenter={cancelHover}
+      >
+        {#if viewport.isPhone && f}
           <div
-            class="item row"
-            class:danger={item.danger}
-            class:disabled={item.disabled}
-            class:selected={item.selected}
-            role={item.selected !== undefined ? 'menuitemradio' : 'menuitem'}
+            class="item back"
+            role="menuitem"
             tabindex="-1"
-            aria-checked={item.selected !== undefined ? (item.selected ? 'true' : 'false') : undefined}
-            aria-disabled={item.disabled ? 'true' : undefined}
-            aria-keyshortcuts={item.shortcut}
-            aria-haspopup={isSubmenuAction(item) ? 'menu' : undefined}
-            aria-expanded={isSubmenuAction(item)
-              ? (levels[depth]?.parentIndex === i ? 'true' : 'false')
-              : undefined}
-            onclick={(e) => clickRow(e, depth, i, item)}
-            onpointerenter={(e) => enterRow(e, depth, i, item)}
+            onclick={() => closeLevel(depth)}
             onpointermove={focusOnMove}
-            onkeydown={(e) => onRowKeydown(e, depth, i, item)}
+            onkeydown={(e) => onChromeKeydown(e, depth, () => closeLevel(depth))}
           >
-            {#if item.icon}
-              <span class="icon"><Icon icon={item.icon} size={viewport.isPhone ? 20 : 16} /></span>
-            {/if}
-            <span class="label">{item.label}</span>
-            {#if isSubmenuAction(item)}
-              <span class="chevron"><Icon icon={ChevronRight} size={16} /></span>
-            {:else if item.shortcut}
-              <kbd class="shortcut">{item.shortcut}</kbd>
-            {:else if item.selected}
-              <span class="check"><Icon icon={Check} size={viewport.isPhone ? 20 : 16} /></span>
-            {/if}
+            <span class="icon"><Icon icon={ChevronLeft} size={20} /></span>
+            <span class="label">{f.label}</span>
+          </div>
+          <div class="separator" role="separator"></div>
+        {/if}
+
+        {#if search}
+          <div class="search" role="none">
+            <TextField
+              placeholder={search.placeholder}
+              aria-label={search.placeholder}
+              autocomplete="off"
+              value={f?.query ?? ''}
+              oninput={(e) => onSearchInput(depth, e.currentTarget.value)}
+              onkeydown={(e) => onSearchKeydown(e, depth)}
+            />
           </div>
         {/if}
-      {/each}
 
-      {#if viewport.isPhone}
-        <div class="separator" role="separator"></div>
-        <div
-          class="item cancel"
-          role="menuitem"
-          tabindex="-1"
-          onclick={() => selectByPointer(CANCEL)}
-          onpointermove={focusOnMove}
-          onkeydown={(e) => onChromeKeydown(e, depth, () => selectByPointer(CANCEL))}
-        >
-          <span class="label">Cancel</span>
-        </div>
-      {/if}
+        {#if view.rows.length === 0}
+          <div class="empty" role="none">{view.query ? 'No matches' : 'Nothing to show'}</div>
+        {/if}
+
+        {#each view.rows as item, i (i)}
+          {#if isSeparator(item)}
+            <div class="separator" role="separator"></div>
+          {:else}
+            <div
+              class="item row"
+              class:danger={item.danger}
+              class:disabled={item.disabled}
+              class:selected={item.selected}
+              role={item.selected !== undefined ? 'menuitemradio' : 'menuitem'}
+              tabindex="-1"
+              aria-checked={item.selected !== undefined ? (item.selected ? 'true' : 'false') : undefined}
+              aria-disabled={item.disabled ? 'true' : undefined}
+              aria-keyshortcuts={item.shortcut}
+              aria-haspopup={isSubmenuAction(item) ? 'menu' : undefined}
+              aria-expanded={isSubmenuAction(item)
+                ? (levels[depth]?.parentIndex === i ? 'true' : 'false')
+                : undefined}
+              onclick={(e) => clickRow(e, depth, i, item)}
+              onpointerenter={(e) => enterRow(e, depth, i, item)}
+              onpointermove={focusOnMove}
+              onkeydown={(e) => onRowKeydown(e, depth, i, item)}
+            >
+              {#if item.icon}
+                <span class="icon"><Icon icon={item.icon} size={viewport.isPhone ? 20 : 16} /></span>
+              {/if}
+              <span class="label">{item.label}</span>
+              {#if isSubmenuAction(item)}
+                <span class="chevron"><Icon icon={ChevronRight} size={16} /></span>
+              {:else if item.shortcut}
+                <kbd class="shortcut">{item.shortcut}</kbd>
+              {:else if item.selected}
+                <span class="check"><Icon icon={Check} size={viewport.isPhone ? 20 : 16} /></span>
+              {/if}
+            </div>
+          {/if}
+        {/each}
+
+        {#if viewport.isPhone}
+          <div class="separator" role="separator"></div>
+          <div
+            class="item cancel"
+            role="menuitem"
+            tabindex="-1"
+            onclick={() => selectByPointer(CANCEL)}
+            onpointermove={focusOnMove}
+            onkeydown={(e) => onChromeKeydown(e, depth, () => selectByPointer(CANCEL))}
+          >
+            <span class="label">Cancel</span>
+          </div>
+        {/if}
+      </div>
+    {/each}
+  {/if}
+
+  {#if viewport.isPhone && contextMenu.options?.phoneBar && !showFullSheet}
+    <div
+      class="phone-action-bar"
+      bind:this={bottomBarEl}
+      role="group"
+      aria-label="Message actions"
+      data-context-menu
+      use:portal
+    >
+      {#each contextMenu.options?.phoneBar ?? [] as item, i (i)}
+        {#if !isSeparator(item)}
+          <button
+            type="button"
+            class="bar-button"
+            class:danger={item.danger}
+            disabled={item.disabled}
+            onclick={() => selectByPointer(item)}
+          >
+            {#if item.icon}
+              <span class="icon"><Icon icon={item.icon} size={24} /></span>
+            {/if}
+            <span class="label">{item.label}</span>
+          </button>
+        {/if}
+      {/each}
+      <button
+        type="button"
+        class="bar-button"
+        aria-label="More"
+        onclick={() => {
+          showFullSheet = true;
+        }}
+      >
+        <span class="icon"><Icon icon={Ellipsis} size={24} /></span>
+        <span class="label">More</span>
+      </button>
     </div>
-  {/each}
+  {/if}
+
   {#if viewport.isPhone && levels.length === 0 && contextMenu.options?.reactions}
-    {@const reactions = contextMenu.options.reactions}
+    {@const reactions = contextMenu.options?.reactions ?? NO_REACTIONS}
     <div class="reaction-float" role="none" data-context-menu use:portal use:placeFloat={reactions.anchor}>
       <QuickReactions
         emojis={reactions.emojis}
         active={reactions.active}
         size="touch"
         onpick={(emoji) => {
+          // Read the handler first: closing clears the options, and `reactions` follows them.
+          const pick = reactions.onpick;
           contextMenu.close();
-          reactions.onpick(emoji);
+          pick(emoji);
         }}
         onmore={() => {
+          const more = reactions.onmore;
           contextMenu.close();
-          reactions.onmore();
+          more();
+        }}
+      />
+    </div>
+  {/if}
+
+  {#if !viewport.isPhone && contextMenu.options?.reactions}
+    {@const reactions = contextMenu.options?.reactions ?? NO_REACTIONS}
+    <div
+      class="desktop-reaction-strip"
+      role="toolbar"
+      aria-label="Quick reactions"
+      data-context-menu
+      use:portal
+      use:placeDesktopStrip
+    >
+      <QuickReactions
+        emojis={reactions.emojis}
+        active={reactions.active}
+        size="compact"
+        onpick={(emoji) => {
+          const pick = reactions.onpick;
+          contextMenu.close();
+          pick(emoji);
+        }}
+        onmore={() => {
+          const more = reactions.onmore;
+          contextMenu.close();
+          more();
         }}
       />
     </div>
@@ -742,9 +886,6 @@
     background: var(--alloy-color-border-subtle);
   }
 
-  .reaction-bar {
-    padding: var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-1);
-  }
 
   /* Phone: the quick reactions float beside the pressed message as a pill, above the action sheet. */
   .reaction-float {
@@ -818,6 +959,83 @@
     background: var(--alloy-color-scrim);
     animation: alloy-fade-in var(--alloy-motion-duration-normal) ease-out backwards;
   }
+  .sheet-scrim.spotlight-scrim {
+    background: transparent;
+  }
+
+  .spotlight {
+    position: fixed;
+    z-index: 109;
+    border-radius: var(--alloy-radii-md);
+    box-shadow: 0 0 0 9999px var(--alloy-color-scrim);
+    pointer-events: none;
+  }
+
+  .phone-action-bar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 110;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--alloy-spacing-scale-2);
+    padding: var(--alloy-spacing-scale-3) var(--alloy-spacing-scale-4)
+      calc(var(--alloy-spacing-scale-3) + var(--alloy-safe-area-bottom));
+    background: var(--alloy-color-surface-panel);
+    border-top: 1px solid var(--alloy-color-border-subtle);
+    border-radius: var(--alloy-radii-lg) var(--alloy-radii-lg) 0 0;
+    box-shadow: var(--alloy-elevation-lg);
+    animation: alloy-action-sheet-up var(--alloy-motion-duration-normal) ease-out backwards;
+  }
+  .bar-button {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-height: 48px;
+    padding: var(--alloy-spacing-scale-1) 0;
+    border: 0;
+    border-radius: var(--alloy-radii-md);
+    background: transparent;
+    color: var(--alloy-color-text-primary);
+    font-family: var(--alloy-typography-font-family-sans);
+    font-size: var(--alloy-typography-size-xs);
+    font-weight: var(--alloy-typography-weight-medium);
+    cursor: pointer;
+    outline: none;
+    user-select: none;
+  }
+  .bar-button:active,
+  .bar-button:focus-visible {
+    background: var(--alloy-color-surface-hover);
+  }
+  .bar-button.danger {
+    color: var(--alloy-color-status-error);
+  }
+  .bar-button .icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--alloy-color-accent-primary);
+  }
+
+  .desktop-reaction-strip {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 110;
+    display: inline-flex;
+    align-items: center;
+    padding: var(--alloy-spacing-scale-1);
+    border: 1px solid var(--alloy-color-border-prominent);
+    border-radius: var(--alloy-radii-full);
+    background: var(--alloy-color-surface-elevated);
+    box-shadow: var(--alloy-elevation-lg);
+    animation: alloy-fade-in var(--alloy-motion-duration-normal) ease-out backwards;
+  }
+
 
   @keyframes alloy-fade-in {
     from {

@@ -48,7 +48,8 @@
   import type { RoomMemberDto } from '$lib/generated';
   import { Avatar, Button, ConfirmDialog, SegmentedControl, TextArea, TextField, UserName } from '../common';
   import { copyItems, notifyItems, notifyLabel, openMenuFrom, roomPictureItems } from './roomMenus';
-  import MediaViewer, { fetchMediaFile } from '../timeline/MediaViewer.svelte';
+  import { fetchMediaFile } from '$lib/content/mediaFetch';
+  import MediaViewer from '../timeline/MediaViewer.svelte';
 
   type MediaView = 'media' | 'files' | 'links';
   type View = 'overview' | MediaView | 'members';

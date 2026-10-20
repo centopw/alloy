@@ -5,7 +5,8 @@
   import { localFileUrl } from '$lib/platform/files';
   import { prefs } from '$lib/stores/prefs.svelte';
   import { viewerItemsFrom, indexOfEvent } from '$lib/content/mediaItems';
-  import MediaViewer, { fetchMediaFile } from './MediaViewer.svelte';
+  import { fetchMediaFile } from '$lib/content/mediaFetch';
+  import MediaViewer from './MediaViewer.svelte';
 
   interface Props {
     uri: string;

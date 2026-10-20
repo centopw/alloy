@@ -1668,6 +1668,10 @@ export class MockTransport implements Transport {
         return { type: 'AllMessagesFound', payload: { hits, next_batch: null } };
       }
 
+      case 'RefreshSync': {
+        return { type: 'SyncRefreshed' };
+      }
+
       default: {
         const _exhaustive: never = command;
         throw new Error(`Unhandled command: ${JSON.stringify(_exhaustive)}`);

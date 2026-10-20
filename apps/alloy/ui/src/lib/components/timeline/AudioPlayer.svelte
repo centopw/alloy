@@ -25,7 +25,7 @@
   import { Pause, Play } from '$lib/icons';
   import { prefs, type VoiceSpeed } from '$lib/stores/prefs.svelte';
   import { barIndexAt, downsample, fallbackBars } from '$lib/content/waveform';
-  import { fetchMediaFile } from './MediaViewer.svelte';
+  import { fetchMediaFile } from '$lib/content/mediaFetch';
 
   interface Props {
     uri: string;

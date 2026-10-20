@@ -26,6 +26,8 @@
   import { firstPreviewUrl } from '$lib/content/urls';
   import { errorMessage } from '$lib/stores/errors';
   import { profileCard } from '$lib/stores/profileCard.svelte';
+  import { canCopyImage, copyImageFromUrl } from '$lib/platform/clipboard';
+  import { fetchMediaFile } from '$lib/content/mediaFetch';
   import type { MenuItem, MenuOptions } from '$lib/stores/contextmenu.svelte';
   import MediaView from './MediaView.svelte';
   import AudioPlayer from './AudioPlayer.svelte';
@@ -95,6 +97,12 @@
   const canEdit = $derived(item.is_own && kind === 'TextMessage' && !!item.event_id);
   const canAct = $derived(!!item.event_id && (kind === 'TextMessage' || kind === 'Media' || kind === 'Location'));
   const canCopy = $derived(kind === 'TextMessage');
+  const isImageMedia = $derived(
+    item.content.kind === 'Media' &&
+      (['image', 'sticker'].includes(item.content.data.media_kind ?? '') ||
+        (item.content.data.mime_type && item.content.data.mime_type.startsWith('image/')))
+  );
+  const canCopyPicture = $derived(isImageMedia && canCopyImage());
   const canDownload = $derived(kind === 'Media' && canDownloadMedia());
   const highlighted = $derived(!!item.event_id && timelineStore.highlightedEventId === item.event_id);
   const roomDetails = $derived(membersStore.detailsOf(timelineStore.roomId));
@@ -192,17 +200,71 @@
     interceptLinks(e);
   }
 
-  /** Reaction bar of the message menu, for messages that can be reacted to. */
+  /** Reaction bar and mobile quick actions of the message menu. */
   function menuOptions(): MenuOptions | undefined {
     if (!canAct) return undefined;
+    const bubble = rowEl?.querySelector<HTMLElement>('.bubble, .media, .body') ?? rowEl;
+    const bubbleRect = bubble?.getBoundingClientRect();
+    const rowRect = rowEl?.getBoundingClientRect();
+    const anchor = bubbleRect
+      ? {
+          x: bubbleRect.left,
+          y: bubbleRect.top,
+          width: bubbleRect.width,
+          height: bubbleRect.height,
+          align: item.is_own ? ('right' as const) : ('left' as const),
+        }
+      : undefined;
+    const spotlight = rowRect
+      ? {
+          x: rowRect.left,
+          y: rowRect.top,
+          width: rowRect.width,
+          height: rowRect.height,
+        }
+      : undefined;
+
+    const phoneBar: MenuItem[] = [];
+    if (canAct && !inThread) {
+      phoneBar.push({ id: 'reply', label: 'Reply', icon: Reply, onselect: () => timelineStore.startReply(item) });
+    }
+
+    if (canCopy) {
+      phoneBar.push({ id: 'copy', label: 'Copy', icon: Copy, onselect: () => void navigator.clipboard.writeText(quote(item)) });
+    } else if (canCopyPicture) {
+      phoneBar.push({ id: 'copy-picture', label: 'Copy', icon: Copy, onselect: () => void copyPictureItem() });
+    } else if (canPin && item.event_id && timelineStore.roomId) {
+      const roomId = timelineStore.roomId;
+      const eventId = item.event_id;
+      phoneBar.push(
+        pinned
+          ? { id: 'unpin', label: 'Unpin', icon: PinOff, onselect: () => void pinsStore.setPinned(roomId, eventId, false) }
+          : { id: 'pin', label: 'Pin', icon: Pin, onselect: () => void pinsStore.setPinned(roomId, eventId, true) },
+      );
+    } else if (canDownload) {
+      phoneBar.push({ id: 'download', label: 'Download', icon: Download, onselect: downloadMediaItem });
+    }
+
+    if (canAct && !inThread) {
+      phoneBar.push({
+        id: 'forward',
+        label: 'Forward',
+        icon: Forward,
+        onselect: () => item.event_id && timelineStore.roomId && forwardStore.begin(timelineStore.roomId, [item.event_id]),
+      });
+    }
+
     return {
       reactions: {
         emojis: prefs.quickReactions,
         active: myReactions,
         onpick: reactWith,
         onmore: () => rowEl && openReactions(rowEl.getBoundingClientRect()),
-        anchor: rowEl?.getBoundingClientRect(),
+        anchor,
       },
+      anchor,
+      spotlight,
+      phoneBar,
     };
   }
 
@@ -244,43 +306,88 @@
     });
   }
 
+  async function copyPictureItem() {
+    if (item.content.kind !== 'Media') return;
+    try {
+      const { uri, mime_type } = item.content.data;
+      const url = await fetchMediaFile(uri, mime_type);
+      await copyImageFromUrl(url);
+    } catch (err: unknown) {
+      timelineStore.error = errorMessage(err);
+    }
+  }
+
   /** Context-menu entries for this message. Groups that do not apply are omitted, not disabled. */
   function menuItems(): MenuItem[] {
-    const replies: MenuItem[] = [];
+    const actions: MenuItem[] = [];
+
+    // 1. Reply
     if (canAct && !inThread) {
-      replies.push({ id: 'reply', label: 'Reply', icon: Reply, onselect: () => timelineStore.startReply(item) });
-      replies.push({ id: 'forward', label: 'Forward', icon: Forward, onselect: () => item.event_id && timelineStore.roomId && forwardStore.begin(timelineStore.roomId, [item.event_id]) });
-      replies.push({ id: 'thread', label: 'Reply in thread', icon: MessageSquare, onselect: openThread });
+      actions.push({ id: 'reply', label: 'Reply', icon: Reply, onselect: () => timelineStore.startReply(item) });
+      actions.push({ id: 'thread', label: 'Reply in thread', icon: MessageSquare, onselect: openThread });
     }
 
-    const copies: MenuItem[] = [];
-    if (canCopy) copies.push({ id: 'copy-text', label: 'Copy text', icon: Copy, onselect: () => void navigator.clipboard.writeText(quote(item)) });
-    copies.push({ id: 'copy-sender', label: 'Copy sender ID', icon: Copy, onselect: () => void navigator.clipboard.writeText(item.sender) });
-    if (canDownload) copies.push({ id: 'download', label: 'Download', icon: Download, onselect: downloadMediaItem });
+    // 2. Edit (own text)
+    if (canEdit) {
+      actions.push({ id: 'edit', label: 'Edit', icon: Pencil, onselect: () => timelineStore.startEdit(item) });
+    }
 
-    const manage: MenuItem[] = [];
+    // 3. Copy text / Copy picture
+    if (canCopy) {
+      actions.push({ id: 'copy-text', label: 'Copy text', icon: Copy, onselect: () => void navigator.clipboard.writeText(quote(item)) });
+    }
+    if (canCopyPicture) {
+      actions.push({ id: 'copy-picture', label: 'Copy picture', icon: Copy, onselect: () => void copyPictureItem() });
+    }
+    actions.push({ id: 'copy-sender', label: 'Copy sender ID', icon: Copy, onselect: () => void navigator.clipboard.writeText(item.sender) });
+
+    // 4. Pin/Unpin
     if (canPin && item.event_id && timelineStore.roomId) {
       const roomId = timelineStore.roomId;
       const eventId = item.event_id;
-      manage.push(
+      actions.push(
         pinned
           ? { id: 'unpin', label: 'Unpin', icon: PinOff, onselect: () => void pinsStore.setPinned(roomId, eventId, false) }
           : { id: 'pin', label: 'Pin', icon: Pin, onselect: () => void pinsStore.setPinned(roomId, eventId, true) },
       );
     }
-    if (canAct && item.event_id) {
-      const eventId = item.event_id;
-      manage.push({ id: 'select', label: 'Select', icon: Check, onselect: () => timelineStore.beginSelect(eventId) });
+
+    // 5. Download (media)
+    if (canDownload) {
+      actions.push({ id: 'download', label: 'Download', icon: Download, onselect: downloadMediaItem });
     }
 
-    const edits: MenuItem[] = [];
-    if (canEdit) edits.push({ id: 'edit', label: 'Edit', icon: Pencil, onselect: () => timelineStore.startEdit(item) });
-    if (canDelete) edits.push({ id: 'delete', label: 'Delete', icon: Trash2, danger: true, onselect: () => (timelineStore.pendingDelete = [item]) });
-    if (!item.is_own && canAct) edits.push({ id: 'report', label: 'Report', icon: Flag, danger: true, onselect: () => (timelineStore.pendingReport = item) });
+    // 6. Forward
+    if (canAct && !inThread) {
+      actions.push({
+        id: 'forward',
+        label: 'Forward',
+        icon: Forward,
+        onselect: () => item.event_id && timelineStore.roomId && forwardStore.begin(timelineStore.roomId, [item.event_id]),
+      });
+    }
 
-    const separator: MenuItem = { separator: true };
-    const groups = [replies, manage, copies, edits].filter((g) => g.length > 0);
-    return groups.flatMap((g, i) => (i === 0 ? g : [separator, ...g]));
+    // 7. Select
+    if (canAct && item.event_id) {
+      const eventId = item.event_id;
+      actions.push({ id: 'select', label: 'Select', icon: Check, onselect: () => timelineStore.beginSelect(eventId) });
+    }
+
+    // 8. Destructive (Delete, Report)
+    const destructive: MenuItem[] = [];
+    if (canDelete) {
+      destructive.push({ id: 'delete', label: 'Delete', icon: Trash2, danger: true, onselect: () => (timelineStore.pendingDelete = [item]) });
+    }
+    if (!item.is_own && canAct) {
+      destructive.push({ id: 'report', label: 'Report', icon: Flag, danger: true, onselect: () => (timelineStore.pendingReport = item) });
+    }
+
+    if (destructive.length > 0) {
+      if (actions.length > 0) actions.push({ separator: true });
+      actions.push(...destructive);
+    }
+
+    return actions;
   }
 </script>
 
@@ -1051,7 +1158,7 @@
       padding: 0 var(--alloy-spacing-scale-3);
     }
     .chip {
-      min-height: 40px;
+      min-height: 44px;
       padding: 0 var(--alloy-spacing-scale-2);
     }
     .failed-actions button {

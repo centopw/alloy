@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { placeFlyout, placeReactionBar } from './contextmenu';
+import { placeDesktopReactionStrip, placeFlyout, placeReactionBar } from './contextmenu';
 
 const VIEWPORT = { width: 1000, height: 800 };
 
@@ -50,5 +50,38 @@ describe('placeReactionBar', () => {
 
   it('keeps a bar wider than the screen at the left margin', () => {
     expect(placeReactionBar(rowAt(400), { width: 500, height: 52 }, phone, limits).x).toBe(8);
+  });
+
+  it('aligns to the right edge when anchor.align is right', () => {
+    // bubble at x=100, width=200 -> right edge is 300. Bar width 240 -> x = 300 - 240 = 60
+    const bubble = { x: 100, y: 400, width: 200, height: 50, align: 'right' as const };
+    expect(placeReactionBar(bubble, { width: 240, height: 52 }, phone, limits).x).toBe(60);
+  });
+
+  it('aligns to the left edge when anchor.align is left', () => {
+    const bubble = { x: 50, y: 400, width: 200, height: 50, align: 'left' as const };
+    expect(placeReactionBar(bubble, { width: 240, height: 52 }, phone, limits).x).toBe(50);
+  });
+});
+
+describe('placeDesktopReactionStrip', () => {
+  const viewport = { width: 1200, height: 800 };
+  const card = { x: 400, y: 300 };
+  const cardSize = { width: 220, height: 260 };
+  const stripSize = { width: 260, height: 40 };
+
+  it('places strip directly above the card with gap', () => {
+    expect(placeDesktopReactionStrip(card, cardSize, stripSize, viewport, 8, 6)).toEqual({
+      x: 400,
+      y: 254, // 300 - 40 - 6
+    });
+  });
+
+  it('clamps y to margin when card is near the top', () => {
+    expect(placeDesktopReactionStrip({ x: 400, y: 30 }, cardSize, stripSize, viewport, 8, 6).y).toBe(8);
+  });
+
+  it('clamps x when card is near the right edge', () => {
+    expect(placeDesktopReactionStrip({ x: 1100, y: 300 }, cardSize, stripSize, viewport, 8, 6).x).toBe(932); // 1200 - 260 - 8
   });
 });

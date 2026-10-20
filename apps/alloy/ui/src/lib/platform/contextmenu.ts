@@ -98,10 +98,39 @@ export function placeReactionBar(
   gap = 8,
 ): MenuPoint {
   const maxX = viewport.width - size.width - margin;
-  const x = maxX < margin ? margin : Math.max(margin, Math.min(anchor.x + anchor.width / 2 - size.width / 2, maxX));
+  let targetX: number;
+  if (anchor.align === 'right') {
+    targetX = anchor.x + anchor.width - size.width;
+  } else if (anchor.align === 'left') {
+    targetX = anchor.x;
+  } else {
+    targetX = anchor.x + anchor.width / 2 - size.width / 2;
+  }
+  const x = maxX < margin ? margin : Math.max(margin, Math.min(targetX, maxX));
   let y = anchor.y - size.height - gap;
   if (y < limits.top) y = anchor.y + anchor.height + gap;
   y = Math.max(limits.top, Math.min(y, limits.bottom - size.height - gap));
+  return { x, y };
+}
+
+/**
+ * Place the desktop reaction strip directly above the menu card, aligned with the card's left edge
+ * (or clamped if overflowing) and kept within the viewport.
+ */
+export function placeDesktopReactionStrip(
+  card: MenuPoint,
+  cardSize: MenuSize,
+  stripSize: MenuSize,
+  viewport: MenuViewport,
+  margin = 8,
+  gap = 6,
+): MenuPoint {
+  const maxX = viewport.width - stripSize.width - margin;
+  const x = Math.max(margin, Math.min(card.x, maxX));
+  let y = card.y - stripSize.height - gap;
+  if (y < margin) {
+    y = margin;
+  }
   return { x, y };
 }
 
@@ -158,9 +187,18 @@ export function contextmenu(node: HTMLElement, factory: (() => MenuItem[]) | Con
     pressStart = { x: e.clientX, y: e.clientY };
     pressTimer = window.setTimeout(() => {
       pressTimer = null;
+      suppressClick = true;
       const items = getItems();
       if (items.length === 0) return;
-      suppressClick = true;
+      const suppressSyntheticClick = (evt: MouseEvent) => {
+        evt.preventDefault();
+        evt.stopPropagation();
+        window.removeEventListener('click', suppressSyntheticClick, true);
+      };
+      window.addEventListener('click', suppressSyntheticClick, true);
+      window.setTimeout(() => {
+        window.removeEventListener('click', suppressSyntheticClick, true);
+      }, 1000);
       contextMenu.open(items, pressStart, getOptions());
     }, LONG_PRESS_MS);
   }

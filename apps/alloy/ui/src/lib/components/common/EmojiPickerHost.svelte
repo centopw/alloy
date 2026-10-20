@@ -20,6 +20,8 @@
   let dragOffset = $state(0);
   let dragStartY = 0;
   let dragging = false;
+  let searchFocused = $state(false);
+  let searching = $state(false);
 
   let returnFocus: HTMLElement | null = null;
 
@@ -31,6 +33,8 @@
       height: window.innerHeight
     });
   });
+
+  const isExpanded = $derived(viewport.isPhone && (searchFocused || searching));
 
   $effect(() => {
     const onPress = () => {
@@ -64,11 +68,18 @@
   });
 
   $effect(() => {
-    if (!emojiPicker.isOpen) return;
-    // Anchors are measured once; any resize would leave the popover misplaced, so close.
+    // Only desktop popovers close on resize; on phones the soft keyboard resizes the viewport.
+    if (!emojiPicker.isOpen || viewport.isPhone) return;
     const onResize = () => emojiPicker.close();
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
+  });
+
+  $effect(() => {
+    if (!emojiPicker.isOpen) {
+      searchFocused = false;
+      searching = false;
+    }
   });
 
   $effect(() => {
@@ -108,6 +119,8 @@
   }
 
   function close() {
+    searchFocused = false;
+    searching = false;
     emojiPicker.close();
   }
 </script>
@@ -117,6 +130,7 @@
     <div class="scrim" role="presentation" use:portal onclick={dismissFromBackdrop}></div>
     <div
       class="sheet"
+      class:expanded={isExpanded}
       role="dialog"
       aria-modal="true"
       aria-label="Emoji picker"
@@ -134,7 +148,12 @@
         <span class="grip" aria-hidden="true"></span>
       </div>
       <div class="content">
-        <EmojiPicker onpick={pick} onclose={close} />
+        <EmojiPicker
+          onpick={pick}
+          onclose={close}
+          onsearchfocus={(f) => (searchFocused = f)}
+          onsearching={(s) => (searching = s)}
+        />
       </div>
     </div>
   {:else if popoverPos}
@@ -190,14 +209,20 @@
     z-index: 101;
     display: flex;
     flex-direction: column;
-    height: 65vh;
-    max-height: calc(100dvh - var(--alloy-safe-area-top));
+    box-sizing: border-box;
+    height: 65dvh;
+    max-height: calc(100dvh - var(--alloy-safe-area-top) - var(--alloy-spacing-scale-2));
     padding-bottom: var(--alloy-safe-area-bottom);
     border-radius: var(--alloy-radii-lg) var(--alloy-radii-lg) 0 0;
     background: var(--alloy-color-surface-elevated);
     box-shadow: var(--alloy-elevation-lg);
     overflow: hidden;
-    transition: transform var(--alloy-motion-duration-fast) var(--alloy-motion-easing-ease);
+    transition: transform var(--alloy-motion-duration-fast) var(--alloy-motion-easing-ease),
+      height var(--alloy-motion-duration-fast) var(--alloy-motion-easing-ease);
+  }
+
+  .sheet.expanded {
+    height: calc(100dvh - var(--alloy-safe-area-top) - var(--alloy-spacing-scale-2));
   }
 
   .grip-area {
@@ -218,7 +243,9 @@
   }
 
   .content {
-    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 0;
     min-height: 0;
   }
 </style>

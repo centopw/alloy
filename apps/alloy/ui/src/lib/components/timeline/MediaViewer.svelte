@@ -1,11 +1,5 @@
 <script module lang="ts">
-  import { localFileUrl } from '$lib/platform/files';
-  import { fetchMediaPath } from '$lib/platform/saveFile';
-
-  /** Fetch the full file into the local media cache. Returns a URL the webview can load. */
-  export async function fetchMediaFile(uri: string, mimeType: string): Promise<string> {
-    return localFileUrl(await fetchMediaPath(uri, mimeType));
-  }
+  export { fetchMediaFile } from '$lib/content/mediaFetch';
 </script>
 
 <script lang="ts">
@@ -19,6 +13,7 @@
   import { displayNameFor } from '$lib/platform/names';
   import { formatTime } from '$lib/content/format';
   import { prefs } from '$lib/stores/prefs.svelte';
+  import { fetchMediaFile } from '$lib/content/mediaFetch';
   import type { MediaItem } from '$lib/content/mediaItems';
   import {
     classifySwipe,

@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.2 (pre-release)
+
+### Added
+- **Refresh.** A Refresh button in the chat list header (Ctrl/Cmd+R or F5 on desktop, pull the chat list down on a phone, or "Refresh" in the timeline menu) restarts the connection to your server and reloads the open chat. Your open chat, reply and half-written edit stay as they were.
+
+### Changed
+- **Messenger-style long-press on phones**: pressing and holding a message dims the conversation with a spotlight keeping the pressed message bright, floats the emoji pill directly above the bubble, and shows a bottom action bar with large Reply, Copy (or Pin/Download), Forward, and More buttons.
+- **Telegram-style desktop right-click**: the reaction strip floats as a separate pill directly above the rounded menu card, with message actions reordered to match Telegram (Reply, Edit, Copy text or picture, Pin/Unpin, Download, Forward, Select, Delete).
+- **Copy picture**: copying an image, sticker, or GIF from the context menu or phone action bar converts it to PNG and places it on the system clipboard.
+
+### Fixed
+- **Latest messages sometimes missing until you restart.** Alloy's sync service stayed stopped after a network or server error. It now restarts itself, with a growing pause between attempts.
+- **Reactions from the long-press pill and the right-click strip did nothing.** Tapping an emoji closed the menu without reacting.
+- **Android long-press tap**: lifting your finger after pressing and holding a message no longer triggers the dimmed backdrop or a menu action.
+- **Android emoji search**: the results no longer vanish when the keyboard opens.
+- **Android picture paste**: pictures on the clipboard are read through the app, and the attach menu offers "Picture from clipboard" when there is one.
+- Reaction chips are 44 px tall on phones.
+
 ## 0.2.1 (pre-release)
 
 ### Added

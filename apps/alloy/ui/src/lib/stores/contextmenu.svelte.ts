@@ -29,6 +29,8 @@ export interface MenuAnchor {
   y: number;
   width: number;
   height: number;
+  /** Side to align the reaction bar: 'right' for own messages, 'left' for others, or 'center' (default). */
+  align?: 'left' | 'right' | 'center';
 }
 
 /** A bar of quick reactions shown above the rows of a message menu. */
@@ -43,9 +45,14 @@ export interface MenuReactions {
   anchor?: MenuAnchor;
 }
 
+
 export interface MenuOptions {
   reactions?: MenuReactions;
   anchor?: MenuAnchor;
+  /** Rect for the spotlight hole that keeps the pressed message bright on phones. */
+  spotlight?: MenuAnchor;
+  /** Actions shown on the mobile bottom action bar before tapping More. */
+  phoneBar?: MenuItem[];
   matchWidth?: boolean;
   minWidth?: number;
   ariaLabel?: string;

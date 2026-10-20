@@ -16,6 +16,7 @@
   import { contextmenu } from '$lib/platform/contextmenu';
   import { badgeLabel, countArrivals } from './arrivals';
   import type { MenuItem } from '$lib/stores/contextmenu.svelte';
+  import { refreshStore } from '$lib/stores/refresh.svelte';
 
   interface Props {
     roomId: string;
@@ -206,6 +207,8 @@
       { id: 'jump-latest', label: 'Jump to latest', disabled: empty, onselect: toBottom },
       { id: 'scroll-top', label: 'Scroll to top (load older)', disabled: empty, onselect: scrollToTop },
       { id: 'mark-read', label: 'Mark as read', onselect: () => void timelineStore.markRead() },
+      { separator: true },
+      { id: 'refresh', label: 'Refresh', onselect: () => void refreshStore.run() },
     ];
   }
 </script>
