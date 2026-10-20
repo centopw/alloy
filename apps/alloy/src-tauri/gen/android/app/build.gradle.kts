@@ -1,4 +1,3 @@
-import java.util.Properties
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -7,12 +6,14 @@ plugins {
     id("rust")
 }
 
-val tauriProperties = Properties().apply {
-    val propFile = file("tauri.properties")
-    if (propFile.exists()) {
-        propFile.inputStream().use { load(it) }
-    }
-}
+// The app version has one source, `version` in apps/alloy/src-tauri/Cargo.toml. Tauri only writes tauri.properties
+// from a `version` in tauri.conf.json, which is deliberately absent, so without this the APK came out as 1 / 1.0.
+val appVersionName: String = file("../../../Cargo.toml").readLines()
+    .first { it.startsWith("version = \"") }
+    .substringAfter('"').substringBefore('"')
+// major * 1_000_000 + minor * 1_000 + patch, the same code Tauri used to derive (0.2.1 was 2001).
+val appVersionCode: Int = appVersionName.substringBefore('-').split('.').map { it.toInt() }
+    .let { (major, minor, patch) -> major * 1_000_000 + minor * 1_000 + patch }
 
 android {
     compileSdk = 37
@@ -22,8 +23,8 @@ android {
         applicationId = "chat.alloy"
         minSdk = 24
         targetSdk = 37
-        versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
-        versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
+        versionCode = appVersionCode
+        versionName = appVersionName
     }
     buildTypes {
         getByName("debug") {

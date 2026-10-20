@@ -301,6 +301,21 @@ jobs:
           [ -n "$APK_RAW" ] || { echo "Android build produced no release APK" >&2; exit 1; }
           scripts/sign-android-apk.sh "$APK_RAW" alloy-android.apk
 
+      # A wrong version code makes Android refuse the update over an installed app (0.2.2 and 0.2.3 shipped as 1 / 1.0).
+      - name: Check the APK version matches the tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          ver="${TAG#v}"
+          IFS=. read -r major minor patch <<<"${ver%%-*}"
+          code=$((major * 1000000 + minor * 1000 + patch))
+          badging="$("$ANDROID_HOME/build-tools/35.0.0/aapt2" dump badging alloy-android.apk | grep -m1 '^package:')"
+          echo "$badging"
+          case "$badging" in
+            *"versionCode='$code' versionName='$ver'"*) ;;
+            *) echo "APK version does not match $TAG (expected code $code, name $ver)" >&2; exit 1 ;;
+          esac
+
       - name: Compute SHA256 Checksums
         run: sha256sum alloy-android.apk > SHA256SUMS
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.4 (pre-release)
+
+### Fixed
+- **Android: 0.2.2 and 0.2.3 could not update an installed app.** Their APKs were built with version 1 instead of 0.2.x, so Android refused to install them over 0.2.1 (a lower version code). The app version now comes from one place and the APK is checked against the release tag before it is published. If you installed 0.2.2 or 0.2.3 on Android, 0.2.4 installs over it. If you stayed on 0.2.1, install 0.2.4 directly.
+
 ## 0.2.3 (pre-release)
 
 ### Added
