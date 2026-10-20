@@ -15,8 +15,30 @@ permissions:
   contents: read
 
 jobs:
+  # Nothing is built or published unless the tag matches the app version, has CHANGELOG notes, sits on
+  # main and has a green CI run for that exact commit (scripts/verify-release.sh). Every other job
+  # depends on this one through create-release.
+  verify:
+    name: Release gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify the tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: scripts/verify-release.sh "$GITHUB_REF_NAME" "$GITHUB_SHA"
+
   create-release:
     name: Create release
+    needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

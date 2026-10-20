@@ -1,13 +1,14 @@
 <script lang="ts">
   import { Button } from '$lib/components/common';
   import { SettingToggle } from '$lib/components/settings/controls';
+  import { appVersion } from '$lib/platform/appVersion';
   import { capabilities, currentEnv } from '$lib/platform/capabilities';
   import { openExternal } from '$lib/platform/links';
   import { prefs } from '$lib/stores/prefs.svelte';
   import { ui } from '$lib/stores/ui.svelte';
   import { updatesStore } from '$lib/stores/updates.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
-  import pkg from '../../../../../package.json';
+  import { onMount } from 'svelte';
 
   const REPOSITORY_URL = 'https://github.com/centopw/alloy';
 
@@ -16,6 +17,10 @@
     void openExternal(REPOSITORY_URL);
   }
 
+  let version = $state('');
+  onMount(() => {
+    void appVersion().then((v) => (version = v));
+  });
   const info = $derived(updatesStore.info);
   const available = $derived(info?.available ? info : null);
   const caps = $derived(capabilities(currentEnv(viewport.isPhone)));
@@ -40,7 +45,7 @@
     </div>
     <div class="row">
       <span class="label">Version</span>
-      <span class="value">{pkg.version}</span>
+      <span class="value">{version}</span>
     </div>
     <div class="row">
       <span class="label">Licence</span>
@@ -109,7 +114,7 @@
     <div class="card">
       <div class="row">
         <span class="label">App version</span>
-        <span class="value mono">{pkg.version}</span>
+        <span class="value mono">{version}</span>
       </div>
       <div class="row">
         <span class="label">Engine</span>

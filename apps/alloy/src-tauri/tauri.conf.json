@@ -1,7 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Alloy",
-  "version": "0.2.1",
   "identifier": "chat.alloy",
   "build": {
     "beforeDevCommand": "pnpm --prefix ui dev",

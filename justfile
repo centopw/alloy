@@ -63,6 +63,10 @@ ci:
 hooks:
     git config core.hooksPath .githooks
 
+# Cut a release: bump the one version source, wait for green CI, then tag (CHANGELOG section must exist)
+release version:
+    scripts/release.sh {{version}}
+
 # Generate changelog from Conventional Commits via git-cliff
 changelog *args:
     @command -v git-cliff >/dev/null 2>&1 || (echo "Error: git-cliff is not installed. Install via: brew install git-cliff or cargo install git-cliff" && exit 1)

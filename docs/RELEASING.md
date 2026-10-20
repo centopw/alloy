@@ -103,8 +103,10 @@ requires the same signing key every time, see section 5.
    The app reads `https://github.com/centopw/alloy/releases/download/updater-feed/latest.json`.
    (GitHub's `releases/latest/download/` URL skips pre-releases, so it cannot be used while
    releases are pre-releases.)
-3. `version` in `apps/alloy/src-tauri/tauri.conf.json` must be bumped to the tag's version before
-   tagging, otherwise installed apps see no newer version.
+3. The app version lives in one place, `version` in `apps/alloy/src-tauri/Cargo.toml`. Tauri and
+   `tauri-action` read it from there (`tauri.conf.json` and `ui/package.json` carry no version, and the
+   release gate fails if one reappears), so installed apps see a newer version as soon as that line is
+   bumped and tagged.
 
 ### Keys
 - The key pair was generated with `pnpm tauri signer generate -w ~/.alloy-updater/alloy.key`.
@@ -229,28 +231,27 @@ Get-FileHash -Algorithm SHA256 .\Alloy_*_x64-setup.exe
 
 ## 8. Release Execution Checklist
 
-When cutting a new stable release (e.g. `v0.1.0`):
+When cutting a new stable release (e.g. `v0.2.2`):
 
-1. **Verify Local Quality Gates:**
+1. **Write the release notes.** Add a `## 0.2.2 (pre-release)` section to `CHANGELOG.md` and commit it.
+   This is the only file edited by hand for a release.
+2. **Run one command** from a clean, up-to-date `main`:
    ```bash
-   just ci
-   just test
-   just audit
+   just release 0.2.2        # same as: scripts/release.sh 0.2.2
    ```
-2. **Review & Update Changelog:**
-   ```bash
-   just changelog --tag v0.1.0 -o CHANGELOG.md
-   ```
-3. **Verify Version Alignment:**
-   - Ensure version in `Cargo.toml`, `apps/alloy/src-tauri/tauri.conf.json`, and `apps/alloy/ui/package.json` match.
-4. **Tag and Push:**
-   ```bash
-   git tag -s v0.1.0 -m "chore(release): v0.1.0"
-   git push origin v0.1.0
-   ```
-5. **Monitor CI Workflow:**
-   - Watch `.github/workflows/release.yml` run to completion.
-   - Verify all desktop bundles (macOS DMG, Windows installer, Linux AppImage/deb) and signed Android APK attach to the release draft.
-   - Inspect SBOM (`alloy-sbom-*.json`) and `SHA256SUMS`.
-6. **Publish Draft Release:**
-   - Review release body and publish on GitHub.
+   It bumps the `Cargo.toml` version and `Cargo.lock`, pushes `chore(release): bump to 0.2.2`, waits
+   for CI to pass on that exact commit, and only then pushes the tag. If CI fails it stops without a
+   tag; fix the problem and run it again.
+3. **The server re-checks everything.** The `Release gate` job of `release.yml` (`scripts/verify-release.sh`)
+   runs before anything is built or uploaded, whoever pushed the tag. It requires: a `vX.Y.Z` tag equal
+   to the `Cargo.toml` version, no second copy of the version in `tauri.conf.json` or `package.json`, a
+   `CHANGELOG.md` section for it, a commit on `main`, and a green `ci.yml` run for that exact commit
+   (it does not wait: if CI is still running or red the job fails at once, and you re-run it once CI is
+   green; `release.sh` does the waiting before it tags). A failing check stops the release with the
+   reason in the log. Run it by hand to preview: `scripts/verify-release.sh v0.2.2`. The tag is a plain
+   lightweight tag; signing is not required.
+4. **Monitor the release workflow** to completion.
+   - Verify all desktop bundles (macOS DMG, Windows installer, Linux AppImage/deb) and the signed Android
+     APK are attached to the release.
+   - Inspect the SBOMs (`alloy-sbom-*.json`) and `SHA256SUMS`.
+   - `https://github.com/centopw/alloy/releases/download/updater-feed/latest.json` must report the new version.
