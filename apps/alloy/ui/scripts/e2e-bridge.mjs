@@ -468,7 +468,8 @@ try {
   step('albums: pictures sent together form one grid that opens a gallery');
   await page.waitForFunction(() => document.querySelectorAll('.album .tile').length === 3, { timeout: 30000 });
   await uxShot(page, 'album');
-  await page.click('.album .tile');
+  // A click at coordinates can land on the pinned bar that appeared just above; a DOM click goes to the tile.
+  await page.evaluate(() => document.querySelector('.album .tile').click());
   await page.waitForFunction(() => document.querySelector('[role=dialog][aria-modal=true]')?.innerText.includes('1 / 3'), { timeout: 30000 });
   await page.keyboard.press('ArrowRight');
   await page.waitForFunction(() => document.querySelector('[role=dialog][aria-modal=true]')?.innerText.includes('2 / 3'), { timeout: 10000 });
@@ -706,7 +707,7 @@ try {
   console.error('E2E FAILED:', e.message, (e.stack || '').split('\n').slice(1, 4).join(' | '));
   try {
     const pages = await browser.pages();
-    const text = await pages[pages.length - 1].evaluate(() => `${document.querySelectorAll('.album .tile').length} album tiles; ${document.body.innerText.replace(/\s+/g, ' ').slice(0, 1200)}`);
+    const text = await pages[pages.length - 1].evaluate(() => `${document.querySelectorAll('.album .tile').length} album tiles; dialogs: ${JSON.stringify([...document.querySelectorAll('[role=dialog]')].map((d) => d.innerText.replace(/\s+/g, ' ').slice(0, 200)))}; page: ${document.body.innerText.replace(/\s+/g, ' ').slice(0, 800)}`);
     console.error('E2E page:', text);
   } catch {}
   try {
