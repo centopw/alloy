@@ -2,10 +2,11 @@
 
 Status: the listing metadata and a draft build recipe are in the repository. Nothing has been submitted.
 
-Checked: `fdroid lint chat.alloy` (fdroidserver Docker image `registry.gitlab.com/fdroid/docker-executable-fdroidserver`)
-accepts the recipe except the category, which that stub setup cannot judge (the valid list is the `config/categories.yml`
-of the fdroiddata checkout; `Internet` is what comparable chat apps use). Not checked: `fdroid build`, which needs the
-full build server environment and was not run, so the build steps are untested.
+Checked: `fdroid lint chat.alloy` (fdroidserver Docker image `registry.gitlab.com/fdroid/docker-executable-fdroidserver`,
+with `config/categories.yml` taken from fdroiddata) reports nothing for the recipe. The category is `Messaging`, which is
+in that list (`Internet` is too, but fits less). Not checked: `fdroid build`, which needs the full build server
+environment and was not run, so the build steps are untested. `fdroid lint` exits 0 even when it prints findings, so
+judge it by its output.
 
 Submitting needs a GitLab account: fork `gitlab.com/fdroid/fdroiddata`, add `metadata/chat.alloy.yml` from
 `docs/fdroid/chat.alloy.yml`, run the checks in its CI, and open the merge request.

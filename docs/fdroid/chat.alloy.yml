@@ -2,7 +2,7 @@
 # Not built by F-Droid's tooling yet: run `fdroid build -v -l chat.alloy` from a fdroiddata checkout before the
 # merge request and fix what it reports. See docs/FDROID.md for the open points.
 Categories:
-  - Internet
+  - Messaging
 License: Apache-2.0
 AuthorName: Alloy Contributors
 WebSite: https://github.com/centopw/alloy
