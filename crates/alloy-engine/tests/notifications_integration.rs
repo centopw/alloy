@@ -175,11 +175,22 @@ async fn restore(
     room_id: &RoomId,
     original: &NotificationSettingsDto,
 ) -> Result<(), String> {
-    let commands = [
+    // The room is a throwaway one and the checks already cleared its rule, so this is hygiene only. The SDK
+    // removes the rule from its local copy of the rules after the server call, and a sync that lands in
+    // between makes that local removal fail with "Unable to remove push rule" although the server call worked
+    // (seen on slower CI machines, never locally). The account-wide settings below stay strict.
+    if let Err(error) = send(
+        eng,
         EngineCommand::SetRoomNotificationLevel {
             room_id: room_id.clone(),
             level: None,
         },
+    )
+    .await
+    {
+        eprintln!("clearing the test room's rule failed (ignored): {error}");
+    }
+    let commands = [
         EngineCommand::SetDefaultNotificationLevel {
             one_to_one: true,
             level: original.one_to_one,
