@@ -26,6 +26,9 @@
   import SettingsDialog from '../settings/SettingsDialog.svelte';
   import VerificationDialog from '../settings/VerificationDialog.svelte';
   import Hud from '../dev/Hud.svelte';
+  import ConnectionBanner from './ConnectionBanner.svelte';
+  import { connectivity } from '$lib/stores/connectivity.svelte';
+  import { client } from '$lib/ipc';
   import { pushBack } from '$lib/platform/backstack';
   import { capabilities, currentEnv } from '$lib/platform/capabilities';
   import { roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
@@ -116,8 +119,17 @@
     void verification.refreshRecovery();
     void notificationSettings.load();
     notifier.start();
+    // Needs the server, so it only succeeds when the connection is back; everything that failed meanwhile reloads.
+    const stopConnectivity = connectivity.start(() => client.invoke({ action: 'GetTagCatalog' }));
+    const stopReconnect = connectivity.onReconnect(() => {
+      void tags.load();
+      void prefs.load();
+      void notificationSettings.load();
+    });
     return () => {
       notifier.stop();
+      stopReconnect();
+      stopConnectivity();
       void roomsStore.stop();
       stopUpdates();
       tags.reset();
@@ -212,7 +224,8 @@
 
 <svelte:window onkeydown={onKeydown} bind:innerWidth />
 
-<div class="frame">
+<div class="frame" class:offline={connectivity.offline}>
+<ConnectionBanner />
 <ChangelogDialog />
 <ForwardDialog />
 <DeleteConfirm />
@@ -319,6 +332,10 @@
     flex-direction: column;
     height: 100%;
     min-height: 0;
+  }
+  /* The offline banner already clears the status bar, so the shell does not add the inset twice. */
+  .frame.offline .shell {
+    padding-top: 0;
   }
   .shell {
     position: relative;

@@ -17,6 +17,7 @@
   import { roomNotify } from '$lib/stores/roomNotify.svelte';
   import { displayTags, TAG_COLOUR_VARS, TAG_COLOURS } from '$lib/stores/tags';
   import { tags } from '$lib/stores/tags.svelte';
+  import { connectivity } from '$lib/stores/connectivity.svelte';
   import UpdateNotice from '../updates/UpdateNotice.svelte';
   import { groupRoomsByTag, ROOM_SORTS, type RoomSort } from '$lib/stores/roomSort';
   import type { TagColour } from '$lib/generated';
@@ -548,7 +549,7 @@
     </div>
   {/if}
 
-  {#if tags.error}
+  {#if tags.error && !connectivity.offline}
     <p class="error" role="alert">{tags.error}</p>
   {/if}
 

@@ -3,6 +3,7 @@ import { TauriTransport } from './tauri.js';
 import { MockTransport } from './mock.js';
 import { WsTransport } from './ws.js';
 import { AlloyClient } from './client.js';
+import { connectivity } from '../stores/connectivity.svelte.js';
 
 /**
  * Auto-detect and create the appropriate transport.
@@ -26,10 +27,25 @@ function createTransport(): Transport {
   return new MockTransport();
 }
 
+/** Tells the connectivity store about every engine call that fails because the server cannot be reached. */
+function observed(inner: Transport): Transport {
+  return {
+    invoke: async (command) => {
+      try {
+        return await inner.invoke(command);
+      } catch (e) {
+        connectivity.noteFailure(e);
+        throw e;
+      }
+    },
+    subscribe: (handler) => inner.subscribe(handler),
+  };
+}
+
 /**
  * Global client instance.
  */
-const transport = createTransport();
+const transport = observed(createTransport());
 export const client = new AlloyClient(transport);
 
 // Re-export types
