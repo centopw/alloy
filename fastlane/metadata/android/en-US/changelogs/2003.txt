@@ -1,0 +1,3 @@
+Scrolling up through a chat no longer jumps around, and the down-arrow count no longer includes messages you already read.
+Refresh button, long-press menu with a reaction bar, Telegram-style right-click on desktop.
+Security: wasmtime updated for two advisories.

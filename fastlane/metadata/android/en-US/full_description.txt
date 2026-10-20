@@ -1,0 +1,23 @@
+Alloy is a chat app for Matrix, the open network that lets you talk to people on any server, with end-to-end encryption. It is free and open source, and it never collects any data about you: no analytics, no tracking, no ads.
+
+Use your existing Matrix account (matrix.org, your company's server, your own) or create one on any server.
+
+<b>What you can do</b>
+- Chat in private encrypted rooms, group rooms and direct messages.
+- Reply (swipe a message), edit, delete, react with one tap, pin messages, forward, start threads, create polls, send photos, files and voice messages, and see when your messages have been read.
+- Press and hold a message for a quick reaction bar and actions.
+- Search your rooms, and search inside a chat for words or for who said them.
+- Organise rooms with your own colour tags, favourites and archive.
+- Send your location.
+
+<b>Notifications without Google services</b>
+Alloy uses UnifiedPush, so notifications arrive while the app is closed without Google Play Services. Install a UnifiedPush distributor such as ntfy, then turn it on in Settings > Notifications. Message text shows in a notification only if you allow it.
+
+<b>Privacy</b>
+- No telemetry, analytics or crash reporting.
+- Private rooms use Matrix end-to-end encryption.
+
+<b>Open source</b>
+Apache-2.0. Source code, issues and releases: https://github.com/centopw/alloy
+
+Alloy is young: some features are still missing. Please report problems on GitHub.

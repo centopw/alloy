@@ -1,0 +1,43 @@
+# DRAFT build recipe for the F-Droid data repository (metadata/chat.alloy.yml in gitlab.com/fdroid/fdroiddata).
+# Not built by F-Droid's tooling yet: run `fdroid build -v -l chat.alloy` from a fdroiddata checkout before the
+# merge request and fix what it reports. See docs/FDROID.md for the open points.
+Categories:
+  - Internet
+License: Apache-2.0
+AuthorName: Alloy Contributors
+WebSite: https://github.com/centopw/alloy
+SourceCode: https://github.com/centopw/alloy
+IssueTracker: https://github.com/centopw/alloy/issues
+Changelog: https://github.com/centopw/alloy/blob/main/CHANGELOG.md
+
+AutoName: Alloy
+
+RepoType: git
+Repo: https://github.com/centopw/alloy.git
+
+Builds:
+  - versionName: 0.2.3
+    versionCode: 2003
+    commit: v0.2.3
+    subdir: apps/alloy/src-tauri/gen/android/app
+    sudo:
+      - apt-get update
+      - apt-get install -y build-essential curl libssl-dev pkg-config
+    output: build/outputs/apk/universal/release/app-universal-release-unsigned.apk
+    ndk: 27.0.12077973
+    prebuild:
+      # Rust (stable, from rust-toolchain.toml) with the arm64 Android target, Node 22 and pnpm 9.
+      - curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable --target aarch64-linux-android
+      - export PATH=$HOME/.cargo/bin:$PATH
+      - npm install -g pnpm@9
+      - cd ../../../../ui && pnpm install --frozen-lockfile
+    build:
+      - export PATH=$HOME/.cargo/bin:$PATH
+      - export ALLOY_DISTRIBUTION=fdroid
+      - export CARGO_PROFILE_RELEASE_OPT_LEVEL=s CARGO_PROFILE_RELEASE_LTO=thin CARGO_PROFILE_RELEASE_PANIC=abort
+      - cd ../../../.. && pnpm tauri android build --apk --target aarch64
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags ^v[0-9.]+$
+CurrentVersion: 0.2.3
+CurrentVersionCode: 2003

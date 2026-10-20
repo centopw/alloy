@@ -395,8 +395,17 @@ mod platform {
 #[cfg(desktop)]
 pub use platform::PendingUpdate;
 
+/// A store build (F-Droid sets `ALLOY_DISTRIBUTION=fdroid` while compiling) is updated by the store, so the app
+/// must not offer another download page. Takes the value as a parameter so it can be tested.
+fn store_manages_updates(distribution: Option<&str>) -> bool {
+    matches!(distribution, Some("fdroid"))
+}
+
 #[tauri::command]
 pub async fn check_update(app: tauri::AppHandle) -> Result<UpdateInfo, String> {
+    if store_manages_updates(option_env!("ALLOY_DISTRIBUTION")) {
+        return Ok(UpdateInfo::up_to_date());
+    }
     platform::check(&app).await
 }
 
@@ -414,7 +423,14 @@ pub async fn apply_update(app: tauri::AppHandle) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_version;
+    use super::{parse_version, store_manages_updates};
+
+    #[test]
+    fn only_a_store_build_leaves_updates_to_the_store() {
+        assert!(store_manages_updates(Some("fdroid")));
+        assert!(!store_manages_updates(None));
+        assert!(!store_manages_updates(Some("github")));
+    }
 
     #[test]
     fn parses_tags_and_ignores_prerelease_suffixes() {
