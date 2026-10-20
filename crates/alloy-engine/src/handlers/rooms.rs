@@ -375,6 +375,11 @@ impl GroupHandler for RoomsHandler {
                     .map_err(map_err)?;
                 Ok(EngineResponse::RoomFavouriteSet { room_id, favourite })
             }
+            EngineCommand::RefreshSync => {
+                let client = ctx.active_client().await?;
+                client.refresh_sync().await.map_err(map_err)?;
+                Ok(EngineResponse::SyncRefreshed)
+            }
             EngineCommand::SetRoomLowPriority {
                 room_id,
                 low_priority,

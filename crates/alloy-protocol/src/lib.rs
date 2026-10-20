@@ -844,6 +844,8 @@ pub enum EngineCommand {
         event_ids: Vec<EventId>,
         targets: Vec<RoomId>,
     },
+    /// Restart background sync and rebuild open timelines: the manual Refresh. Returns at once; sync resumes in the background.
+    RefreshSync,
     /// Set the room's favourite flag (pin to top of the list).
     SetRoomFavourite {
         room_id: RoomId,
@@ -1228,6 +1230,8 @@ pub enum EngineResponse {
         forwarded: Vec<RoomId>,
         failed: Vec<ForwardFailure>,
     },
+    /// Sync was restarted; messages arrive again as it catches up.
+    SyncRefreshed,
     /// Room's favourite flag changed.
     RoomFavouriteSet {
         room_id: RoomId,

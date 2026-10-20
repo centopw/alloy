@@ -204,7 +204,10 @@ impl AlloyClient {
         let svc = self
             .sync
             .get_or_try_init(|| async {
+                // Offline mode: a failing sync no longer ends the service; it checks the server and resumes by
+                // itself. Without it the service stayed stopped after one error until the app was restarted.
                 let svc = matrix_sdk_ui::sync_service::SyncService::builder(self.client.clone())
+                    .with_offline_mode()
                     .build()
                     .await
                     .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
@@ -225,6 +228,44 @@ impl AlloyClient {
             let stopper = tokio::spawn(async move { svc.stop().await });
             let _ = tokio::time::timeout(std::time::Duration::from_secs(2), stopper).await;
         }
+    }
+
+    /// Restarts sync and drops the cached timelines, so the next time a room opens it is rebuilt from what the
+    /// server has. This is what the manual Refresh runs: a sync that hung on a dead connection looks "running".
+    /// The restart happens in the background because stopping waits for the in-flight request.
+    pub async fn refresh_sync(&self) -> AlloyResult<()> {
+        let svc = self.sync_service().await?;
+        self.timelines.lock().await.clear();
+        tokio::spawn(async move {
+            svc.stop().await;
+            svc.start().await;
+        });
+        Ok(())
+    }
+
+    /// Starts the sync service again whenever it ends in an error, pausing longer after each repeated failure.
+    /// Runs until the returned task is aborted.
+    pub async fn supervise_sync(&self) -> AlloyResult<tokio::task::JoinHandle<()>> {
+        use matrix_sdk_ui::sync_service::State;
+        let svc = self.sync_service().await?;
+        Ok(tokio::spawn(async move {
+            let mut states = svc.state();
+            let mut failures: u32 = 0;
+            while let Some(state) = states.next().await {
+                match state {
+                    State::Running => failures = 0,
+                    State::Error(error) => {
+                        failures = failures.saturating_add(1);
+                        let pause =
+                            std::time::Duration::from_secs((1_u64 << failures.min(5)).min(30));
+                        tracing::warn!(%error, ?pause, "sync stopped with an error, restarting");
+                        tokio::time::sleep(pause).await;
+                        svc.start().await;
+                    }
+                    _ => {}
+                }
+            }
+        }))
     }
 
     /// Get the matrix-sdk Client for advanced operations.

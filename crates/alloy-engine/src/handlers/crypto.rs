@@ -54,6 +54,15 @@ pub(crate) async fn start_background(ctx: &EngineContext, client: Arc<AlloyClien
 
     // Sync must run for key and verification traffic to flow.
     let _ = client.sync_service().await;
+    // Keeps sync alive: restarts it whenever it ends in an error.
+    if let Ok(supervisor) = client.supervise_sync().await {
+        ctx.subscriptions
+            .register(
+                SubscriptionId(format!("sync-supervisor-{}", uuid::Uuid::new_v4())),
+                supervisor.abort_handle(),
+            )
+            .await;
+    }
 
     let sink = ctx.sink.clone();
     let c = client.clone();

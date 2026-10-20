@@ -103,6 +103,7 @@ Commands are serialized with `#[serde(tag = "action", content = "params")]`.
 | | `StartLiveLocation` | `{ room_id, duration_ms }` | `LiveLocationStarted { room_id }` | Initiates live location share; send beacons with `SendLocationBeacon` |
 | | `SendLocationBeacon` | `{ room_id, geo_uri }` | `LocationBeaconSent { room_id }` | Updates live location (only valid during active `StartLiveLocation`) |
 | | `StopLiveLocation` | `{ room_id }` | `LiveLocationStopped { room_id }` | Terminates live location share |
+| | `RefreshSync` | none | `SyncRefreshed` | Manual Refresh: stops and restarts the background sync service and drops cached timelines; returns at once, sync resumes in the background. The engine also builds the sync service with offline mode and restarts it itself when it ends in an error |
 | | `MarkRead` | `{ room_id, event_id }` | `ReadMarked { room_id }` | Sends unthreaded read receipt |
 | | `SetTyping` | `{ room_id, typing }` | `TypingStatusSet { room_id }` | Sets ephemeral typing notice |
 | **Media** | `GetMedia` | `{ source, kind, width?, height? }` | `MediaRetrieved { local_path }` | Authenticated media download/thumbnail cache |

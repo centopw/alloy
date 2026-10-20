@@ -252,6 +252,8 @@ export type EngineCommand = { action: "DiscoverHomeserver"; params: {
 	event_ids: EventId[],
 	targets: RoomId[],
 } } | 
+/**  Restart background sync and rebuild open timelines: the manual Refresh. Returns at once; sync resumes in the background. */
+{ action: "RefreshSync" } | 
 /**  Set the room's favourite flag (pin to top of the list). */
 { action: "SetRoomFavourite"; params: {
 	room_id: RoomId,
@@ -608,6 +610,8 @@ export type EngineResponse = { type: "HomeserverInfo"; payload: {
 	forwarded: RoomId[],
 	failed: ForwardFailure[],
 } } | 
+/**  Sync was restarted; messages arrive again as it catches up. */
+{ type: "SyncRefreshed" } | 
 /**  Room's favourite flag changed. */
 { type: "RoomFavouriteSet"; payload: {
 	room_id: RoomId,

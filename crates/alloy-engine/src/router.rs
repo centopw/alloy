@@ -64,6 +64,7 @@ impl CommandGroup {
             | EngineCommand::DeleteRoomTag { .. }
             | EngineCommand::SearchRoomMessages { .. }
             | EngineCommand::SetRoomFavourite { .. }
+            | EngineCommand::RefreshSync
             | EngineCommand::SetRoomLowPriority { .. }
             | EngineCommand::SetRoomMarkedUnread { .. }
             | EngineCommand::SaveDraft { .. }
