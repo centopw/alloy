@@ -47,6 +47,7 @@ git fetch --quiet origin main
 git merge-base --is-ancestor "$sha" origin/main || fail "$sha is not on main"
 
 # 5. Green CI on exactly this commit.
+start=$SECONDS
 deadline=$((SECONDS + wait_minutes * 60))
 while :; do
   runs="$(gh api "repos/$repo/actions/workflows/ci.yml/runs?head_sha=$sha&event=push&per_page=20" \
@@ -56,6 +57,12 @@ while :; do
     exit 0
   fi
   if jq -e 'length == 0' <<<"$runs" >/dev/null; then
+    # Right after a push GitHub has not created the run yet; only a waiting caller gives it a few minutes.
+    if [ "$wait_minutes" -gt 0 ] && [ $((SECONDS - start)) -lt 300 ]; then
+      echo "release gate: CI has not started for $sha yet, checking again in 15 s"
+      sleep 15
+      continue
+    fi
     fail "no CI run for $sha; CI skips docs-only commits, so tag a commit that changed code"
   fi
   if jq -e 'all(.[]; .status == "completed")' <<<"$runs" >/dev/null; then

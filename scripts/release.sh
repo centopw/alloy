@@ -25,17 +25,21 @@ git rev-parse -q --verify "refs/tags/v$ver" >/dev/null && die "tag v$ver already
 grep -q "^## ${ver//./\\.} " CHANGELOG.md || die "write the '## $ver (pre-release)' section in CHANGELOG.md and commit it first"
 
 current="$(cargo metadata --no-deps --format-version 1 --offline | jq -r '.packages[] | select(.name == "alloy-app") | .version')"
-[ "$(printf '%s\n%s\n' "$current" "$ver" | sort -V | tail -n1)" = "$ver" ] && [ "$current" != "$ver" ] \
-  || die "$ver is not newer than the current version $current"
+if [ "$current" = "$ver" ]; then
+  # A run that stopped after pushing the bump (CI failed, or the terminal closed) continues here.
+  echo "release: Cargo.toml is already at $ver; skipping the bump and tagging HEAD once CI is green"
+else
+  [ "$(printf '%s\n%s\n' "$current" "$ver" | sort -V | tail -n1)" = "$ver" ] || die "$ver is not newer than the current version $current"
 
-# The only version edit: the [package] version line of the app manifest.
-awk -v v="$ver" '!done && /^version = "/ { print "version = \"" v "\""; done = 1; next } { print }' "$manifest" > "$manifest.tmp"
-mv "$manifest.tmp" "$manifest"
-cargo update -p alloy-app --offline
+  # The only version edit: the [package] version line of the app manifest.
+  awk -v v="$ver" '!done && /^version = "/ { print "version = \"" v "\""; done = 1; next } { print }' "$manifest" > "$manifest.tmp"
+  mv "$manifest.tmp" "$manifest"
+  cargo update -p alloy-app --offline
 
-git add "$manifest" Cargo.lock
-git commit -q -m "chore(release): bump to $ver"
-git push -q origin main
+  git add "$manifest" Cargo.lock
+  git commit -q -m "chore(release): bump to $ver"
+  git push -q origin main
+fi
 sha="$(git rev-parse HEAD)"
 
 echo "release: waiting for CI on $sha (the gate checks it again before building)"
