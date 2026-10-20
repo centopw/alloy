@@ -1,6 +1,6 @@
 [package]
 name = "alloy-app"
-version = "0.2.2"
+version = "0.2.3"
 description = "Alloy Tauri 2 desktop and mobile shell"
 authors = ["Alloy Contributors"]
 edition.workspace = true
