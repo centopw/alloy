@@ -1,0 +1,56 @@
+name: mac build test
+on:
+  push:
+    branches: [ci/mac-build-test]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: tauri-release-macos-arm64
+          workspaces: |
+            . -> target
+          save-if: false
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/alloy/ui/pnpm-lock.yaml
+      - name: Install UI dependencies
+        working-directory: apps/alloy/ui
+        run: pnpm install --frozen-lockfile
+      - name: Trust the self-signed signing certificate (macOS)
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          sudo security add-trusted-cert -d -r trustRoot -p codeSign -k /Library/Keychains/System.keychain .github/macos-signing-cert.pem
+          echo "TAURI_CONFIG={\"bundle\":{\"macOS\":{\"signingIdentity\":\"$APPLE_SIGNING_IDENTITY\"}}}" >> "$GITHUB_ENV"
+      - name: Build the app bundle
+        working-directory: apps/alloy
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pnpm tauri build --bundles app --target aarch64-apple-darwin
+      - name: Show the signature
+        run: |
+          APP=$(find target -name Alloy.app -maxdepth 6 | head -1)
+          echo "app=$APP"
+          codesign -dr - "$APP" 2>&1 | grep designated
+          codesign -dvv "$APP" 2>&1 | grep -E "Identifier|Signature|Authority|TeamIdentifier" || true
+          codesign --verify --deep --strict "$APP" && echo "SIGNATURE VALID"
