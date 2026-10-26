@@ -13,6 +13,7 @@
     type DefaultLevel,
     type MentionRule,
   } from '$lib/stores/notificationSettings.svelte';
+  import { permissionsStore } from '$lib/stores/permissions.svelte';
 
   const levelOptions: { value: DefaultLevel; label: string }[] = [
     { value: 'All', label: 'All messages' },
@@ -23,7 +24,24 @@
   let pushError = $state<string | null>(null);
   onMount(() => {
     void notificationSettings.load();
+    return permissionsStore.watch();
   });
+
+  const notificationRow = $derived(permissionsStore.rows.find((r) => r.id === 'notifications'));
+  const notificationsDenied = $derived(
+    notificationRow?.state === 'denied' ||
+    (pushStore.enabled && pushStore.permission === 'denied') ||
+    permissionError !== null
+  );
+
+  interface Props {
+    onOpenPermissions?: () => void;
+  }
+  let { onOpenPermissions }: Props = $props();
+
+  function openPermissions() {
+    onOpenPermissions?.();
+  }
 
   const settings = $derived(notificationSettings.settings);
   const busy = $derived(notificationSettings.saving > 0);
@@ -131,6 +149,12 @@
       checked={prefs.notifyDesktop}
       onchange={(v) => void changeDesktop(v)}
     />
+    {#if notificationsDenied}
+      <div class="permission-notice">
+        <span>Review or change notification access in </span>
+        <button type="button" class="permissions-link" onclick={openPermissions}>Permissions</button>.
+      </div>
+    {/if}
     <SettingToggle
       label="Play a sound"
       description="Play the system notification sound."
@@ -198,6 +222,7 @@
           <p class="error" role="alert">
             Notifications are blocked for Alloy. Open Android Settings &gt; Apps &gt; Alloy &gt; Notifications and turn on Allow notifications.
           </p>
+          <button type="button" class="permissions-link" onclick={openPermissions}>Open Permissions</button>
         </div>
       {/if}
       {#if pushStore.enabled && pushStore.error}
@@ -209,7 +234,10 @@
   {/if}
 
   {#if permissionError}
-    <p class="error" role="alert">{permissionError}</p>
+    <div class="permission-error-row">
+      <p class="error" role="alert">{permissionError}</p>
+      <button type="button" class="permissions-link" onclick={openPermissions}>Open Permissions</button>
+    </div>
   {/if}
   {#if notificationSettings.error}
     <p class="error" role="alert">{notificationSettings.error}</p>
@@ -265,5 +293,32 @@
   .push-alert {
     padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x) var(--alloy-spacing-scale-3);
     border-top: 1px solid var(--alloy-color-border-subtle);
+  }
+  .permission-notice {
+    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-row-pad-x);
+    font-size: var(--alloy-typography-size-sm);
+    color: var(--alloy-color-text-secondary);
+    border-top: 1px solid var(--alloy-color-border-subtle);
+  }
+  .permissions-link {
+    display: inline;
+    padding: 0;
+    margin: 0;
+    border: none;
+    background: none;
+    color: var(--alloy-color-accent-primary);
+    font: inherit;
+    font-size: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+  .permissions-link:hover {
+    color: var(--alloy-color-accent-hover, var(--alloy-color-accent-primary));
+  }
+  .permission-error-row {
+    display: flex;
+    flex-direction: column;
+    gap: var(--alloy-spacing-scale-1);
+    align-items: flex-start;
   }
 </style>

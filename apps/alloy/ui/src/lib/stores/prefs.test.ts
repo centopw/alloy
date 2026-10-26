@@ -147,6 +147,7 @@ describe('defaults', () => {
       roomSort: 'activity',
       quickReactions: ['\u{1F44D}', '\u2764\uFE0F', '\u{1F602}', '\u{1F62E}', '\u{1F622}', '\u{1F64F}'],
       voiceSpeed: '1',
+      permissionsPromptDismissed: false,
       mutedUntil: {},
     });
   });

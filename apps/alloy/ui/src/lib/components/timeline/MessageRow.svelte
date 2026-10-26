@@ -468,7 +468,7 @@
         </div>
       {/if}
 
-      <div class="bubble">
+      <div class="bubble" class:has-reactions={(item.reactions ?? []).length > 0}>
         {#if item.reply_to}
           <div class="reply-slot">
             <ReplyQuote replyTo={item.reply_to} inOwnBubble={layout === 'bubbles' && item.is_own} />
@@ -564,7 +564,7 @@
                 data-tooltip={joinNames(r.senders.map(nameOf))}
                 use:contextmenu={() => [{ id: 'who', label: 'See who reacted', icon: Users, onselect: () => openWho(r.key) }]}
               >
-                <span>{r.key}</span><span class="count">{r.count}</span>
+                <span class="pill"><span>{r.key}</span><span class="count">{r.count}</span></span>
               </button>
             {/each}
           </div>
@@ -914,6 +914,8 @@
     outline-offset: 1px;
   }
   .reactions {
+    /* Height of one chip's tap area; the pill inside is smaller on phones. */
+    --chip-box: 24px;
     display: flex;
     flex-wrap: wrap;
     gap: var(--alloy-spacing-scale-1);
@@ -921,23 +923,32 @@
   }
   .chip {
     display: inline-flex;
+    align-items: center;
+    min-height: var(--chip-box);
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--alloy-color-text-primary);
+    font: inherit;
+    font-size: var(--alloy-typography-size-sm);
+    cursor: pointer;
+  }
+  .pill {
+    display: inline-flex;
     gap: var(--alloy-spacing-scale-1);
     align-items: center;
     padding: 2px var(--alloy-spacing-scale-2);
     border-radius: var(--alloy-radii-full);
     border: 1px solid var(--alloy-color-border-prominent);
     background: var(--alloy-color-surface-subtle);
-    color: var(--alloy-color-text-primary);
-    font: inherit;
-    font-size: var(--alloy-typography-size-sm);
-    cursor: pointer;
+    line-height: var(--alloy-typography-line-height-normal);
   }
   @media (hover: hover) {
-    .chip:hover {
+    .chip:hover .pill {
       background: var(--alloy-color-surface-hover);
     }
   }
-  .chip.mine {
+  .chip.mine .pill {
     border-color: var(--alloy-color-accent-primary);
     background: var(--alloy-color-accent-subtle);
   }
@@ -988,8 +999,14 @@
     color: var(--alloy-color-text-primary);
   }
   .toolbar button:focus-visible,
-  .failed-actions button:focus-visible,
+  .failed-actions button:focus-visible {
+    outline: 2px solid var(--alloy-color-accent-primary);
+    outline-offset: 1px;
+  }
   .chip:focus-visible {
+    outline: none;
+  }
+  .chip:focus-visible .pill {
     outline: 2px solid var(--alloy-color-accent-primary);
     outline-offset: 1px;
   }
@@ -1112,6 +1129,25 @@
   .row.own[data-layout='bubbles'] .bubble {
     background: var(--alloy-color-accent-subtle);
   }
+  /* Reactions sit on the bottom edge of the bubble, half over it, as in Messenger. */
+  .row[data-layout='bubbles'] .bubble {
+    position: relative;
+  }
+  .row[data-layout='bubbles'] .bubble.has-reactions {
+    margin-bottom: var(--alloy-spacing-scale-3);
+  }
+  .row[data-layout='bubbles'] .reactions {
+    position: absolute;
+    left: var(--alloy-spacing-scale-2);
+    bottom: calc(var(--chip-box) / -2);
+    flex-wrap: nowrap;
+    margin: 0;
+    z-index: 1;
+  }
+  .row.own[data-layout='bubbles'] .reactions {
+    left: auto;
+    right: var(--alloy-spacing-scale-2);
+  }
   .row.grouped[data-layout='bubbles']:not(.own) .bubble {
     border-top-left-radius: var(--alloy-radii-sm);
   }
@@ -1157,9 +1193,15 @@
       min-height: 44px;
       padding: 0 var(--alloy-spacing-scale-3);
     }
+    .reactions {
+      --chip-box: 44px;
+    }
     .chip {
       min-height: 44px;
-      padding: 0 var(--alloy-spacing-scale-2);
+      padding: 0 var(--alloy-spacing-scale-1);
+    }
+    .row[data-layout='bubbles'] .bubble.has-reactions {
+      margin-bottom: var(--alloy-spacing-scale-6);
     }
     .failed-actions button {
       display: inline-flex;

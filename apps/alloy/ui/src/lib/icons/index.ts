@@ -89,3 +89,5 @@ export { Navigation } from '@lucide/svelte';
 export { Ban } from '@lucide/svelte';
 export { UserMinus } from '@lucide/svelte';
 export { ShieldAlert } from '@lucide/svelte';
+export { BatteryCharging } from '@lucide/svelte';
+export { CircleCheck } from '@lucide/svelte';

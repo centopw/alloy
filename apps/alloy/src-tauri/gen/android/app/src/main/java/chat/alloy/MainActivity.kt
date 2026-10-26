@@ -82,6 +82,7 @@ class MainActivity : TauriActivity() {
     this.webView = webView
     webView.addJavascriptInterface(DownloadBridge(applicationContext), "AlloyAndroid")
     webView.addJavascriptInterface(ClipboardBridge(applicationContext), "AlloyClipboard")
+    webView.addJavascriptInterface(PermissionsBridge(this), "AlloyPermissions")
     pushBridge = PushBridge(this)
     webView.addJavascriptInterface(pushBridge, "AlloyPush")
 
@@ -136,6 +137,29 @@ class MainActivity : TauriActivity() {
     webView!!.evaluateJavascript(
       "javascript:void(window.dispatchEvent(new CustomEvent('alloy-push-state', {detail:$stateJson})))"
     ) { _ -> }
+  }
+
+  /** Asks the system for one runtime permission (through Wry's helper) and tells the page the answer. */
+  fun requestPermissionFor(name: String, permission: String) {
+    val permissions = if (name == "microphone") {
+      arrayOf(permission, android.Manifest.permission.MODIFY_AUDIO_SETTINGS)
+    } else if (name == "location") {
+      arrayOf(permission, android.Manifest.permission.ACCESS_COARSE_LOCATION)
+    } else {
+      arrayOf(permission)
+    }
+    requestPermissions(permissions) { _ -> dispatchPermissionChanged(name) }
+  }
+
+  /** Lets the Permissions screen re-read its states: after an answer, or on return from a settings page. */
+  fun dispatchPermissionChanged(name: String) {
+    if (!webViewReady || webView == null) return
+    val safe = name.replace("\\", "\\\\").replace("'", "\\'")
+    webView!!.post {
+      webView!!.evaluateJavascript(
+        "javascript:void(window.dispatchEvent(new CustomEvent('alloy-permission-changed', {detail:{name:'$safe'}})))"
+      ) { _ -> }
+    }
   }
 
   fun requestNotificationPermission(callback: (Boolean) -> Unit) {

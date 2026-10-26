@@ -138,6 +138,25 @@ try {
     pageErrors.push(e.message);
     console.error('pageerror:', e.message);
   });
+  const assertReactionOverlay = async (rowSelectorOrHandle) => {
+    await page.waitForFunction((target) => {
+      const isBubbles = document.documentElement.getAttribute('data-message-layout') === 'bubbles';
+      let row = typeof target === 'string' ? document.querySelector(target) : target;
+      if (!row && typeof target === 'string') {
+        row = [...document.querySelectorAll('.row[data-event-id], .row')].find((r) => r.querySelector('.reactions .chip'));
+      }
+      if (!row) return false;
+      const rowBubbles = isBubbles || row.getAttribute('data-layout') === 'bubbles';
+      if (!rowBubbles) return true;
+      const bubble = row.querySelector('.bubble');
+      const pill = row.querySelector('.chip .pill') || row.querySelector('.chip');
+      if (!bubble || !pill) return false;
+      const bRect = bubble.getBoundingClientRect();
+      const pRect = pill.getBoundingClientRect();
+      const pillCenter = pRect.top + pRect.height / 2;
+      return Math.abs(pillCenter - bRect.bottom) <= 4;
+    }, { timeout: 10000 }, rowSelectorOrHandle);
+  };
   page.on('console', (m) => ['error', 'warning', 'log'].includes(m.type()) && console.error('console:', m.text()));
   if (process.env.E2E_TRACE) {
     const cdp = await page.createCDPSession();
@@ -160,6 +179,46 @@ try {
   step('room list streams in with the invited room');
   await page.waitForFunction(() => [...document.querySelectorAll('button.row .title')].some((e) => e.textContent === 'From Bob'), { timeout: 60000 });
   await page.screenshot({ path: resolve(shots, 'e2e-1-room-list.png') });
+
+  // First-run permissions gate: if it appears on a fresh profile, verify and dismiss it before interaction
+  const hasGate = await page.waitForFunction(() => {
+    return document.querySelector('[role=dialog][aria-label="Allow what Alloy needs"], .gate') !== null;
+  }, { timeout: 3000 }).catch(() => false);
+
+  if (hasGate) {
+    step('first-run permissions gate: assert summary and rows, then dismiss');
+    await page.waitForFunction(() => {
+      const summary = document.querySelector('[data-testid="permissions-summary"]')?.textContent?.trim();
+      const rows = document.querySelectorAll('.gate li[data-permission], [role=dialog] li[data-permission]');
+      return rows.length > 0 && summary && !summary.includes('Checking');
+    }, { timeout: 5000 });
+
+    const gateData = await page.evaluate(() => {
+      const gateEl = document.querySelector('[role=dialog][aria-label="Allow what Alloy needs"], .gate');
+      const summary = gateEl?.querySelector('[data-testid="permissions-summary"]')?.textContent?.trim() || '';
+      const rows = [...(gateEl?.querySelectorAll('li[data-permission]') ?? [])].map((r) => ({
+        id: r.getAttribute('data-permission'),
+        state: r.getAttribute('data-state'),
+      }));
+      return { summary, rows };
+    });
+
+    if (!gateData.summary) throw new Error('permissions gate summary rendered empty');
+    if (!gateData.rows.length || !gateData.rows.some((r) => r.id === 'notifications')) {
+      throw new Error(`permissions gate rows missing notifications: ${JSON.stringify(gateData.rows)}`);
+    }
+
+    await page.evaluate(() => {
+      const d = document.querySelector('[role=dialog][aria-label="Allow what Alloy needs"], .gate');
+      const btn = [...(d?.querySelectorAll('button') ?? [])].find((b) => b.textContent.trim() === 'Continue');
+      if (!btn) throw new Error('Continue button not found in permissions gate');
+      btn.click();
+    });
+    await page.waitForFunction(
+      () => !document.querySelector('[role=dialog][aria-label="Allow what Alloy needs"], .gate'),
+      { timeout: 10000 }
+    );
+  }
 
   if (MOBILE) {
     const problems = [];
@@ -210,6 +269,7 @@ try {
     await page.touchscreen.tap(laugh.x, laugh.y);
     await page.waitForFunction(() => !document.querySelector('.sheet-scrim'), { timeout: 5000 });
     await page.waitForFunction(() => [...document.querySelectorAll('.row[data-event-id]')].find((e) => e.textContent.includes('Hi from bob'))?.querySelector('button[aria-label^="\u{1F602}"]'), { timeout: 20000 });
+    await assertReactionOverlay('.row[data-event-id]:has(button[aria-label^="\u{1F602}"])');
     await settle();
     step('mobile: swipe a message to the right replies to it');
     const swipeAt = await page.evaluate(() => { const r = [...document.querySelectorAll('.row[data-event-id]')].find((e) => e.textContent.includes('Hi from bob')).getBoundingClientRect(); return { x: 60, y: r.y + r.height / 2 }; });
@@ -293,6 +353,7 @@ try {
   await page.waitForFunction(() => document.querySelector('.emoji-picker .heading')?.textContent === 'Results' && /thumbs up/i.test(document.querySelector('.emoji-picker .cell')?.getAttribute('aria-label') ?? ''), { timeout: 10000 });
   await page.evaluate(() => document.querySelector('.emoji-picker .cell').click());
   await page.waitForFunction(() => document.querySelector('.chip.mine'), { timeout: 30000 });
+  await assertReactionOverlay(bobRow);
 
   step('one-click quick reaction from the hover toolbar');
   await page.waitForFunction(() => [...document.querySelectorAll('.row[data-event-id]')].some((r) => r.textContent.includes('alloy-e2e') && r.querySelector('.toolbar')), { timeout: 30000 });
@@ -300,6 +361,7 @@ try {
   await linkRow.asElement().hover();
   await page.evaluate((row) => row.querySelector('.toolbar button[aria-label^="React with"]').click(), linkRow);
   await page.waitForFunction((row) => row.querySelector('.chip.mine'), { timeout: 30000 }, linkRow);
+  await assertReactionOverlay(linkRow);
 
   step('live: a message sent by the other user while the room is open arrives without reopening');
   await fetch(`${HS}/_matrix/client/v3/rooms/${encodeURIComponent(room.room_id)}/send/m.room.message/live1`, {
@@ -779,6 +841,7 @@ try {
   await page.waitForSelector('.desktop-reaction-strip button[aria-label^="React with"]', { visible: true, timeout: 5000 });
   await page.evaluate(() => [...document.querySelectorAll('.desktop-reaction-strip button[aria-label^="React with"]')].find((e) => e.textContent.includes('\u{1F62E}')).click());
   await page.waitForFunction(() => [...document.querySelectorAll('.row[data-event-id]')].find((e) => e.textContent.includes('live ping alloy-live'))?.querySelector('button[aria-label^="\u{1F62E}"]'), { timeout: 20000 });
+  await assertReactionOverlay('.row[data-event-id]:has(button[aria-label^="\u{1F62E}"])');
 
   step('refresh: restart sync from the header button; the open chat stays open and later messages still arrive');
   await openRoom('From Bob');
@@ -812,6 +875,8 @@ try {
   // Hovering must not resize a bubble (the time used to appear only on hover and push every message down).
   const bubbleTimeShown = await page.evaluate(() => { const t = document.querySelector('.row[data-layout="bubbles"] .bubble-time'); return !!t && getComputedStyle(t).display !== 'none'; });
   if (!bubbleTimeShown) throw new Error('bubble time is hidden until hover: hovering would shift the layout');
+  // For a reacted message in bubbles layout, the pill's vertical center should be within 4px of the bubble's bottom edge
+  await assertReactionOverlay('.row:has(.reactions .chip)');
   // Our own Select: open the 'Font size' trigger, then pick the 120% item from the popup menu.
   await page.evaluate(() => document.querySelector('[role=dialog] button[aria-label^="Font size"]').click());
   await page.waitForSelector('[role=menuitemradio]', { visible: true, timeout: 5000 });
@@ -823,6 +888,15 @@ try {
   await openPage('Notifications');
   await page.waitForFunction(() => document.querySelector('[role=dialog]').innerText.includes('Direct chats'), { timeout: 15000 });
   await uxShot(page, 'settings-notifications');
+  step('settings: open permissions and assert rows and summary');
+  await openPage('Permissions');
+  await page.waitForFunction(() => {
+    const dialog = document.querySelector('[role=dialog]');
+    const summary = dialog?.querySelector('[data-testid="permissions-summary"]')?.textContent?.trim();
+    const rows = dialog?.querySelectorAll('li[data-permission]');
+    return !!summary && !summary.includes('Checking') && (rows?.length ?? 0) > 0;
+  }, { timeout: 15000 });
+  await uxShot(page, 'settings-permissions');
   await openPage('Devices');
   await page.waitForFunction(() => document.querySelector('[role=dialog]').innerText.includes('This device'), { timeout: 15000 });
   await uxShot(page, 'settings-devices');

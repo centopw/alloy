@@ -54,6 +54,8 @@ export interface Prefs {
   /** Emoji shown in the quick-reaction bar, in order. */
   quickReactions: readonly string[];
   voiceSpeed: VoiceSpeed;
+  /** The first-run permissions prompt was dismissed on this device. */
+  permissionsPromptDismissed: boolean;
   /** Rooms muted for a limited time: room id -> epoch ms when the mute ends. */
   mutedUntil: MutedUntil;
 }
@@ -93,6 +95,7 @@ export const DEFAULT_PREFS: Readonly<Prefs> = Object.freeze({
   roomSort: 'activity',
   quickReactions: DEFAULT_QUICK_REACTIONS,
   voiceSpeed: '1',
+  permissionsPromptDismissed: false,
   mutedUntil: NO_MUTES,
 });
 
@@ -133,6 +136,7 @@ const PREF_SCOPE: Record<PrefKey, PrefScope> = {
   autoCheckUpdates: 'device',
   autoDownloadUpdates: 'device',
   voiceSpeed: 'device',
+  permissionsPromptDismissed: 'device',
   timeFormat: 'synced',
   bigEmoji: 'synced',
   showReadReceipts: 'synced',
@@ -375,6 +379,9 @@ export class PrefsStore {
   }
   get voiceSpeed(): VoiceSpeed {
     return this.#values.voiceSpeed;
+  }
+  get permissionsPromptDismissed(): boolean {
+    return this.#values.permissionsPromptDismissed;
   }
   get mutedUntil(): MutedUntil {
     return this.#values.mutedUntil;

@@ -102,6 +102,7 @@ export type SettingsSectionId =
   | 'devices'
   | 'appearance'
   | 'notifications'
+  | 'permissions'
   | 'preferences'
   | 'keyboard'
   | 'sidebar'
@@ -150,6 +151,7 @@ export const SETTINGS_GROUPS_DEF: RawSettingsGroup[] = [
     items: [
       { id: 'appearance', label: 'Appearance' },
       { id: 'notifications', label: 'Notifications' },
+      { id: 'permissions', label: 'Permissions' },
       { id: 'preferences', label: 'Preferences' },
       { id: 'keyboard', label: 'Keyboard', visible: (caps) => caps.keyboardShortcuts },
       { id: 'sidebar', label: 'Sidebar', phoneLabel: 'Chat list' },

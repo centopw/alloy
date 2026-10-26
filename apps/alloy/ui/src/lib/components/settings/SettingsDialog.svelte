@@ -17,7 +17,8 @@
     PanelLeft,
     MessageSquare,
     Info,
-    Tag
+    Tag,
+    ShieldCheck as PermissionsIcon
   } from '$lib/icons';
   import { session } from '$lib/stores/session.svelte';
   import { pushBack } from '$lib/platform/backstack';
@@ -41,6 +42,7 @@ import SecurityPrivacy from './sections/SecurityPrivacy.svelte';
 import Encryption from './sections/Encryption.svelte';
 import HelpAbout from './sections/HelpAbout.svelte';
 import Tags from './sections/Tags.svelte';
+import Permissions from './sections/Permissions.svelte';
 
   interface Props {
     open: boolean;
@@ -62,6 +64,7 @@ import Tags from './sections/Tags.svelte';
     encryption: { icon: Lock },
     appearance: { icon: Palette },
     notifications: { icon: Bell },
+    permissions: { icon: PermissionsIcon },
     preferences: { icon: SlidersHorizontal },
     keyboard: { icon: KeyboardIcon },
     sidebar: { icon: PanelLeft, phoneIcon: MessageSquare },
@@ -249,7 +252,9 @@ import Tags from './sections/Tags.svelte';
             {:else if section === 'appearance'}
               <Appearance />
             {:else if section === 'notifications'}
-              <Notifications />
+              <Notifications onOpenPermissions={() => openSection('permissions')} />
+            {:else if section === 'permissions'}
+              <Permissions />
             {:else if section === 'preferences'}
               <Preferences />
             {:else if section === 'keyboard'}
