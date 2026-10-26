@@ -44,6 +44,13 @@
   const video = $derived(mediaKind === 'video');
   // Audio and file items do NOT open the viewer
   const openable = $derived(mediaKind === 'image' || video);
+  // Bumped by Retry: the fetch effect re-runs for the same source.
+  let attempt = $state(0);
+  function retryLoad() {
+    attempt += 1;
+  }
+  // Only a picture or a video gets the visible retry: an audio or file row already names its item.
+  const loadFailed = $derived(openable && failed);
   // Images thumbnail their own media; videos use their poster when one exists.
   const thumbSource = $derived(visual ? uri : video ? thumbnailUri : null);
   const thumbMime = $derived(visual ? mimeType : 'image/jpeg');
@@ -88,6 +95,9 @@
 
   $effect(() => {
     const source = thumbSource;
+    // Reading `attempt` makes a retry re-run the fetch for the same source.
+    const generation = attempt;
+    void generation;
     if (source === null) return;
     let cancelled = false;
     src = null;
@@ -150,7 +160,12 @@
   {/if}
 {/snippet}
 
-{#if hasThumb || inlineVideo}
+{#if loadFailed}
+  <div class="frame frame-error" style="min-height: 120px;" role="group" aria-label="Media did not load">
+    <span class="error-text">Couldn't load this {mediaKind}.</span>
+    <button type="button" class="retry" onclick={retryLoad}>Retry</button>
+  </div>
+{:else if hasThumb || inlineVideo}
   {#if openable}
     <button
       class="frame frame-open"
@@ -264,10 +279,58 @@
     color: var(--alloy-color-text-secondary);
   }
 
+  /* The thumbnail is still being fetched: a sweeping sheen, never a still grey block. */
   .placeholder {
     width: 100%;
     height: 100%;
-    background: linear-gradient(135deg, transparent 48%, var(--alloy-color-text-secondary) 49%, var(--alloy-color-text-secondary) 51%, transparent 52%);
-    opacity: 0.1;
+    background: linear-gradient(
+      100deg,
+      var(--alloy-color-surface-hover) 30%,
+      var(--alloy-color-surface-subtle) 50%,
+      var(--alloy-color-surface-hover) 70%
+    );
+    background-size: 220% 100%;
+    animation: media-skeleton 1.4s ease-in-out infinite;
+  }
+  @keyframes media-skeleton {
+    0% {
+      background-position: 220% 0;
+    }
+    100% {
+      background-position: -220% 0;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .placeholder {
+      animation: none;
+    }
+  }
+  .frame-error {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--alloy-spacing-scale-2);
+    padding: var(--alloy-spacing-scale-3);
+    background: var(--alloy-color-surface-subtle);
+    color: var(--alloy-color-text-secondary);
+    font-size: var(--alloy-typography-size-sm);
+    text-align: center;
+  }
+  .retry {
+    border: 1px solid var(--alloy-color-border-subtle);
+    border-radius: var(--alloy-radii-md);
+    background: var(--alloy-color-surface-elevated);
+    color: var(--alloy-color-text-primary);
+    font: inherit;
+    padding: var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-3);
+    cursor: pointer;
+  }
+  .retry:hover {
+    background: var(--alloy-color-surface-hover);
+  }
+  .retry:focus-visible {
+    outline: 2px solid var(--alloy-color-accent-primary);
+    outline-offset: 2px;
   }
 </style>

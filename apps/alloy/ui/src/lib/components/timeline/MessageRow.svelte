@@ -536,7 +536,7 @@
         {/if}
 
         {#if item.is_own && sending}
-          <div class="state">Sending</div>
+          <div class="state sending" role="status" aria-label="Sending">Sending</div>
         {:else if failed}
           <div class="failed-actions">
             <span class="err">Failed to send</span>
@@ -871,6 +871,25 @@
   .state {
     font-size: var(--alloy-typography-size-xs);
     color: var(--alloy-color-text-muted);
+  }
+  /* A pending echo has no byte progress to show, so the label breathes to prove the row is alive. */
+  .state.sending {
+    animation: sending-pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes sending-pulse {
+    0%,
+    100% {
+      opacity: 0.5;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .state.sending {
+      animation: none;
+      opacity: 0.85;
+    }
   }
   .failed-actions {
     display: flex;
