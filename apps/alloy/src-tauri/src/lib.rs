@@ -77,6 +77,7 @@ pub fn run() {
             let engine = Arc::new(AppEngine::new(ctx));
 
             app.manage(AppState { engine });
+            notify::register_click_handler(app.handle())?;
 
             Ok(())
         })
@@ -93,9 +94,11 @@ pub fn run() {
             update::download_update,
             update::apply_update,
             notify::notify_permission,
+            notify::notify_permission_state,
             notify::notify_message,
             notify::autostart_get,
-            notify::autostart_set
+            notify::autostart_set,
+            notify::open_permission_settings
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

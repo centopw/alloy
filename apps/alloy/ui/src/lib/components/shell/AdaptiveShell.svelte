@@ -47,11 +47,14 @@
   import { pushStore } from '$lib/stores/push.svelte';
   import { refreshStore } from '$lib/stores/refresh.svelte';
   import ChangelogDialog from '$lib/components/updates/ChangelogDialog.svelte';
+  import { listen } from '@tauri-apps/api/event';
+  import { isTauriShell } from '$lib/platform/notify';
+  import PermissionsGate from './PermissionsGate.svelte';
 
   let paletteOpen = $state(false);
   let settingsOpen = $state(false);
-  let settingsSection = $state<'tags' | undefined>();
-  function openSettings(section?: 'tags') {
+  let settingsSection = $state<'tags' | 'permissions' | undefined>();
+  function openSettings(section?: 'tags' | 'permissions') {
     settingsSection = section;
     settingsOpen = true;
   }
@@ -136,6 +139,22 @@
       }
     };
     window.addEventListener('alloy-open-room', onOpenRoom);
+    // Desktop notification clicks come from the Rust side as a Tauri event, not a DOM event.
+    // `disposed` covers teardown before `listen` resolves: the late unlisten is called at once.
+    let disposed = false;
+    let unlistenNativeRoom: (() => void) | null = null;
+    if (isTauriShell()) {
+      listen<string>('alloy-open-room', (e) => {
+        onOpenRoom(new CustomEvent('alloy-open-room', { detail: e.payload }));
+      })
+        .then((fn) => {
+          if (disposed) fn();
+          else unlistenNativeRoom = fn;
+        })
+        .catch((err: unknown) => {
+          console.warn('[shell] could not listen for notification clicks', err);
+        });
+    }
     const stopConnectivity = connectivity.start(() => client.invoke({ action: 'GetTagCatalog' }));
     const stopReconnect = connectivity.onReconnect(() => {
       void tags.load();
@@ -144,6 +163,8 @@
     });
     return () => {
       window.removeEventListener('alloy-open-room', onOpenRoom);
+      disposed = true;
+      unlistenNativeRoom?.();
       pushStore.stop();
       notifier.stop();
       stopConnectivity();
@@ -350,6 +371,7 @@
 <NewRoomDialog open={newRoomOpen} onclose={() => (newRoomOpen = false)} onopened={pick} />
 <DirectoryDialog open={directoryOpen} onclose={() => (directoryOpen = false)} onjoined={pick} />
 <SettingsDialog open={settingsOpen} initialSection={settingsSection} onclose={() => (settingsOpen = false)} />
+<PermissionsGate onopensettings={() => openSettings('permissions')} />
 <VerificationDialog />
 {#if import.meta.env.DEV}<Hud bind:visible={hudVisible} />{/if}
 

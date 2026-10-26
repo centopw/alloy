@@ -102,7 +102,7 @@ describe('Notifier', () => {
     notifier.observe([room('!a', 3, 0, 'new message')]);
     await vi.advanceTimersByTimeAsync(0);
     expect(deps.show).toHaveBeenCalledOnce();
-    expect(deps.show).toHaveBeenCalledWith({ title: '!a', body: 'new message', silent: false });
+    expect(deps.show).toHaveBeenCalledWith({ title: '!a', body: 'new message', silent: false, roomId: '!a' });
   });
 
   it('hides the preview when previews are disabled', async () => {
@@ -111,7 +111,7 @@ describe('Notifier', () => {
     notifier.observe([room('!a', 0)]);
     notifier.observe([room('!a', 1, 0, 'secret')]);
     await vi.advanceTimersByTimeAsync(0);
-    expect(deps.show).toHaveBeenCalledWith({ title: '!a', body: 'New message', silent: true });
+    expect(deps.show).toHaveBeenCalledWith({ title: '!a', body: 'New message', silent: true, roomId: '!a' });
   });
 
   it('does not notify for a room whose engine level is Mute', async () => {
@@ -149,7 +149,7 @@ describe('Notifier', () => {
     clock += COALESCE_MS;
     await vi.advanceTimersByTimeAsync(COALESCE_MS);
     expect(deps.show).toHaveBeenCalledTimes(2);
-    expect(deps.show).toHaveBeenLastCalledWith({ title: '!a', body: 'third', silent: false });
+    expect(deps.show).toHaveBeenLastCalledWith({ title: '!a', body: 'third', silent: false, roomId: '!a' });
   });
 
   it('keeps coalescing separate per room', async () => {

@@ -10,6 +10,8 @@ export interface OsNotification {
   body: string;
   /** When true the notification is shown without a sound. */
   silent: boolean;
+  /** The room the notification is about; a click on the notification opens it. */
+  roomId: string;
 }
 
 /**
@@ -27,11 +29,16 @@ export async function requestNotificationPermission(): Promise<boolean> {
 /** Shows one OS notification. Rejects when permission is not granted. */
 export async function showNotification(n: OsNotification): Promise<void> {
   if (isTauriShell()) {
-    await invoke<void>('notify_message', { title: n.title, body: n.body, silent: n.silent });
+    await invoke<void>('notify_message', { title: n.title, body: n.body, silent: n.silent, roomId: n.roomId });
     return;
   }
   if (typeof Notification === 'undefined' || Notification.permission !== 'granted') {
     throw new Error('notification permission is not granted');
   }
-  new Notification(n.title, { body: n.body, silent: n.silent });
+  const note = new Notification(n.title, { body: n.body, silent: n.silent });
+  note.onclick = () => {
+    window.focus();
+    window.dispatchEvent(new CustomEvent('alloy-open-room', { detail: n.roomId }));
+    note.close();
+  };
 }

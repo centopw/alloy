@@ -44,13 +44,20 @@ describe('showNotification', () => {
   it('sends title, body and silent flag to the shell', async () => {
     host.__TAURI_INTERNALS__ = {};
     invoke.mockResolvedValue(undefined);
-    await showNotification({ title: 'Room', body: 'hi', silent: true });
-    expect(invoke).toHaveBeenCalledWith('notify_message', { title: 'Room', body: 'hi', silent: true });
+    await showNotification({ title: 'Room', body: 'hi', silent: true, roomId: '!room:alloy.chat' });
+    expect(invoke).toHaveBeenCalledWith('notify_message', {
+      title: 'Room',
+      body: 'hi',
+      silent: true,
+      roomId: '!room:alloy.chat',
+    });
   });
 
   it('rejects in the browser when permission is not granted', async () => {
     vi.stubGlobal('Notification', Object.assign(vi.fn(), { permission: 'denied' }));
-    await expect(showNotification({ title: 'Room', body: 'hi', silent: false })).rejects.toThrow(
+    await expect(
+      showNotification({ title: 'Room', body: 'hi', silent: false, roomId: '!room:alloy.chat' })
+    ).rejects.toThrow(
       'permission is not granted'
     );
   });

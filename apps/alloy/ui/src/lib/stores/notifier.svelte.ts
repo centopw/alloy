@@ -147,7 +147,7 @@ export class Notifier {
     };
     if (!shouldNotify(state)) return;
     const body = settings.preview ? (room.preview ?? 'New message') : 'New message';
-    this.deliver(room.id, { title: room.title, body, silent: !settings.sound });
+    this.deliver(room.id, { title: room.title, body, silent: !settings.sound, roomId: room.id });
   }
 
   private deliver(roomId: string, notice: OsNotification): void {
