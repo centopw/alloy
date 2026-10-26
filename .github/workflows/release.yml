@@ -172,12 +172,103 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           # Tauri treats an empty variable as "signing requested", so export only non-empty secrets.
-          for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID \
+          # For macOS signing:
+          # When APPLE_ID is present, a real Apple Developer ID is configured; export
+          # APPLE_CERTIFICATE and APPLE_CERTIFICATE_PASSWORD so Tauri's built-in tauri-macos-sign
+          # manages the temporary keychain, resolves the team ID, signs, and notarizes.
+          # When APPLE_ID is absent, any APPLE_CERTIFICATE is self-signed and must NOT be exported
+          # to GITHUB_ENV, because tauri-macos-sign requires an Apple Team ID to resolve identities
+          # and fails with "failed to resolve signing identity". The dedicated macOS step below imports
+          # the self-signed certificate into a persistent user keychain for codesign instead.
+          for v in APPLE_SIGNING_IDENTITY APPLE_ID \
                    APPLE_PASSWORD APPLE_TEAM_ID WINDOWS_CERTIFICATE WINDOWS_CERTIFICATE_PASSWORD \
                    TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD; do
             if [ -n "${!v}" ]; then echo "$v=${!v}" >> "$GITHUB_ENV"; fi
           done
 
+          if [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_CERTIFICATE:-}" ]; then
+            echo "APPLE_CERTIFICATE=${APPLE_CERTIFICATE}" >> "$GITHUB_ENV"
+            if [ -n "${APPLE_CERTIFICATE_PASSWORD:-}" ]; then
+              echo "APPLE_CERTIFICATE_PASSWORD=${APPLE_CERTIFICATE_PASSWORD}" >> "$GITHUB_ENV"
+            fi
+          fi
+
+      # Without an Apple Developer ID the certificate is self-signed (.github/macos-signing-cert.pem, docs/RELEASING.md).
+      # tauri-macos-sign requires an Apple Team ID to resolve identities from APPLE_CERTIFICATE, so for self-signed
+      # certs we import the .p12 into a persistent user keychain, configure partition lists and trust settings,
+      # and point Tauri at the identity name via TAURI_CONFIG while keeping APPLE_CERTIFICATE out of Tauri's env.
+      # Tauri then signs with codesign directly from the default keychain.
+      # With a real Apple certificate (APPLE_ID set) Tauri's built-in certificate/notarization flow is used instead.
+      - name: Set up macOS code signing
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+        run: |
+          if [ -z "${APPLE_CERTIFICATE:-}" ]; then
+            echo "No macOS signing certificate configured; builds are signed ad hoc."
+            exit 0
+          fi
+
+          if [ -n "${APPLE_ID:-}" ]; then
+            echo "Apple Developer ID configured; keeping Tauri built-in certificate and notarization flow."
+            exit 0
+          fi
+
+          SIGNING_IDENTITY="${APPLE_SIGNING_IDENTITY:-Alloy Release Signing}"
+          echo "Setting up self-signed macOS certificate for identity: $SIGNING_IDENTITY"
+
+          # Trust the public certificate root for code signing in the System keychain
+          sudo security add-trusted-cert -d -r trustRoot -p codeSign -k /Library/Keychains/System.keychain .github/macos-signing-cert.pem
+
+          # Create a dedicated user keychain and keep it unlocked for codesign
+          KEYCHAIN_PATH="$HOME/Library/Keychains/alloy-signing.keychain-db"
+          KEYCHAIN_PWD="alloy-signing-keychain"
+
+          security delete-keychain "$KEYCHAIN_PATH" 2>/dev/null || true
+          security create-keychain -p "$KEYCHAIN_PWD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -t 21600 -u "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PWD" "$KEYCHAIN_PATH"
+
+          # Add to the user keychain search list and set as default keychain
+          EXISTING_KEYCHAINS=()
+          while IFS= read -r kc; do
+            kc=$(echo "$kc" | tr -d '"' | xargs)
+            if [ -n "$kc" ]; then
+              EXISTING_KEYCHAINS+=("$kc")
+            fi
+          done < <(security list-keychains -d user)
+
+          security list-keychains -d user -s "$KEYCHAIN_PATH" ${EXISTING_KEYCHAINS[@]+"${EXISTING_KEYCHAINS[@]}"}
+          security default-keychain -s "$KEYCHAIN_PATH"
+
+          # Decode and import the PKCS12 certificate and private key
+          CERT_FILE="$(mktemp -t alloy-cert.XXXXXX).p12"
+          echo "$APPLE_CERTIFICATE" | base64 -d > "$CERT_FILE"
+          security import "$CERT_FILE" \
+            -k "$KEYCHAIN_PATH" \
+            -f pkcs12 \
+            -t agg \
+            -P "${APPLE_CERTIFICATE_PASSWORD:-}" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security
+          rm -f "$CERT_FILE"
+
+          # Allow codesign to access the private key without prompting
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "$KEYCHAIN_PWD" \
+            "$KEYCHAIN_PATH"
+
+          # Verify identity is available for codesigning
+          security find-identity -v -p codesigning
+
+          # Tell Tauri to sign with the self-signed identity from the default keychain
+          echo "TAURI_CONFIG={\"bundle\":{\"macOS\":{\"signingIdentity\":\"$SIGNING_IDENTITY\"}}}" >> "$GITHUB_ENV"
       - name: Build Tauri Desktop Bundle
         uses: tauri-apps/tauri-action@v0
         env:

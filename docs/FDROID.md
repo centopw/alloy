@@ -1,15 +1,20 @@
 # Publishing Alloy on F-Droid
 
-Status: the listing metadata and a draft build recipe are in the repository. Nothing has been submitted.
+Status: **paused; no F-Droid release is planned for now.** The store metadata and a draft build recipe stay in the
+repository for a later submission.
+
+[Merge request !53450](https://gitlab.com/fdroid/fdroiddata/-/merge_requests/53450) was opened and then closed by an
+F-Droid reviewer because the project did not meet the inclusion policy's requirement to have been actively maintained
+for at least three months (or qualify for one of its exceptions). Reopen it or submit a new request only once Alloy
+meets that requirement.
 
 Checked: `fdroid lint chat.alloy` (fdroidserver Docker image `registry.gitlab.com/fdroid/docker-executable-fdroidserver`,
-with `config/categories.yml` taken from fdroiddata) reports nothing for the recipe. The category is `Messaging`, which is
-in that list (`Internet` is too, but fits less). Not checked: `fdroid build`, which needs the full build server
-environment and was not run, so the build steps are untested. `fdroid lint` exits 0 even when it prints findings, so
-judge it by its output.
+with `config/categories.yml` taken from fdroiddata) reported no findings. The category is `Messaging`. `fdroid lint`
+exits 0 even when it prints findings, so judge it by its output.
 
-Submitting needs a GitLab account: fork `gitlab.com/fdroid/fdroiddata`, add `metadata/chat.alloy.yml` from
-`docs/fdroid/chat.alloy.yml`, run the checks in its CI, and open the merge request.
+The F-Droid CI built the UI, Rust code and APK, then stopped because the APK had `versionCode=1` instead of the
+expected `2003`. That exposed an Android versioning bug in Alloy, fixed separately; it was not a successful F-Droid
+release. A later submission still needs the complete build and review to pass.
 
 ## What is in the repository
 

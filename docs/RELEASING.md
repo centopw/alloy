@@ -55,7 +55,7 @@ just changelog --tag v0.1.0 -o CHANGELOG.md
 | Channel | Trigger | Signing | Target Artifacts | Destination |
 |---|---|---|---|---|
 | **Nightly** | Daily at 02:00 UTC or `workflow_dispatch` | Unsigned desktop; Debug APK | macOS (arm64 + x64), Windows x64, Linux (AppImage + deb), Android debug APK | Rolling GitHub Prerelease (`nightly`) |
-| **Stable** | Git tag push `v*` (e.g. `v0.1.0`) | Signed & Notarized | macOS DMG/App (notarized), Windows NSIS/MSI, Linux deb/AppImage, Signed Android APK | GitHub Releases (Draft -> Published) |
+| **Stable** | Git tag push `v*` (e.g. `v0.1.0`) | Signed (stable self-signed identity or Apple Developer ID) | macOS DMG/App (signed; notarized only if Apple ID configured), Windows NSIS/MSI, Linux deb/AppImage, Signed Android APK | GitHub Releases (Draft -> Published) |
 
 ### Nightly Version Metadata
 Nightly builds append commit metadata to the base version per SemVer 2.0.0:
@@ -134,9 +134,9 @@ The following GitHub Actions secrets must be configured in repository settings:
 ### Desktop Code Signing & Notarization
 | Secret | Description | Target Platform |
 |---|---|---|
-| `APPLE_CERTIFICATE` | Base64-encoded Developer ID Application `.p12` certificate | macOS |
+| `APPLE_CERTIFICATE` | Base64-encoded Developer ID Application or self-signed `.p12` certificate | macOS |
 | `APPLE_CERTIFICATE_PASSWORD` | Passphrase for the `.p12` file | macOS |
-| `APPLE_SIGNING_IDENTITY` | Identity string (e.g., `Developer ID Application: Name (TEAMID)`) | macOS |
+| `APPLE_SIGNING_IDENTITY` | Identity string (`Alloy Release Signing` or `Developer ID Application: Name (TEAMID)`) | macOS |
 | `APPLE_ID` | Apple ID account email used for notarization | macOS |
 | `APPLE_PASSWORD` | App-specific password generated on appleid.apple.com | macOS |
 | `APPLE_TEAM_ID` | 10-character Apple Developer Team ID | macOS |
@@ -145,6 +145,55 @@ The following GitHub Actions secrets must be configured in repository settings:
 | `TAURI_SIGNING_PRIVATE_KEY` | Minisign private key for Tauri updater manifests | Desktop (all) |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`| Passphrase for the updater private key | Desktop (all) |
 
+### macOS signing identity (self-signed) and the keychain prompt
+
+Alloy stores account session credentials and encryption keys in the macOS login keychain. The macOS Security subsystem restricts access to keychain items based on the application's *code signing identity* and designated requirement ("Always Allow").
+
+#### Why earlier builds prompted on every update
+Builds signed ad hoc (`codesign -s -`) have a designated requirement tied directly to the binary's code directory hash (`cdhash H"..."`). Because every build generates a different hash, macOS treated every updated application as a completely distinct, untrusted binary attempting to access another app's keychain items. Consequently, users were forced to re-enter their macOS account password on every single application update.
+
+#### Transition to the stable identity and the one-time "Always Allow" prompt
+Releases are signed with a stable self-signed certificate with Subject `CN=Alloy Release Signing, O=Alloy`. All builds signed with this certificate share the exact same designated requirement:
+```
+identifier "chat.alloy" and certificate root = H"f0dca1b41b0a35fb57bd2120c062e95fa0559963"
+```
+
+When users upgrade from an earlier ad-hoc signed release (e.g. v0.2.2 / v0.2.3) to the first release signed with this stable identity:
+1. macOS detects that the designated requirement changed from the previous ad-hoc `cdhash`.
+2. macOS displays a **one-time modal keychain access dialog** asking whether to allow "Alloy" to access the keychain item.
+3. The user must click **"Always Allow"** and enter their macOS account password once.
+4. Because all subsequent releases retain the identical designated requirement, macOS recognizes the code identity and will **not prompt for the keychain password again** on future updates.
+
+#### CI signing architecture (`release.yml`)
+Tauri 2.12.x bundles `tauri-macos-sign`. When `APPLE_CERTIFICATE` and `APPLE_CERTIFICATE_PASSWORD` are exported in the environment, `tauri-macos-sign` attempts to parse an official Apple Developer ID certificate by searching for Apple prefixes (`Developer ID Application:`, etc.) and extracting a 10-character Apple Developer Team ID from the certificate's `Organizational Unit` (OU) field. A self-signed certificate lacks an Apple Team ID, causing `tauri-macos-sign`'s `identity::list` to fail with `failed to resolve signing identity`.
+
+When `APPLE_CERTIFICATE` is absent from the environment but a signing identity is configured, Tauri instead delegates code signing directly to `/usr/bin/codesign` using the default user keychain search list.
+
+To resolve this robustly, `.github/workflows/release.yml` routes signing depending on whether `APPLE_ID` is configured:
+- **Self-signed path (`APPLE_CERTIFICATE` set, `APPLE_ID` absent):**
+  - `APPLE_CERTIFICATE` and `APPLE_CERTIFICATE_PASSWORD` are intentionally **not** exported to `GITHUB_ENV` so that Tauri does not attempt to resolve them through `tauri-macos-sign`.
+  - The `Set up macOS code signing` step decodes the base64 `.p12` and imports it into a dedicated user keychain (`alloy-signing.keychain-db`), unlocks it with a 6-hour timeout, configures the key partition list (`apple-tool:,apple:,codesign:`) so `/usr/bin/codesign` can sign without interactive authorization prompts, and sets this keychain as the default and first entry in the user search list.
+  - It trusts the public root certificate (`.github/macos-signing-cert.pem`) for code signing in `/Library/Keychains/System.keychain`.
+  - It exports `TAURI_CONFIG={"bundle":{"macOS":{"signingIdentity":"Alloy Release Signing"}}}` to `GITHUB_ENV`.
+  - Tauri sees the configured signing identity and the absence of `APPLE_CERTIFICATE`, invokes `/usr/bin/codesign` directly against the default keychain search list, and signs the app bundle with the stable identity.
+- **Apple Developer ID path (`APPLE_CERTIFICATE` and `APPLE_ID` set):**
+  - All Apple secrets (`APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`, `APPLE_SIGNING_IDENTITY`) are exported to `GITHUB_ENV`.
+  - Tauri's built-in `tauri-macos-sign` flow runs normally, importing the certificate to a temporary keychain, resolving the Team ID, signing, and submitting to Apple's notarization servers.
+- **Ad-hoc fallback (no certificate configured):**
+  - If no certificate secret is present, neither `APPLE_CERTIFICATE` nor `TAURI_CONFIG` is set, preserving `tauri.conf.json`'s default ad-hoc signing (`signingIdentity: "-"`).
+
+#### Important: This is NOT Notarization
+This self-signed certificate is strictly for establishing a **stable local code identity** across updates to eliminate repetitive keychain access prompts; **it is not notarization**.
+
+Because the certificate is self-signed and not issued by Apple:
+- macOS Gatekeeper will still present the standard "unidentified developer" warning when a user downloads the DMG or tarball directly from GitHub and opens it for the first time. Users must right-click -> "Open" (or approve in System Settings -> Privacy & Security -> "Open Anyway").
+- In-app updates delivered via Alloy's built-in updater plugin (verified with `TAURI_SIGNING_PRIVATE_KEY` minisign signatures) do not trigger Gatekeeper warnings on replacement, and preserve keychain access across updates.
+- Real Apple notarization requires an Apple Developer Program membership ($99/year). If acquired, setting `APPLE_ID`, `APPLE_PASSWORD`, and `APPLE_TEAM_ID` alongside the official Developer ID certificate in repository secrets will automatically enable notarization without modifying the workflow.
+
+#### Key management
+- Public certificate: `.github/macos-signing-cert.pem` (expires October 2036).
+- Secrets: `APPLE_CERTIFICATE` (base64 `.p12`), `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY` (`Alloy Release Signing`).
+- Private key backup: Stored in `~/.alloy-updater/macos-signing/` alongside the Tauri updater keys. If the private key is lost or replaced, the code signing requirement changes and users will receive one more keychain prompt on the following update.
 ### Android Release Signing
 | Secret | Description | Target Platform |
 |---|---|---|

@@ -1,6 +1,6 @@
 # DRAFT build recipe for the F-Droid data repository (metadata/chat.alloy.yml in gitlab.com/fdroid/fdroiddata).
-# Not built by F-Droid's tooling yet: run `fdroid build -v -l chat.alloy` from a fdroiddata checkout before the
-# merge request and fix what it reports. See docs/FDROID.md for the open points.
+# Used in merge request !53450, which was closed because the project was not yet three months old. F-Droid CI built
+# the UI, Rust code and APK, then rejected its incorrect versionCode. Submission is paused; see docs/FDROID.md.
 Categories:
   - Messaging
 License: Apache-2.0

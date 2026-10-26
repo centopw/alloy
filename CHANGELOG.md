@@ -2,7 +2,12 @@
 
 ## 0.2.4 (pre-release)
 
+### Added
+- **Permissions screen and first-run guidance**: A dedicated Settings > Permissions screen shows what Alloy asks the system for (notifications, microphone, location, push distributor, battery optimization), what each permission is used for, and its live status. A first-run prompt helps grant required permissions before using the app, and Settings > Notifications links directly to Permissions when notifications are blocked.
+- **Reaction overlay in bubbles layout**: Reaction pills now sit directly on the bottom edge of message bubbles as an overlay instead of an inline block, matching modern messenger bubble design.
+
 ### Fixed
+- **Desktop: clicking a message notification opens its chat.** Notifications now carry their room. Not yet verified on desktop or Android.
 - **Android: the 0.2.2 and 0.2.3 APKs had version 1 (1.0) instead of 0.2.x.** Android does not install a lower version code over an installed app, so these two could not update 0.2.1 (version code 2001). The Android build now takes the app version from `Cargo.toml`, and the release workflow stops when the signed APK's version does not match the tag. Not yet tested on a device.
 
 ## 0.2.3 (pre-release)
