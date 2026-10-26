@@ -16,6 +16,15 @@ export async function pickFiles(): Promise<string[]> {
   return invoke<string[]>('pick_attachments');
 }
 
+/**
+ * Pick pictures or videos, opening the system media chooser on Android and iOS. Empty when
+ * cancelled or unsupported.
+ */
+export async function pickMediaFiles(): Promise<string[]> {
+  if (!isTauriRuntime()) return [];
+  return invoke<string[]>('pick_media_files');
+}
+
 /** File extension for a recorded clip's MIME type (the engine and servers care about it). */
 export function voiceExtension(mimeType: string): string {
   const type = mimeType.toLowerCase();

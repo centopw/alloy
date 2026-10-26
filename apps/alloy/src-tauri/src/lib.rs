@@ -86,6 +86,7 @@ pub fn run() {
             alloy_subscribe,
             pick::pick_attachment,
             pick::pick_attachments,
+            pick::pick_media_files,
             pick::save_pasted_image,
             pick::import_pasted_image_path,
             save::save_media,

@@ -9,7 +9,7 @@ use std::time::{Duration, SystemTime};
 use alloy_engine::{Engine, EngineContext};
 use percent_encoding::percent_decode_str;
 use tauri::{AppHandle, Manager};
-use tauri_plugin_dialog::{DialogExt, FilePath};
+use tauri_plugin_dialog::{DialogExt, FilePath, PickerMode};
 use tauri_plugin_fs::{FsExt, OpenOptions};
 
 use crate::AppState;
@@ -40,6 +40,24 @@ pub async fn pick_attachment(app: AppHandle) -> Result<Option<String>, String> {
 #[tauri::command]
 pub async fn pick_attachments(app: AppHandle) -> Result<Vec<String>, String> {
     tauri::async_runtime::spawn_blocking(move || pick_many_blocking(&app))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Extensions the desktop media dialog offers. Android and iOS ignore them and show the system
+/// media chooser instead.
+const MEDIA_EXTENSIONS: [&str; 15] = [
+    "png", "jpg", "jpeg", "gif", "webp", "bmp", "heic", "avif", "mp4", "mov", "webm", "mkv", "m4v",
+    "avi", "3gp",
+];
+
+/// Opens the media picker for one or more pictures or videos. Empty when the user cancels.
+///
+/// On Android and iOS this is the media chooser (images and videos) rather than the document
+/// picker, so attaching a picture or a video lands in the gallery instead of a file browser.
+#[tauri::command]
+pub async fn pick_media_files(app: AppHandle) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || pick_many_media_blocking(&app))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -191,6 +209,25 @@ fn pick_blocking(app: &AppHandle) -> Result<Option<String>, String> {
 fn pick_many_blocking(app: &AppHandle) -> Result<Vec<String>, String> {
     let root = picks_root(app)?;
     let Some(picked) = app.dialog().file().blocking_pick_files() else {
+        return Ok(Vec::new());
+    };
+    picked
+        .into_iter()
+        .map(|file| resolve_picked(app, &root, file))
+        .collect()
+}
+
+/// The picker shared by both media commands: the media mode on mobile, media filters on desktop.
+fn media_dialog(app: &AppHandle) -> tauri_plugin_dialog::FileDialogBuilder<tauri::Wry> {
+    app.dialog()
+        .file()
+        .set_picker_mode(PickerMode::Media)
+        .add_filter("Pictures and videos", &MEDIA_EXTENSIONS)
+}
+
+fn pick_many_media_blocking(app: &AppHandle) -> Result<Vec<String>, String> {
+    let root = picks_root(app)?;
+    let Some(picked) = media_dialog(app).blocking_pick_files() else {
         return Ok(Vec::new());
     };
     picked
@@ -404,6 +441,22 @@ mod tests {
         assert_eq!(image_path_from_text("https://example.com/x.png"), None);
         assert_eq!(image_path_from_text("/Users/a/notes.txt"), None);
         assert_eq!(image_path_from_text(""), None);
+    }
+
+    #[test]
+    fn the_media_picker_offers_every_pasted_picture_kind_and_video() {
+        for image in IMAGE_EXTENSIONS {
+            assert!(
+                MEDIA_EXTENSIONS.contains(&image),
+                "the media picker must offer {image}"
+            );
+        }
+        for video in ["mp4", "mov", "webm"] {
+            assert!(
+                MEDIA_EXTENSIONS.contains(&video),
+                "the media picker must offer {video}"
+            );
+        }
     }
 
     #[test]
