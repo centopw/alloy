@@ -29,6 +29,24 @@ ignore = [
     # zbus/zvariant family flagged unmaintained. zbus 5 comes from tauri-plugin-opener (Linux),
     # zbus 4 from keyring's Secret Service backend (Linux). Neither has a maintained successor
     # we could switch to without replacing the platform keychain integration.
+    # zstd 0.13 / zstd-safe 7.x, pulled in by wasmtime-internal-cache through wasmtime's default
+    # `cache` feature. The plugin host builds its Engine with fuel and epoch limits only and never
+    # configures a module cache (no cache_config_load), so none of this compression code runs. The
+    # fix needs zstd >= 0.14.3 / zstd-safe >= 8.2.0, which wasmtime still pins out (wasmtime 50.0.0
+    # also asks for zstd ^0.13); drop these when wasmtime accepts zstd 0.14.
+    { id = "RUSTSEC-2026-0391", reason = "zstd via wasmtime-internal-cache; module cache never configured" },
+    { id = "RUSTSEC-2026-0395", reason = "zstd-safe via wasmtime-internal-cache; module cache never configured" },
+    { id = "RUSTSEC-2026-0396", reason = "zstd-safe via wasmtime-internal-cache; module cache never configured" },
+    { id = "RUSTSEC-2026-0397", reason = "zstd-safe via wasmtime-internal-cache; module cache never configured" },
+    { id = "RUSTSEC-2026-0398", reason = "zstd-safe via wasmtime-internal-cache; module cache never configured" },
+    { id = "RUSTSEC-2026-0399", reason = "zstd-safe via wasmtime-internal-cache; module cache never configured" },
+    { id = "RUSTSEC-2026-0400", reason = "zstd-safe via wasmtime-internal-cache; module cache never configured" },
+    { id = "RUSTSEC-2026-0401", reason = "zstd-safe via wasmtime-internal-cache; module cache never configured" },
+    { id = "RUSTSEC-2026-0402", reason = "zstd-safe via wasmtime-internal-cache; module cache never configured" },
+    { id = "RUSTSEC-2026-0403", reason = "zstd-safe via wasmtime-internal-cache; module cache never configured" },
+    { id = "RUSTSEC-2026-0404", reason = "zstd-safe via wasmtime-internal-cache; module cache never configured" },
+    { id = "RUSTSEC-2026-0405", reason = "zstd-safe via wasmtime-internal-cache; module cache never configured" },
+    { id = "RUSTSEC-2026-0406", reason = "zstd-safe via wasmtime-internal-cache; module cache never configured" },
     { id = "RUSTSEC-2026-0370", reason = "zvariant via tauri-plugin-opener and keyring (Linux D-Bus)" },
     { id = "RUSTSEC-2026-0371", reason = "zbus_names via tauri-plugin-opener and keyring (Linux D-Bus)" },
     { id = "RUSTSEC-2026-0372", reason = "zvariant_derive via tauri-plugin-opener and keyring (Linux D-Bus)" },

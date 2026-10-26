@@ -9,6 +9,22 @@ ignore = [
     "RUSTSEC-2024-0388", # derivative via wasm_evt_listener (wasm32 only)
     "RUSTSEC-2024-0370", # proc-macro-error via gtk3-rs (tauri/wry on Linux)
     "RUSTSEC-2024-0429", # glib 0.18 unsoundness via tauri/wry on Linux; API not used
+    # zstd/zstd-safe via wasmtime-internal-cache (wasmtime's default `cache` feature); the plugin
+    # host never configures a module cache, so this code path is unreachable. Needs wasmtime to
+    # accept zstd >= 0.14.3 / zstd-safe >= 8.2.0.
+    "RUSTSEC-2026-0391", # zstd via wasmtime-internal-cache; module cache never configured
+    "RUSTSEC-2026-0395", # zstd-safe, same
+    "RUSTSEC-2026-0396", # zstd-safe, same
+    "RUSTSEC-2026-0397", # zstd-safe, same
+    "RUSTSEC-2026-0398", # zstd-safe, same
+    "RUSTSEC-2026-0399", # zstd-safe, same
+    "RUSTSEC-2026-0400", # zstd-safe, same
+    "RUSTSEC-2026-0401", # zstd-safe, same
+    "RUSTSEC-2026-0402", # zstd-safe, same
+    "RUSTSEC-2026-0403", # zstd-safe, same
+    "RUSTSEC-2026-0404", # zstd-safe, same
+    "RUSTSEC-2026-0405", # zstd-safe, same
+    "RUSTSEC-2026-0406", # zstd-safe, same
     "RUSTSEC-2026-0370", # zvariant (zbus family, Linux D-Bus)
     "RUSTSEC-2026-0371", # zbus_names
     "RUSTSEC-2026-0372", # zvariant_derive

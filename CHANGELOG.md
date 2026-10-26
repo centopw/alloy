@@ -13,6 +13,7 @@
 
 ### Fixed
 - **Attaching a picture no longer sends it immediately.** Files wait for your Send, so you can review them, remove one, or add a caption first.
+- **Security:** the `zstd` advisories reported in wasmtime's module-cache dependency are accepted in the audit configuration with their reason. Alloy never enables that cache, so the affected compression code is never reached; the entries are dropped once wasmtime accepts `zstd` 0.14.
 
 ## 0.2.5 (pre-release)
 
