@@ -11,6 +11,7 @@
     canPickFiles,
     importPastedImagePath,
     isTauriRuntime,
+    localFileUrl,
     looksLikeFilePath,
     pastedImageFiles,
     pastedImageName,
@@ -75,7 +76,17 @@
   const replying = $derived(threadRoot ? null : timelineStore.replyTo);
   const editing = $derived(threadRoot ? null : timelineStore.editing);
   const composing = $derived(!!(replying || editing));
-  const canSend = $derived(text.trim().length > 0);
+
+  // Picked, dropped or pasted files wait here until the user sends them, and the composer text
+  // becomes their caption. Nothing leaves the device without an explicit Send.
+  interface StagedPicture {
+    path: string;
+    name: string;
+    preview: string | null;
+  }
+  let staged = $state<StagedPicture[]>([]);
+  // Staged attachments are sendable on their own.
+  const canSend = $derived(text.trim().length > 0 || staged.length > 0);
   /** The microphone stands in for Send while there is nothing to send (not while editing or in a thread). */
   let recording = $state(false);
   const canRecord = $derived(!threadRoot && !editing && !canSend && isTauriRuntime() && isVoiceMessagesSupported());
@@ -277,6 +288,11 @@
   }
 
   async function submit() {
+    // Attachments waiting in the strip are what this send is about; the text becomes their caption.
+    if (staged.length > 0 && !editing) {
+      await sendStaged();
+      return;
+    }
     if (!canSend) return;
     const body = text;
     const mentions = reconcileMentions(body, mentionRecords);
@@ -296,15 +312,6 @@
     resize();
   }
 
-  // Pictures pasted into the field wait here until the user sends them. A path found on the clipboard is only a
-  // suggestion of a file, so nothing leaves the device without an explicit Send.
-  interface StagedPicture {
-    path: string;
-    name: string;
-    preview: string | null;
-  }
-  let staged = $state<StagedPicture[]>([]);
-
   function dropPreviews(items: StagedPicture[]) {
     for (const item of items) if (item.preview) URL.revokeObjectURL(item.preview);
   }
@@ -314,14 +321,77 @@
     staged = staged.filter((item) => item.path !== path);
   }
 
+  /**
+   * Sends the staged attachments. Text in the composer rides along as their caption, on the first one
+   * only so an album does not repeat it. The field is cleared once they are on their way.
+   */
   async function sendStaged() {
     const items = staged;
+    if (items.length === 0) return;
+    const caption = text.trim();
     staged = [];
-    for (const item of items) await timelineStore.sendFile(item.path);
+    if (caption) {
+      text = '';
+      mention = null;
+      mentionRecords = [];
+      void tickResize();
+    }
+    for (const [index, item] of items.entries()) {
+      await timelineStore.sendFile(item.path, null, index === 0 && caption ? caption : null);
+    }
     dropPreviews(items);
   }
 
+  /** Adds picked or dropped files to the preview strip; pictures also get a thumbnail. */
+  async function stagePaths(paths: string[]) {
+    for (const path of paths) {
+      if (staged.some((item) => item.path === path)) continue;
+      staged.push({ path, name: path.split(/[\\/]/).pop() ?? path, preview: await picturePreview(path) });
+    }
+  }
+
+  /** An <img> source for a picture path, or null for anything the webview should not try to render. */
+  async function picturePreview(path: string): Promise<string | null> {
+    if (!/\.(png|jpe?g|gif|webp|bmp|avif|heic)$/i.test(path)) return null;
+    try {
+      return await localFileUrl(path);
+    } catch {
+      return null;
+    }
+  }
+
   $effect(() => () => dropPreviews(staged));
+
+  // Desktop drops come through Tauri's own event: the webview hides the dropped files' real paths from
+  // the page. They join the same preview strip as picked files, so nothing is sent without a Send.
+  let dropActive = $state(false);
+  $effect(() => {
+    if (!isTauriRuntime() || threadRoot) return;
+    let dispose: (() => void) | undefined;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { getCurrentWebview } = await import('@tauri-apps/api/webview');
+        const off = await getCurrentWebview().onDragDropEvent((event) => {
+          const payload = event.payload;
+          if (payload.type === 'enter' || payload.type === 'over') dropActive = true;
+          else if (payload.type === 'leave') dropActive = false;
+          else if (payload.type === 'drop') {
+            dropActive = false;
+            void stagePaths(payload.paths ?? []);
+          }
+        });
+        if (cancelled) off();
+        else dispose = off;
+      } catch {
+        // A shell without the drag-drop event simply never highlights the composer.
+      }
+    })();
+    return () => {
+      cancelled = true;
+      dispose?.();
+    };
+  });
   async function stageFromClipboard() {
     const rawPath = nativeClipboardImage();
     if (!rawPath) return;
@@ -374,8 +444,8 @@
     }
   }
   function onKeydown(e: KeyboardEvent) {
-    // With a pasted picture waiting and nothing typed, Enter sends the picture.
-    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && staged.length > 0 && text.trim() === '') {
+    // Staged attachments take Enter (phones keep Enter for newlines and use the Send button).
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && staged.length > 0 && !pickerOpen && !viewport.isPhone) {
       e.preventDefault();
       void sendStaged();
       return;
@@ -438,9 +508,9 @@
     }
   }
 
-  /** Picks one or more files and sends them in the order chosen; pictures sent together form an album. */
+  /** Picks files and stages them for review; nothing leaves the device until the user sends. */
   async function attach() {
-    for (const path of await pickFiles()) await timelineStore.sendFile(path);
+    await stagePaths(await pickFiles());
   }
 
   /**
@@ -448,7 +518,7 @@
    * system media chooser, so the user lands in the gallery instead of a file browser.
    */
   async function attachMedia() {
-    for (const path of await pickMediaFiles()) await timelineStore.sendFile(path);
+    await stagePaths(await pickMediaFiles());
   }
 
   // Location choices: send where you are now, or share it live for a while.
@@ -559,7 +629,12 @@
   }
 </script>
 
-<div class="composer" class:attached={composing}>
+<svelte:window
+  ondragover={(e) => e.preventDefault()}
+  ondrop={(e) => e.preventDefault()}
+/>
+
+<div class="composer" class:attached={composing} class:dropped={dropActive}>
   {#if showFormat}
     <div class="format" class:floating={!viewport.isPhone}>
       <FormatToolbar onwrap={onWrap} />
@@ -588,11 +663,11 @@
   {/if}
 
   {#if staged.length > 0}
-    <div class="staged" role="group" aria-label="Pictures ready to send">
+    <div class="staged" role="group" aria-label="Attachments ready to send">
       {#each staged as item (item.path)}
         <div class="picture">
           {#if item.preview}
-            <img src={item.preview} alt="" />
+            <img src={item.preview} alt="" onerror={() => (item.preview = null)} />
           {/if}
           <span class="picture-name">{item.name}</span>
           <button type="button" class="round" aria-label="Remove {item.name}" data-tooltip="Remove" onclick={() => unstage(item.path)}>
@@ -600,7 +675,10 @@
           </button>
         </div>
       {/each}
-      <Button size="sm" onclick={() => void sendStaged()}>{staged.length === 1 ? 'Send picture' : `Send ${staged.length} pictures`}</Button>
+      <span class="staged-hint">{text.trim() ? 'Your text becomes the caption' : 'Press Enter to send'}</span>
+      <Button size="sm" onclick={() => void sendStaged()}>
+        {staged.length === 1 ? 'Send attachment' : `Send ${staged.length} attachments`}
+      </Button>
     </div>
   {/if}
 
@@ -744,6 +822,15 @@
     display: flex;
     justify-content: flex-end;
     gap: var(--alloy-spacing-scale-2);
+  }
+  /* Dropping a file lights the field so the destination is obvious before the drop lands. */
+  .composer.dropped .field {
+    border-color: var(--alloy-color-accent-primary);
+    background: var(--alloy-color-surface-hover);
+  }
+  .staged-hint {
+    color: var(--alloy-color-text-muted);
+    font-size: var(--alloy-typography-xs, 12px);
   }
   .staged {
     display: flex;

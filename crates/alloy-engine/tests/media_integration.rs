@@ -79,6 +79,7 @@ async fn roundtrip(eng: &AppEngine, ctx: &EngineContext, encrypted: bool, dir: &
         room_id: room_id.clone(),
         file_path: file.to_string_lossy().into_owned(),
         mime_type: Some("image/png".into()),
+        body: None,
         txn_id: None,
     })
     .await
@@ -251,6 +252,7 @@ async fn upload_emits_progress_ending_at_total() {
             room_id: room_id.clone(),
             file_path: file.to_string_lossy().into_owned(),
             mime_type: Some("application/octet-stream".into()),
+            body: None,
             txn_id: Some("upload-test-1".into()),
         })
         .await
@@ -294,6 +296,7 @@ async fn attachment_sources_must_be_registered() {
         room_id: room_id.clone(),
         file_path: path.to_string_lossy().into_owned(),
         mime_type: None,
+        body: None,
         txn_id: None,
     };
 

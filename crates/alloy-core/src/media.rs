@@ -5,6 +5,7 @@
 use crate::{AlloyClient, AlloyError, AlloyResult};
 use alloy_protocol::RoomId;
 use matrix_sdk::media::{MediaFormat, MediaRequestParameters, MediaThumbnailSettings};
+use matrix_sdk::ruma::events::room::message::TextMessageEventContent;
 use matrix_sdk::ruma::events::room::{EncryptedFile, MediaSource};
 use matrix_sdk::ruma::{OwnedMxcUri, UInt};
 use std::path::{Path, PathBuf};
@@ -164,6 +165,7 @@ impl AlloyClient {
         room_id: &RoomId,
         file_path: &Path,
         mime_type: Option<&str>,
+        caption: Option<&str>,
         txn_id: Option<&str>,
         mut on_progress: impl FnMut(u64, u64) + Send + 'static,
     ) -> AlloyResult<()> {
@@ -178,6 +180,9 @@ impl AlloyClient {
         let mut config = matrix_sdk_ui::timeline::AttachmentConfig::default();
         if let Some(txn) = txn_id {
             config.txn_id = Some(matrix_sdk::ruma::OwnedTransactionId::from(txn));
+        }
+        if let Some(text) = caption.map(str::trim).filter(|t| !t.is_empty()) {
+            config.caption = Some(TextMessageEventContent::plain(text));
         }
         let upload = timeline.send_attachment(file_path, mime, config);
         let mut progress = upload.subscribe_to_send_progress();

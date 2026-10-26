@@ -164,13 +164,13 @@ class TimelineStore {
     }
   }
 
-  async sendFile(path: string, mime?: string | null) {
+  async sendFile(path: string, mime?: string | null, body?: string | null) {
     if (!this.roomId) return;
     const roomId = this.roomId;
     const txnId = crypto.randomUUID();
     uploadsStore.begin({ txnId, roomId, name: path.split(/[\\/]/).pop() || path });
     try {
-      await client.sendAttachment(roomId, path, { mime_type: mime ?? null, txn_id: txnId });
+      await client.sendAttachment(roomId, path, { mime_type: mime ?? null, body: body ?? null, txn_id: txnId });
     } catch (e) {
       this.error = errorMessage(e);
     } finally {

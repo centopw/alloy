@@ -81,6 +81,7 @@ impl GroupHandler for MediaHandler {
                 room_id,
                 file_path,
                 mime_type,
+                body,
                 txn_id,
             } => {
                 let path = PathBuf::from(&file_path);
@@ -102,6 +103,7 @@ impl GroupHandler for MediaHandler {
                         &room_id,
                         &path,
                         mime_type.as_deref(),
+                        body.as_deref(),
                         Some(&txn_id),
                         move |sent, total| {
                             // At most one event per interval, but never drop the final one.

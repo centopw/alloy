@@ -304,6 +304,8 @@ export type EngineCommand = { action: "DiscoverHomeserver"; params: {
 	room_id: RoomId,
 	file_path: string,
 	mime_type: string | null,
+	/**  Optional caption, sent as the media message body. */
+	body?: string | null,
 	txn_id: string | null,
 } } | 
 /**  Send a voice message (audio with waveform): file must be registered for attachment. */

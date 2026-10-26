@@ -46,6 +46,7 @@ async fn send_attachment(eng: &AppEngine, room_id: &RoomId, path: &Path, mime: &
         room_id: room_id.clone(),
         file_path: path.to_string_lossy().into_owned(),
         mime_type: Some(mime.into()),
+        body: None,
         txn_id: None,
     })
     .await

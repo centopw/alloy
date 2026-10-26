@@ -291,7 +291,7 @@ export class AlloyClient {
   async sendAttachment(
     room_id: RoomId,
     file_path: string,
-    opts?: { mime_type?: string | null; txn_id?: string | null }
+    opts?: { mime_type?: string | null; body?: string | null; txn_id?: string | null }
   ) {
     return this.transport.invoke({
       action: 'SendAttachment',
@@ -299,6 +299,7 @@ export class AlloyClient {
         room_id,
         file_path,
         mime_type: opts?.mime_type ?? null,
+        body: opts?.body ?? null,
         txn_id: opts?.txn_id ?? null,
       },
     });

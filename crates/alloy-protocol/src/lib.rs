@@ -902,6 +902,9 @@ pub enum EngineCommand {
         room_id: RoomId,
         file_path: String,
         mime_type: Option<String>,
+        /// Optional caption, sent as the media message body.
+        #[serde(default)]
+        body: Option<String>,
         txn_id: Option<String>,
     },
     /// Send a voice message (audio with waveform): file must be registered for attachment.
