@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.6 (pre-release)
+
+### Added
+- **Attachments wait for Send, with a caption.** Picked, dropped or pasted files now sit in a preview strip above the message box until you send them. The text in the field becomes their caption (the first file of an album carries it), and each file can be removed first. On desktop you can drag a file onto the window to stage it — the composer lights up while a drop is in range. Nothing leaves the device without an explicit Send.
+
+### Changed
+- **The sidebar reads as one designed surface.** The search field is a full pill with its shortcut hint, the open room carries a 3 px accent bar, and the room filters sit in a bordered segmented toggle instead of loose links.
+- **Global search hits are richer.** Matching messages in the sidebar now show the sender's avatar and highlight the matched words, so a hit is easy to scan before jumping to it.
+- **The thread drawer opens wider.** The default width is 380 px (still resizable) so the original message and its replies have room.
+- **Theme settings show their hierarchy.** Dark mode and Pure black background are indented under Follow system appearance and dimmed while the system setting governs them; a selected message-layout card now carries a check mark.
+
+### Fixed
+- **Attaching a picture no longer sends it immediately.** Files wait for your Send, so you can review them, remove one, or add a caption first.
+
 ## 0.2.5 (pre-release)
 
 ### Added
