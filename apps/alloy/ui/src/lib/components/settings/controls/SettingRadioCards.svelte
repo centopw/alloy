@@ -1,5 +1,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
+  import Icon from '$lib/icons/Icon.svelte';
+  import { Check } from '$lib/icons';
 
   interface Option {
     value: string;
@@ -40,6 +42,9 @@
         <span class="card-label">{option.label}</span>
         {#if option.description}
           <span class="card-description">{option.description}</span>
+        {/if}
+        {#if selected}
+          <span class="check" aria-hidden="true"><Icon icon={Check} size={16} /></span>
         {/if}
       </label>
     {/each}
@@ -86,8 +91,23 @@
     background: var(--alloy-color-surface-hover);
   }
 
+  /* A doubled ring reads as the 2 px accent border without shifting the card's layout. */
   .card.selected {
     border-color: var(--alloy-color-accent-primary);
+    box-shadow: 0 0 0 1px var(--alloy-color-accent-primary);
+  }
+
+  .check {
+    position: absolute;
+    top: var(--alloy-spacing-scale-2);
+    right: var(--alloy-spacing-scale-2);
+    display: inline-grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    border-radius: var(--alloy-radii-full);
+    background: var(--alloy-color-accent-fill);
+    color: var(--alloy-color-text-on-accent);
   }
 
   .card:has(input:focus-visible) {

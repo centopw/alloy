@@ -85,20 +85,23 @@
       checked={themeStore.followSystem}
       onchange={(v) => themeStore.setFollowSystem(v)}
     />
-    <SettingToggle
-      label="Dark mode"
-      checked={dark}
-      disabled={themeStore.followSystem}
-      disabledReason={themeStore.followSystem ? themeReason : undefined}
-      onchange={setDark}
-    />
-    <SettingToggle
-      label="Pure black background"
-      checked={amoled}
-      disabled={!dark || themeStore.followSystem}
-      disabledReason={amoledReason}
-      onchange={setAmoled}
-    />
+    <!-- The two appearance switches hang off the follow-system choice, so they sit indented under it. -->
+    <div class="theme-children">
+      <SettingToggle
+        label="Dark mode"
+        checked={dark}
+        disabled={themeStore.followSystem}
+        disabledReason={themeStore.followSystem ? themeReason : undefined}
+        onchange={setDark}
+      />
+      <SettingToggle
+        label="Pure black background"
+        checked={amoled}
+        disabled={!dark || themeStore.followSystem}
+        disabledReason={amoledReason}
+        onchange={setAmoled}
+      />
+    </div>
     <div class="row">
       <span class="row-label">Density</span>
       <SegmentedControl
@@ -152,6 +155,13 @@
     display: flex;
     flex-direction: column;
     gap: var(--alloy-layout-section-gap);
+  }
+
+  /* Child switches of the theme group sit inside an indented rail. */
+  .theme-children {
+    margin-left: var(--alloy-spacing-scale-4);
+    padding-left: var(--alloy-spacing-scale-3);
+    border-left: 2px solid var(--alloy-color-border-subtle);
   }
 
   .row {

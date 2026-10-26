@@ -26,6 +26,7 @@
   import { ui } from '$lib/stores/ui.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
   import { formatListTime } from '$lib/content/format';
+  import { highlightRuns } from '$lib/content/searchHighlight';
   import RenameRoomDialog from './RenameRoomDialog.svelte';
   import UserPanel from './UserPanel.svelte';
   import { copyItems, notifyItems, openMenuFrom } from './roomMenus';
@@ -624,8 +625,14 @@
             {#each globalSearch.hits as hit (hit.room_id + hit.event_id)}
               <li>
                 <button type="button" class="hit" onclick={() => void globalSearch.open(hit, openRoom)}>
-                  <span class="hit-room">{hit.room_name ?? 'Room'}<time datetime={new Date(hit.timestamp_millis).toISOString()}>{formatListTime(hit.timestamp_millis)}</time></span>
-                  <span class="hit-body"><span class="hit-sender">{hit.sender_display_name ?? hit.sender}:</span> {hit.body}</span>
+                  <span class="hit-meta">
+                    <Avatar userId={hit.sender} displayName={hit.sender_display_name} size="sm" />
+                    <span class="hit-room">{hit.room_name ?? 'Room'}<time datetime={new Date(hit.timestamp_millis).toISOString()}>{formatListTime(hit.timestamp_millis)}</time></span>
+                  </span>
+                  <span class="hit-body">
+                    <span class="hit-sender">{hit.sender_display_name ?? hit.sender}:</span>
+                    {#each highlightRuns(hit.body, globalSearch.query) as run, i (i)}{#if run.match}<mark>{run.text}</mark>{:else}{run.text}{/if}{/each}
+                  </span>
                 </button>
               </li>
             {/each}
@@ -707,16 +714,22 @@
     font-weight: var(--alloy-typography-weight-semibold);
     color: var(--alloy-color-text-primary);
   }
+  /* A full pill makes the search field read as the sidebar's primary quick-switcher. */
   .search {
     display: flex;
     align-items: center;
     gap: var(--alloy-spacing-scale-2);
     flex-shrink: 0;
     margin: var(--alloy-spacing-scale-3) var(--alloy-layout-row-inset) var(--alloy-spacing-scale-2);
-    padding: var(--alloy-spacing-scale-1) var(--alloy-layout-row-pad-x);
-    border-radius: var(--alloy-radii-md);
+    padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x);
+    border: 1px solid var(--alloy-color-border-subtle);
+    border-radius: var(--alloy-radii-full);
     background: var(--alloy-color-surface-canvas);
     color: var(--alloy-color-text-muted);
+    transition: border-color var(--alloy-motion-duration-fast) ease;
+  }
+  .search:hover {
+    border-color: var(--alloy-color-border-prominent);
   }
   .search:focus-within {
     outline: 2px solid var(--alloy-color-accent-primary);
@@ -743,6 +756,7 @@
     gap: var(--alloy-spacing-scale-1);
     margin: 0 var(--alloy-layout-row-inset) var(--alloy-spacing-scale-2);
   }
+  /* One bordered container turns the loose filter links into a segmented toggle. */
   .chips {
     display: flex;
     flex: 1;
@@ -750,6 +764,10 @@
     gap: 2px;
     overflow-x: auto;
     scrollbar-width: none;
+    padding: 2px;
+    border: 1px solid var(--alloy-color-border-subtle);
+    border-radius: var(--alloy-radii-md);
+    background: var(--alloy-color-surface-canvas);
   }
   .chips::-webkit-scrollbar {
     display: none;
@@ -828,6 +846,7 @@
     border-radius: var(--alloy-radii-full);
   }
   .row {
+    position: relative;
     display: flex;
     align-items: center;
     gap: var(--alloy-spacing-scale-2);
@@ -851,6 +870,18 @@
   button.row.active {
     background: var(--alloy-color-surface-hover);
     color: var(--alloy-color-text-primary);
+  }
+  /* The selected room carries a 3 px accent bar, matching the rail's active pill. */
+  button.row.active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    translate: 0 -50%;
+    width: 3px;
+    height: 60%;
+    border-radius: var(--alloy-radii-full);
+    background: var(--alloy-color-accent-primary);
   }
   .row.unread {
     color: var(--alloy-color-text-primary);
@@ -916,6 +947,21 @@
   }
   .hit:hover {
     background: var(--alloy-color-surface-subtle);
+  }
+  .hit-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--alloy-spacing-scale-2);
+    min-width: 0;
+  }
+  .hit-meta .hit-room {
+    flex: 1;
+    min-width: 0;
+  }
+  .hit mark {
+    border-radius: var(--alloy-radii-sm);
+    background: var(--alloy-color-accent-subtle);
+    color: var(--alloy-color-accent-primary);
   }
   .hit-room {
     display: flex;
