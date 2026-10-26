@@ -170,6 +170,15 @@ function syncedSubset(values: Partial<Prefs>): Partial<Prefs> {
   }
   return out as Partial<Prefs>;
 }
+/** Keeps only the device keys of `values`. */
+export function deviceSubset(values: Partial<Prefs>): Partial<Prefs> {
+  const out: Partial<Record<PrefKey, unknown>> = {};
+  for (const key of DEVICE_PREF_KEYS) {
+    if (values[key] !== undefined) out[key] = values[key];
+  }
+  return out as Partial<Prefs>;
+}
+
 
 const ENUM_VALUES = {
   messageLayout: ['modern', 'bubbles', 'irc'],
@@ -271,6 +280,14 @@ function parseAccountDoc(json: string | null): AccountDoc | null {
   return { updatedAt, values: syncedSubset(sanitizePrefs(raw)) };
 }
 
+const flushHandlers = new Set<() => Promise<void> | void>();
+
+/** Registers another store's pending persistence writes with the app lifecycle flush. */
+export function registerFlushHandler(handler: () => Promise<void> | void): () => void {
+  flushHandlers.add(handler);
+  return () => flushHandlers.delete(handler);
+}
+
 export class PrefsStore {
   #storage: PrefsStorage | null;
   #values = $state<Prefs>({ ...DEFAULT_PREFS });
@@ -281,12 +298,21 @@ export class PrefsStore {
   /** Synced values changed here and not yet stored on the account. */
   #accountDirty = false;
   #listening = false;
+  /** True once engine settings have been successfully loaded. */
+  #engineLoaded = false;
+  /** Delays between retry attempts for initial GetSettings load. */
+  #retryDelays: readonly number[];
+  /** Pending engine save promise, or undefined if none in flight. */
+  #inFlightEngine: Promise<void> | undefined;
+  /** Pending account save promise, or undefined if none in flight. */
+  #inFlightAccount: Promise<void> | undefined;
 
   /** True once `load()` has reconciled with the engine, or given up. */
   ready = $state(false);
 
-  constructor(storage: PrefsStorage | null = defaultStorage()) {
+  constructor(storage: PrefsStorage | null = defaultStorage(), retryDelays: readonly number[] = [100, 200]) {
     this.#storage = storage;
+    this.#retryDelays = retryDelays;
     this.#values = { ...defaultPrefsFor(viewport.isPhone), ...readStored(storage) };
     this.#syncedAt = readSyncedAt(storage);
   }
@@ -410,10 +436,34 @@ export class PrefsStore {
   }
 
   /**
-   * Sign-out: the synced values and their timestamp belong to the account that just left, so they are
-   * dropped (device-only settings stay). Nothing is pushed; the next account starts from its own document.
+   * Writes pending changes immediately. Callers can await persistence before teardown where possible.
    */
-  signOut(): void {
+  async flush(): Promise<void> {
+    const pending: Promise<unknown>[] = [];
+    if (this.#inFlightEngine) pending.push(this.#inFlightEngine);
+    if (this.#inFlightAccount) pending.push(this.#inFlightAccount);
+    if (this.#engineTimer !== undefined) {
+      clearTimeout(this.#engineTimer);
+      this.#engineTimer = undefined;
+      pending.push(this.#pushToEngine());
+      if (this.#accountDirty) pending.push(this.#pushToAccount());
+    }
+    for (const handler of flushHandlers) {
+      try {
+        pending.push(Promise.resolve(handler()));
+      } catch (err) {
+        console.warn('[prefs] could not flush another store', err);
+      }
+    }
+    await Promise.allSettled(pending);
+  }
+
+  /**
+   * Sign-out: the synced values and their timestamp belong to the account that just left, so they are
+   * dropped (device-only settings stay). Clear synced values from the engine's settings file and
+   * localStorage so the next account does not inherit them.
+   */
+  signOut(): Promise<void> {
     clearTimeout(this.#engineTimer);
     this.#engineTimer = undefined;
     this.#accountDirty = false;
@@ -421,19 +471,9 @@ export class PrefsStore {
     for (const key of SYNCED_PREF_KEYS) (this.#values as Record<PrefKey, unknown>)[key] = defaults[key];
     this.#syncedAt = 0;
     this.#version++;
-    this.#writeLocal();
-  }
-
-  /**
-   * Writes a change that is still waiting out its debounce right now. Called when the window is hidden or
-   * closing, so a setting changed a moment before quitting still reaches the engine and the account.
-   */
-  flush(): void {
-    if (this.#engineTimer === undefined) return;
-    clearTimeout(this.#engineTimer);
-    this.#engineTimer = undefined;
-    void this.#pushToEngine();
-    if (this.#accountDirty) void this.#pushToAccount();
+    this.#writeLocal(true);
+    // Immediately push only device-scoped values to the engine, clearing synced values from the file.
+    return this.#pushToEngine(true);
   }
 
   /**
@@ -444,34 +484,51 @@ export class PrefsStore {
   async load(): Promise<void> {
     this.#listen();
     await this.#loadEngineCopy();
-    await this.#loadAccount();
+    if (this.#engineLoaded) {
+      await this.#loadAccount();
+    }
     this.ready = true;
   }
 
   /**
-   * Merges the engine's `prefs` entry over the defaults. If the engine has no entry, or the user changed a
+   * Merges the engine's `prefs` entry over the defaults. Retries with exponential backoff (3 attempts)
+   * to handle IPC not ready on startup. If the engine has no entry, or the user changed a
    * preference while the request was in flight, the local values are kept and pushed to the engine.
+   * Failed load keeps the local (localStorage + defaults) values without overwriting them.
    */
   async #loadEngineCopy(): Promise<void> {
     const startVersion = this.#version;
-    try {
-      const res = await client.invoke({ action: 'GetSettings' });
-      if (res.type !== 'SettingsRetrieved') {
-        throw new Error(`unexpected response: ${res.type}`);
-      }
-      const settings = JSON.parse(res.payload.settings_json) as { [PREFS_ENGINE_KEY]?: unknown } | null;
-      const entry = settings?.[PREFS_ENGINE_KEY];
-      // A newer user change is already scheduled to reach the engine; do not overwrite it.
-      if (this.#version !== startVersion) return;
-      if (entry === undefined) {
-        this.#scheduleEngineSave();
+    let lastErr: unknown;
+    for (let attempt = 0; attempt <= this.#retryDelays.length; attempt++) {
+      try {
+        const res = await client.invoke({ action: 'GetSettings' });
+        if (res.type !== 'SettingsRetrieved') {
+          throw new Error(`unexpected response: ${res.type}`);
+        }
+        const settings = JSON.parse(res.payload.settings_json) as { [PREFS_ENGINE_KEY]?: unknown } | null;
+        const entry = settings?.[PREFS_ENGINE_KEY];
+        // A newer user change is already scheduled to reach the engine; do not overwrite it.
+        if (this.#version !== startVersion) return;
+        if (entry === undefined) {
+          this.#engineLoaded = true;
+          this.#scheduleEngineSave();
+          return;
+        }
+        this.#engineLoaded = true;
+        this.#values = { ...defaultPrefsFor(viewport.isPhone), ...sanitizePrefs(entry) };
+        this.#writeLocal();
         return;
+      } catch (err) {
+        lastErr = err;
+        const delayMs = this.#retryDelays[attempt];
+        if (delayMs !== undefined) {
+          const { promise, resolve } = Promise.withResolvers<void>();
+          setTimeout(resolve, delayMs);
+          await promise;
+        }
       }
-      this.#values = { ...defaultPrefsFor(viewport.isPhone), ...sanitizePrefs(entry) };
-      this.#writeLocal();
-    } catch (err) {
-      console.warn('[prefs] could not reconcile preferences with the engine; keeping the local copy', err);
     }
+    console.warn('[prefs] could not reconcile preferences with the engine after retries; keeping the local copy', lastErr);
   }
 
   /**
@@ -530,10 +587,11 @@ export class PrefsStore {
     this.#scheduleEngineSave();
   }
 
-  #writeLocal(): void {
+  #writeLocal(deviceOnly = false): void {
     if (!this.#storage) return;
     try {
-      this.#storage.setItem(PREFS_STORAGE_KEY, JSON.stringify(this.#values));
+      const toSave = deviceOnly ? deviceSubset(this.#values) : this.#values;
+      this.#storage.setItem(PREFS_STORAGE_KEY, JSON.stringify(toSave));
       this.#storage.setItem(PREFS_SYNCED_AT_STORAGE_KEY, String(this.#syncedAt));
     } catch (err) {
       console.warn('[prefs] could not persist preferences locally', err);
@@ -549,17 +607,32 @@ export class PrefsStore {
     }, PREFS_ENGINE_DEBOUNCE_MS);
   }
 
-  async #pushToEngine(): Promise<void> {
-    try {
-      const res = await client.invoke({
-        action: 'SetSetting',
-        params: { key: PREFS_ENGINE_KEY, value_json: JSON.stringify(this.#values) },
-      });
-      if (res.type !== 'SettingSet') {
-        console.warn('[prefs] unexpected response while saving preferences', res.type);
+  /**
+   * Saves preferences to the engine. If `deviceOnly` is true, only device-scoped values are saved,
+   * clearing synced values from the engine's settings file (used at sign-out).
+   */
+  async #pushToEngine(deviceOnly = false): Promise<void> {
+    const promise = (async () => {
+      try {
+        const toSave = deviceOnly ? deviceSubset(this.#values) : this.#values;
+        const res = await client.invoke({
+          action: 'SetSetting',
+          params: { key: PREFS_ENGINE_KEY, value_json: JSON.stringify(toSave) },
+        });
+        if (res.type !== 'SettingSet') {
+          console.warn('[prefs] unexpected response while saving preferences', res.type);
+        }
+      } catch (err) {
+        console.warn('[prefs] could not save preferences to the engine', err);
       }
-    } catch (err) {
-      console.warn('[prefs] could not save preferences to the engine', err);
+    })();
+    this.#inFlightEngine = promise;
+    try {
+      await promise;
+    } finally {
+      if (this.#inFlightEngine === promise) {
+        this.#inFlightEngine = undefined;
+      }
     }
   }
 
@@ -569,15 +642,25 @@ export class PrefsStore {
    */
   async #pushToAccount(): Promise<void> {
     this.#accountDirty = false;
-    const json = JSON.stringify({ ...syncedSubset(this.#values), updated_at: this.#syncedAt });
-    try {
-      const res = await client.invoke({ action: 'SetAccountPrefs', params: { json } });
-      if (res.type !== 'Unit') {
-        console.warn('[prefs] unexpected response while saving synced preferences', res.type);
+    const promise = (async () => {
+      const json = JSON.stringify({ ...syncedSubset(this.#values), updated_at: this.#syncedAt });
+      try {
+        const res = await client.invoke({ action: 'SetAccountPrefs', params: { json } });
+        if (res.type !== 'Unit') {
+          console.warn('[prefs] unexpected response while saving synced preferences', res.type);
+        }
+      } catch (err) {
+        this.#accountDirty = true;
+        console.warn('[prefs] could not save synced preferences to the account', err);
       }
-    } catch (err) {
-      this.#accountDirty = true;
-      console.warn('[prefs] could not save synced preferences to the account', err);
+    })();
+    this.#inFlightAccount = promise;
+    try {
+      await promise;
+    } finally {
+      if (this.#inFlightAccount === promise) {
+        this.#inFlightAccount = undefined;
+      }
     }
   }
 }
@@ -600,9 +683,9 @@ export function applyMessageLayout(layout: MessageLayout): void {
  * Keeps the document in sync with the given store. Call once from the app shell. Returns a teardown.
  */
 export function installPrefsEffects(store: PrefsStore = prefs): () => void {
-  const flush = () => store.flush();
+  const flush = () => void store.flush();
   const onVisibility = () => {
-    if (document.visibilityState === 'hidden') store.flush();
+    if (document.visibilityState === 'hidden') void store.flush();
   };
   window.addEventListener('pagehide', flush);
   document.addEventListener('visibilitychange', onVisibility);

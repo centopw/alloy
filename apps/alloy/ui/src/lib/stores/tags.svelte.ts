@@ -1,14 +1,15 @@
 import type { RoomTagDef, TagColour } from '../generated/index.js';
 import { client } from '../ipc/index.js';
 import { errorMessage, expect } from './errors.js';
+import { registerFlushHandler } from './prefs.svelte.js';
 import { makeTagId } from './tags.js';
-
 /** The account's custom room tag catalogue, plus per-room assignment through the engine. */
 class TagStore {
   defs = $state<RoomTagDef[]>([]);
   loaded = $state(false);
   error = $state<string | null>(null);
-  #inflight: Promise<void> | null = null;
+  #loadInflight: Promise<void> | null = null;
+  #inflight = new Set<Promise<unknown>>();
 
   /** Forget everything (sign-out), so the next account never sees this one's tags. */
   reset() {
@@ -17,12 +18,25 @@ class TagStore {
     this.error = null;
   }
 
+  /** Waits for all pending tag and catalogue writes to finish. */
+  flush(): Promise<void> {
+    return Promise.all([...this.#inflight]).then(() => undefined);
+  }
+
+  #track<T>(op: () => Promise<T>): Promise<T> {
+    const p = op();
+    const settled = p.then(() => undefined, () => undefined);
+    this.#inflight.add(settled);
+    void settled.finally(() => this.#inflight.delete(settled));
+    return p;
+  }
+
   /** Loads the catalogue; concurrent callers share the same request. */
   load(): Promise<void> {
-    this.#inflight ??= this.#fetch().finally(() => {
-      this.#inflight = null;
+    this.#loadInflight ??= this.#fetch().finally(() => {
+      this.#loadInflight = null;
     });
-    return this.#inflight;
+    return this.#loadInflight;
   }
 
   async #fetch(): Promise<void> {
@@ -37,16 +51,18 @@ class TagStore {
   }
 
   /** Replaces the whole catalogue. Returns false (and sets `error`) when the engine refuses. */
-  async #save(next: RoomTagDef[]): Promise<boolean> {
-    try {
-      expect(await client.invoke({ action: 'SaveTagCatalog', params: { tags: next } }), 'Unit');
-      this.defs = next;
-      this.error = null;
-      return true;
-    } catch (e) {
-      this.error = errorMessage(e);
-      return false;
-    }
+  #save(next: RoomTagDef[]): Promise<boolean> {
+    return this.#track(async () => {
+      try {
+        expect(await client.invoke({ action: 'SaveTagCatalog', params: { tags: next } }), 'Unit');
+        this.defs = next;
+        this.error = null;
+        return true;
+      } catch (e) {
+        this.error = errorMessage(e);
+        return false;
+      }
+    });
   }
 
   /** Adds a tag at the end of the catalogue. Returns the new definition, or null on failure. */
@@ -82,35 +98,41 @@ class TagStore {
   }
 
   /** Deletes a tag from the catalogue and from every room that carries it. */
-  async remove(id: string): Promise<boolean> {
-    try {
-      expect(await client.invoke({ action: 'DeleteRoomTag', params: { tag_id: id } }), 'Unit');
-      this.defs = this.defs.filter((d) => d.id !== id);
-      this.error = null;
-      return true;
-    } catch (e) {
-      this.error = errorMessage(e);
-      return false;
-    }
+  remove(id: string): Promise<boolean> {
+    return this.#track(async () => {
+      try {
+        expect(await client.invoke({ action: 'DeleteRoomTag', params: { tag_id: id } }), 'Unit');
+        this.defs = this.defs.filter((d) => d.id !== id);
+        this.error = null;
+        return true;
+      } catch (e) {
+        this.error = errorMessage(e);
+        return false;
+      }
+    });
   }
 
   /** Engine call that assigns or removes a tag on one room. Callers update the room list (see RoomsStore.setRoomTag). */
-  async setForRoom(roomId: string, tagId: string, enabled: boolean): Promise<boolean> {
-    try {
-      expect(
-        await client.invoke({
-          action: 'SetRoomTag',
-          params: { room_id: roomId, tag_id: tagId, enabled },
-        }),
-        'Unit',
-      );
-      this.error = null;
-      return true;
-    } catch (e) {
-      this.error = errorMessage(e);
-      return false;
-    }
+  setForRoom(roomId: string, tagId: string, enabled: boolean): Promise<boolean> {
+    return this.#track(async () => {
+      try {
+        expect(
+          await client.invoke({
+            action: 'SetRoomTag',
+            params: { room_id: roomId, tag_id: tagId, enabled },
+          }),
+          'Unit',
+        );
+        this.error = null;
+        return true;
+      } catch (e) {
+        this.error = errorMessage(e);
+        return false;
+      }
+    });
   }
 }
 
 export const tags = new TagStore();
+
+registerFlushHandler(() => tags.flush());

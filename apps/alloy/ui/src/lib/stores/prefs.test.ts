@@ -56,7 +56,7 @@ function storedPrefs(storage: MemoryStorage): unknown {
 /** A request the store sent to the engine through `client.invoke`. */
 interface SentRequest {
   action: string;
-  params?: { json?: string };
+  params?: { json?: string; key?: string; value_json?: string };
 }
 
 function sentRequests(action: string): SentRequest[] {
@@ -359,15 +359,57 @@ describe('engine sync', () => {
 
   it('keeps local values and becomes ready when the load fails', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    invoke.mockRejectedValueOnce(new Error('no engine'));
-    const store = new PrefsStore(memoryStorage());
+    invoke.mockRejectedValue(new Error('no engine'));
+    const store = new PrefsStore(memoryStorage(), [10, 20]);
     store.set('fontScale', 90);
-    await store.load();
+    const pending = store.load();
+    await vi.runAllTimersAsync();
+    await pending;
     expect(store.fontScale).toBe(90);
     expect(store.ready).toBe(true);
     expect(warn).toHaveBeenCalled();
   });
 
+  it('retries GetSettings on initial failure and recovers engine settings', async () => {
+    invoke
+      .mockRejectedValueOnce(new Error('IPC not ready'))
+      .mockResolvedValueOnce(settingsResponse({ [PREFS_ENGINE_KEY]: { fontScale: 130 } }));
+    const storage = memoryStorage();
+    const store = new PrefsStore(storage, [10, 20]);
+    const pending = store.load();
+    await vi.runAllTimersAsync();
+    await pending;
+
+    expect(store.fontScale).toBe(130);
+    expect(storedPrefs(storage)).toEqual({ ...DEFAULT_PREFS, fontScale: 130 });
+    expect(store.ready).toBe(true);
+  });
+
+  it('does not overwrite engine settings with defaults when engine load fails', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    invoke.mockRejectedValue(new Error('no engine'));
+    const store = new PrefsStore(memoryStorage(), [10, 20]);
+    const pending = store.load();
+    await vi.runAllTimersAsync();
+    await pending;
+    await vi.advanceTimersByTimeAsync(PREFS_ENGINE_DEBOUNCE_MS);
+
+    expect(saveCalls()).toHaveLength(0);
+  });
+
+  it('recovers settings from the engine even when localStorage is empty', async () => {
+    invoke.mockResolvedValueOnce(
+      settingsResponse({ [PREFS_ENGINE_KEY]: { fontScale: 120, timeFormat: '24h' } }),
+    );
+    const storage = memoryStorage();
+    const store = new PrefsStore(storage);
+    expect(store.fontScale).toBe(DEFAULT_PREFS.fontScale);
+
+    await store.load();
+    expect(store.fontScale).toBe(120);
+    expect(store.timeFormat).toBe('24h');
+    expect(storedPrefs(storage)).toEqual({ ...DEFAULT_PREFS, fontScale: 120, timeFormat: '24h' });
+  });
   it('keeps a change made while the load is in flight', async () => {
     const response = Promise.withResolvers<unknown>();
     invoke.mockReturnValueOnce(response.promise);
@@ -396,19 +438,51 @@ describe('sign-out and flush', () => {
     expect(storage.getItem(PREFS_SYNCED_AT_STORAGE_KEY)).toBe('0');
   });
 
-  it('writes a pending change immediately on flush', async () => {
+  it('clears synced values from the engine on sign-out', async () => {
+    const storage = memoryStorage();
+    const store = new PrefsStore(storage);
+    store.set('timeFormat', '24h');
+    store.set('fontScale', 120);
+
+    await store.signOut();
+    await vi.advanceTimersByTimeAsync(PREFS_ENGINE_DEBOUNCE_MS);
+
+    expect(store.fontScale).toBe(120);
+    expect(store.timeFormat).toBe(DEFAULT_PREFS.timeFormat);
+    expect(saveCalls()).toHaveLength(1);
+    const [savedPrefs] = saveCalls();
+    const prefs = JSON.parse(savedPrefs.params?.value_json ?? '{}');
+    expect(prefs).toHaveProperty('fontScale', 120);
+    expect(prefs).not.toHaveProperty('timeFormat');
+  });
+
+  it('awaits flush before returning', async () => {
     const store = new PrefsStore(memoryStorage());
     store.set('fontScale', 110);
     expect(saveCalls()).toHaveLength(0);
 
-    store.flush();
-    await vi.advanceTimersByTimeAsync(0);
+    await store.flush();
 
     expect(saveCalls()).toHaveLength(1);
-    await vi.advanceTimersByTimeAsync(PREFS_ENGINE_DEBOUNCE_MS);
+  });
+
+  it('awaits signOut persistence before returning', async () => {
+    const storage = memoryStorage();
+    const store = new PrefsStore(storage);
+    store.set('timeFormat', '24h');
+    store.set('fontScale', 120);
+
+    await store.signOut();
+
+    expect(store.fontScale).toBe(120);
+    expect(store.timeFormat).toBe(DEFAULT_PREFS.timeFormat);
     expect(saveCalls()).toHaveLength(1);
+    const [savedPrefs] = saveCalls();
+    const prefs = JSON.parse(savedPrefs.params?.value_json ?? '{}');
+    expect(prefs).not.toHaveProperty('timeFormat');
   });
 });
+
 
 describe('account sync', () => {
   const REMOTE_STAMP = 1_700_000_000_000;

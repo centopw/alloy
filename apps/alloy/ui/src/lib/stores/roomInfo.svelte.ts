@@ -1,6 +1,7 @@
 import { client } from '../ipc/index.js';
 import type { EngineResponse, RoomDetails } from '../generated/index.js';
 import { errorMessage, expect } from './errors.js';
+import { registerFlushHandler } from './prefs.svelte.js';
 
 interface RoomInfoEntry {
   details: RoomDetails | null;
@@ -19,7 +20,7 @@ interface RoomInfoEntry {
 export class RoomInfoStore {
   private rooms = $state<Record<string, RoomInfoEntry>>({});
   private inflight = new Map<string, Promise<void>>();
-
+  private pendingWrites = new Set<Promise<void>>();
   details(roomId: string): RoomDetails | null {
     return this.rooms[roomId]?.details ?? null;
   }
@@ -74,6 +75,11 @@ export class RoomInfoStore {
     );
   }
 
+  /** Waits for every room-info write currently in flight. */
+  flush(): Promise<void> {
+    return Promise.all([...this.pendingWrites]).then(() => undefined);
+  }
+
   private room(roomId: string): RoomInfoEntry {
     if (!this.rooms[roomId]) {
       this.rooms[roomId] = { details: null, note: '', loaded: false, writes: 0, error: null };
@@ -100,18 +106,25 @@ export class RoomInfoStore {
   }
 
   /** Runs one engine write, then re-reads details and note. Failures are stored, not thrown. */
-  private async write(roomId: string, action: () => Promise<EngineResponse>): Promise<void> {
+  private write(roomId: string, action: () => Promise<EngineResponse>): Promise<void> {
     this.room(roomId).writes += 1;
     this.room(roomId).error = null;
-    try {
-      expect(await action(), 'Unit');
-      await this.fetchInfo(roomId);
-    } catch (err) {
-      this.room(roomId).error = errorMessage(err);
-    } finally {
-      this.room(roomId).writes -= 1;
-    }
+    const pending = (async () => {
+      try {
+        expect(await action(), 'Unit');
+        await this.fetchInfo(roomId);
+      } catch (err) {
+        this.room(roomId).error = errorMessage(err);
+      } finally {
+        this.room(roomId).writes -= 1;
+      }
+    })();
+    this.pendingWrites.add(pending);
+    void pending.finally(() => this.pendingWrites.delete(pending));
+    return pending;
   }
 }
 
 export const roomInfo = new RoomInfoStore();
+
+registerFlushHandler(() => roomInfo.flush());

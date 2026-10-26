@@ -47,6 +47,11 @@ pub struct RoomAdminRights {
 /// Account-data type holding the private room note as `{"note": "..."}`.
 const ROOM_NOTE_EVENT_TYPE: &str = "chat.alloy.room_note";
 
+#[derive(serde::Deserialize)]
+struct RoomNoteContent {
+    #[serde(default)]
+    note: String,
+}
 /// Power level as the protocol reports it; unlimited power maps to `INFINITE_POWER_LEVEL`.
 fn power_level_value(level: UserPowerLevel) -> i64 {
     match level {
@@ -230,6 +235,7 @@ impl AlloyClient {
 
     /// The active account's private note about a room, read from the homeserver.
     /// Returns an empty string when no note is stored.
+    /// Falls back to the room's local account-data cache if the direct server request fails (network error, not NotFound).
     pub async fn get_room_note(&self, room_id: &RoomId) -> AlloyResult<String> {
         let room = self.room(room_id)?;
         let user_id = self
@@ -251,7 +257,24 @@ impl AlloyClient {
             Err(e) if matches!(e.client_api_error_kind(), Some(ErrorKind::NotFound)) => {
                 Ok(String::new())
             }
-            Err(e) => Err(AlloyError::MatrixSdk(e.to_string())),
+            Err(e) => {
+                if !matches!(&e, matrix_sdk::HttpError::Reqwest(_)) {
+                    return Err(AlloyError::MatrixSdk(e.to_string()));
+                }
+                // Fall back to the room's local account-data cache if present
+                let cached = room
+                    .account_data(RoomAccountDataEventType::from(ROOM_NOTE_EVENT_TYPE))
+                    .await
+                    .map_err(|_| AlloyError::MatrixSdk(e.to_string()))?;
+                if let Some(raw) = cached {
+                    if let Ok(Some(content)) = raw.get_field::<RoomNoteContent>("content") {
+                        return Ok(content.note);
+                    }
+                    // Malformed cached data returns error
+                    return Err(AlloyError::MatrixSdk(format!("malformed cached note: {e}")));
+                }
+                Err(AlloyError::MatrixSdk(e.to_string()))
+            }
         }
     }
 

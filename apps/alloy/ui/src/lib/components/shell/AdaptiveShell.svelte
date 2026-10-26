@@ -172,7 +172,7 @@
       stopUpdates();
       tags.reset();
       roomsStore.clearReadMarks();
-      prefs.signOut();
+      void prefs.signOut();
       teardownPrefs();
     };
   });
