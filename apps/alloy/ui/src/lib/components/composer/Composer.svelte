@@ -6,7 +6,7 @@
   import { client } from '$lib/ipc';
   import { prefs } from '$lib/stores/prefs.svelte';
   import Icon from '$lib/icons/Icon.svelte';
-  import { ChartBar, Image, MapPin, Navigation, Paperclip, Plus, Send, Smile, Type, X } from '$lib/icons';
+  import { ChartBar, Ellipsis, File, Image, ImagePlus, MapPin, Navigation, Plus, Send, Smile, Type, X } from '$lib/icons';
   import {
     canPickFiles,
     importPastedImagePath,
@@ -15,6 +15,7 @@
     pastedImageFiles,
     pastedImageName,
     pickFiles,
+    pickMediaFiles,
     savePastedImage
   } from '$lib/platform/files';
   import { nativeClipboardHasImage, nativeClipboardImage } from '$lib/platform/clipboardImage';
@@ -442,6 +443,14 @@
     for (const path of await pickFiles()) await timelineStore.sendFile(path);
   }
 
+  /**
+   * Picks pictures or videos and sends them in the order chosen. On Android and iOS this opens the
+   * system media chooser, so the user lands in the gallery instead of a file browser.
+   */
+  async function attachMedia() {
+    for (const path of await pickMediaFiles()) await timelineStore.sendFile(path);
+  }
+
   // Location choices: send where you are now, or share it live for a while.
   function locationItems(): MenuItem[] {
     const live: MenuItem = {
@@ -459,35 +468,48 @@
     return [{ id: 'send-location', label: 'Send my location', icon: MapPin, onselect: () => (locationOpen = true) }, live];
   }
 
-  function openLocationMenu(e: MouseEvent) {
-    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    contextMenu.open(locationItems(), { x: r.left, y: r.top }, { anchor: { x: r.left, y: r.top, width: r.width, height: r.height }, ariaLabel: 'Share location' });
+  // The attach menu leads with media: a picture or a video is the main thing to send, a plain file is
+  // second, and the poll and the location stay reachable one level down under More (ADR 0007 tiers
+  // menus instead of growing flat lists).
+  function attachItems(): MenuItem[] {
+    const items: MenuItem[] = [];
+    if (canPickFiles()) {
+      items.push({ id: 'media', label: 'Photo or video', icon: ImagePlus, onselect: () => void attachMedia() });
+      items.push({ id: 'file', label: 'File', icon: File, onselect: () => void attach() });
+    }
+    if (nativeClipboardHasImage()) {
+      items.push({
+        id: 'clipboard-image',
+        label: 'Picture from clipboard',
+        icon: Image,
+        onselect: () => void stageFromClipboard(),
+      });
+    }
+    items.push(moreItem());
+    return items;
   }
 
-  // Phones keep File, Poll and Location behind the + button so the composer row stays uncluttered.
+  /** Poll and location: the secondary ways to send something, behind one More row. */
+  function moreItem(): MenuItem {
+    return {
+      id: 'more',
+      label: 'More',
+      icon: Ellipsis,
+      submenu: {
+        items: [
+          { id: 'poll', label: 'Poll', icon: ChartBar, onselect: () => (pollOpen = true) },
+          ...(canLocate() ? locationItems() : []),
+        ],
+      },
+    };
+  }
+
   function openAttachMenu(e: MouseEvent) {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const file = { id: 'file', label: 'File', icon: Paperclip, onselect: () => void attach() };
-    const clipboard: MenuItem = {
-      id: 'clipboard-image',
-      label: 'Picture from clipboard',
-      icon: Image,
-      onselect: () => void stageFromClipboard(),
-    };
-    const poll = { id: 'poll', label: 'Poll', icon: ChartBar, onselect: () => (pollOpen = true) };
-    const place = canLocate() ? locationItems() : [];
-    const fileItems = canPickFiles()
-      ? nativeClipboardHasImage()
-        ? [file, clipboard]
-        : [file]
-      : nativeClipboardHasImage()
-        ? [clipboard]
-        : [];
-    contextMenu.open([...fileItems, poll, ...place], { x: r.left, y: r.top });
-  }
-  // Right-click on a composer button offers exactly the action that button performs.
-  function attachMenu(): MenuItem[] {
-    return [{ id: 'attach', label: 'Attach file', icon: Paperclip, onselect: () => void attach() }];
+    contextMenu.open(attachItems(), { x: r.left, y: r.top }, {
+      anchor: { x: r.left, y: r.top, width: r.width, height: r.height },
+      ariaLabel: 'Add attachment',
+    });
   }
 
   let emojiButton: HTMLButtonElement | undefined = $state();
@@ -583,34 +605,18 @@
   {/if}
 
   <div class="field" class:recording>
-    {#if canPickFiles() && !threadRoot && !viewport.isPhone}
-      <button type="button" class="round" aria-label="Attach file" title="Attach file" onclick={attach} use:contextmenu={attachMenu}>
-        <Icon icon={Plus} size={20} />
-      </button>
-    {/if}
-    {#if !threadRoot && viewport.isPhone}
+    {#if !threadRoot}
       <button
         type="button"
         class="round"
-        aria-label="Add attachment or poll"
-        title="Add"
+        aria-label="Add attachment, poll or location"
+        data-tooltip="Add"
         aria-haspopup="menu"
         onclick={openAttachMenu}
+        use:contextmenu={attachItems}
       >
         <Icon icon={Plus} size={20} />
       </button>
-    {/if}
-    {#if !threadRoot && !viewport.isPhone}
-      <button type="button" class="round" aria-label="Create poll" title="Create poll" onclick={() => (pollOpen = true)}>
-        <Icon icon={ChartBar} size={20} />
-      </button>
-      {#if canLocate()}
-        <button type="button" class="round" aria-label="Share location" aria-haspopup="menu" data-tooltip="Share location" onclick={openLocationMenu}>
-          <Icon icon={MapPin} size={20} />
-        </button>
-      {/if}
-    {/if}
-    {#if !threadRoot}
       <PollDialog open={pollOpen} onclose={() => (pollOpen = false)} />
       <LocationDialog open={locationOpen} {roomId} onclose={() => (locationOpen = false)} />
     {/if}
