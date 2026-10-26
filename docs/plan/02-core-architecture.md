@@ -1,3 +1,12 @@
+---
+id: plan-02-core-architecture
+type: architecture-design
+status: draft
+title: "Core Architecture & Matrix Engine Specification (alloy-core)"
+parent: alloy-architecture
+tags: [architecture, core, plan]
+---
+
 # Core Architecture & Matrix Engine Specification (alloy-core)
 
 ## 1. Summary & Recommendation

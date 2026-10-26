@@ -1,3 +1,13 @@
+---
+id: adr-0006-shared-controls-tags
+type: architecture-design
+status: draft
+title: "ADR 0006: Shared controls, one members UI, platform-aware settings, custom room tags"
+parent: alloy-architecture
+depends-on: [adr-0002-discord-style-layout, adr-0004-functional-settings, adr-0005-mobile-first-shell]
+tags: [adr, ui, controls, settings]
+---
+
 # 0006: Shared controls, one members UI, platform-aware settings, custom room tags
 
 - Status: accepted

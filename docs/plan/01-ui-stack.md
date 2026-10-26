@@ -1,3 +1,12 @@
+---
+id: plan-01-ui-stack
+type: architecture-design
+status: draft
+title: "Alloy Architecture Plan: UI Stack & Cross-Platform Shell Evaluation"
+parent: alloy-architecture
+tags: [architecture, ui, plan]
+---
+
 # Alloy Architecture Plan: UI Stack & Cross-Platform Shell Evaluation
 
 - **Target Path**: `docs/plan/01-ui-stack.md`

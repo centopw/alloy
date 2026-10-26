@@ -143,7 +143,7 @@ Highest risks: WebView perf on low-end Android (G1), Android background delivery
 ## 8. Roadmap (2026-10-19)
 
 ### What changed against the plan above
-- **Crates:** an `alloy-engine` crate (command handlers, subscriptions, event sink) sits between the Tauri app and `alloy-core`, and `alloy-bridge` exposes it over WebSocket for the browser E2E. `alloy-ffi` and `tools/alloy-pack` do not exist yet (P2 push, P3 packaging).
+- **Crates:** an `alloy-engine` crate (command handlers, subscriptions, event sink) sits between the Tauri app and `alloy-core`, and `alloy-bridge` exposes it over WebSocket for the browser E2E. `alloy-ffi` and `alloy-push` now exist for Android background push; `tools/alloy-pack` does not exist yet (P3 packaging).
 - **Customization:** the token system, light/dark/AMOLED and one extra theme ship, and `schemas/` hold the theme, keybinding and plugin-manifest schemas, but themes are compiled in; `alloy-plugin` has the Wasmtime host (fuel, 32 MiB cap, capability denial) and a sample `hello-plugin`, not yet wired into the engine.
 - **Layout and mobile:** D11 and D13 replaced the single adaptive layout of the first plan.
 - **Delivery:** GitHub Releases with a nightly channel, signed update feed for desktop, ad-hoc signed macOS bundle, SBOM; all releases are pre-releases.

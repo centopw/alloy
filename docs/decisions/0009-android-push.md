@@ -1,3 +1,12 @@
+---
+id: adr-0009-android-push
+type: architecture-design
+status: draft
+title: "ADR 0009: Android background push notifications via UnifiedPush"
+parent: alloy-architecture
+tags: [adr, android, push, privacy]
+---
+
 # ADR-0009: Android Background Push Notifications via UnifiedPush
 
 ## Context

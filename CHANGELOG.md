@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.5 (pre-release)
+
+### Added
+- **Media first in the composer.** The attach menu now leads with **Photo or video** and **File**, with polls and locations one level down under **More**. On Android and iOS, **Photo or video** opens the system media chooser, so pictures and videos land in the gallery instead of a file browser; desktop gets the same action with a pictures-and-videos filter. The separate File, Poll and Location buttons on desktop are gone — one `+` button opens the tiered menu on every platform.
+- **A failed picture or video offers Retry.** When a timeline picture or video cannot be loaded, its frame says so and offers a Retry button that fetches the same source again.
+
+### Changed
+- **Uploads no longer look stuck.** While the engine is still encrypting or buffering an attachment there is no byte count yet, so the upload bar now sweeps instead of sitting at 0% labelled "Starting"; a message waiting to send breathes instead of sitting still, and a media thumbnail shows a sweeping skeleton instead of a flat grey block. All three animations respect `prefers-reduced-motion`.
+- **Android and Windows move to a secure webview origin.** The webview is now served over `https://tauri.localhost`, so entering credentials no longer shows the "not secure" autofill warning and password managers offer to fill the sign-in form. Because the origin changes, device-only settings kept in `localStorage` (theme choice, layout, font size, notification toggles, Enter-to-send, autostart and update toggles) reset once on upgrade; the synced preferences reload from the engine on sign-in. Only packaged builds are affected — `tauri android dev` still serves the Vite dev server over http.
+
+### Fixed
+- **The attach menu no longer looks like a stuck spinner.** The upload strip reports indeterminate progress while a send is starting, and pictures or videos that fail to load say so and offer Retry instead of an empty frame.
+
 ## 0.2.4 (pre-release)
 
 ### Added

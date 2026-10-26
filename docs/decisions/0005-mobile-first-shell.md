@@ -1,3 +1,13 @@
+---
+id: adr-0005-mobile-first-shell
+type: architecture-design
+status: draft
+title: "ADR 0005: A real mobile UI, not a scaled-down desktop"
+parent: alloy-architecture
+depends-on: [adr-0002-discord-style-layout, adr-0003-ux-review-2026-10, adr-0004-functional-settings]
+tags: [adr, mobile, ux]
+---
+
 # 0005: A real mobile UI, not a scaled-down desktop
 
 Status: accepted. Extends 0002 to 0004.
@@ -16,7 +26,8 @@ dialogs, and a page the user could drag around (the shell scrolled).
   the shell applies safe-area padding itself.
 - **Touch first.** Every interactive element is at least 44x44 (switches via a 44px hit area), inputs use
   16px text, hover-only affordances are replaced by long-press, the composer has a Send button and a `+`
-  sheet for attachments and polls, and phones default to the bubbles message layout.
+  sheet for attachments, polls and locations — media first (`Photo or video`, then `File`), with polls and
+  locations under `More` — and phones default to the bubbles message layout.
 - **Guarded by a test.** `E2E_MOBILE=1 node scripts/e2e-bridge.mjs` drives the real app at 390x844 with touch
   emulation and fails (with `E2E_STRICT=1`) on page scroll, horizontal overflow, or any target under 44px.
 

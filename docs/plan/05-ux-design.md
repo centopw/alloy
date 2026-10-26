@@ -1,3 +1,12 @@
+---
+id: plan-05-ux-design
+type: architecture-design
+status: draft
+title: "Alloy UX & Product Design Specification"
+parent: alloy-architecture
+tags: [architecture, ux, design, plan]
+---
+
 # Alloy UX & Product Design Specification
 
 ## 1. Summary & Recommendation

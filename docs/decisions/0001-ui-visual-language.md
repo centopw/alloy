@@ -1,3 +1,12 @@
+---
+id: adr-0001-ui-visual-language
+type: architecture-design
+status: draft
+title: "ADR 0001: UI visual language v1 (text-first, Telegram-inspired chat)"
+parent: alloy-architecture
+tags: [adr, ui, design]
+---
+
 # 0001: UI visual language v1 (text-first, Telegram-inspired chat)
 
 - Status: accepted (items 2, 4, 5 and 6 superseded by 0002)

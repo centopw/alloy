@@ -1,3 +1,12 @@
+---
+id: plan-04-security-delivery
+type: architecture-design
+status: draft
+title: "04: Security & Delivery Architecture"
+parent: alloy-architecture
+tags: [architecture, security, delivery, plan]
+---
+
 # 04: Security & Delivery Architecture
 
 **Status:** Planning  

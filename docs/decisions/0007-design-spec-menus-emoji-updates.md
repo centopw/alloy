@@ -1,3 +1,13 @@
+---
+id: adr-0007-design-spec-menus-emoji-updates
+type: architecture-design
+status: draft
+title: "ADR 0007: Workspace design spec, tiered menus, no native menus, emoji picker, update experience"
+parent: alloy-architecture
+depends-on: [adr-0001-ui-visual-language, adr-0002-discord-style-layout, adr-0005-mobile-first-shell, adr-0006-shared-controls-tags]
+tags: [adr, design, menus, updates]
+---
+
 # 0007: Workspace design spec, tiered menus, no native menus, emoji picker, update experience
 
 - Status: accepted

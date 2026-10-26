@@ -1,3 +1,13 @@
+---
+id: adr-0008-chat-parity
+type: architecture-design
+status: draft
+title: "ADR 0008: Chat parity with Messenger and Telegram"
+parent: alloy-architecture
+depends-on: [adr-0001-ui-visual-language, adr-0007-design-spec-menus-emoji-updates]
+tags: [adr, chat, features]
+---
+
 # ADR 0008: Chat parity with Messenger and Telegram
 
 Status: accepted (0.2.0). Extends ADR 0001 (visual language) and ADR 0007 (menus, emoji, updates).

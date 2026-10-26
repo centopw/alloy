@@ -1,3 +1,12 @@
+---
+id: plan-03-extensibility
+type: architecture-design
+status: draft
+title: "Extensibility & Customization Architecture Plan"
+parent: alloy-architecture
+tags: [architecture, extensibility, plan]
+---
+
 # Extensibility & Customization Architecture Plan
 
 ## 1. Summary & Recommendation

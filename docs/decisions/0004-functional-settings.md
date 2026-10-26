@@ -1,3 +1,13 @@
+---
+id: adr-0004-functional-settings
+type: architecture-design
+status: draft
+title: "ADR 0004: Settings configure behaviour (Element as reference)"
+parent: alloy-architecture
+depends-on: [adr-0002-discord-style-layout, adr-0003-ux-review-2026-10]
+tags: [adr, settings, ux]
+---
+
 # 0004: Settings configure behaviour (Element as reference)
 
 Status: accepted. Extends 0002 and 0003.
