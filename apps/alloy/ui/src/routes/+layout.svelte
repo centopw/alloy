@@ -2,6 +2,9 @@
   import "../lib/tokens.css";
   import "../lib/layout.css";
   import "../lib/mobile.css";
+  // shadcn-svelte token bridge (decision 0012). Imported last: its Tailwind utilities live in a
+  // cascade layer, so the unlayered alloy CSS above always keeps the final say.
+  import "../app.css";
   import { onMount } from "svelte";
   import ProfileCardHost from '$lib/components/shell/ProfileCardHost.svelte';
   import EmojiPickerHost from '$lib/components/common/EmojiPickerHost.svelte';

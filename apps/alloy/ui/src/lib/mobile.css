@@ -50,9 +50,9 @@
 
   /*
    * Minimum touch target height for controls that components do not size themselves.
-   * Switches are excluded: their track is a fixed 40x22 and gets a larger hit area via ::before in
-   * Toggle.svelte instead. Message-body buttons and links (.body button, .body a) are exempt so
-   * inline text controls keep their line height.
+   * Switches are excluded: their track stays at the primitive's size and gets a larger hit area via
+   * the `[data-slot="switch"]` rule below. Message-body buttons and links (.body button, .body a)
+   * are exempt so inline text controls keep their line height.
    */
   :where(button:not([role="switch"]), [role="button"], [role="tab"], [role="menuitem"], select, textarea,
     input:not([type="checkbox"]):not([type="radio"])):where(:not(.body button, .body a)) {
@@ -62,6 +62,20 @@
   /* Icon-only buttons (named by aria-label) are also at least 44px wide. */
   :where(button[aria-label]:not([role="switch"]), [role="button"][aria-label]):where(:not(.body button, .body a)) {
     min-width: var(--alloy-touch-target);
+  }
+
+  /*
+   * Switches rendered by the vendored shadcn-svelte primitive (Toggle.svelte): the track keeps its
+   * 32x18.4px size and the hit area grows to 44px tall through an overlay, so ADR 0005's minimum is
+   * met without changing the visual.
+   */
+  :where([data-slot="switch"]) {
+    position: relative;
+  }
+  :where([data-slot="switch"])::before {
+    content: "";
+    position: absolute;
+    inset: -13px -12px;
   }
 
   /* Form fields: 16px stops the browser zooming on focus and matches the native field size. */

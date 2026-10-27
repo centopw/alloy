@@ -1,4 +1,7 @@
 <script lang="ts">
+  // Bits UI supplies the progressbar role and aria-valuenow; ADR 0012 replaced the hand-rolled
+  // aria-hidden track. Restyle through `class`; the vendored primitive stays unmodified.
+  import { Progress } from '$lib/components/ui/progress/index.js';
   import Icon from '$lib/icons/Icon.svelte';
   import { X } from '$lib/icons';
   import { contextmenu } from '$lib/platform/contextmenu';
@@ -75,9 +78,20 @@
       </button>
     {/if}
     {#if updatesStore.phase === 'downloading'}
-      <span class="track" aria-hidden="true">
-        <span class="fill" style:width={percent === null ? '30%' : `${percent}%`}></span>
-      </span>
+      <!--
+        Known size: a determinate bar. Unknown size (null) keeps correct indeterminate ARIA from
+        Bits UI but renders an empty track, so the track itself pulses to read as "still working"
+        rather than stalled — the same intent as the old 30% placeholder.
+      -->
+      <Progress
+        value={percent}
+        aria-label={percent === null ? 'Working on update' : 'Downloading update'}
+        class="absolute inset-x-0 bottom-0 h-[2px] w-full overflow-hidden rounded-none
+          bg-[var(--alloy-color-border-subtle)]
+          [&_[data-slot=progress-indicator]]:bg-[var(--alloy-color-accent-primary)]
+          [&_[data-slot=progress-indicator]]:duration-200
+          {percent === null ? 'animate-pulse' : ''}"
+      />
     {/if}
   </div>
 {/if}
@@ -188,21 +202,5 @@
   .dismiss:focus-visible {
     outline: 2px solid var(--alloy-color-accent-primary);
     outline-offset: -2px;
-  }
-
-  .track {
-    position: absolute;
-    right: 0;
-    bottom: 0;
-    left: 0;
-    height: 2px;
-    background: var(--alloy-color-border-subtle);
-  }
-
-  .fill {
-    display: block;
-    height: 100%;
-    background: var(--alloy-color-accent-primary);
-    transition: width 200ms ease;
   }
 </style>

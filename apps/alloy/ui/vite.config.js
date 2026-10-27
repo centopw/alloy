@@ -1,15 +1,21 @@
 import { defineConfig } from "vite";
 import { sveltekit } from "@sveltejs/kit/vite";
+import tailwindcss from "@tailwindcss/vite";
 import process from "node:process";
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
 export default defineConfig(() => ({
-  plugins: [sveltekit()],
+  // Tailwind v4 runs as a Vite plugin; it compiles src/app.css (the shadcn-svelte token bridge).
+  plugins: [tailwindcss(), sveltekit()],
 
   test: {
     environment: "jsdom",
   },
+
+  // Vitest must resolve Svelte's browser build for component tests; the SvelteKit build sets its
+  // own conditions per environment, so this only applies while tests run.
+  ...(process.env.VITEST ? { resolve: { conditions: ["browser"] } } : {}),
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //

@@ -1,0 +1,136 @@
+/*
+ * shadcn-svelte global stylesheet for Alloy (decision 0012).
+ *
+ * This file is the *only* place where shadcn-svelte's CSS variable contract meets alloy-theme.
+ * Nothing here defines a colour, radius or font of its own: every shadcn variable is an alias of an
+ * `--alloy-*` token that `crates/alloy-theme` generates. That keeps ADR 0001's "one source of design
+ * truth" intact while letting vendored shadcn-svelte components work unmodified.
+ *
+ * Two deliberate deviations from shadcn-svelte's defaults, both required by this repo:
+ *
+ * 1. No Tailwind Preflight. `src/lib/tokens.css` is the authoritative reset and it is already
+ *    unlayered, so it wins over anything in `@layer base`. Importing Preflight would additionally
+ *    rewrite `img, video { max-width: 100%; height: auto }` (regressing MediaView's fixed-size
+ *    timeline media) and `a { color: inherit; text-decoration: inherit }` (regressing link styling
+ *    in message bodies). Only `theme.css` and `utilities.css` are imported.
+ * 2. Dark mode keys off the `data-theme` attribute instead of shadcn's `.dark` class. Every alloy
+ *    theme resolves its own token values, so `--background` and friends already flip per theme;
+ *    the variant only exists for components that ship `dark:` utilities. "Not the light theme"
+ *    covers alloy-dark, alloy-amoled and any custom dark theme without enumerating them.
+ */
+
+@layer theme, base, components, utilities;
+
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "tw-animate-css";
+
+@custom-variant dark (&:where(:root:not([data-theme="alloy-light"]) *));
+
+/* shadcn-svelte's variable contract, aliased onto alloy-theme tokens. */
+:root {
+  /* ADR 0001: panels are flat (0), components 4px, inputs/composer 6px. shadcn's base radius is the
+     component radius; anything needing 0 or 6px sets it explicitly at the call site. */
+  --radius: var(--alloy-radii-sm);
+
+  --background: var(--alloy-color-surface-canvas);
+  --foreground: var(--alloy-color-text-primary);
+
+  --card: var(--alloy-color-surface-panel);
+  --card-foreground: var(--alloy-color-text-primary);
+  --popover: var(--alloy-color-surface-elevated);
+  --popover-foreground: var(--alloy-color-text-primary);
+
+  --primary: var(--alloy-color-accent-fill);
+  --primary-foreground: var(--alloy-color-text-on-accent);
+  --secondary: var(--alloy-color-surface-subtle);
+  --secondary-foreground: var(--alloy-color-text-primary);
+  --muted: var(--alloy-color-surface-subtle);
+  --muted-foreground: var(--alloy-color-text-secondary);
+  --accent: var(--alloy-color-surface-hover);
+  --accent-foreground: var(--alloy-color-text-primary);
+  --destructive: var(--alloy-color-status-error);
+  --destructive-foreground: var(--alloy-color-text-on-accent);
+
+  --border: var(--alloy-color-border-subtle);
+  --input: var(--alloy-color-border-subtle);
+  --ring: var(--alloy-color-accent-primary);
+
+  /* Charts reuse the deterministic sender palette so a chart series matches its sender colour. */
+  --chart-1: var(--alloy-color-user-1);
+  --chart-2: var(--alloy-color-user-2);
+  --chart-3: var(--alloy-color-user-3);
+  --chart-4: var(--alloy-color-user-4);
+  --chart-5: var(--alloy-color-user-5);
+
+  --sidebar: var(--alloy-color-surface-panel);
+  --sidebar-foreground: var(--alloy-color-text-primary);
+  --sidebar-primary: var(--alloy-color-accent-fill);
+  --sidebar-primary-foreground: var(--alloy-color-text-on-accent);
+  --sidebar-accent: var(--alloy-color-surface-hover);
+  --sidebar-accent-foreground: var(--alloy-color-text-primary);
+  --sidebar-border: var(--alloy-color-border-subtle);
+  --sidebar-ring: var(--alloy-color-accent-primary);
+}
+
+@theme inline {
+  /* Radii map 1:1 onto the alloy scale instead of shadcn's multipliers, so a vendored component's
+     `rounded-md` is ADR 0001's 4px rather than an arbitrary fraction of it. */
+  --radius-sm: var(--alloy-radii-sm);
+  --radius-md: var(--alloy-radii-md);
+  --radius-lg: var(--alloy-radii-lg);
+  --radius-xl: var(--alloy-radii-lg);
+  --radius-2xl: var(--alloy-radii-lg);
+  --radius-3xl: var(--alloy-radii-lg);
+  --radius-4xl: var(--alloy-radii-lg);
+
+  --font-sans: var(--alloy-typography-font-family-sans);
+  --font-mono: var(--alloy-typography-font-family-mono);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+@layer base {
+  /* shadcn components rely on a base border colour: the `border` utility sets width and style only. */
+  *,
+  ::after,
+  ::before {
+    border-color: var(--border);
+  }
+  /* Tailwind v4 defaults buttons to cursor: default; every alloy control is clickable. */
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
