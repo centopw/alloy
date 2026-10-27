@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.7 (pre-release)
+
+### Added
+- **Staged pictures and videos show real thumbnails.** Every picture in the composer's preview strip now shows its own image and every video its poster frame, so the strip reads at a glance instead of as a row of blank tiles. A file that cannot be previewed shows a muted file-type glyph (play, image or file) rather than an empty box. Sending is unchanged: nothing leaves the device until Send.
+- **A vendored primitive layer under the Alloy theme.** Interaction-heavy controls now come from shadcn-svelte (Bits UI behaviour), vendored into `src/lib/components/ui` and kept byte-for-byte close to upstream. The settings switch and the update-download bar are the first two. The design language stays alloy-theme's: shadcn's CSS variable contract is aliased onto the generated `--alloy-*` tokens in `src/app.css`, dark mode keys off the `data-theme` attribute rather than a `.dark` class, and Tailwind's Preflight reset is deliberately not imported so `tokens.css` remains the authoritative reset. Business surfaces — shell, timeline, composer, upload strip, media view and settings — stay hand-written. See decision 0012.
+
+### Changed
+- **The settings switch and the update bar now run on those primitives.** `Toggle.svelte` and the update-download bar keep their call-site API but delegate interaction and ARIA to the vendored switch and progress components. The visible switch track and the 2 px download bar are unchanged.
+
+### Fixed
+- **The quick switcher is a real combobox for screen readers.** The highlighted room is announced through `aria-activedescendant` while focus stays in the search field, and Tab is trapped inside the palette instead of escaping to the page behind the backdrop.
+- **The settings switch keeps its semantics and its touch target.** It now carries the primitive's `role="switch"` and `aria-checked` handling, and its 44 px phone hit area moved into the mobile stylesheet so the visible track stays the primitive's size.
+- **The update-download bar is a real progressbar.** It exposes `aria-valuenow`, and its indeterminate state pulses instead of sitting as an empty track.
+- **The upload bar stays indeterminate until the engine reports a size.** The engine emits a `0 of 0` event as soon as an upload starts; treating that as real progress froze the bar at 0% with no sweep. It now stays indeterminate until `total > 0`, so an upload never looks stuck.
+
 ## 0.2.6 (pre-release)
 
 ### Added
