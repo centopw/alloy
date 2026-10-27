@@ -27,6 +27,28 @@ export function isUploadComplete(progress: UploadProgress): boolean {
   return progress.total > 0 && progress.sent >= progress.total;
 }
 
+/*
+ * The engine emits a `0 of 0` event the moment an upload starts. A progress bar that treats that as
+ * real progress freezes at 0% with no sweep — the "looks stuck" report. Until a total arrives the
+ * bar must stay indeterminate, so the strip asks these two questions rather than reading the
+ * fraction directly.
+ */
+
+/**
+ * Whether the engine has reported a size yet. Drives indeterminate vs determinate.
+ *
+ * A type guard so the template's `hasSize ?` branch narrows `progress` to non-null and can read
+ * `sent`/`total` without a redundant null check.
+ */
+export function hasKnownSize(progress: UploadProgress | null): progress is UploadProgress {
+  return progress !== null && progress.total > 0;
+}
+
+/** Percent 0..100, rounded. Only meaningful when `hasKnownSize` is true. */
+export function uploadPercent(progress: UploadProgress | null): number {
+  return progress === null ? 0 : Math.round(progress.fraction * 100);
+}
+
 /** Pure: returns a new map with the event's progress recorded under its txn_id. */
 export function reduceUploadProgress(
   state: UploadProgressMap,

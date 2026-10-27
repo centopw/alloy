@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   UPLOAD_LINGER_MS,
+  hasKnownSize,
   isUploadComplete,
   reduceUploadClear,
   reduceUploadProgress,
   uploadFraction,
+  uploadPercent,
   uploadsStore,
   type UploadProgressMap,
 } from './uploads.svelte';
@@ -41,6 +43,36 @@ describe('isUploadComplete', () => {
   it('is false while bytes remain or the total is unknown', () => {
     expect(isUploadComplete({ sent: 99, total: 100, fraction: 0.99 })).toBe(false);
     expect(isUploadComplete({ sent: 0, total: 0, fraction: 0 })).toBe(false);
+  });
+});
+
+describe('hasKnownSize', () => {
+  it('is false with no progress record yet', () => {
+    expect(hasKnownSize(null)).toBe(false);
+  });
+
+  it('is false for the 0-of-0 event the engine emits when an upload starts', () => {
+    expect(hasKnownSize({ sent: 0, total: 0, fraction: 0 })).toBe(false);
+  });
+
+  it('is true once a non-zero total arrives', () => {
+    expect(hasKnownSize({ sent: 0, total: 2048, fraction: 0 })).toBe(true);
+    expect(hasKnownSize({ sent: 1024, total: 2048, fraction: 0.5 })).toBe(true);
+  });
+});
+
+describe('uploadPercent', () => {
+  it('is 0 with no progress record yet', () => {
+    expect(uploadPercent(null)).toBe(0);
+  });
+
+  it('rounds the fraction to whole percent', () => {
+    expect(uploadPercent({ sent: 1, total: 3, fraction: 1 / 3 })).toBe(33);
+    expect(uploadPercent({ sent: 2, total: 3, fraction: 2 / 3 })).toBe(67);
+  });
+
+  it('reads 100 for a finished upload', () => {
+    expect(uploadPercent({ sent: 2048, total: 2048, fraction: 1 })).toBe(100);
   });
 });
 

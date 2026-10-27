@@ -1,6 +1,6 @@
 <script lang="ts">
   import { formatBytes } from '$lib/content/format';
-  import { uploadsStore } from '$lib/stores/uploads.svelte';
+  import { hasKnownSize, uploadPercent, uploadsStore } from '$lib/stores/uploads.svelte';
 
   interface Props {
     roomId: string;
@@ -20,8 +20,8 @@
   <ul class="uploads" aria-label="Uploads in progress">
     {#each uploads as upload (upload.txnId)}
       {@const progress = uploadsStore.progressFor(upload.txnId)}
-      {@const percent = progress ? Math.round(progress.fraction * 100) : 0}
-      {@const hasSize = progress !== null && progress.total > 0}
+      {@const hasSize = hasKnownSize(progress)}
+      {@const percent = uploadPercent(progress)}
       <li class="upload">
         <span class="name">{upload.name}</span>
         <div
