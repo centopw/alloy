@@ -6,12 +6,11 @@
   import { client } from '$lib/ipc';
   import { prefs } from '$lib/stores/prefs.svelte';
   import Icon from '$lib/icons/Icon.svelte';
-  import { ChartBar, Ellipsis, File, Image, ImagePlus, MapPin, Navigation, Plus, Send, Smile, Type, X } from '$lib/icons';
+  import { ChartBar, Ellipsis, File, Image, ImagePlus, MapPin, Navigation, Play, Plus, Send, Smile, Type, X } from '$lib/icons';
   import {
     canPickFiles,
     importPastedImagePath,
     isTauriRuntime,
-    localFileUrl,
     looksLikeFilePath,
     pastedImageFiles,
     pastedImageName,
@@ -20,7 +19,7 @@
     savePastedImage
   } from '$lib/platform/files';
   import { nativeClipboardHasImage, nativeClipboardImage } from '$lib/platform/clipboardImage';
-  import { stagePictureFromPath } from './stageHelper';
+  import { stageFile, stagePictureFromPath, type StagedPicture } from './stageHelper';
   import { errorMessage } from '$lib/stores/errors';
   import { isVoiceMessagesSupported } from '$lib/platform/capabilities';
   import { canLocate } from '$lib/platform/geolocation';
@@ -79,11 +78,6 @@
 
   // Picked, dropped or pasted files wait here until the user sends them, and the composer text
   // becomes their caption. Nothing leaves the device without an explicit Send.
-  interface StagedPicture {
-    path: string;
-    name: string;
-    preview: string | null;
-  }
   let staged = $state<StagedPicture[]>([]);
   // Staged attachments are sendable on their own.
   const canSend = $derived(text.trim().length > 0 || staged.length > 0);
@@ -342,21 +336,11 @@
     dropPreviews(items);
   }
 
-  /** Adds picked or dropped files to the preview strip; pictures also get a thumbnail. */
+  /** Adds picked or dropped files to the preview strip; pictures and videos get a thumbnail. */
   async function stagePaths(paths: string[]) {
     for (const path of paths) {
       if (staged.some((item) => item.path === path)) continue;
-      staged.push({ path, name: path.split(/[\\/]/).pop() ?? path, preview: await picturePreview(path) });
-    }
-  }
-
-  /** An <img> source for a picture path, or null for anything the webview should not try to render. */
-  async function picturePreview(path: string): Promise<string | null> {
-    if (!/\.(png|jpe?g|gif|webp|bmp|avif|heic)$/i.test(path)) return null;
-    try {
-      return await localFileUrl(path);
-    } catch {
-      return null;
+      staged.push(await stageFile(path));
     }
   }
 
@@ -411,7 +395,7 @@
       e.preventDefault();
       for (const file of pictures) {
         try {
-          staged.push({ path: await savePastedImage(file), name: pastedImageName(file), preview: URL.createObjectURL(file) });
+          staged.push({ path: await savePastedImage(file), name: pastedImageName(file), kind: 'image', preview: URL.createObjectURL(file) });
         } catch (err) {
           timelineStore.error = errorMessage(err);
         }
@@ -437,7 +421,7 @@
       timelineStore.error = errorMessage(err);
     }
     if (path) {
-      staged.push({ path, name: path.split(/[\\/]/).pop() ?? path, preview: null });
+      staged.push(await stageFile(path));
     } else {
       field?.focus();
       document.execCommand('insertText', false, pasted);
@@ -666,8 +650,26 @@
     <div class="staged" role="group" aria-label="Attachments ready to send">
       {#each staged as item (item.path)}
         <div class="picture">
-          {#if item.preview}
+          {#if item.preview && item.kind === 'video'}
+            <!-- svelte-ignore a11y_media_has_caption -->
+            <video
+              src={`${item.preview}#t=0.1`}
+              muted
+              playsinline
+              preload="metadata"
+              aria-label={item.name}
+              onloadedmetadata={(e) => {
+                const v = e.currentTarget;
+                if (Number.isFinite(v.duration) && v.duration > 0) v.currentTime = Math.min(0.1, v.duration / 2);
+              }}
+              onerror={() => (item.preview = null)}
+            ></video>
+          {:else if item.preview}
             <img src={item.preview} alt="" onerror={() => (item.preview = null)} />
+          {:else}
+            <span class="picture-icon" aria-hidden="true">
+              <Icon icon={item.kind === 'video' ? Play : item.kind === 'image' ? Image : File} size={20} />
+            </span>
           {/if}
           <span class="picture-name">{item.name}</span>
           <button type="button" class="round" aria-label="Remove {item.name}" data-tooltip="Remove" onclick={() => unstage(item.path)}>
@@ -850,11 +852,24 @@
     color: var(--alloy-color-text-secondary);
     font-size: var(--alloy-typography-size-sm);
   }
-  .picture img {
+  .picture img,
+  .picture video {
     width: 40px;
     height: 40px;
     object-fit: cover;
     border-radius: var(--alloy-radii-md);
+    flex: none;
+    background: var(--alloy-color-surface-hover);
+  }
+  .picture-icon {
+    width: 40px;
+    height: 40px;
+    flex: none;
+    display: inline-grid;
+    place-items: center;
+    border-radius: var(--alloy-radii-md);
+    background: var(--alloy-color-surface-hover);
+    color: var(--alloy-color-text-secondary);
   }
   .picture-name {
     min-width: 0;
