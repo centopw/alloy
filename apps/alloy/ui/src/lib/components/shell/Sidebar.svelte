@@ -385,7 +385,7 @@
       use:contextmenu={() => roomItems(r)}
       onclick={() => openRoom(r.id)}
     >
-      <span class="fixed">
+      <span class="pinned">
         <Avatar userId={r.id} displayName={roomTitle(r)} src={r.avatar_url} size={36} shape={r.is_direct ? 'circle' : 'rounded'} />
       </span>
       <span class="text">
@@ -409,22 +409,22 @@
             </span>
           {/if}
           {#if r.favourite}
-            <span class="fixed"><Icon icon={Pin} size={16} label="Pinned" /></span>
+            <span class="pinned"><Icon icon={Pin} size={16} label="Pinned" /></span>
           {/if}
           {#if r.encrypted}
-            <span class="fixed"><Icon icon={Lock} size={16} label="Encrypted" /></span>
+            <span class="pinned"><Icon icon={Lock} size={16} label="Encrypted" /></span>
           {/if}
           {#if muted}
-            <span class="fixed"><Icon icon={BellOff} size={16} label={until ?? 'Notifications muted'} /></span>
+            <span class="pinned"><Icon icon={BellOff} size={16} label={until ?? 'Notifications muted'} /></span>
           {/if}
           {#if unread > 0}
             {#if muted}
-              <span class="fixed"><span class="dot" aria-hidden="true"></span></span>
+              <span class="pinned"><span class="dot" aria-hidden="true"></span></span>
             {:else}
-              <span class="fixed"><Badge count={unread} /></span>
+              <span class="pinned"><Badge count={unread} /></span>
             {/if}
           {:else if markedUnread}
-            <span class="fixed"><span class="dot accent" role="img" aria-label="Marked as unread"></span></span>
+            <span class="pinned"><span class="dot accent" role="img" aria-label="Marked as unread"></span></span>
           {/if}
         </span>
       </span>
@@ -445,7 +445,7 @@
 
 {#snippet inviteRow(r: RoomItem)}
   <div class="row invite" use:contextmenu={() => inviteItems(r)}>
-    <span class="fixed">
+    <span class="pinned">
       <Avatar userId={r.id} displayName={roomTitle(r)} src={r.avatar_url} size={36} shape={r.is_direct ? 'circle' : 'rounded'} />
     </span>
     <div class="text">
@@ -832,7 +832,9 @@
     flex-direction: column;
     gap: var(--alloy-spacing-scale-1);
   }
-  .fixed {
+  /* Named `.pinned`, not `.fixed`: Tailwind's utilities layer emits a global `.fixed{position:fixed}`
+     and a bare `.fixed` class would turn every avatar/marks container into a viewport-fixed box. */
+  .pinned {
     flex: none;
     display: inline-flex;
   }

@@ -26,7 +26,7 @@
 
 {#if account && !viewport.isPhone}
   <div class="panel" use:contextmenu={() => panelItems(account.user_id)}>
-    <span class="fixed">
+    <span class="pinned">
       <Avatar userId={account.user_id} displayName={name} src={account.avatar_url} size="md" />
     </span>
     <div class="who">
@@ -50,7 +50,9 @@
     border-radius: var(--alloy-radii-md);
     background: var(--alloy-color-surface-canvas);
   }
-  .fixed {
+  /* Named `.pinned`, not `.fixed`: Tailwind's utilities layer emits a global `.fixed{position:fixed}`
+     and a bare `.fixed` class would turn the avatar container into a viewport-fixed box. */
+  .pinned {
     flex: none;
     display: inline-flex;
   }

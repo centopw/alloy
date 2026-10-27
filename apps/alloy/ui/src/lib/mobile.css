@@ -68,6 +68,10 @@
    * Switches rendered by the vendored shadcn-svelte primitive (Toggle.svelte): the track keeps its
    * 32x18.4px size and the hit area grows to 44px tall through an overlay, so ADR 0005's minimum is
    * met without changing the visual.
+   *
+   * The vertical inset is 14px, not 13px, because the primitive's track carries a 1px border on each
+   * side: an absolutely positioned pseudo-element resolves against the ancestor's padding box, so
+   * only 16.4px of the 18.4px track is available. 16.4 + 2*14 = 44.4px clears the 44px minimum.
    */
   :where([data-slot="switch"]) {
     position: relative;
@@ -75,7 +79,7 @@
   :where([data-slot="switch"])::before {
     content: "";
     position: absolute;
-    inset: -13px -12px;
+    inset: -14px -12px;
   }
 
   /* Form fields: 16px stops the browser zooming on focus and matches the native field size. */
