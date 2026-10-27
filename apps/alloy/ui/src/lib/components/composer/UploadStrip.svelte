@@ -8,6 +8,12 @@
   let { roomId }: Props = $props();
 
   const uploads = $derived(uploadsStore.inRoom(roomId));
+
+  /*
+   * A progress record only means something once the engine reports a size. The engine emits a
+   * `0 of 0` event as soon as the upload starts, and treating that as real progress froze the bar
+   * at 0% with no sweep — the "looks stuck" report. Until `total > 0`, stay indeterminate.
+   */
 </script>
 
 {#if uploads.length > 0}
@@ -15,21 +21,22 @@
     {#each uploads as upload (upload.txnId)}
       {@const progress = uploadsStore.progressFor(upload.txnId)}
       {@const percent = progress ? Math.round(progress.fraction * 100) : 0}
+      {@const hasSize = progress !== null && progress.total > 0}
       <li class="upload">
         <span class="name">{upload.name}</span>
         <div
           class="track"
-          class:indeterminate={!progress}
+          class:indeterminate={!hasSize}
           role="progressbar"
           aria-label="Uploading {upload.name}"
           aria-valuemin="0"
           aria-valuemax="100"
-          aria-valuenow={progress ? percent : undefined}
-          aria-valuetext={progress ? `${formatBytes(progress.sent)} of ${formatBytes(progress.total)}` : 'Uploading'}
+          aria-valuenow={hasSize ? percent : undefined}
+          aria-valuetext={hasSize ? `${formatBytes(progress.sent)} of ${formatBytes(progress.total)}` : 'Uploading'}
         >
-          <div class="fill" style={progress ? `width: ${percent}%` : undefined}></div>
+          <div class="fill" style={hasSize ? `width: ${percent}%` : undefined}></div>
         </div>
-        <span class="meta">{progress ? `${percent}%` : 'Uploading…'}</span>
+        <span class="meta">{hasSize ? `${percent}%` : 'Uploading…'}</span>
       </li>
     {/each}
   </ul>
