@@ -181,4 +181,34 @@ describe('RoomInfoStore', () => {
     expect(store.error(ROOM)).toBeNull();
     expect(store.details(ROOM)?.name).toBe('General');
   });
+
+  it('forgets cached notes on reset so another account cannot read them', async () => {
+    invoke.mockResolvedValueOnce(detailsRes('General')).mockResolvedValueOnce(noteRes('private to A'));
+    await store.load(ROOM);
+    expect(store.note(ROOM)).toBe('private to A');
+
+    store.reset();
+    expect(store.note(ROOM)).toBe('');
+    expect(store.details(ROOM)).toBeNull();
+
+    invoke.mockResolvedValueOnce(detailsRes('General')).mockResolvedValueOnce(noteRes('private to B'));
+    await store.load(ROOM);
+
+    expect(store.note(ROOM)).toBe('private to B');
+  });
+
+  it('drops a read that was in flight when the account changed', async () => {
+    const detailsPending = deferred<unknown>();
+    const notePending = deferred<unknown>();
+    invoke.mockReturnValueOnce(detailsPending.promise).mockReturnValueOnce(notePending.promise);
+
+    const loading = store.load(ROOM);
+    store.reset();
+    detailsPending.resolve(detailsRes('General'));
+    notePending.resolve(noteRes('private to A'));
+    await loading;
+
+    expect(store.details(ROOM)).toBeNull();
+    expect(store.note(ROOM)).toBe('');
+  });
 });

@@ -13,12 +13,14 @@ vi.mock('../ipc/index.js', () => ({
 import {
   DEFAULT_PREFS,
   DEVICE_PREF_KEYS,
+  PREFS_ACCOUNT_STORAGE_KEY,
   PREFS_ENGINE_DEBOUNCE_MS,
   PREFS_ENGINE_KEY,
   PREFS_STORAGE_KEY,
   PREFS_SYNCED_AT_STORAGE_KEY,
   SYNCED_PREF_KEYS,
   PrefsStore,
+  deviceSubset,
   isValidPref,
   sanitizePrefs,
   type PrefsStorage,
@@ -299,7 +301,8 @@ describe('engine sync', () => {
       action: 'SetSetting',
       params: {
         key: PREFS_ENGINE_KEY,
-        value_json: JSON.stringify({ ...DEFAULT_PREFS, fontScale: 120, timeFormat: '24h' }),
+        // The engine file is install-wide: only device-scoped values go into it.
+        value_json: JSON.stringify(deviceSubset({ ...DEFAULT_PREFS, fontScale: 120 })),
       },
     });
   });
@@ -381,7 +384,7 @@ describe('engine sync', () => {
     expect(saveCalls()).toHaveLength(0);
   });
 
-  it('recovers settings from the engine even when localStorage is empty', async () => {
+  it('recovers device settings from the engine even when localStorage is empty', async () => {
     invoke.mockResolvedValueOnce(
       settingsResponse({ [PREFS_ENGINE_KEY]: { fontScale: 120, timeFormat: '24h' } }),
     );
@@ -390,9 +393,10 @@ describe('engine sync', () => {
     expect(store.fontScale).toBe(DEFAULT_PREFS.fontScale);
 
     await store.load();
+    // `fontScale` is device-scoped and comes back; `timeFormat` is synced and must come from the
+    // account, never from the install-wide engine file (another account may have written it).
     expect(store.fontScale).toBe(120);
-    expect(store.timeFormat).toBe('24h');
-    expect(storedPrefs(storage)).toEqual({ ...DEFAULT_PREFS, fontScale: 120, timeFormat: '24h' });
+    expect(store.timeFormat).toBe(DEFAULT_PREFS.timeFormat);
   });
   it('keeps a change made while the load is in flight', async () => {
     const response = Promise.withResolvers<unknown>();
@@ -587,6 +591,58 @@ describe('account sync', () => {
 
     expect(pushedAccountDocs()).toHaveLength(1);
     expect(pushedAccountDocs()[0]).toMatchObject({ bigEmoji: store.bigEmoji });
+  });
+});
+
+describe('account isolation', () => {
+  it('never takes synced values from the install-wide engine file', async () => {
+    invoke.mockResolvedValueOnce(
+      settingsResponse({ [PREFS_ENGINE_KEY]: { fontScale: 120, timeFormat: '24h' } }),
+    );
+    const store = new PrefsStore(memoryStorage());
+    await store.load();
+
+    expect(store.fontScale).toBe(120);
+    expect(store.timeFormat).toBe(DEFAULT_PREFS.timeFormat);
+  });
+
+  it('drops the previous account synced values when another account signs in', () => {
+    const storage = memoryStorage();
+    const first = new PrefsStore(storage);
+    first.beginAccount('@alice:alloy.chat');
+    first.set('timeFormat', '24h');
+    first.set('fontScale', 120);
+
+    // A different account starts from the same install without a clean sign-out.
+    const second = new PrefsStore(storage);
+    second.beginAccount('@bob:alloy.chat');
+
+    expect(second.timeFormat).toBe(DEFAULT_PREFS.timeFormat);
+    expect(second.fontScale).toBe(120);
+    expect(storage.getItem(PREFS_ACCOUNT_STORAGE_KEY)).toBe('@bob:alloy.chat');
+  });
+
+  it('keeps synced values when the same account signs in again', () => {
+    const storage = memoryStorage();
+    const first = new PrefsStore(storage);
+    first.beginAccount('@alice:alloy.chat');
+    first.set('timeFormat', '24h');
+
+    const again = new PrefsStore(storage);
+    again.beginAccount('@alice:alloy.chat');
+
+    expect(again.timeFormat).toBe('24h');
+  });
+
+  it('forgets the account marker on sign-out', () => {
+    const storage = memoryStorage();
+    const store = new PrefsStore(storage);
+    store.beginAccount('@alice:alloy.chat');
+    expect(storage.getItem(PREFS_ACCOUNT_STORAGE_KEY)).toBe('@alice:alloy.chat');
+
+    void store.signOut();
+
+    expect(storage.getItem(PREFS_ACCOUNT_STORAGE_KEY)).toBeNull();
   });
 });
 

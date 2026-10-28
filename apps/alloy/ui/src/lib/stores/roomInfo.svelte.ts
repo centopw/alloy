@@ -21,6 +21,20 @@ export class RoomInfoStore {
   private rooms = $state<Record<string, RoomInfoEntry>>({});
   private inflight = new Map<string, Promise<void>>();
   private pendingWrites = new Set<Promise<void>>();
+  /** Bumped on reset so a request started for the previous account cannot repopulate the cache. */
+  private generation = 0;
+
+  /**
+   * Forgets every cached note and detail (sign-out). Notes are private to the account that wrote
+   * them, and room ids are shared across accounts on a homeserver, so this cache must not survive
+   * an account change.
+   */
+  reset(): void {
+    this.generation += 1;
+    this.rooms = {};
+    this.inflight.clear();
+  }
+
   details(roomId: string): RoomDetails | null {
     return this.rooms[roomId]?.details ?? null;
   }
@@ -88,6 +102,7 @@ export class RoomInfoStore {
   }
 
   private async fetchInfo(roomId: string): Promise<void> {
+    const generation = this.generation;
     try {
       const [detailsRes, noteRes] = await Promise.all([
         client.invoke({ action: 'GetRoomDetails', params: { room_id: roomId } }),
@@ -95,18 +110,21 @@ export class RoomInfoStore {
       ]);
       const details = expect(detailsRes, 'RoomDetailsRetrieved').payload.details;
       const note = expect(noteRes, 'RoomNote').payload.note;
+      if (generation !== this.generation) return;
       const room = this.room(roomId);
       room.details = details;
       room.note = note;
       room.loaded = true;
       room.error = null;
     } catch (err) {
+      if (generation !== this.generation) return;
       this.room(roomId).error = errorMessage(err);
     }
   }
 
   /** Runs one engine write, then re-reads details and note. Failures are stored, not thrown. */
   private write(roomId: string, action: () => Promise<EngineResponse>): Promise<void> {
+    const generation = this.generation;
     this.room(roomId).writes += 1;
     this.room(roomId).error = null;
     const pending = (async () => {
@@ -114,9 +132,9 @@ export class RoomInfoStore {
         expect(await action(), 'Unit');
         await this.fetchInfo(roomId);
       } catch (err) {
-        this.room(roomId).error = errorMessage(err);
+        if (generation === this.generation) this.room(roomId).error = errorMessage(err);
       } finally {
-        this.room(roomId).writes -= 1;
+        if (generation === this.generation) this.room(roomId).writes -= 1;
       }
     })();
     this.pendingWrites.add(pending);

@@ -15,6 +15,8 @@ export const PREFS_STORAGE_KEY = 'alloy.prefs.v1';
 export const PREFS_ENGINE_KEY = 'prefs';
 export const PREFS_ENGINE_DEBOUNCE_MS = 300;
 export const PREFS_SYNCED_AT_STORAGE_KEY = 'alloy.prefs.syncedAt.v1';
+/** The account the local synced copy belongs to, so a different account never inherits it. */
+export const PREFS_ACCOUNT_STORAGE_KEY = 'alloy.prefs.account.v1';
 
 export type MessageLayout = 'modern' | 'bubbles' | 'irc';
 export type FontScale = 90 | 100 | 110 | 120 | 130;
@@ -300,6 +302,8 @@ export class PrefsStore {
 
   /** True once `load()` has reconciled with the engine, or given up. */
   ready = $state(false);
+  /** The account the synced values come from; null before `beginAccount` and after sign-out. */
+  #accountId: string | null = null;
 
   constructor(storage: PrefsStorage | null = defaultStorage(), retryDelays: readonly number[] = [100, 200]) {
     this.#storage = storage;
@@ -458,13 +462,30 @@ export class PrefsStore {
     clearTimeout(this.#engineTimer);
     this.#engineTimer = undefined;
     this.#accountDirty = false;
+    this.#accountId = null;
     const defaults = DEFAULT_PREFS;
     for (const key of SYNCED_PREF_KEYS) (this.#values as Record<PrefKey, unknown>)[key] = defaults[key];
     this.#syncedAt = 0;
     this.#version++;
     this.#writeLocal(true);
     // Immediately push only device-scoped values to the engine, clearing synced values from the file.
-    return this.#pushToEngine(true);
+    return this.#pushToEngine();
+  }
+
+  /**
+   * Binds the local copy to the signed-in account, before `load()` reads the engine and account.
+   * A different account than the one that wrote the local copy starts from the defaults for the
+   * synced preferences: those values describe what the previous user saw, not what this one does.
+   */
+  beginAccount(accountId: string): void {
+    const previous = this.#storedAccount();
+    this.#accountId = accountId;
+    if (previous === accountId) return;
+    for (const key of SYNCED_PREF_KEYS) (this.#values as Record<PrefKey, unknown>)[key] = DEFAULT_PREFS[key];
+    this.#syncedAt = 0;
+    this.#accountDirty = false;
+    this.#version++;
+    this.#writeLocal(true);
   }
 
   /**
@@ -506,7 +527,9 @@ export class PrefsStore {
           return;
         }
         this.#engineLoaded = true;
-        this.#values = { ...DEFAULT_PREFS, ...sanitizePrefs(entry) };
+        // The settings file is install-wide, so only device-scoped values may cross from it; synced
+        // values come from the account document, or the local copy of this account.
+        this.#values = { ...this.#values, ...deviceSubset(sanitizePrefs(entry)) };
         this.#writeLocal();
         return;
       } catch (err) {
@@ -584,8 +607,20 @@ export class PrefsStore {
       const toSave = deviceOnly ? deviceSubset(this.#values) : this.#values;
       this.#storage.setItem(PREFS_STORAGE_KEY, JSON.stringify(toSave));
       this.#storage.setItem(PREFS_SYNCED_AT_STORAGE_KEY, String(this.#syncedAt));
+      if (this.#accountId === null) this.#storage.removeItem(PREFS_ACCOUNT_STORAGE_KEY);
+      else this.#storage.setItem(PREFS_ACCOUNT_STORAGE_KEY, this.#accountId);
     } catch (err) {
       console.warn('[prefs] could not persist preferences locally', err);
+    }
+  }
+
+  /** The account this install's local copy was last written for, if any. */
+  #storedAccount(): string | null {
+    if (!this.#storage) return null;
+    try {
+      return this.#storage.getItem(PREFS_ACCOUNT_STORAGE_KEY);
+    } catch {
+      return null;
     }
   }
 
@@ -599,13 +634,14 @@ export class PrefsStore {
   }
 
   /**
-   * Saves preferences to the engine. If `deviceOnly` is true, only device-scoped values are saved,
-   * clearing synced values from the engine's settings file (used at sign-out).
+   * Saves the device-scoped preferences to the engine's settings file. The file is install-wide, so
+   * it never holds synced values — those belong to an account and travel in its document. Older
+   * builds wrote them here; this device-only write clears that out.
    */
-  async #pushToEngine(deviceOnly = false): Promise<void> {
+  async #pushToEngine(): Promise<void> {
     const promise = (async () => {
       try {
-        const toSave = deviceOnly ? deviceSubset(this.#values) : this.#values;
+        const toSave = deviceSubset(this.#values);
         const res = await client.invoke({
           action: 'SetSetting',
           params: { key: PREFS_ENGINE_KEY, value_json: JSON.stringify(toSave) },
