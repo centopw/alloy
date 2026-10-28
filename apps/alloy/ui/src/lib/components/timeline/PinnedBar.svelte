@@ -107,8 +107,8 @@
   .bar {
     display: flex;
     align-items: stretch;
-    border-bottom: 1px solid var(--alloy-color-border-subtle);
-    background: var(--alloy-color-surface-panel);
+    border-bottom: 1px solid var(--alloy-glass-rim);
+    background: transparent;
   }
   .main {
     display: flex;
@@ -128,7 +128,7 @@
   @media (hover: hover) {
     .main:hover,
     .more:hover {
-      background: var(--alloy-color-surface-hover);
+      background: var(--alloy-glass-control);
     }
   }
   .stripe {

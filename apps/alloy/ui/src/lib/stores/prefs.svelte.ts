@@ -7,7 +7,6 @@
  * Every change is written to localStorage immediately and to the engine and account after a short debounce.
  */
 import { client } from '../ipc/index.js';
-import { viewport } from './viewport.svelte.js';
 import { ROOM_SORTS, type RoomSort } from './roomSort.js';
 import { DEFAULT_QUICK_REACTIONS, isQuickReactions } from '../content/quickReactions.js';
 import { NO_MUTES, isMutedUntil, sameMutedUntil, type MutedUntil } from '../content/mute.js';
@@ -66,7 +65,7 @@ export type PrefKey = keyof Prefs;
 export type EngineTimer = ReturnType<typeof setTimeout>;
 
 export const DEFAULT_PREFS: Readonly<Prefs> = Object.freeze({
-  messageLayout: 'modern',
+  messageLayout: 'bubbles',
   fontScale: 100,
   timeFormat: 'auto',
   bigEmoji: true,
@@ -98,14 +97,6 @@ export const DEFAULT_PREFS: Readonly<Prefs> = Object.freeze({
   permissionsPromptDismissed: false,
   mutedUntil: NO_MUTES,
 });
-
-/**
- * Defaults for a device with no stored preference. Phones start in the bubble layout, which fits a
- * narrow screen; desktops keep the modern layout. The stored value always wins over these defaults.
- */
-export function defaultPrefsFor(isPhone: boolean): Readonly<Prefs> {
-  return isPhone ? { ...DEFAULT_PREFS, messageLayout: 'bubbles' } : DEFAULT_PREFS;
-}
 
 /** Equality for preference values: lists compare by content, everything else by identity. */
 function sameValue(a: unknown, b: unknown): boolean {
@@ -313,7 +304,7 @@ export class PrefsStore {
   constructor(storage: PrefsStorage | null = defaultStorage(), retryDelays: readonly number[] = [100, 200]) {
     this.#storage = storage;
     this.#retryDelays = retryDelays;
-    this.#values = { ...defaultPrefsFor(viewport.isPhone), ...readStored(storage) };
+    this.#values = { ...DEFAULT_PREFS, ...readStored(storage) };
     this.#syncedAt = readSyncedAt(storage);
   }
 
@@ -428,9 +419,9 @@ export class PrefsStore {
   /** Restores one key to its default, or every key when called without arguments. */
   reset<K extends PrefKey>(key?: K): void {
     if (key === undefined) {
-      this.#values = { ...defaultPrefsFor(viewport.isPhone) };
+      this.#values = { ...DEFAULT_PREFS };
     } else {
-      this.#values[key] = defaultPrefsFor(viewport.isPhone)[key];
+      this.#values[key] = DEFAULT_PREFS[key];
     }
     this.#changed(key === undefined || PREF_SCOPE[key] === 'synced');
   }
@@ -467,7 +458,7 @@ export class PrefsStore {
     clearTimeout(this.#engineTimer);
     this.#engineTimer = undefined;
     this.#accountDirty = false;
-    const defaults = defaultPrefsFor(viewport.isPhone);
+    const defaults = DEFAULT_PREFS;
     for (const key of SYNCED_PREF_KEYS) (this.#values as Record<PrefKey, unknown>)[key] = defaults[key];
     this.#syncedAt = 0;
     this.#version++;
@@ -515,7 +506,7 @@ export class PrefsStore {
           return;
         }
         this.#engineLoaded = true;
-        this.#values = { ...defaultPrefsFor(viewport.isPhone), ...sanitizePrefs(entry) };
+        this.#values = { ...DEFAULT_PREFS, ...sanitizePrefs(entry) };
         this.#writeLocal();
         return;
       } catch (err) {

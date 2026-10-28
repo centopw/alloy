@@ -13,18 +13,37 @@
     edge: 'start' | 'end';
     /** Width applied on double-click. Omit to disable double-click reset. */
     defaultValue?: number;
+    /**
+     * Drag threshold below the minimum that collapses the panel instead of clamping at the minimum.
+     * Omit when the panel cannot collapse.
+     */
+    collapseBelow?: number;
     onchange: (value: number) => void;
     /** Called once a drag ends or a keyboard/reset change is applied, for persistence. */
     ondone?: () => void;
+    /** Called when the panel is dragged past `collapseBelow`. */
+    oncollapse?: () => void;
   }
 
-  let { value, min, max, label, edge, defaultValue, onchange, ondone }: Props = $props();
+  let {
+    value,
+    min,
+    max,
+    label,
+    edge,
+    defaultValue,
+    collapseBelow,
+    onchange,
+    ondone,
+    oncollapse,
+  }: Props = $props();
 
   const KEY_STEP = 16;
   const KEY_STEP_LARGE = 64;
 
   let handleEl: HTMLDivElement | undefined = $state();
   let drag: { startX: number; startValue: number } | null = null;
+  let collapsing = false;
 
   function clamp(v: number): number {
     return Math.min(max, Math.max(min, v));
@@ -40,13 +59,26 @@
     e.preventDefault();
     handleEl.setPointerCapture(e.pointerId);
     drag = { startX: e.clientX, startValue: value };
+    collapsing = false;
     document.body.classList.add('alloy-resizing');
   }
 
   function onPointerMove(e: PointerEvent) {
     if (drag === null) return;
     const dx = e.clientX - drag.startX;
-    onchange(clamp(drag.startValue + (edge === 'end' ? dx : -dx)));
+    const raw = drag.startValue + (edge === 'end' ? dx : -dx);
+    // Past the collapse threshold the panel hides; the drag ends with it.
+    if (collapseBelow !== undefined && raw <= collapseBelow) {
+      if (!collapsing) {
+        collapsing = true;
+        // Put the width back where the drag began, so expanding later does not restore the
+        // minimum width the drag passed through on its way to the collapse threshold.
+        onchange(clamp(drag.startValue));
+        oncollapse?.();
+      }
+      return;
+    }
+    onchange(clamp(raw));
   }
 
   function endDrag() {
@@ -113,29 +145,53 @@
 <style>
   .handle {
     position: relative;
-    flex: 0 0 6px;
+    flex: 1 1 auto;
     align-self: stretch;
+    width: 100%;
     cursor: col-resize;
     touch-action: none;
     user-select: none;
     outline: none;
   }
 
+  /* A hairline marks the boundary while hovering; the grip says the line can be dragged. */
   .handle::before {
     content: '';
     position: absolute;
     top: 0;
     bottom: 0;
     left: 50%;
-    width: 2px;
+    width: 1px;
     transform: translateX(-50%);
     background: transparent;
     transition: background var(--alloy-motion-duration-fast) ease-out;
   }
 
+  .handle::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 4px;
+    height: 36px;
+    transform: translate(-50%, -50%) scaleY(0.7);
+    border-radius: var(--alloy-radii-full);
+    background: var(--alloy-color-accent-primary);
+    opacity: 0;
+    transition:
+      opacity var(--alloy-motion-duration-fast) ease-out,
+      transform var(--alloy-motion-duration-fast) ease-out;
+  }
+
   .handle:hover::before,
   .handle:focus-visible::before {
-    background: var(--alloy-color-accent-primary);
+    background: color-mix(in srgb, var(--alloy-color-accent-primary) 45%, transparent);
+  }
+
+  .handle:hover::after,
+  .handle:focus-visible::after {
+    opacity: 1;
+    transform: translate(-50%, -50%) scaleY(1);
   }
 
   .handle:focus-visible {
@@ -151,8 +207,14 @@
     background: var(--alloy-color-accent-primary);
   }
 
+  :global(body.alloy-resizing) .handle::after {
+    opacity: 1;
+    transform: translate(-50%, -50%) scaleY(1);
+  }
+
   @media (prefers-reduced-motion: reduce) {
-    .handle::before {
+    .handle::before,
+    .handle::after {
       transition: none;
     }
   }

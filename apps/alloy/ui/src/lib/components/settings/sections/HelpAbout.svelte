@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Button } from '$lib/components/common';
-  import { SettingToggle } from '$lib/components/settings/controls';
+  import { SettingGroup, SettingToggle } from '$lib/components/settings/controls';
   import { appVersion } from '$lib/platform/appVersion';
   import { capabilities, currentEnv } from '$lib/platform/capabilities';
   import { openExternal } from '$lib/platform/links';
@@ -38,9 +38,9 @@
 </script>
 
 <section class="section">
-  <div class="card">
+  <SettingGroup title="Application">
     <div class="row">
-      <span class="label">Application</span>
+      <span class="label">Name</span>
       <span class="value">Alloy</span>
     </div>
     <div class="row">
@@ -55,8 +55,15 @@
       <span class="label">Source</span>
       <a class="value link" href={REPOSITORY_URL} onclick={openRepository}>{REPOSITORY_URL}</a>
     </div>
+    <div class="row">
+      <span class="label">Last checked</span>
+      <span class="value">{lastChecked}</span>
+    </div>
+  </SettingGroup>
+
+  <SettingGroup title="Updates" description="Alloy checks for a new release in the background.">
     <div class="row updates">
-      <span class="label">Updates</span>
+      <span class="label">Status</span>
       <div class="update">
         <span class="value" role="status">
           {#if updatesStore.checking}
@@ -83,14 +90,6 @@
         </div>
       </div>
     </div>
-    <div class="row">
-      <span class="label">Last checked</span>
-      <span class="value">{lastChecked}</span>
-    </div>
-  </div>
-
-  <div class="block">
-    <h3 class="subtitle">Automatic updates</h3>
     <SettingToggle
       label="Automatically check for updates"
       description="Looks for a new release every few hours."
@@ -107,32 +106,28 @@
         onchange={(value) => updatesStore.setAutoDownload(value)}
       />
     {/if}
-  </div>
+  </SettingGroup>
 
-  <div class="block">
-    <h3 class="subtitle">Diagnostics</h3>
-    <div class="card">
-      <div class="row">
-        <span class="label">App version</span>
-        <span class="value mono">{version}</span>
-      </div>
-      <div class="row">
-        <span class="label">Engine</span>
-        <span class="value mono">{engineLabel()}</span>
-      </div>
+  <SettingGroup title="Diagnostics">
+    <div class="row">
+      <span class="label">App version</span>
+      <span class="value mono">{version}</span>
     </div>
-  </div>
+    <div class="row">
+      <span class="label">Engine</span>
+      <span class="value mono">{engineLabel()}</span>
+    </div>
+  </SettingGroup>
 
   {#if import.meta.env.DEV}
-    <div class="block">
-      <h3 class="subtitle">Developer</h3>
+    <SettingGroup title="Developer">
       <SettingToggle
         label="Developer HUD"
         description="Shows engine and render diagnostics over the app."
         checked={ui.hudVisible}
         onchange={(v) => (ui.hudVisible = v)}
       />
-    </div>
+    </SettingGroup>
   {/if}
 </section>
 
@@ -142,28 +137,12 @@
     flex-direction: column;
     gap: var(--alloy-layout-section-gap);
   }
-  .block {
-    display: flex;
-    flex-direction: column;
-    gap: var(--alloy-spacing-scale-2);
-  }
-  .subtitle {
-    margin: 0;
-    font-size: var(--alloy-typography-size-lg);
-    font-weight: var(--alloy-typography-weight-semibold);
-    color: var(--alloy-color-text-primary);
-  }
-  .card {
-    background: var(--alloy-color-surface-subtle);
-    border-radius: var(--alloy-radii-lg);
-    overflow: hidden;
-  }
   .row {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
     gap: var(--alloy-spacing-scale-3);
-    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-gutter);
+    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-row-pad-x);
     font-size: var(--alloy-typography-size-base);
     color: var(--alloy-color-text-primary);
   }
@@ -191,6 +170,9 @@
   .link:focus-visible {
     outline: 2px solid var(--alloy-color-accent-primary);
     outline-offset: 2px;
+  }
+  .row + .row {
+    border-top: 1px solid var(--alloy-color-border-subtle);
   }
   /* The label sits on the first line of the value column, like every other row; the actions go
      under the status, right-aligned to the same edge as the values above. */

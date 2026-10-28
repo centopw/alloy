@@ -65,8 +65,8 @@
     gap: var(--alloy-spacing-scale-1);
     min-height: 56px;
     padding: 0 var(--alloy-spacing-scale-3);
-    border-bottom: 1px solid var(--alloy-color-border-subtle);
-    background: var(--alloy-color-surface-panel);
+    border-bottom: 1px solid var(--alloy-glass-rim);
+    background: transparent;
   }
   .count {
     flex: 1;
@@ -94,7 +94,7 @@
   }
   @media (hover: hover) {
     .tool:not(:disabled):hover {
-      background: var(--alloy-color-surface-hover);
+      background: var(--alloy-glass-control);
     }
   }
   @media (max-width: 899px) {

@@ -133,11 +133,13 @@
     box-sizing: border-box;
     max-height: calc(100vh - 2 * var(--alloy-space-2));
     overflow: auto;
-    background: var(--alloy-color-surface-elevated);
-    color: var(--alloy-text-primary);
-    border: 1px solid var(--alloy-color-border-subtle);
-    border-radius: var(--alloy-radii-lg);
-    box-shadow: var(--alloy-elevation-md);
+    background: var(--alloy-glass-sheen), var(--alloy-glass-fill-strong);
+    -webkit-backdrop-filter: var(--alloy-glass-filter-strong);
+    backdrop-filter: var(--alloy-glass-filter-strong);
+    color: var(--alloy-color-text-primary);
+    border: 1px solid var(--alloy-glass-rim);
+    border-radius: var(--alloy-glass-radius-panel);
+    box-shadow: var(--alloy-glass-shadow), var(--alloy-glass-highlight);
   }
 
   .host:focus {

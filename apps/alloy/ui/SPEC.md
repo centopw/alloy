@@ -21,3 +21,53 @@ It talks only to the protocol through `ipc/`; it has no Rust crate dependencies,
 Interaction-heavy primitives are vendored from shadcn-svelte (Bits UI behaviour) into `src/lib/components/ui/**`; business surfaces — shell, timeline, composer, upload strip, media view, settings — stay hand-written. `crates/alloy-theme` remains the single source of design truth: `src/app.css` aliases shadcn's CSS variable contract onto the generated `--alloy-*` tokens, imports Tailwind's theme and utilities layers without Preflight (so `tokens.css` stays the authoritative reset), and keys dark mode off the `data-theme` attribute rather than a `.dark` class. Vendored files are never edited to satisfy a repo audit or to restyle; overrides go through the component's `class` prop. The deliberately excluded primitives (`ContextMenu`, `Select`, `Modal`, `TooltipLayer`, `Avatar`, `EmojiPicker`) encode product behaviour — the app-wide menu model, backstack integration and drag-to-dismiss sheets, global tooltip derivation, deterministic sender colours — that a generic primitive does not model. See decision 0012.
 
 Known limitations: the accessibility audit is pending (#20, #36); user-supplied keybinding and slash-command JSON packages are not loaded yet; only `switch` and `progress` are vendored so far, so the migration is incremental and most primitives remain hand-written.
+
+### Shell material
+
+The shell is flush: no outer padding, no pane cards, panes joined by hairlines
+(`--alloy-chat-rim`). Depth is four material layers, not elevation (decision 0014). The canvas is a
+chromatic aurora with grain (`--alloy-canvas-art`); navigation and side panes are lightly
+transparent (`--alloy-chrome-surface` 86%, `--alloy-chrome-surface-strong` 90%,
+`--alloy-chrome-filter` 26px blur); the conversation is near-opaque (`--alloy-chat-surface` 92%,
+`--alloy-chat-filter` 30px blur); only floating layers (menus, dialogs, pickers, composer popovers)
+keep the full `--alloy-glass-*` recipe — flat fill, rim and soft shadow, with no specular sheet or
+top-edge catch. Dark themes draw more of the canvas (84% chat, 80/86% chrome) over a two-bloom,
+lower-saturation aurora, so the panes read as layers rather than a black void and the wash never
+looks like gloss. Reduced-transparency and no-`backdrop-filter` environments
+switch the chrome and chat filters off and their surfaces to the opaque tokens; layout and hierarchy
+must survive that. Geometry (`src/lib/layout.css`, `LAYOUT_LIMITS`): 56px rail, sidebar 200–320
+(default 240), details 320–420 (default 380), 52px header. Chrome type uses
+`--alloy-font-size-title` (15px), `-row` (13px), `-preview` (12px) and `-meta` (10.5px) with
+`--alloy-letter-spacing-caps` for uppercase headings.
+
+### Conversation surface
+
+The chat keeps the shadcn chat *anatomy* without vendoring its React components (decision 0013), and
+its visual values now follow decision 0014. Bubbles are the default layout on every device; `modern`
+(flat rows) and `irc` remain choices in Settings > Appearance. Bubbles use
+`--alloy-bubble-radius` (20px), the joined/tail corner `--alloy-bubble-radius-tail` (8px), and cap at
+`--alloy-bubble-max-width` (72%, 85% on phones). Own bubbles are the one saturated surface; received
+bubbles use `--alloy-bubble-other-surface` over a 1px text-at-8% edge. Rhythm is tokenised
+(`--alloy-spacing-bubble-x/y`, `--alloy-avatar-grouped-size`), message meta is the xs token and sender
+names are `--alloy-font-size-preview`, semibold; date separators are centred pills. **Replies stack:**
+in the bubble layout the quoted message is its own bubble above the reply (`ReplyQuote` `stacked`),
+flush with it so the two 1px edges form one seam; the junction is square on both sides and the quote
+keeps a 20px outer top while the reply keeps its 20px bottom, so the pair reads as one card. The
+quoted sender's colour is kept as a leading bar; inline quotes remain for `modern` and `irc`. The scroll
+engine (paging, anchoring, prepend) is untouched.
+
+### Room details panel
+
+Read-first, not a form (decision 0014). Identity is a horizontal 56px avatar with the room name,
+alias and meta beside it; name, topic and private note render as text and reveal a 24px pencil on
+hover/focus-within (always visible on touch and when the value is empty). Clicking the pencil swaps
+the text for a focused `TextField`/`TextArea`; Enter saves, Escape cancels, blur saves, and focus
+returns to the pencil after keyboard edits. Open fields are never overwritten by store updates;
+closed fields follow the room. Sections are separated by hairlines and use the
+`--alloy-font-size-meta` uppercase heading; rows and cards are 44px-minimum with
+`--alloy-radii-lg` surfaces. The Shared media switch hugs its labels instead of stretching across the
+panel, and a thumbnail that fails to fetch or decode is pulled from the document so the neutral tile
+icon shows instead of the browser's broken-image placeholder. Save errors surface inline; a private
+note is the user's own room account
+data (synced to their account, never visible to other members).
+

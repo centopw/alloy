@@ -153,28 +153,26 @@
     </SettingGroup>
 
     <SettingGroup title="Identity">
-      <div class="card">
-        <div class="row">
-          <span class="row-label">Username</span>
-          <span class="row-value">
-            {session.account.user_id}
-            <button
-              type="button"
-              class="icon-button"
-              aria-label="Copy username"
-              onclick={() => void copyUserId()}
-            >
-              <Copy size={16} />
-            </button>
-          </span>
-        </div>
-        {#if copied}
-          <p class="row note" role="status">Username copied.</p>
-        {/if}
-        <div class="row">
-          <span class="row-label">Homeserver</span>
-          <span class="row-value">{session.account.homeserver_url}</span>
-        </div>
+      <div class="row">
+        <span class="row-label">Username</span>
+        <span class="row-value">
+          {session.account.user_id}
+          <button
+            type="button"
+            class="icon-button"
+            aria-label="Copy username"
+            onclick={() => void copyUserId()}
+          >
+            <Copy size={16} />
+          </button>
+        </span>
+      </div>
+      {#if copied}
+        <p class="row note" role="status">Username copied.</p>
+      {/if}
+      <div class="row">
+        <span class="row-label">Homeserver</span>
+        <span class="row-value">{session.account.homeserver_url}</span>
       </div>
     </SettingGroup>
 
@@ -205,6 +203,7 @@
     display: flex;
     align-items: center;
     gap: var(--alloy-spacing-scale-4);
+    padding: 0 var(--alloy-layout-row-pad-x);
   }
   .identity {
     min-width: 0;
@@ -229,12 +228,13 @@
     display: flex;
     flex-wrap: wrap;
     gap: var(--alloy-spacing-scale-2);
+    padding: 0 var(--alloy-layout-row-pad-x);
   }
   .name-form {
     display: flex;
     align-items: flex-end;
     gap: var(--alloy-spacing-scale-2);
-    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-gutter);
+    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-row-pad-x);
   }
   .field {
     flex: 1;
@@ -247,17 +247,12 @@
     font-size: var(--alloy-typography-size-sm);
     color: var(--alloy-color-text-secondary);
   }
-  .card {
-    background: var(--alloy-color-surface-subtle);
-    border-radius: var(--alloy-radii-lg);
-    overflow: hidden;
-  }
   .row {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: var(--alloy-spacing-scale-3);
-    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-gutter);
+    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-row-pad-x);
     font-size: var(--alloy-typography-size-base);
     color: var(--alloy-color-text-primary);
   }
@@ -307,6 +302,7 @@
   }
   .error {
     margin: 0;
+    padding: 0 var(--alloy-layout-row-pad-x);
     color: var(--alloy-color-status-error);
     overflow-wrap: anywhere;
   }

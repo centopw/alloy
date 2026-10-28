@@ -787,10 +787,13 @@
     z-index: 110;
     min-width: 180px;
     max-width: 280px;
-    padding: var(--alloy-spacing-scale-1);
-    border: 1px solid var(--alloy-color-border-prominent);
-    border-radius: var(--alloy-radii-md);
-    background: var(--alloy-color-surface-elevated);
+    padding: 5px;
+    border: 1px solid var(--alloy-glass-rim);
+    border-radius: var(--alloy-radii-2xl);
+    background: var(--alloy-glass-sheen), var(--alloy-glass-fill-strong);
+    -webkit-backdrop-filter: var(--alloy-glass-filter-strong);
+    backdrop-filter: var(--alloy-glass-filter-strong);
+    box-shadow: var(--alloy-glass-shadow), var(--alloy-glass-highlight);
     color: var(--alloy-color-text-primary);
     font-family: var(--alloy-typography-font-family-sans);
     font-size: var(--alloy-typography-size-base);
@@ -823,9 +826,9 @@
     display: flex;
     align-items: center;
     gap: var(--alloy-spacing-scale-2);
-    height: 32px;
-    padding: 0 var(--alloy-spacing-scale-2);
-    border-radius: var(--alloy-radii-sm);
+    height: 34px;
+    padding: 0 10px;
+    border-radius: var(--alloy-radii-xl);
     cursor: pointer;
     user-select: none;
     white-space: nowrap;
@@ -833,7 +836,7 @@
   }
 
   .item:focus {
-    background: var(--alloy-color-surface-hover);
+    background: var(--alloy-glass-control-hover);
   }
 
   .item.danger {

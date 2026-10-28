@@ -23,8 +23,11 @@
     flex-shrink: 0;
     /* The shell drops its own top inset while this bar is shown, so the bar keeps clear of the status bar. */
     padding: calc(var(--alloy-safe-area-top) + var(--alloy-spacing-scale-1)) var(--alloy-spacing-scale-3) var(--alloy-spacing-scale-1);
-    background: var(--alloy-color-surface-elevated);
-    border-bottom: 1px solid var(--alloy-color-border-subtle);
+    background: var(--alloy-glass-sheen), var(--alloy-glass-fill-strong);
+    -webkit-backdrop-filter: var(--alloy-glass-filter);
+    backdrop-filter: var(--alloy-glass-filter);
+    border-bottom: 1px solid var(--alloy-glass-rim);
+    box-shadow: var(--alloy-glass-highlight);
     color: var(--alloy-color-text-secondary);
     font-size: var(--alloy-typography-size-sm, 12px);
     text-align: center;

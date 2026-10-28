@@ -41,10 +41,12 @@
     align-items: center;
     gap: 2px;
     padding: 2px;
-    border: 1px solid var(--alloy-color-border-subtle);
-    border-radius: var(--alloy-radii-lg);
-    background: var(--alloy-color-surface-elevated);
-    box-shadow: var(--alloy-elevation-md);
+    border: 1px solid var(--alloy-glass-rim);
+    border-radius: var(--alloy-radii-xl);
+    background: var(--alloy-glass-sheen), var(--alloy-glass-fill-strong);
+    -webkit-backdrop-filter: var(--alloy-glass-filter);
+    backdrop-filter: var(--alloy-glass-filter);
+    box-shadow: var(--alloy-glass-shadow-soft), var(--alloy-glass-highlight);
   }
   button {
     display: grid;
@@ -60,7 +62,7 @@
   }
   @media (hover: hover) {
     button:hover {
-      background: var(--alloy-color-surface-hover);
+      background: var(--alloy-glass-control-hover);
       color: var(--alloy-color-text-primary);
     }
   }

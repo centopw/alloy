@@ -124,20 +124,25 @@
     position: fixed;
     inset: 0;
     background: var(--alloy-color-scrim);
+    -webkit-backdrop-filter: blur(10px) saturate(140%);
+    backdrop-filter: blur(10px) saturate(140%);
     display: grid;
     place-items: center;
-    z-index: 60;
+    /* Above Settings (60) so a dialog opened from it is visible at once; below the media viewer (70). */
+    z-index: 65;
   }
   .dialog {
     width: var(--alloy-modal-width);
     max-height: 88vh;
     display: flex;
     flex-direction: column;
-    background: var(--alloy-color-surface-elevated);
+    background: var(--alloy-glass-sheen), var(--alloy-glass-fill-strong);
+    -webkit-backdrop-filter: var(--alloy-glass-filter-strong);
+    backdrop-filter: var(--alloy-glass-filter-strong);
     color: var(--alloy-color-text-primary);
-    border: 1px solid var(--alloy-color-border-prominent);
-    border-radius: var(--alloy-radii-md);
-    box-shadow: var(--alloy-elevation-lg);
+    border: 1px solid var(--alloy-glass-rim);
+    border-radius: var(--alloy-glass-radius-shell);
+    box-shadow: var(--alloy-glass-shadow), var(--alloy-glass-highlight);
     outline: 0;
   }
   header {
@@ -146,7 +151,7 @@
     align-items: center;
     height: var(--alloy-layout-header-height);
     padding: 0 var(--alloy-layout-gutter);
-    border-bottom: 1px solid var(--alloy-color-border-subtle);
+    border-bottom: 1px solid var(--alloy-glass-rim);
   }
   h2 {
     margin: 0;
@@ -164,7 +169,7 @@
     place-items: center;
   }
   header button:hover {
-    background: var(--alloy-color-surface-hover);
+    background: var(--alloy-glass-control);
   }
   .content {
     padding: var(--alloy-layout-gutter);
@@ -196,7 +201,7 @@
       border-left: 0;
       border-right: 0;
       border-bottom: 0;
-      border-radius: var(--alloy-radii-md) var(--alloy-radii-md) 0 0;
+      border-radius: var(--alloy-radii-2xl) var(--alloy-radii-2xl) 0 0;
       padding-bottom: var(--alloy-safe-area-bottom);
       animation: alloy-sheet-up var(--alloy-motion-duration-normal) ease-out backwards;
     }

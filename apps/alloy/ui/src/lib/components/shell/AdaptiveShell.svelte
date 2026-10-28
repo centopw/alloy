@@ -50,6 +50,9 @@
   import { listen } from '@tauri-apps/api/event';
   import { isTauriShell } from '$lib/platform/notify';
   import PermissionsGate from './PermissionsGate.svelte';
+  import Icon from '$lib/icons/Icon.svelte';
+  import { Search } from '$lib/icons';
+  import { shortcutLabel } from '$lib/platform/shortcuts';
 
   let paletteOpen = $state(false);
   let settingsOpen = $state(false);
@@ -284,6 +287,7 @@
   data-pane={pane}
   data-side={sideLayout}
   data-thread={threadMode}
+  data-sidebar={layout.sidebarCollapsed ? 'collapsed' : 'expanded'}
   style:--sidebar-width="{layout.sidebarWidth}px"
   style:--details-width="{layout.detailsWidth}px"
 >
@@ -301,21 +305,37 @@
         unread={unreadTotal}
       />
     {:else}
-      <SpaceRail onnew={() => (newRoomOpen = true)} />
-      <Sidebar onselect={pick} onnew={() => (newRoomOpen = true)} onbrowse={() => (directoryOpen = true)} onsettings={openSettings} />
+      <SpaceRail
+        onsettings={openSettings}
+        collapsed={layout.sidebarCollapsed}
+        onexpand={() => layout.setSidebarCollapsed(false)}
+      />
+      <div class="list-body">
+        <Sidebar
+          onselect={pick}
+          onnew={() => (newRoomOpen = true)}
+          onbrowse={() => (directoryOpen = true)}
+          onsettings={openSettings}
+          oncollapse={() => layout.setSidebarCollapsed(true)}
+        />
+      </div>
     {/if}
   </div>
 
-  {#if breakpoint !== 'narrow'}
-    <ResizeHandle
-      value={layout.sidebarWidth}
-      min={LAYOUT_LIMITS.sidebarWidth.min}
-      max={LAYOUT_LIMITS.sidebarWidth.max}
-      defaultValue={LAYOUT_LIMITS.sidebarWidth.default}
-      label="Resize sidebar"
-      edge="end"
-      onchange={(v) => layout.set('sidebarWidth', v)}
-    />
+  {#if breakpoint !== 'narrow' && !layout.sidebarCollapsed}
+    <div class="split split-sidebar">
+      <ResizeHandle
+        value={layout.sidebarWidth}
+        min={LAYOUT_LIMITS.sidebarWidth.min}
+        max={LAYOUT_LIMITS.sidebarWidth.max}
+        defaultValue={LAYOUT_LIMITS.sidebarWidth.default}
+        label="Resize sidebar"
+        edge="end"
+        collapseBelow={LAYOUT_LIMITS.sidebarWidth.min - 40}
+        onchange={(v) => layout.set('sidebarWidth', v)}
+        oncollapse={() => layout.setSidebarCollapsed(true)}
+      />
+    </div>
   {/if}
 
   <main class="chat">
@@ -332,22 +352,30 @@
       <Composer roomId={activeId} />
     {:else}
       <div class="empty">
-        <h2>Select a conversation</h2>
-        <p>Press Ctrl K to jump to one quickly.</p>
+        <p class="eyebrow">Alloy</p>
+        <h2>No conversation open</h2>
+        <p>Search every room and person, or pick one from the sidebar.</p>
+        <button type="button" class="jump" onclick={() => (paletteOpen = true)}>
+          <Icon icon={Search} size={16} />
+          <span>Quick switcher</span>
+          <kbd>{shortcutLabel('K')}</kbd>
+        </button>
       </div>
     {/if}
   </main>
 
   {#if sideLayout === 'column'}
-    <ResizeHandle
-      value={layout.detailsWidth}
-      min={LAYOUT_LIMITS.detailsWidth.min}
-      max={LAYOUT_LIMITS.detailsWidth.max}
-      defaultValue={LAYOUT_LIMITS.detailsWidth.default}
-      label="Resize side panel"
-      edge="start"
-      onchange={(v) => layout.set('detailsWidth', v)}
-    />
+    <div class="split split-details">
+      <ResizeHandle
+        value={layout.detailsWidth}
+        min={LAYOUT_LIMITS.detailsWidth.min}
+        max={LAYOUT_LIMITS.detailsWidth.max}
+        defaultValue={LAYOUT_LIMITS.detailsWidth.default}
+        label="Resize side panel"
+        edge="start"
+        onchange={(v) => layout.set('detailsWidth', v)}
+      />
+    </div>
   {/if}
 
   {#if infoMode !== 'none' && active && activeId}
@@ -376,11 +404,14 @@
 {#if import.meta.env.DEV}<Hud bind:visible={hudVisible} />{/if}
 
 <style>
+  /* The canvas is the material source: floating glass panes refract this wash (ADR 0014). */
   .frame {
     display: flex;
     flex-direction: column;
     height: 100%;
     min-height: 0;
+    background: var(--alloy-canvas-art);
+    background-attachment: fixed;
   }
   /* The offline banner already clears the status bar, so the shell does not add the inset twice. */
   .frame.offline .shell {
@@ -391,34 +422,84 @@
     flex: 1;
     min-height: 0;
     display: grid;
-    grid-template-columns: calc(var(--alloy-layout-rail-width) + var(--sidebar-width, 240px)) 6px minmax(0, 1fr);
+    /* Chrome and conversation sit side by side between hairlines, so the chat keeps the pixels. */
+    grid-template-columns: calc(var(--alloy-layout-rail-width) + var(--sidebar-width, 240px))
+      minmax(0, 1fr);
     box-sizing: border-box;
     overflow: hidden;
     /* Keep content clear of the status bar, gesture bar and display cutouts on phones. */
     padding: var(--alloy-safe-area-top) var(--alloy-safe-area-right) var(--alloy-safe-area-bottom)
       var(--alloy-safe-area-left);
-    background: var(--alloy-color-surface-canvas);
     color: var(--alloy-color-text-primary);
   }
   .shell[data-side='column'] {
-    grid-template-columns: calc(var(--alloy-layout-rail-width) + var(--sidebar-width, 240px)) 6px minmax(0, 1fr) 6px var(--details-width, 320px);
+    grid-template-columns: calc(var(--alloy-layout-rail-width) + var(--sidebar-width, 240px))
+      minmax(0, 1fr) var(--details-width, 320px);
+  }
+  /* The room list collapsed to the rail: the conversation takes the freed pixels. */
+  .shell[data-layout='wide'][data-sidebar='collapsed'],
+  .shell[data-layout='medium'][data-sidebar='collapsed'] {
+    grid-template-columns: var(--alloy-layout-rail-width) minmax(0, 1fr);
+  }
+  .shell[data-layout='wide'][data-sidebar='collapsed'][data-side='column'],
+  .shell[data-layout='medium'][data-sidebar='collapsed'][data-side='column'] {
+    grid-template-columns: var(--alloy-layout-rail-width) minmax(0, 1fr) var(--details-width, 320px);
+  }
+  .shell[data-layout='wide'][data-sidebar='collapsed'] .nav,
+  .shell[data-layout='medium'][data-sidebar='collapsed'] .nav {
+    grid-template-columns: var(--alloy-layout-rail-width);
+  }
+  .shell[data-layout='wide'][data-sidebar='collapsed'] .nav .list-body,
+  .shell[data-layout='medium'][data-sidebar='collapsed'] .nav .list-body {
+    display: none;
+  }
+  /* Handles straddle the hairline; the wrapper gives them a hit area without a gutter between panes. */
+  .split {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    display: flex;
+    width: 10px;
+    z-index: 8;
+  }
+  .split-sidebar {
+    left: calc(var(--alloy-layout-rail-width) + var(--sidebar-width, 240px) - 5px);
+  }
+  .split-details {
+    right: calc(var(--details-width, 320px) - 5px);
   }
 
-  /* The rail (68px) and the sidebar are separate components; this wrapper lays them out. The
-     sidebar width covers both, so the rail sits inside the resizable left column. */
+  /* Navigation chrome: the rail and the room list share one lightly transparent surface. */
   .nav {
     display: grid;
     grid-template-columns: var(--alloy-layout-rail-width) minmax(0, 1fr);
     min-width: 0;
     min-height: 0;
+    overflow: visible;
+    border-right: 1px solid var(--alloy-chat-rim);
+    background: var(--alloy-chrome-surface);
+    -webkit-backdrop-filter: var(--alloy-chrome-filter);
+    backdrop-filter: var(--alloy-chrome-filter);
+  }
+  .list-body {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
   }
 
+  /* Conversation: the only near-opaque surface, because reading must not depend on the wash. */
   .chat {
     display: flex;
     flex-direction: column;
     min-width: 0;
     min-height: 0;
-    background: var(--alloy-color-surface-canvas);
+    overflow: hidden;
+    --alloy-layout-gutter: 12px;
+    background: var(--alloy-chat-surface);
+    -webkit-backdrop-filter: var(--alloy-chat-filter);
+    backdrop-filter: var(--alloy-chat-filter);
   }
 
   .side {
@@ -427,18 +508,21 @@
     min-width: 0;
     min-height: 0;
     overflow: hidden;
-    background: var(--alloy-color-surface-panel);
-    border-left: 1px solid var(--alloy-color-border-subtle);
+    border-left: 1px solid var(--alloy-chat-rim);
+    background: var(--alloy-chrome-surface-strong);
+    -webkit-backdrop-filter: var(--alloy-chrome-filter);
+    backdrop-filter: var(--alloy-chrome-filter);
   }
   .shell[data-side='overlay'] .side {
     position: absolute;
-    top: var(--alloy-spacing-scale-2);
-    right: var(--alloy-spacing-scale-2);
-    bottom: var(--alloy-spacing-scale-2);
+    top: var(--alloy-shell-edge);
+    right: var(--alloy-shell-edge);
+    bottom: var(--alloy-shell-edge);
     z-index: 10;
-    width: min(var(--details-width, 320px), calc(100% - 2 * var(--alloy-spacing-scale-2)));
-    border: 1px solid var(--alloy-color-border-subtle);
-    border-radius: var(--alloy-radii-md);
+    width: min(var(--details-width, 320px), calc(100% - 2 * var(--alloy-shell-edge)));
+    border: 1px solid var(--alloy-glass-rim);
+    border-radius: var(--alloy-glass-radius-panel);
+    box-shadow: var(--alloy-glass-shadow);
   }
 
   .thread-host {
@@ -448,8 +532,12 @@
     min-height: 0;
     overflow: hidden;
   }
+  /* The thread is a third pane between hairlines, not a card floating over the conversation. */
   .shell[data-thread='column'] .thread-host {
-    border-left: 1px solid var(--alloy-color-border-subtle);
+    border-left: 1px solid var(--alloy-chat-rim);
+    background: var(--alloy-chrome-surface-strong);
+    -webkit-backdrop-filter: var(--alloy-chrome-filter);
+    backdrop-filter: var(--alloy-chrome-filter);
   }
   .shell[data-thread='overlay'] .thread-host {
     position: fixed;
@@ -457,17 +545,80 @@
     z-index: 20;
     padding: var(--alloy-safe-area-top) var(--alloy-safe-area-right) var(--alloy-safe-area-bottom)
       var(--alloy-safe-area-left);
-    background: var(--alloy-color-surface-canvas);
+    background: var(--alloy-canvas-art);
   }
 
   .empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--alloy-spacing-scale-2);
     margin: auto;
+    padding: var(--alloy-spacing-scale-7);
+    max-width: 420px;
     text-align: center;
     color: var(--alloy-color-text-secondary);
   }
+  .empty .eyebrow {
+    margin: 0 0 var(--alloy-spacing-scale-1);
+    font-size: var(--alloy-font-size-meta);
+    font-weight: var(--alloy-typography-weight-semibold);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--alloy-color-accent-primary);
+  }
   .empty h2 {
-    margin: 0 0 var(--alloy-spacing-scale-2);
+    margin: 0;
+    font-size: var(--alloy-typography-size-xxl);
+    font-weight: var(--alloy-typography-weight-semibold);
+    letter-spacing: -0.02em;
     color: var(--alloy-color-text-primary);
+  }
+  .empty p {
+    margin: 0;
+    max-width: 34ch;
+    font-size: var(--alloy-typography-size-base);
+    line-height: var(--alloy-typography-line-height-normal);
+  }
+  .jump {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--alloy-spacing-scale-2);
+    height: 40px;
+    margin-top: var(--alloy-spacing-scale-3);
+    padding: 0 var(--alloy-spacing-scale-2) 0 var(--alloy-spacing-scale-4);
+    border: 1px solid var(--alloy-glass-rim);
+    border-radius: var(--alloy-radii-full);
+    background: var(--alloy-glass-control);
+    color: var(--alloy-color-text-secondary);
+    font: inherit;
+    font-size: var(--alloy-font-size-row);
+    cursor: pointer;
+    box-shadow: var(--alloy-glass-highlight);
+    transition:
+      background var(--alloy-motion-duration-fast) var(--alloy-motion-easing-ease),
+      border-color var(--alloy-motion-duration-fast) var(--alloy-motion-easing-ease),
+      color var(--alloy-motion-duration-fast) var(--alloy-motion-easing-ease);
+  }
+  .jump:hover {
+    border-color: var(--alloy-glass-rim-strong);
+    background: var(--alloy-glass-control-hover);
+    color: var(--alloy-color-text-primary);
+  }
+  .jump:focus-visible {
+    outline: 2px solid var(--alloy-color-accent-primary);
+    outline-offset: 2px;
+  }
+  .jump kbd {
+    padding: 3px 6px;
+    border: 1px solid var(--alloy-glass-rim);
+    border-radius: 5px;
+    background: color-mix(in srgb, var(--alloy-color-text-primary) 4%, transparent);
+    font-family: inherit;
+    font-size: var(--alloy-font-size-meta);
+    line-height: 1;
+    color: var(--alloy-color-text-muted);
   }
 
   /* Phone (narrow): one screen at a time. The list screen is the space strip, the room list and the
@@ -476,21 +627,40 @@
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr);
     /* The tab bar pads the bottom safe area itself on the list screen. */
-    padding-bottom: 0;
+    padding: var(--alloy-safe-area-top) var(--alloy-safe-area-right) 0 var(--alloy-safe-area-left);
   }
   .shell[data-layout='narrow'][data-pane='chat'] {
     padding-bottom: var(--alloy-safe-area-bottom);
   }
+  /* Phones are edge-to-edge: the canvas runs behind the chrome and the chrome itself is glass.
+     The list needs a readable veil over the aurora, not a transparent sheet. */
   .shell[data-layout='narrow'] .nav {
     display: flex;
     flex-direction: column;
     min-height: 0;
+    overflow: hidden;
+    border: 0;
+    border-radius: 0;
+    background: color-mix(in srgb, var(--alloy-color-surface-canvas) 66%, transparent);
+    -webkit-backdrop-filter: var(--alloy-glass-filter);
+    backdrop-filter: var(--alloy-glass-filter);
+    box-shadow: none;
+  }
+  /* Phones get the roomier phone gutter back; the desktop 12px is for a narrow chat column. */
+  .shell[data-layout='narrow'] .chat {
+    --alloy-layout-gutter: var(--alloy-spacing-scale-4);
   }
   .shell[data-layout='narrow'] .list-body {
     display: grid;
     grid-template-rows: minmax(0, 1fr);
     flex: 1 1 0;
     min-height: 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: none;
   }
   .shell[data-layout='narrow'][data-pane='list'] .chat {
     display: none;
@@ -506,6 +676,10 @@
     width: auto;
     border: 0;
     border-radius: 0;
+    background: var(--alloy-glass-sheen), var(--alloy-glass-fill-strong);
+    -webkit-backdrop-filter: var(--alloy-glass-filter-strong);
+    backdrop-filter: var(--alloy-glass-filter-strong);
+    box-shadow: none;
     padding: var(--alloy-safe-area-top) var(--alloy-safe-area-right) var(--alloy-safe-area-bottom)
       var(--alloy-safe-area-left);
     animation: alloy-panel-in var(--alloy-motion-duration-normal) ease-out;

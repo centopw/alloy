@@ -4,7 +4,7 @@
   import { roomInfo } from '$lib/stores/roomInfo.svelte';
   import { copyItems, openMenuFrom, roomPictureItems } from './roomMenus';
   import Icon from '$lib/icons/Icon.svelte';
-  import { CheckCheck, ChevronLeft, Info, Search, Users } from '$lib/icons';
+  import { CheckCheck, ChevronLeft, Info, Lock, Search, Users } from '$lib/icons';
   import { contextmenu } from '$lib/platform/contextmenu';
   import { shortcutLabel } from '$lib/platform/shortcuts';
   import type { MenuItem } from '$lib/stores/contextmenu.svelte';
@@ -101,6 +101,11 @@
           </span>
         {:else}
           <span class="title">{title}</span>
+          {#if room.encrypted}
+            <span class="lock" role="img" aria-label="End-to-end encrypted" title="End-to-end encrypted">
+              <Icon icon={Lock} size={16} />
+            </span>
+          {/if}
           {#if topic}
             <span class="divider" aria-hidden="true"></span>
             <span class="topic">{topic}</span>
@@ -155,8 +160,8 @@
     min-width: 0;
     height: var(--alloy-layout-header-height);
     padding: 0 var(--alloy-layout-gutter);
-    border-bottom: 1px solid var(--alloy-color-border-subtle);
-    background: var(--alloy-color-surface-canvas);
+    border-bottom: 1px solid var(--alloy-chat-rim);
+    background: transparent;
   }
   .heading {
     flex: 1 1 0;
@@ -216,15 +221,22 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: var(--alloy-typography-size-base);
+    font-size: var(--alloy-font-size-title);
     font-weight: var(--alloy-typography-weight-semibold);
+    letter-spacing: -0.01em;
     color: var(--alloy-color-text-primary);
+  }
+  .lock {
+    display: inline-flex;
+    flex: none;
+    color: var(--alloy-color-text-muted);
   }
   .divider {
     flex-shrink: 0;
-    width: 1px;
-    height: 20px;
-    background: var(--alloy-color-border-subtle);
+    width: 3px;
+    height: 3px;
+    border-radius: var(--alloy-radii-full);
+    background: color-mix(in srgb, var(--alloy-color-text-muted) 70%, transparent);
   }
   .topic {
     flex: 1 1 0;
@@ -257,7 +269,7 @@
     cursor: pointer;
   }
   .icon:hover {
-    background: var(--alloy-color-surface-hover);
+    background: var(--alloy-glass-control);
     color: var(--alloy-color-text-primary);
   }
   .icon[aria-pressed='true'] {

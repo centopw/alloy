@@ -752,7 +752,7 @@
     >
       <Icon icon={Smile} size={20} />
     </button>
-    {#if viewport.isPhone && (canSend || !canRecord)}
+    {#if !viewport.isPhone || canSend || !canRecord}
       <button
         type="button"
         class="send"
@@ -803,8 +803,8 @@
 <style>
   .composer {
     position: relative;
-    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-gutter) var(--alloy-layout-gutter);
-    background: var(--alloy-color-surface-canvas);
+    padding: var(--alloy-spacing-scale-2) var(--alloy-layout-gutter) var(--alloy-spacing-scale-3);
+    background: transparent;
   }
   .format.floating {
     position: absolute;
@@ -828,7 +828,7 @@
   /* Dropping a file lights the field so the destination is obvious before the drop lands. */
   .composer.dropped .field {
     border-color: var(--alloy-color-accent-primary);
-    background: var(--alloy-color-surface-hover);
+    background: var(--alloy-glass-sheen), var(--alloy-glass-control-hover);
   }
   .staged-hint {
     color: var(--alloy-color-text-muted);
@@ -841,8 +841,12 @@
     gap: var(--alloy-spacing-scale-2);
     margin-bottom: var(--alloy-spacing-scale-2);
     padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
-    background: var(--alloy-color-surface-subtle);
-    border-radius: var(--alloy-radii-lg);
+    background: var(--alloy-glass-sheen), var(--alloy-glass-fill-strong);
+    -webkit-backdrop-filter: var(--alloy-glass-filter);
+    backdrop-filter: var(--alloy-glass-filter);
+    border: 1px solid var(--alloy-glass-rim);
+    border-radius: var(--alloy-radii-2xl);
+    box-shadow: var(--alloy-glass-highlight);
   }
   .picture {
     display: flex;
@@ -884,8 +888,12 @@
     justify-content: space-between;
     gap: var(--alloy-spacing-scale-3);
     padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
-    background: var(--alloy-color-surface-subtle);
-    border-radius: var(--alloy-radii-lg) var(--alloy-radii-lg) 0 0;
+    background: var(--alloy-glass-sheen), var(--alloy-glass-fill-strong);
+    -webkit-backdrop-filter: var(--alloy-glass-filter);
+    backdrop-filter: var(--alloy-glass-filter);
+    border: 1px solid var(--alloy-glass-rim);
+    border-bottom: 0;
+    border-radius: var(--alloy-radii-2xl) var(--alloy-radii-2xl) 0 0;
     color: var(--alloy-color-text-muted);
     font-size: var(--alloy-typography-size-sm);
   }
@@ -909,15 +917,22 @@
     display: flex;
     align-items: flex-end;
     gap: var(--alloy-spacing-scale-1);
-    padding: var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-2);
-    background: var(--alloy-color-surface-subtle);
-    border: 1px solid var(--alloy-color-border-subtle);
-    border-radius: var(--alloy-radii-lg);
+    padding: var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-1)
+      var(--alloy-spacing-scale-1);
+    background: var(--alloy-glass-control);
+    border: 1px solid var(--alloy-chat-rim);
+    border-radius: var(--alloy-radii-xl);
+    transition:
+      border-color var(--alloy-motion-duration-fast) var(--alloy-motion-easing-ease),
+      background var(--alloy-motion-duration-fast) var(--alloy-motion-easing-ease);
   }
+  /* Border-first focus: the field reads as one soft surface, not a boxed toolbar. */
   .field:focus-within {
-    border-color: var(--alloy-color-accent-primary);
+    border-color: color-mix(in srgb, var(--alloy-color-accent-primary) 45%, transparent);
+    background: var(--alloy-glass-control-hover);
   }
   .attached .field {
+    border-top: 0;
     border-top-left-radius: 0;
     border-top-right-radius: 0;
   }
@@ -961,17 +976,26 @@
   .send {
     border: 0;
     border-radius: var(--alloy-radii-full);
-    width: 44px;
-    height: 44px;
+    width: 36px;
+    height: 36px;
     display: inline-grid;
     place-items: center;
     cursor: pointer;
     flex: none;
     background: var(--alloy-color-accent-fill);
     color: var(--alloy-color-text-on-accent);
+    transition:
+      filter var(--alloy-motion-duration-fast) ease,
+      scale var(--alloy-motion-duration-fast) ease;
+  }
+  .send:hover:not(:disabled) {
+    filter: brightness(1.08);
+  }
+  .send:active:not(:disabled) {
+    scale: 0.94;
   }
   .send:disabled {
-    background: var(--alloy-color-surface-hover);
+    background: transparent;
     color: var(--alloy-color-text-muted);
     cursor: default;
   }
@@ -981,7 +1005,7 @@
   }
   @media (hover: hover) {
     .round:hover {
-      background: var(--alloy-color-surface-hover);
+      background: var(--alloy-glass-control);
       color: var(--alloy-color-text-primary);
     }
   }
@@ -996,6 +1020,10 @@
     }
     .round,
     .banner .round {
+      width: 44px;
+      height: 44px;
+    }
+    .send {
       width: 44px;
       height: 44px;
     }

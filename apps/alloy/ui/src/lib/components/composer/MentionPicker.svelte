@@ -66,10 +66,12 @@
     max-height: 240px;
     overflow-y: auto;
     padding: var(--alloy-spacing-scale-1);
-    background: var(--alloy-color-surface-elevated);
-    border: 1px solid var(--alloy-color-border-prominent);
-    border-radius: var(--alloy-radii-lg);
-    box-shadow: var(--alloy-elevation-md);
+    background: var(--alloy-glass-sheen), var(--alloy-glass-fill-strong);
+    -webkit-backdrop-filter: var(--alloy-glass-filter-strong);
+    backdrop-filter: var(--alloy-glass-filter-strong);
+    border: 1px solid var(--alloy-glass-rim);
+    border-radius: var(--alloy-radii-xl);
+    box-shadow: var(--alloy-glass-shadow), var(--alloy-glass-highlight);
   }
   .option {
     display: flex;
@@ -82,7 +84,7 @@
     color: var(--alloy-color-text-primary);
   }
   .option.active {
-    background: var(--alloy-color-surface-hover);
+    background: var(--alloy-glass-control-hover);
   }
   .name {
     min-width: 0;

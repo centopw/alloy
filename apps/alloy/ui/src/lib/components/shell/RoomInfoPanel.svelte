@@ -24,8 +24,8 @@
 </script>
 
 <script lang="ts">
-  import { untrack } from 'svelte';
-  import { Icon, X, ChevronLeft, Play, File, ExternalLink, Image, Download, Copy, Link, MessageSquare, User, Search, Lock, Bell, BellOff, Ban, ShieldAlert, UserMinus } from '$lib/icons';
+  import { tick, untrack } from 'svelte';
+  import { Icon, X, ChevronLeft, Play, File, ExternalLink, Image, Download, Copy, Link, MessageSquare, User, Search, Lock, Bell, BellOff, Ban, ShieldAlert, UserMinus, Pencil } from '$lib/icons';
   import { formatBytes, formatDay } from '$lib/content/format';
   import { viewport } from '$lib/stores/viewport.svelte';
   import { copyText } from '$lib/platform/clipboard';
@@ -125,10 +125,39 @@
   let noteSaved = $state(false);
   let noteTimer: ReturnType<typeof setTimeout> | undefined;
 
+  // Name and topic are read as text; the pencil opens the field that edits them.
+  let editingName = $state(false);
+  let editingTopic = $state(false);
+  let editingNote = $state(false);
+  let nameInput = $state<HTMLInputElement | null>(null);
+  let topicInput = $state<HTMLTextAreaElement | null>(null);
+  let noteInput = $state<HTMLTextAreaElement | null>(null);
+  let nameEditBtn = $state<HTMLButtonElement | null>(null);
+  let topicEditBtn = $state<HTMLButtonElement | null>(null);
+  let noteEditBtn = $state<HTMLButtonElement | null>(null);
+
+  // Drafts follow the room while their field is closed, so an edit is never overwritten mid-typing.
   $effect(() => {
-    nameDraft = details?.name ?? '';
-    topicDraft = details?.topic ?? '';
+    if (!editingName) nameDraft = details?.name ?? '';
+    if (!editingTopic) topicDraft = details?.topic ?? '';
   });
+
+  $effect(() => {
+    if (editingName) nameInput?.focus();
+  });
+
+  $effect(() => {
+    if (editingTopic) topicInput?.focus();
+  });
+
+  $effect(() => {
+    if (editingNote) noteInput?.focus();
+  });
+
+  /** Keyboard edits swap the field back for the pencil; focus follows so the tab order stays put. */
+  function refocus(button: () => HTMLElement | null) {
+    void tick().then(() => button()?.focus());
+  }
 
   $effect(() => {
     const stored = roomInfo.note(roomId);
@@ -170,6 +199,28 @@
     noteTimer = setTimeout(() => void flushNote(id), 800);
   }
 
+  function editNote() {
+    noteDraft = roomInfo.note(roomId);
+    noteDirty = false;
+    editingNote = true;
+  }
+
+  function cancelNoteEdit() {
+    if (noteTimer !== undefined) {
+      clearTimeout(noteTimer);
+      noteTimer = undefined;
+    }
+    noteDirty = false;
+    noteDraft = roomInfo.note(roomId);
+    editingNote = false;
+  }
+
+  async function saveNoteEdit() {
+    if (!editingNote) return;
+    editingNote = false;
+    await flushNote(roomId);
+  }
+
   async function commitName() {
     const d = details;
     if (!d) return;
@@ -188,6 +239,40 @@
     const next = topicDraft.trim();
     if (next === (d.topic ?? '').trim()) return;
     await roomInfo.setTopic(roomId, next);
+  }
+
+  function editName() {
+    if (!details?.can_set_name) return;
+    nameDraft = details.name ?? '';
+    editingName = true;
+  }
+
+  function cancelNameEdit() {
+    nameDraft = details?.name ?? '';
+    editingName = false;
+  }
+
+  async function saveName() {
+    if (!editingName) return;
+    editingName = false;
+    await commitName();
+  }
+
+  function editTopic() {
+    if (!details?.can_set_topic) return;
+    topicDraft = details.topic ?? '';
+    editingTopic = true;
+  }
+
+  function cancelTopicEdit() {
+    topicDraft = details?.topic ?? '';
+    editingTopic = false;
+  }
+
+  async function saveTopic() {
+    if (!editingTopic) return;
+    editingTopic = false;
+    await commitTopic();
   }
 
   // Room notifications load so the bell shows the current level.
@@ -437,10 +522,15 @@
         {#await thumbFor(item.kind === 'video' ? item.thumbnail_uri : item.uri, item.kind === 'video' ? 'image/jpeg' : item.mime_type)}
           <span class="media-fallback"></span>
         {:then src}
+          <span class="media-fallback"><Icon icon={Image} size={20} /></span>
           {#if src}
-            <img class="media-img" src={src} alt="" loading="lazy" />
-          {:else}
-            <span class="media-fallback"><Icon icon={Image} size={20} /></span>
+            <img
+              class="media-img"
+              src={src}
+              alt=""
+              loading="lazy"
+              onerror={(e) => e.currentTarget.remove()}
+            />
           {/if}
         {/await}
         {#if item.kind === 'video'}
@@ -541,11 +631,14 @@
     {#if fileError}
       <p class="notice" role="alert">{fileError}</p>
     {/if}
+    {#if roomInfo.error(roomId)}
+      <p class="notice" role="alert">{roomInfo.error(roomId)}</p>
+    {/if}
 
     {#if view === 'overview'}
       <div class="identity">
         {#snippet avatarView()}
-          <Avatar userId={roomId} displayName={details?.name ?? ''} src={details?.avatar_url ?? null} size="xl" shape="rounded" />
+          <Avatar userId={roomId} displayName={details?.name ?? ''} src={details?.avatar_url ?? null} size={56} shape="rounded" />
         {/snippet}
         {#if details?.can_set_avatar}
           <button
@@ -560,14 +653,54 @@
         {:else}
           {@render avatarView()}
         {/if}
-        <p class="name">{details?.name || 'Unnamed room'}</p>
-        {#if details?.canonical_alias}<p class="id">{details.canonical_alias}</p>{/if}
-        {#if details}
-          <p class="meta">
-            {#if details.encrypted}<Icon icon={Lock} size={16} />{/if}
-            {details.encrypted ? 'End-to-end encrypted' : 'Not encrypted'} · {details.joined_members} members
-          </p>
-        {/if}
+        <div class="identity-main">
+          {#if editingName}
+            <div class="editor">
+              <TextField
+                bind:value={nameDraft}
+                bind:el={nameInput}
+                maxlength={255}
+                aria-label="Room name"
+                onkeydown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    void saveName();
+                    refocus(() => nameEditBtn);
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    cancelNameEdit();
+                    refocus(() => nameEditBtn);
+                  }
+                }}
+                onblur={() => void saveName()}
+              />
+              <p class="hint">Enter to save · Esc to cancel</p>
+            </div>
+          {:else}
+            <div class="editable">
+              <h3 class="name">{details?.name || 'Unnamed room'}</h3>
+              {#if details?.can_set_name}
+                <button
+                  type="button"
+                  class="edit-btn"
+                  aria-label="Edit room name"
+                  title="Edit room name"
+                  bind:this={nameEditBtn}
+                  onclick={editName}
+                >
+                  <Icon icon={Pencil} size={16} />
+                </button>
+              {/if}
+            </div>
+          {/if}
+          {#if details?.canonical_alias}<p class="id">{details.canonical_alias}</p>{/if}
+          {#if details}
+            <p class="meta">
+              {#if details.encrypted}<Icon icon={Lock} size={16} />{/if}
+              {details.encrypted ? 'End-to-end encrypted' : 'Not encrypted'} · {details.joined_members} members
+            </p>
+          {/if}
+        </div>
       </div>
 
       <div class="actions">
@@ -594,25 +727,49 @@
 
       <section class="section" aria-labelledby="room-info-about">
         <h3 class="heading" id="room-info-about">About</h3>
-        {#if roomInfo.error(roomId)}
-          <p class="notice" role="alert">{roomInfo.error(roomId)}</p>
+        {#if editingTopic}
+          <div class="editor">
+            <TextArea
+              rows={3}
+              bind:value={topicDraft}
+              bind:el={topicInput}
+              aria-label="Room topic"
+              onkeydown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  void saveTopic();
+                  refocus(() => topicEditBtn);
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  cancelTopicEdit();
+                  refocus(() => topicEditBtn);
+                }
+              }}
+              onblur={() => void saveTopic()}
+            />
+            <p class="hint">Enter to save · Shift+Enter for a new line · Esc to cancel</p>
+          </div>
+        {:else}
+          <div class="editable" class:is-empty={!details?.topic}>
+            {#if details?.topic}
+              <p class="value">{details.topic}</p>
+            {:else}
+              <p class="value empty-value">{details?.can_set_topic ? 'No topic yet' : 'No topic'}</p>
+            {/if}
+            {#if details?.can_set_topic}
+              <button
+                type="button"
+                class="edit-btn"
+                aria-label="Edit room topic"
+                title="Edit room topic"
+                bind:this={topicEditBtn}
+                onclick={editTopic}
+              >
+                <Icon icon={Pencil} size={16} />
+              </button>
+            {/if}
+          </div>
         {/if}
-        <label class="field">
-          <span class="label">Name</span>
-          <TextField
-            maxlength={255}
-            bind:value={nameDraft}
-            disabled={!details?.can_set_name}
-            onkeydown={(e) => {
-              if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur();
-            }}
-            onblur={commitName}
-          />
-        </label>
-        <label class="field">
-          <span class="label">Topic</span>
-          <TextArea rows={3} bind:value={topicDraft} disabled={!details?.can_set_topic} onblur={commitTopic} />
-        </label>
         {#if roomInfo.saving(roomId)}
           <p class="status" role="status">Saving…</p>
         {/if}
@@ -623,15 +780,48 @@
           <h3 class="heading">Private note</h3>
           <span class="pill">Only you</span>
         </div>
-        <label class="field">
-          <span class="sr-only">Private note</span>
-          <TextArea
-            rows={4}
-            value={noteDraft}
-            oninput={(e) => onNoteInput(e.currentTarget.value)}
-            onblur={() => void flushNote(roomId)}
-          />
-        </label>
+        {#if editingNote}
+          <div class="editor">
+            <TextArea
+              rows={3}
+              bind:value={noteDraft}
+              bind:el={noteInput}
+              aria-label="Private note"
+              oninput={(e) => onNoteInput(e.currentTarget.value)}
+              onkeydown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  void saveNoteEdit();
+                  refocus(() => noteEditBtn);
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  cancelNoteEdit();
+                  refocus(() => noteEditBtn);
+                }
+              }}
+              onblur={() => void saveNoteEdit()}
+            />
+            <p class="hint">Enter to save · Shift+Enter for a new line · Esc to cancel</p>
+          </div>
+        {:else}
+          <div class="editable" class:is-empty={!roomInfo.note(roomId)}>
+            {#if roomInfo.note(roomId)}
+              <p class="value">{roomInfo.note(roomId)}</p>
+            {:else}
+              <p class="value empty-value">A note only you can see</p>
+            {/if}
+            <button
+              type="button"
+              class="edit-btn"
+              aria-label="Edit private note"
+              title="Edit private note"
+              bind:this={noteEditBtn}
+              onclick={editNote}
+            >
+              <Icon icon={Pencil} size={16} />
+            </button>
+          </div>
+        {/if}
         {#if noteSaving}
           <p class="status" role="status">Saving…</p>
         {:else if noteSaved}
@@ -751,7 +941,7 @@
     flex-direction: column;
     height: 100%;
     min-height: 0;
-    background: var(--alloy-color-surface-panel);
+    background: transparent;
     color: var(--alloy-color-text-primary);
   }
 
@@ -761,7 +951,7 @@
     gap: var(--alloy-spacing-scale-2);
     height: var(--alloy-layout-header-height);
     padding: 0 var(--alloy-layout-gutter);
-    border-bottom: 1px solid var(--alloy-color-border-subtle);
+    border-bottom: 1px solid var(--alloy-chat-rim);
     flex-shrink: 0;
   }
 
@@ -769,8 +959,11 @@
     flex: 1;
     min-width: 0;
     margin: 0;
-    font-size: var(--alloy-typography-size-lg);
+    overflow: hidden;
+    font-size: var(--alloy-font-size-title);
     font-weight: var(--alloy-typography-weight-semibold);
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .icon-btn {
@@ -789,7 +982,7 @@
   }
 
   .icon-btn:hover {
-    background: var(--alloy-color-surface-hover);
+    background: var(--alloy-glass-control);
     color: var(--alloy-color-text-primary);
   }
 
@@ -800,13 +993,21 @@
     display: flex;
     flex-direction: column;
     gap: var(--alloy-layout-section-gap);
-    padding: var(--alloy-spacing-scale-6);
+    padding: var(--alloy-layout-gutter);
   }
 
   .identity {
     display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--alloy-spacing-scale-3);
+    min-width: 0;
+  }
+
+  .identity-main {
+    display: flex;
+    flex: 1;
     flex-direction: column;
-    align-items: flex-start;
     gap: var(--alloy-spacing-scale-1);
     min-width: 0;
   }
@@ -815,13 +1016,14 @@
     margin: 0;
     font-size: var(--alloy-typography-size-xl);
     font-weight: var(--alloy-typography-weight-semibold);
+    line-height: var(--alloy-typography-line-height-tight);
     overflow-wrap: anywhere;
   }
 
   .id {
     margin: 0;
     font-family: var(--alloy-typography-font-family-mono);
-    font-size: var(--alloy-typography-size-sm);
+    font-size: var(--alloy-font-size-preview);
     color: var(--alloy-color-text-muted);
     overflow-wrap: anywhere;
   }
@@ -831,8 +1033,103 @@
     align-items: center;
     gap: var(--alloy-spacing-scale-1);
     margin: 0;
-    font-size: var(--alloy-typography-size-sm);
+    font-size: var(--alloy-font-size-preview);
     color: var(--alloy-color-text-secondary);
+  }
+
+  /* A value is text until the pencil is used, so the panel reads as a summary, not a form. */
+  .editable {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--alloy-spacing-scale-1);
+    width: 100%;
+    min-width: 0;
+  }
+
+  .editable .name,
+  .editable .value {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .value {
+    margin: 0;
+    font-size: var(--alloy-font-size-row);
+    line-height: var(--alloy-typography-line-height-normal);
+    color: var(--alloy-color-text-secondary);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .empty-value {
+    color: var(--alloy-color-text-muted);
+  }
+
+  .edit-btn {
+    position: relative;
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    margin-top: -2px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--alloy-radii-sm);
+    background: transparent;
+    color: var(--alloy-color-text-muted);
+    opacity: 0;
+    cursor: pointer;
+    transition:
+      opacity var(--alloy-motion-duration-fast) ease,
+      background-color var(--alloy-motion-duration-fast) ease,
+      color var(--alloy-motion-duration-fast) ease;
+  }
+
+  .editable:hover .edit-btn,
+  .editable:focus-within .edit-btn,
+  .editable.is-empty .edit-btn {
+    opacity: 1;
+  }
+
+  .edit-btn:hover {
+    background: var(--alloy-glass-control-hover);
+    color: var(--alloy-color-text-primary);
+  }
+
+  .edit-btn:focus-visible {
+    opacity: 1;
+    outline: 2px solid var(--alloy-color-accent-primary);
+    outline-offset: 1px;
+  }
+
+  /* Touch has no hover state, so the affordance is always visible there. The icon stays 24px but
+     its hit area grows to the 44px minimum without moving the text. */
+  @media (hover: none) {
+    .edit-btn {
+      opacity: 1;
+    }
+
+    .edit-btn::after {
+      content: '';
+      position: absolute;
+      inset: -10px;
+    }
+  }
+
+  .editor {
+    display: flex;
+    flex-direction: column;
+    gap: var(--alloy-spacing-scale-1);
+    width: 100%;
+    min-width: 0;
+  }
+
+  .hint {
+    margin: 0;
+    font-size: var(--alloy-font-size-meta);
+    color: var(--alloy-color-text-muted);
   }
 
   .actions {
@@ -847,7 +1144,20 @@
     flex-direction: column;
     gap: var(--alloy-spacing-scale-3);
     padding-top: var(--alloy-layout-section-gap);
-    border-top: 1px solid var(--alloy-color-border-subtle);
+    border-top: 1px solid var(--alloy-chat-rim);
+  }
+
+  /* The shared-media switch hugs its labels instead of stretching to the panel width, which left a
+     dead segment of empty track to the right of Files. */
+  .section > :global(.alloy-segmented-control) {
+    align-self: flex-start;
+    max-width: 100%;
+  }
+
+  /* A sub-view opens on its first section; the header already draws the line above it. */
+  .body > .section:first-child {
+    padding-top: 0;
+    border-top: 0;
   }
 
   .section-head {
@@ -857,21 +1167,13 @@
     gap: var(--alloy-spacing-scale-2);
   }
 
-  .heading,
-  .label {
+  .heading {
     margin: 0;
-    font-size: var(--alloy-typography-size-xs);
+    font-size: var(--alloy-font-size-meta);
     font-weight: var(--alloy-typography-weight-semibold);
     text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--alloy-color-text-secondary);
-  }
-
-  .field {
-    display: flex;
-    flex-direction: column;
-    gap: var(--alloy-spacing-scale-1);
-    min-width: 0;
+    letter-spacing: var(--alloy-letter-spacing-caps);
+    color: var(--alloy-color-text-muted);
   }
 
   .picture-btn {
@@ -893,9 +1195,9 @@
     flex-direction: column;
     gap: var(--alloy-spacing-scale-2);
     padding: var(--alloy-spacing-scale-3);
-    border: 1px solid var(--alloy-color-border-subtle);
-    border-radius: var(--alloy-radii-sm);
-    background: var(--alloy-color-surface-subtle);
+    border: 1px solid var(--alloy-chat-rim);
+    border-radius: var(--alloy-radii-lg);
+    background: var(--alloy-glass-control);
   }
 
   .card-head {
@@ -910,23 +1212,24 @@
     border-radius: var(--alloy-radii-full);
     background: var(--alloy-color-surface-hover);
     color: var(--alloy-color-text-secondary);
-    font-size: var(--alloy-typography-size-xs);
+    font-size: var(--alloy-font-size-meta);
   }
 
   .status,
   .empty {
     margin: 0;
-    font-size: var(--alloy-typography-size-xs);
+    font-size: var(--alloy-font-size-preview);
     color: var(--alloy-color-text-muted);
   }
 
   .notice {
     margin: 0;
     padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
-    border-radius: var(--alloy-radii-sm);
+    border: 1px solid var(--alloy-color-border-subtle);
+    border-radius: var(--alloy-radii-md);
     background: var(--alloy-color-surface-subtle);
     color: var(--alloy-color-status-error);
-    font-size: var(--alloy-typography-size-sm);
+    font-size: var(--alloy-font-size-preview);
   }
 
   .media-grid {
@@ -940,7 +1243,7 @@
     aspect-ratio: 1;
     padding: 0;
     border: 0;
-    border-radius: var(--alloy-radii-sm);
+    border-radius: var(--alloy-radii-md);
     overflow: hidden;
     background: var(--alloy-color-surface-subtle);
     cursor: pointer;
@@ -990,12 +1293,13 @@
   .row {
     display: flex;
     align-items: center;
-    gap: var(--alloy-spacing-scale-3);
+    gap: var(--alloy-spacing-scale-2);
     width: 100%;
     min-width: 0;
-    padding: var(--alloy-spacing-scale-2);
+    min-height: 44px;
+    padding: var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-2);
     border: 0;
-    border-radius: var(--alloy-radii-sm);
+    border-radius: var(--alloy-radii-lg);
     background: transparent;
     color: inherit;
     text-align: left;
@@ -1027,7 +1331,7 @@
 
   .row-title {
     overflow: hidden;
-    font-size: var(--alloy-typography-size-sm);
+    font-size: var(--alloy-font-size-row);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -1038,7 +1342,7 @@
 
   .row-meta {
     overflow: hidden;
-    font-size: var(--alloy-typography-size-xs);
+    font-size: var(--alloy-font-size-meta);
     color: var(--alloy-color-text-muted);
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1046,15 +1350,6 @@
 
   .sentinel {
     height: 1px;
-  }
-
-  .sr-only {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
   }
 
   @media (max-width: 899px) {

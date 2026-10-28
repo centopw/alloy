@@ -39,7 +39,7 @@
   });
 
   function menuItems(): MenuItem[] {
-    return [
+    const items: MenuItem[] = [
       { id: 'whats-new', label: "What's new", onselect: () => updatesStore.openChangelog() },
       {
         id: 'primary',
@@ -48,9 +48,13 @@
         onselect: () => void updatesStore.primary(),
       },
       { id: 'remind-later', label: 'Remind me later', onselect: () => updatesStore.remindLater() },
-      { id: 'skip-version', label: 'Skip this version', onselect: () => updatesStore.skipVersion() },
-      { id: 'check', label: 'Check for updates', onselect: () => void updatesStore.check() },
     ];
+    // Once the download has started, skipping would leave a downloaded update unused.
+    if (!updatesStore.info?.downloaded && !updatesStore.busy) {
+      items.push({ id: 'skip-version', label: 'Skip this version', onselect: () => updatesStore.skipVersion() });
+    }
+    items.push({ id: 'check', label: 'Check for updates', onselect: () => void updatesStore.check() });
+    return items;
   }
 </script>
 

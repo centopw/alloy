@@ -43,6 +43,33 @@ describe('LayoutStore', () => {
     const store = new LayoutStore(memoryStorage());
     expect(store.sidebarWidth).toBe(LAYOUT_LIMITS.sidebarWidth.default);
     expect(store.detailsWidth).toBe(LAYOUT_LIMITS.detailsWidth.default);
+    expect(store.sidebarCollapsed).toBe(false);
+  });
+
+  it('persists the collapsed sidebar and restores it', () => {
+    const storage = memoryStorage();
+    const store = new LayoutStore(storage);
+    store.setSidebarCollapsed(true);
+    expect(store.sidebarCollapsed).toBe(true);
+
+    const reloaded = new LayoutStore(storage);
+    expect(reloaded.sidebarCollapsed).toBe(true);
+    expect(reloaded.sidebarWidth).toBe(LAYOUT_LIMITS.sidebarWidth.default);
+  });
+
+  it('toggles the sidebar', () => {
+    const store = new LayoutStore(memoryStorage());
+    store.toggleSidebar();
+    expect(store.sidebarCollapsed).toBe(true);
+    store.toggleSidebar();
+    expect(store.sidebarCollapsed).toBe(false);
+  });
+
+  it('treats a non-boolean stored collapse value as expanded', () => {
+    const storage = memoryStorage({
+      [LAYOUT_STORAGE_KEY]: JSON.stringify({ sidebarCollapsed: 'yes' }),
+    });
+    expect(new LayoutStore(storage).sidebarCollapsed).toBe(false);
   });
 
   it('clamps and persists widths, and a new store reads them back', () => {
@@ -88,8 +115,10 @@ describe('LayoutStore', () => {
     const storage = memoryStorage();
     const store = new LayoutStore(storage);
     store.set('detailsWidth', 500);
+    store.setSidebarCollapsed(true);
     store.reset();
     expect(store.detailsWidth).toBe(LAYOUT_LIMITS.detailsWidth.default);
+    expect(store.sidebarCollapsed).toBe(false);
     expect(storage.data.has(LAYOUT_STORAGE_KEY)).toBe(false);
   });
 

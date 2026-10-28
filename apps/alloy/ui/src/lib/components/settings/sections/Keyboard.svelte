@@ -70,16 +70,19 @@
 
 {#snippet chordList(chords: Chord[])}
   {#each chords as chord, i (i)}
-    {#if i > 0}
-      <span class="or">or</span>
-    {/if}
-    <span class="chord">
-      {#each chord as key, j (j)}
-        {#if j > 0}
-          <span class="plus" aria-hidden="true">+</span>
-        {/if}
-        <kbd>{key}</kbd>
-      {/each}
+    <!-- "or" belongs to the chord that follows it, so a wrapped row keeps the pair together. -->
+    <span class="alt">
+      {#if i > 0}
+        <span class="or">or</span>
+      {/if}
+      <span class="chord">
+        {#each chord as key, j (j)}
+          {#if j > 0}
+            <span class="plus" aria-hidden="true">+</span>
+          {/if}
+          <kbd>{key}</kbd>
+        {/each}
+      </span>
     </span>
   {/each}
 {/snippet}
@@ -150,6 +153,20 @@
   .keys {
     font-size: var(--alloy-typography-size-sm);
     color: var(--alloy-color-text-secondary);
+    /* Keys are the control in this row: every other settings row puts its control on the right
+       rail, so shortcuts do too, wrapping as whole alternatives instead of breaking mid-chord. */
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    align-items: center;
+    gap: var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-2);
+    text-align: right;
+  }
+
+  .alt {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--alloy-spacing-scale-2);
   }
 
   .chord {
@@ -160,7 +177,6 @@
   }
 
   .or {
-    margin: 0 var(--alloy-spacing-scale-2);
     font-size: var(--alloy-typography-size-xs);
     color: var(--alloy-color-text-muted);
   }
@@ -216,6 +232,10 @@
     }
     .keys {
       font-size: var(--alloy-typography-size-sm);
+      text-align: left;
+    }
+    .alt + .alt {
+      margin-left: var(--alloy-spacing-scale-2);
     }
   }
 </style>

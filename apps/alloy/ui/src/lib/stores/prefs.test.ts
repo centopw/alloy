@@ -18,10 +18,8 @@ import {
   PREFS_STORAGE_KEY,
   PREFS_SYNCED_AT_STORAGE_KEY,
   SYNCED_PREF_KEYS,
-  type PrefKey,
   PrefsStore,
   isValidPref,
-  defaultPrefsFor,
   sanitizePrefs,
   type PrefsStorage,
 } from './prefs.svelte.js';
@@ -101,24 +99,10 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('defaultPrefsFor', () => {
-  it('starts phones in the bubble layout and keeps the desktop default otherwise', () => {
-    expect(defaultPrefsFor(true).messageLayout).toBe('bubbles');
-    expect(defaultPrefsFor(false)).toEqual(DEFAULT_PREFS);
-  });
-
-  it('differs from the desktop default only in the message layout', () => {
-    for (const key of Object.keys(DEFAULT_PREFS) as PrefKey[]) {
-      if (key === 'messageLayout') continue;
-      expect(defaultPrefsFor(true)[key]).toEqual(DEFAULT_PREFS[key]);
-    }
-  });
-});
-
 describe('defaults', () => {
   it('matches the documented defaults for every key', () => {
     expect(DEFAULT_PREFS).toEqual({
-      messageLayout: 'modern',
+      messageLayout: 'bubbles',
       fontScale: 100,
       timeFormat: 'auto',
       bigEmoji: true,
@@ -158,7 +142,7 @@ describe('defaults', () => {
 
   it('exposes every key through its typed getter', () => {
     const store = new PrefsStore(memoryStorage());
-    expect(store.messageLayout).toBe('modern');
+    expect(store.messageLayout).toBe('bubbles');
     expect(store.fontScale).toBe(100);
     expect(store.timeFormat).toBe('auto');
     expect(store.autoplayMedia).toBe(false);
@@ -223,9 +207,9 @@ describe('set and reset', () => {
   it('updates the value and persists it locally', () => {
     const storage = memoryStorage();
     const store = new PrefsStore(storage);
-    store.set('messageLayout', 'bubbles');
-    expect(store.messageLayout).toBe('bubbles');
-    expect(storedPrefs(storage)).toEqual({ ...DEFAULT_PREFS, messageLayout: 'bubbles' });
+    store.set('messageLayout', 'modern');
+    expect(store.messageLayout).toBe('modern');
+    expect(storedPrefs(storage)).toEqual({ ...DEFAULT_PREFS, messageLayout: 'modern' });
   });
 
   it('does not write when the value is unchanged', () => {
@@ -341,7 +325,7 @@ describe('engine sync', () => {
 
     expect(store.fontScale).toBe(130);
     expect(store.notifySound).toBe(false);
-    expect(store.messageLayout).toBe('modern');
+    expect(store.messageLayout).toBe('bubbles');
     expect(storedPrefs(storage)).toEqual({ ...DEFAULT_PREFS, fontScale: 130, notifySound: false });
     expect(store.ready).toBe(true);
   });

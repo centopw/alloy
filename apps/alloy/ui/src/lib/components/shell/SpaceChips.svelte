@@ -89,15 +89,18 @@
     max-width: 220px;
     padding: 0 var(--alloy-spacing-scale-3) 0 var(--alloy-spacing-scale-2);
     border-radius: var(--alloy-radius-full);
-    background: var(--alloy-color-surface-subtle);
+    background: var(--alloy-glass-sheen), var(--alloy-glass-fill-soft);
+    -webkit-backdrop-filter: var(--alloy-glass-filter);
+    backdrop-filter: var(--alloy-glass-filter);
+    box-shadow: var(--alloy-glass-highlight);
     color: var(--alloy-color-text-secondary);
     font-size: var(--alloy-typography-size-sm);
     font-weight: var(--alloy-typography-weight-medium);
   }
 
   .chip.active {
-    background: var(--alloy-color-accent-subtle);
-    border-color: var(--alloy-color-accent-primary);
+    background: color-mix(in srgb, var(--alloy-color-accent-primary) 16%, transparent);
+    border-color: color-mix(in srgb, var(--alloy-color-accent-primary) 30%, transparent);
     color: var(--alloy-color-text-primary);
   }
 
@@ -119,7 +122,10 @@
     width: 44px;
     padding: 0;
     border-radius: var(--alloy-radius-full);
-    background: var(--alloy-color-surface-subtle);
+    background: var(--alloy-glass-sheen), var(--alloy-glass-fill-soft);
+    -webkit-backdrop-filter: var(--alloy-glass-filter);
+    backdrop-filter: var(--alloy-glass-filter);
+    box-shadow: var(--alloy-glass-highlight);
     color: var(--alloy-color-text-secondary);
   }
 
@@ -132,7 +138,7 @@
   @media (hover: hover) {
     .chip:not(.active):hover,
     .add:hover {
-      background: var(--alloy-color-surface-hover);
+      background: var(--alloy-glass-control-hover);
       color: var(--alloy-color-text-primary);
     }
   }

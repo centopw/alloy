@@ -106,13 +106,13 @@
   }
   .status {
     margin: 0;
-    padding: 0 var(--alloy-layout-gutter);
+    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-row-pad-x);
     font-size: var(--alloy-typography-size-sm);
     color: var(--alloy-color-text-secondary);
   }
   .error {
     margin: 0;
-    padding: 0 var(--alloy-layout-gutter);
+    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-row-pad-x);
     font-size: var(--alloy-typography-size-sm);
     color: var(--alloy-color-status-error);
     overflow-wrap: anywhere;

@@ -118,11 +118,9 @@
 <section class="section">
   <SettingGroup title="This session">
     {#if current}
-      <div class="card">
-        <div class="row">
-          <span class="row-label">Status</span>
-          <span class="row-value">{current.verified ? 'Verified' : 'Not verified'}</span>
-        </div>
+      <div class="row">
+        <span class="row-label">Status</span>
+        <span class="row-value">{current.verified ? 'Verified' : 'Not verified'}</span>
       </div>
       {#if !current.verified}
         <SettingButtonRow
@@ -139,14 +137,14 @@
     {#if loading}
       <p class="muted">Loading devices...</p>
     {:else if error}
-      <p class="error" role="alert">{error}</p>
-      <div>
+      <p class="error group-note" role="alert">{error}</p>
+      <div class="group-note">
         <Button variant="ghost" size="sm" onclick={() => void load()}>Try again</Button>
       </div>
     {:else if ordered.length === 0}
       <p class="muted">No devices found.</p>
     {:else}
-      <ul class="card list">
+      <ul class="list">
         {#each ordered as device (device.device_id)}
           <li class="device">
             <div class="device-head">
@@ -191,11 +189,6 @@
     flex-direction: column;
     gap: var(--alloy-layout-section-gap);
   }
-  .card {
-    background: var(--alloy-color-surface-subtle);
-    border-radius: var(--alloy-radii-lg);
-    overflow: hidden;
-  }
   .list {
     list-style: none;
     margin: 0;
@@ -205,7 +198,7 @@
     display: flex;
     flex-direction: column;
     gap: var(--alloy-spacing-scale-1);
-    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-gutter);
+    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-row-pad-x);
   }
   .device + .device {
     border-top: 1px solid var(--alloy-color-border-subtle);
@@ -249,7 +242,7 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--alloy-spacing-scale-3);
-    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-gutter);
+    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-row-pad-x);
     font-size: var(--alloy-typography-size-base);
     color: var(--alloy-color-text-primary);
   }
@@ -259,14 +252,26 @@
   .row-value {
     text-align: right;
   }
-  .muted {
+  .muted,
+  .group-note {
     margin: 0;
+    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-row-pad-x);
+  }
+  .muted {
     color: var(--alloy-color-text-muted);
+  }
+  .group-note {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--alloy-spacing-scale-2);
   }
   .error {
     margin: 0;
     color: var(--alloy-color-status-error);
     overflow-wrap: anywhere;
+  }
+  .error.group-note {
+    color: var(--alloy-color-status-error);
   }
   .signout {
     display: flex;
@@ -285,5 +290,7 @@
   }
   .footer-actions {
     justify-content: space-between;
+    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-row-pad-x)
+      var(--alloy-spacing-scale-4);
   }
 </style>

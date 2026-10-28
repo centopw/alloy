@@ -38,22 +38,35 @@ export class LayoutStore {
 
   sidebarWidth = $state<number>(LAYOUT_LIMITS.sidebarWidth.default);
   detailsWidth = $state<number>(LAYOUT_LIMITS.detailsWidth.default);
+  /** The room list is hidden but stays mounted, so its scroll position and state survive. */
+  sidebarCollapsed = $state(false);
 
   constructor(storage: LayoutStorage | null = defaultStorage()) {
     this.#storage = storage;
     this.#load();
   }
 
-  /** Set one width, clamped to its limits, and persist both widths. */
+  /** Set one width, clamped to its limits, and persist the layout. */
   set(name: LayoutKey, value: number): void {
     this[name] = clampLayoutWidth(name, value);
     this.#write();
   }
 
-  /** Restore the default widths and forget the stored layout. */
+  /** Show or hide the room list, keeping its width for when it comes back. */
+  setSidebarCollapsed(collapsed: boolean): void {
+    this.sidebarCollapsed = collapsed;
+    this.#write();
+  }
+
+  toggleSidebar(): void {
+    this.setSidebarCollapsed(!this.sidebarCollapsed);
+  }
+
+  /** Restore the default widths and show the room list again; forget the stored layout. */
   reset(): void {
     this.sidebarWidth = LAYOUT_LIMITS.sidebarWidth.default;
     this.detailsWidth = LAYOUT_LIMITS.detailsWidth.default;
+    this.sidebarCollapsed = false;
     try {
       this.#storage?.removeItem(LAYOUT_STORAGE_KEY);
     } catch (err) {
@@ -72,7 +85,7 @@ export class LayoutStore {
       return;
     }
     if (typeof parsed !== 'object' || parsed === null) return;
-    const data = parsed as Partial<Record<LayoutKey, unknown>>;
+    const data = parsed as Partial<Record<LayoutKey | 'sidebarCollapsed', unknown>>;
     this.sidebarWidth = clampLayoutWidth(
       'sidebarWidth',
       typeof data.sidebarWidth === 'number' ? data.sidebarWidth : Number.NaN,
@@ -81,6 +94,7 @@ export class LayoutStore {
       'detailsWidth',
       typeof data.detailsWidth === 'number' ? data.detailsWidth : Number.NaN,
     );
+    this.sidebarCollapsed = data.sidebarCollapsed === true;
   }
 
   #read(): string | null {
@@ -93,7 +107,11 @@ export class LayoutStore {
   }
 
   #write(): void {
-    const data = { sidebarWidth: this.sidebarWidth, detailsWidth: this.detailsWidth };
+    const data = {
+      sidebarWidth: this.sidebarWidth,
+      detailsWidth: this.detailsWidth,
+      sidebarCollapsed: this.sidebarCollapsed,
+    };
     try {
       this.#storage?.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(data));
     } catch (err) {

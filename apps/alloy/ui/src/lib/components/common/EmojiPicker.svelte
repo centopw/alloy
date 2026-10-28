@@ -487,7 +487,7 @@
     flex: 1 1 0;
     min-height: 0;
     height: 100%;
-    background: var(--alloy-color-surface-elevated);
+    background: transparent;
     color: var(--alloy-color-text-primary);
     font-family: var(--alloy-typography-font-family-sans);
     outline: none;
@@ -585,7 +585,9 @@
     z-index: 1;
     margin: 0;
     padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-1);
-    background: var(--alloy-color-surface-elevated);
+    background: var(--alloy-glass-fill-strong);
+    -webkit-backdrop-filter: var(--alloy-glass-filter);
+    backdrop-filter: var(--alloy-glass-filter);
     color: var(--alloy-color-text-muted);
     font-size: var(--alloy-typography-size-xs);
     font-weight: var(--alloy-typography-weight-semibold);

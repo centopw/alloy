@@ -40,15 +40,14 @@
 
   // Previews are static markup; they are hoisted, so the option list can reference them.
   const layoutOptions: { value: MessageLayout; label: string; description: string; preview: Snippet }[] = [
+    { value: 'bubbles', label: 'Bubbles', description: 'Chat bubbles (default)', preview: bubblesPreview },
     { value: 'modern', label: 'Modern', description: 'Flat rows with avatars', preview: modernPreview },
-    { value: 'bubbles', label: 'Bubbles', description: 'Messages in chat bubbles', preview: bubblesPreview },
     { value: 'irc', label: 'IRC', description: 'Compact, single line', preview: ircPreview },
   ];
 
-  const themeReason = 'Follows your system setting.';
-  const amoledReason = $derived(
-    themeStore.followSystem ? themeReason : !dark ? 'Available in dark mode.' : undefined,
-  );
+  // Choosing a theme is an explicit answer, so the store drops follow-system for us. Pure black is
+  // the one switch that still needs a precondition of its own.
+  const amoledReason = $derived(!dark ? 'Turn on dark mode first.' : undefined);
 </script>
 
 {#snippet modernPreview()}
@@ -85,19 +84,14 @@
       checked={themeStore.followSystem}
       onchange={(v) => themeStore.setFollowSystem(v)}
     />
-    <!-- The two appearance switches hang off the follow-system choice, so they sit indented under it. -->
+    <!-- Indented under follow-system: they refine the same choice, and touching either one makes it
+         an explicit choice of its own. -->
     <div class="theme-children">
-      <SettingToggle
-        label="Dark mode"
-        checked={dark}
-        disabled={themeStore.followSystem}
-        disabledReason={themeStore.followSystem ? themeReason : undefined}
-        onchange={setDark}
-      />
+      <SettingToggle label="Dark mode" checked={dark} onchange={setDark} />
       <SettingToggle
         label="Pure black background"
         checked={amoled}
-        disabled={!dark || themeStore.followSystem}
+        disabled={!dark}
         disabledReason={amoledReason}
         onchange={setAmoled}
       />

@@ -444,6 +444,7 @@
           {src}
           alt={title}
           draggable="false"
+          onerror={() => (failed = true)}
           style="
             transform: translate({scale === 1 ? dragOffset.x : pan.x}px, {scale === 1 ? dragOffset.y : pan.y}px) scale({scale});
             transition: {isDragging || reduceMotion ? 'none' : 'transform var(--alloy-motion-duration-normal) ease-out'};
@@ -548,7 +549,7 @@
   }
 
   .tool:hover:not(:disabled) {
-    background: var(--alloy-color-surface-hover);
+    background: var(--alloy-glass-control);
     color: var(--alloy-color-text-primary);
   }
 
@@ -596,9 +597,12 @@
     justify-content: center;
     width: 44px;
     height: 44px;
-    border: 0;
-    border-radius: var(--alloy-radii-md);
-    background: var(--alloy-color-surface-elevated);
+    border: 1px solid var(--alloy-glass-rim);
+    border-radius: var(--alloy-radii-full);
+    background: var(--alloy-glass-sheen), var(--alloy-glass-fill-strong);
+    -webkit-backdrop-filter: var(--alloy-glass-filter);
+    backdrop-filter: var(--alloy-glass-filter);
+    box-shadow: var(--alloy-glass-shadow-soft), var(--alloy-glass-highlight);
     color: var(--alloy-color-text-primary);
     cursor: pointer;
     opacity: 0.8;
@@ -606,7 +610,7 @@
 
   .nav:hover {
     opacity: 1;
-    background: var(--alloy-color-surface-hover);
+    background: var(--alloy-glass-control-hover);
   }
 
   .nav:focus-visible {
@@ -629,7 +633,7 @@
     justify-content: space-between;
     gap: var(--alloy-spacing-scale-2);
     padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
-    border-top: 1px solid var(--alloy-color-border-subtle);
+    border-top: 1px solid var(--alloy-glass-rim);
   }
 
   .info {

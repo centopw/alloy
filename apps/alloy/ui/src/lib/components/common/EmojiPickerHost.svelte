@@ -187,10 +187,12 @@
     width: 360px;
     height: min(420px, calc(100vh - 16px));
     overflow: hidden;
-    border: 1px solid var(--alloy-color-border-prominent);
-    border-radius: var(--alloy-radii-md);
-    background: var(--alloy-color-surface-elevated);
-    box-shadow: var(--alloy-elevation-lg);
+    border: 1px solid var(--alloy-glass-rim);
+    border-radius: var(--alloy-glass-radius-panel);
+    background: var(--alloy-glass-sheen), var(--alloy-glass-fill-strong);
+    -webkit-backdrop-filter: var(--alloy-glass-filter-strong);
+    backdrop-filter: var(--alloy-glass-filter-strong);
+    box-shadow: var(--alloy-glass-shadow), var(--alloy-glass-highlight);
   }
 
   /* Phones: dimmed scrim and a bottom sheet, below the context menu layers (109/110). */
@@ -199,6 +201,8 @@
     inset: 0;
     z-index: 100;
     background: var(--alloy-color-scrim);
+    -webkit-backdrop-filter: blur(10px) saturate(140%);
+    backdrop-filter: blur(10px) saturate(140%);
   }
 
   .sheet {
@@ -213,9 +217,13 @@
     height: 65dvh;
     max-height: calc(100dvh - var(--alloy-safe-area-top) - var(--alloy-spacing-scale-2));
     padding-bottom: var(--alloy-safe-area-bottom);
-    border-radius: var(--alloy-radii-lg) var(--alloy-radii-lg) 0 0;
-    background: var(--alloy-color-surface-elevated);
-    box-shadow: var(--alloy-elevation-lg);
+    border: 1px solid var(--alloy-glass-rim);
+    border-bottom: 0;
+    border-radius: var(--alloy-glass-radius-panel) var(--alloy-glass-radius-panel) 0 0;
+    background: var(--alloy-glass-sheen), var(--alloy-glass-fill-strong);
+    -webkit-backdrop-filter: var(--alloy-glass-filter-strong);
+    backdrop-filter: var(--alloy-glass-filter-strong);
+    box-shadow: var(--alloy-glass-shadow), var(--alloy-glass-highlight);
     overflow: hidden;
     transition: transform var(--alloy-motion-duration-fast) var(--alloy-motion-easing-ease),
       height var(--alloy-motion-duration-fast) var(--alloy-motion-easing-ease);

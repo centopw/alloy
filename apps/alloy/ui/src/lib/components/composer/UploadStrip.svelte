@@ -56,8 +56,12 @@
     align-items: center;
     gap: var(--alloy-spacing-scale-3);
     padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x);
-    border-radius: var(--alloy-radii-lg);
-    background: var(--alloy-color-surface-subtle);
+    border: 1px solid var(--alloy-glass-rim);
+    border-radius: var(--alloy-glass-radius-control);
+    background: var(--alloy-glass-sheen), var(--alloy-glass-fill-strong);
+    -webkit-backdrop-filter: var(--alloy-glass-filter);
+    backdrop-filter: var(--alloy-glass-filter);
+    box-shadow: var(--alloy-glass-highlight);
     font-size: var(--alloy-typography-size-sm);
     color: var(--alloy-color-text-primary);
   }

@@ -133,7 +133,9 @@
   .backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.45);
+    background: var(--alloy-color-scrim);
+    -webkit-backdrop-filter: blur(10px) saturate(140%);
+    backdrop-filter: blur(10px) saturate(140%);
     display: flex;
     justify-content: center;
     align-items: flex-start;
@@ -142,10 +144,12 @@
   }
   .palette {
     width: min(520px, 92vw);
-    background: var(--alloy-color-surface-elevated);
-    border: 1px solid var(--alloy-color-border-prominent);
-    border-radius: var(--alloy-radii-lg);
-    box-shadow: var(--alloy-elevation-lg);
+    background: var(--alloy-glass-sheen), var(--alloy-glass-fill-strong);
+    -webkit-backdrop-filter: var(--alloy-glass-filter-strong);
+    backdrop-filter: var(--alloy-glass-filter-strong);
+    border: 1px solid var(--alloy-glass-rim);
+    border-radius: var(--alloy-glass-radius-shell);
+    box-shadow: var(--alloy-glass-shadow), var(--alloy-glass-highlight);
     overflow: hidden;
   }
   input {
@@ -158,7 +162,7 @@
     font-size: var(--alloy-typography-size-lg);
     height: var(--alloy-layout-header-height);
     padding: 0 var(--alloy-layout-gutter);
-    border-bottom: 1px solid var(--alloy-color-border-subtle);
+    border-bottom: 1px solid var(--alloy-glass-rim);
   }
   ul {
     list-style: none;
@@ -181,7 +185,7 @@
   }
   button.sel,
   button:hover {
-    background: var(--alloy-color-surface-hover);
+    background: var(--alloy-glass-control-hover);
   }
   .none {
     padding: var(--alloy-spacing-scale-4);
@@ -198,7 +202,7 @@
     .backdrop {
       padding: 0;
       align-items: stretch;
-      background: var(--alloy-color-surface-panel);
+      background: var(--alloy-canvas-art);
     }
     .palette {
       display: flex;

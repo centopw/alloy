@@ -67,10 +67,16 @@
     display: flex;
     flex: 0 0 auto;
     box-sizing: border-box;
-    height: calc(56px + var(--alloy-safe-area-bottom));
-    padding: 0 var(--alloy-safe-area-right) var(--alloy-safe-area-bottom) var(--alloy-safe-area-left);
-    background: var(--alloy-color-surface-panel);
-    border-top: 1px solid var(--alloy-color-border-subtle);
+    height: 56px;
+    margin: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3)
+      calc(var(--alloy-spacing-scale-2) + var(--alloy-safe-area-bottom));
+    padding: 0 4px;
+    border: 1px solid var(--alloy-glass-rim);
+    border-radius: var(--alloy-glass-radius-shell);
+    background: var(--alloy-glass-sheen), var(--alloy-glass-fill-strong);
+    -webkit-backdrop-filter: var(--alloy-glass-filter);
+    backdrop-filter: var(--alloy-glass-filter);
+    box-shadow: var(--alloy-glass-shadow-soft), var(--alloy-glass-highlight);
   }
 
   .tab {
@@ -106,8 +112,14 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 32px;
+    width: 40px;
     height: 28px;
+    border-radius: var(--alloy-radii-full);
+    transition: background var(--alloy-motion-duration-fast) ease;
+  }
+
+  .tab.active .glyph {
+    background: color-mix(in srgb, var(--alloy-color-accent-primary) 14%, transparent);
   }
 
   .label {

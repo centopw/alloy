@@ -54,7 +54,7 @@
     width: 100%;
     min-height: 0;
     overflow: hidden;
-    background: var(--alloy-color-surface-panel);
+    background: transparent;
   }
 
   header {
@@ -65,7 +65,7 @@
     height: var(--alloy-layout-header-height);
     box-sizing: border-box;
     padding: 0 var(--alloy-layout-gutter);
-    border-bottom: 1px solid var(--alloy-color-border-subtle);
+    border-bottom: 1px solid var(--alloy-glass-rim);
   }
   h2 {
     margin: 0;
@@ -87,7 +87,7 @@
     cursor: pointer;
   }
   .round:hover {
-    background: var(--alloy-color-surface-hover);
+    background: var(--alloy-glass-control);
     color: var(--alloy-color-text-primary);
   }
 
@@ -117,6 +117,9 @@
       padding: var(--alloy-safe-area-top) var(--alloy-safe-area-right) var(--alloy-safe-area-bottom)
         var(--alloy-safe-area-left);
       box-sizing: border-box;
+      background: var(--alloy-glass-sheen), var(--alloy-glass-fill-strong);
+      -webkit-backdrop-filter: var(--alloy-glass-filter-strong);
+      backdrop-filter: var(--alloy-glass-filter-strong);
     }
     header {
       justify-content: flex-start;

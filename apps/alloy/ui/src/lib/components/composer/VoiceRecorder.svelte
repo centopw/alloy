@@ -239,8 +239,11 @@
     height: 32px;
     margin-bottom: var(--alloy-spacing-scale-2);
     border-radius: var(--alloy-radii-full);
-    background: var(--alloy-color-surface-elevated);
-    box-shadow: var(--alloy-elevation-md);
+    background: var(--alloy-glass-sheen), var(--alloy-glass-fill-strong);
+    -webkit-backdrop-filter: var(--alloy-glass-filter);
+    backdrop-filter: var(--alloy-glass-filter);
+    border: 1px solid var(--alloy-glass-rim);
+    box-shadow: var(--alloy-glass-shadow-soft), var(--alloy-glass-highlight);
     color: var(--alloy-color-text-secondary);
   }
   .bar {

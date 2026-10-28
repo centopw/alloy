@@ -47,8 +47,10 @@
     flex-shrink: 0;
     margin: var(--alloy-layout-row-inset);
     padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x);
-    border-radius: var(--alloy-radii-md);
-    background: var(--alloy-color-surface-canvas);
+    border: 1px solid var(--alloy-glass-rim);
+    border-radius: var(--alloy-glass-radius-control);
+    background: var(--alloy-glass-control);
+    box-shadow: var(--alloy-glass-highlight);
   }
   /* Named `.pinned`, not `.fixed`: Tailwind's utilities layer emits a global `.fixed{position:fixed}`
      and a bare `.fixed` class would turn the avatar container into a viewport-fixed box. */
@@ -89,7 +91,7 @@
     cursor: pointer;
   }
   .gear:hover {
-    background: var(--alloy-color-surface-hover);
+    background: var(--alloy-glass-control-hover);
     color: var(--alloy-color-text-primary);
   }
   .gear:focus-visible {

@@ -284,16 +284,21 @@ import Permissions from './sections/Permissions.svelte';
     z-index: 60;
     display: flex;
     padding: var(--alloy-spacing-scale-4);
-    background: color-mix(in srgb, var(--alloy-color-surface-canvas) 70%, transparent);
+    background: color-mix(in srgb, var(--alloy-color-surface-canvas) 55%, transparent);
+    -webkit-backdrop-filter: blur(10px) saturate(140%);
+    backdrop-filter: blur(10px) saturate(140%);
   }
   .panel {
     display: flex;
     width: 100%;
     height: 100%;
     overflow: hidden;
-    background: var(--alloy-color-surface-canvas);
-    border-radius: var(--alloy-radii-lg);
-    box-shadow: var(--alloy-elevation-lg);
+    background: var(--alloy-glass-sheen), var(--alloy-glass-fill-strong);
+    -webkit-backdrop-filter: var(--alloy-glass-filter-strong);
+    backdrop-filter: var(--alloy-glass-filter-strong);
+    border: 1px solid var(--alloy-glass-rim);
+    border-radius: var(--alloy-glass-radius-shell);
+    box-shadow: var(--alloy-glass-shadow), var(--alloy-glass-highlight);
     outline: none;
   }
   .nav {
@@ -304,7 +309,8 @@ import Permissions from './sections/Permissions.svelte';
     flex-shrink: 0;
     padding: 0 var(--alloy-layout-row-inset) var(--alloy-layout-row-inset);
     overflow-y: auto;
-    background: var(--alloy-color-surface-panel);
+    background: color-mix(in srgb, var(--alloy-color-surface-panel) 42%, transparent);
+    border-right: 1px solid var(--alloy-glass-rim);
   }
   .nav-title {
     margin: 0;
@@ -335,8 +341,8 @@ import Permissions from './sections/Permissions.svelte';
     width: 100%;
     margin: 0;
     padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x);
-    border: 0;
-    border-radius: var(--alloy-radii-md);
+    border: 1px solid transparent;
+    border-radius: var(--alloy-glass-radius-control);
     background: transparent;
     font: inherit;
     font-size: var(--alloy-typography-size-base);
@@ -345,13 +351,15 @@ import Permissions from './sections/Permissions.svelte';
     cursor: pointer;
   }
   .nav-item:hover {
-    background: var(--alloy-color-surface-subtle);
+    background: var(--alloy-glass-control);
     color: var(--alloy-color-text-primary);
   }
   .nav-item[aria-current='page'] {
-    background: var(--alloy-color-surface-hover);
+    border-color: color-mix(in srgb, var(--alloy-color-accent-primary) 26%, transparent);
+    background: color-mix(in srgb, var(--alloy-color-accent-primary) 14%, transparent);
     color: var(--alloy-color-text-primary);
     font-weight: var(--alloy-typography-weight-medium);
+    box-shadow: var(--alloy-glass-highlight);
   }
   .nav-item.danger {
     color: var(--alloy-color-status-error);
@@ -364,14 +372,14 @@ import Permissions from './sections/Permissions.svelte';
   .nav-footer {
     margin-top: auto;
     padding-top: var(--alloy-spacing-scale-2);
-    border-top: 1px solid var(--alloy-color-border-subtle);
+    border-top: 1px solid var(--alloy-glass-rim);
   }
   .content {
     display: flex;
     flex: 1;
     min-width: 0;
     flex-direction: column;
-    background: var(--alloy-color-surface-canvas);
+    background: transparent;
   }
   .header {
     display: flex;
@@ -406,7 +414,7 @@ import Permissions from './sections/Permissions.svelte';
     cursor: pointer;
   }
   .close:hover {
-    background: var(--alloy-color-surface-hover);
+    background: var(--alloy-glass-control);
     color: var(--alloy-color-text-primary);
   }
   .scroll {
@@ -424,10 +432,13 @@ import Permissions from './sections/Permissions.svelte';
   @media (max-width: 899px) {
     .backdrop {
       padding: 0;
-      background: var(--alloy-color-surface-canvas);
+      background: var(--alloy-canvas-art);
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
     }
     .panel {
       padding: var(--alloy-safe-area-top) var(--alloy-safe-area-right) 0 var(--alloy-safe-area-left);
+      border: 0;
       border-radius: 0;
       box-shadow: none;
     }
@@ -435,7 +446,8 @@ import Permissions from './sections/Permissions.svelte';
       width: 100%;
       gap: 0;
       padding: 0 0 var(--alloy-safe-area-bottom);
-      background: var(--alloy-color-surface-canvas);
+      background: var(--alloy-glass-sheen), var(--alloy-glass-fill);
+      border-right: 0;
       overscroll-behavior: contain;
       -webkit-overflow-scrolling: touch;
     }

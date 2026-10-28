@@ -154,7 +154,7 @@
   {:else if src && still}
     <canvas bind:this={canvasEl} aria-label={body || 'Animated image, paused'}></canvas>
   {:else if src}
-    <img {src} alt={body} loading="lazy" />
+    <img {src} alt={body} loading="lazy" onerror={() => (failed = true)} />
   {:else}
     <div class="placeholder" aria-busy="true"></div>
   {/if}
@@ -209,7 +209,8 @@
     max-width: min(400px, 100%);
     min-width: 120px;
     max-height: 360px;
-    border-radius: var(--alloy-radii-lg);
+    border: 1px solid var(--alloy-color-border-subtle);
+    border-radius: var(--alloy-radii-xl);
     overflow: hidden;
   }
   .frame-open {
@@ -226,7 +227,7 @@
   button.frame-open:focus-visible {
     outline: 2px solid var(--alloy-color-accent-primary);
     outline-offset: 2px;
-    border-radius: var(--alloy-radii-lg);
+    border-radius: var(--alloy-radii-xl);
   }
 
   canvas {
@@ -249,7 +250,7 @@
     align-items: flex-start;
     padding: var(--alloy-spacing-scale-2);
     border: 1px solid var(--alloy-color-border-subtle);
-    border-radius: var(--alloy-radii-md);
+    border-radius: var(--alloy-radii-xl);
     background: var(--alloy-color-surface-elevated);
   }
 

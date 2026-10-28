@@ -228,7 +228,7 @@
     flex-direction: column;
     height: 100%;
     min-height: 0;
-    background: var(--alloy-color-surface-panel);
+    background: transparent;
     color: var(--alloy-color-text-primary);
   }
 
@@ -238,7 +238,7 @@
     gap: var(--alloy-spacing-scale-2);
     height: var(--alloy-layout-header-height);
     padding: 0 var(--alloy-layout-gutter);
-    border-bottom: 1px solid var(--alloy-color-border-subtle);
+    border-bottom: 1px solid var(--alloy-glass-rim);
     flex-shrink: 0;
   }
 
@@ -268,7 +268,7 @@
   }
 
   .icon-btn:hover {
-    background: var(--alloy-color-surface-hover);
+    background: var(--alloy-glass-control);
     color: var(--alloy-color-text-primary);
   }
 
@@ -277,7 +277,7 @@
     flex-direction: column;
     gap: var(--alloy-spacing-scale-2);
     padding: var(--alloy-spacing-scale-3) var(--alloy-layout-gutter);
-    border-bottom: 1px solid var(--alloy-color-border-subtle);
+    border-bottom: 1px solid var(--alloy-glass-rim);
     flex-shrink: 0;
   }
 
@@ -335,7 +335,7 @@
 
   .hit:hover,
   .hit:focus-visible {
-    background: var(--alloy-color-surface-hover);
+    background: var(--alloy-glass-control);
   }
 
   .hit:disabled {

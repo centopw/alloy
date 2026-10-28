@@ -33,14 +33,17 @@
     display: flex;
     flex-direction: column;
     gap: var(--alloy-spacing-scale-1);
-    padding: 0 var(--alloy-layout-row-pad-x);
   }
 
+  /* An eyebrow, not a row: flush with the card's edge, tracked caps and the quieter text colour.
+     That is what separates "Theme" from the switch labels underneath it at a glance. */
   .title {
     margin: 0;
-    font-size: var(--alloy-typography-size-lg);
+    font-size: var(--alloy-font-size-preview);
     font-weight: var(--alloy-typography-weight-semibold);
-    color: var(--alloy-color-text-primary);
+    letter-spacing: var(--alloy-letter-spacing-caps);
+    text-transform: uppercase;
+    color: var(--alloy-color-text-secondary);
   }
 
   .description {

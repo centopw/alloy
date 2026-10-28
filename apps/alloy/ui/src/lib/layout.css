@@ -12,11 +12,11 @@
  */
 :root {
   --alloy-layout-gutter: var(--alloy-spacing-scale-4);
-  --alloy-layout-header-height: 48px;
+  --alloy-layout-header-height: 52px;
   --alloy-layout-row-inset: var(--alloy-spacing-scale-2);
   --alloy-layout-row-pad-x: var(--alloy-spacing-scale-3);
   --alloy-layout-section-gap: var(--alloy-spacing-scale-4);
-  --alloy-layout-rail-width: 68px;
+  --alloy-layout-rail-width: 56px;
   --alloy-layout-control-height: 36px;
   --alloy-layout-control-height-sm: 28px;
 }

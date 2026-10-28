@@ -30,5 +30,5 @@
   {disabled}
   aria-label={label}
   onCheckedChange={(next: boolean) => onchange?.(next)}
-  class={cn('alloy-toggle', className)}
+  class={cn('alloy-toggle p-0', className)}
 />

@@ -74,12 +74,13 @@
       item.timestamp_millis - prev!.timestamp_millis < GROUP_MS
   );
   const layout = $derived(prefs.messageLayout);
+  /** Bubbles layout: the quote is a bubble stacked above the reply, not a panel inside it. */
+  const stackedReply = $derived(layout === 'bubbles' && Boolean(item.reply_to));
   const time = $derived(formatTime(item.timestamp_millis, prefs.timeFormat));
-  const avatarSize = $derived(layout === 'bubbles' ? 28 : viewport.isPhone ? 36 : 40);
+  const avatarSize = $derived(layout === 'bubbles' ? 32 : viewport.isPhone ? 36 : 40);
   /** IRC always shows the name column; bubbles omit the head on your own messages. */
   const showHead = $derived(layout === 'irc' || (!grouped && !(layout === 'bubbles' && item.is_own)));
-  /** A short run of emoji renders large when the pref is on. */
-  const jumbo = $derived(
+  /** A short run of emoji renders large when the pref is on. */  const jumbo = $derived(
     item.content.kind === 'TextMessage' && prefs.bigEmoji && isEmojiOnly(item.content.data.body)
   );
   /** A picture, video or sticker sent without a caption sits straight on the timeline, with no bubble behind it. */
@@ -419,6 +420,7 @@
     class="row"
     class:grouped
     class:own={item.is_own}
+    class:replied={stackedReply}
     class:jumbo
     class:bare={bareMedia}
     class:highlighted
@@ -468,109 +470,115 @@
         </div>
       {/if}
 
-      <div class="bubble" class:has-reactions={(item.reactions ?? []).length > 0}>
-        {#if item.reply_to}
-          <div class="reply-slot">
-            <ReplyQuote replyTo={item.reply_to} inOwnBubble={layout === 'bubbles' && item.is_own} />
-          </div>
+      <div class="message-stack">
+        {#if stackedReply && item.reply_to}
+          <ReplyQuote replyTo={item.reply_to} stacked own={item.is_own} />
         {/if}
 
-        {#if item.content.kind === 'TextMessage'}
-          {#if html}
-            <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-            <div class="body html" onclick={onBodyClick} onauxclick={interceptLinks}>{@html html}{#if item.edited}<span class="edited">(edited)</span>{/if}</div>
-          {:else}
-            <div class="body">{item.content.data.body}{#if item.edited}<span class="edited">(edited)</span>{/if}</div>
+        <div class="bubble" class:has-reactions={(item.reactions ?? []).length > 0}>
+          {#if item.reply_to && !stackedReply}
+            <div class="reply-slot">
+              <ReplyQuote replyTo={item.reply_to} inOwnBubble={layout === 'bubbles' && item.is_own} />
+            </div>
           {/if}
-          {#if previewUrl && timelineStore.roomId}
-            <LinkPreview url={previewUrl} roomId={timelineStore.roomId} />
-          {/if}
-        {:else if item.content.kind === 'Media'}
-          <div class="block">
-            {#if album}
-              <AlbumGrid items={album} />
-            {:else if item.content.data.media_kind === 'audio'}
-              <AudioPlayer
-                uri={item.content.data.uri}
-                mimeType={item.content.data.mime_type}
-                body={item.content.data.body ?? ''}
-                sizeBytes={item.content.data.size_bytes}
-                durationMs={item.content.data.duration_ms ?? null}
-                waveform={item.content.data.waveform ?? null}
-                voice={item.content.data.voice ?? false}
-              />
+
+          {#if item.content.kind === 'TextMessage'}
+            {#if html}
+              <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+              <div class="body html" onclick={onBodyClick} onauxclick={interceptLinks}>{@html html}{#if item.edited}<span class="edited">(edited)</span>{/if}</div>
             {:else}
-              <MediaView
-                eventId={item.event_id}
-                uri={item.content.data.uri}
-                mimeType={item.content.data.mime_type}
-                body={item.content.data.body ?? ''}
-                mediaKind={item.content.data.media_kind ?? 'file'}
-                sizeBytes={item.content.data.size_bytes}
-                width={item.content.data.width}
-                height={item.content.data.height}
-                thumbnailUri={item.content.data.thumbnail_uri}
+              <div class="body">{item.content.data.body}{#if item.edited}<span class="edited">(edited)</span>{/if}</div>
+            {/if}
+            {#if previewUrl && timelineStore.roomId}
+              <LinkPreview url={previewUrl} roomId={timelineStore.roomId} />
+            {/if}
+          {:else if item.content.kind === 'Media'}
+            <div class="block">
+              {#if album}
+                <AlbumGrid items={album} />
+              {:else if item.content.data.media_kind === 'audio'}
+                <AudioPlayer
+                  uri={item.content.data.uri}
+                  mimeType={item.content.data.mime_type}
+                  body={item.content.data.body ?? ''}
+                  sizeBytes={item.content.data.size_bytes}
+                  durationMs={item.content.data.duration_ms ?? null}
+                  waveform={item.content.data.waveform ?? null}
+                  voice={item.content.data.voice ?? false}
+                />
+              {:else}
+                <MediaView
+                  eventId={item.event_id}
+                  uri={item.content.data.uri}
+                  mimeType={item.content.data.mime_type}
+                  body={item.content.data.body ?? ''}
+                  mediaKind={item.content.data.media_kind ?? 'file'}
+                  sizeBytes={item.content.data.size_bytes}
+                  width={item.content.data.width}
+                  height={item.content.data.height}
+                  thumbnailUri={item.content.data.thumbnail_uri}
+                />
+              {/if}
+              {#if item.content.data.media_kind === 'image' && item.content.data.body && !isFileName(item.content.data.body)}
+                <div class="body caption">{item.content.data.body}{#if item.edited}<span class="edited">(edited)</span>{/if}</div>
+              {/if}
+            </div>
+          {:else if item.content.kind === 'Redacted'}
+            <div class="body muted">Message deleted</div>
+          {:else if item.content.kind === 'UnableToDecrypt'}
+            <div class="body muted">Waiting for this message. Verify this device to read it.</div>
+          {:else if item.content.kind === 'Poll'}
+            <div class="block"><PollView {item} poll={item.content.data} /></div>
+          {:else if item.content.kind === 'Location'}
+            <div class="block">
+              <LocationCard
+                geoUri={item.content.data.geo_uri}
+                description={item.content.data.description}
+                live={item.content.data.live ?? false}
+                liveUntil={item.content.data.live_until_millis ?? null}
               />
-            {/if}
-            {#if item.content.data.media_kind === 'image' && item.content.data.body && !isFileName(item.content.data.body)}
-              <div class="body caption">{item.content.data.body}{#if item.edited}<span class="edited">(edited)</span>{/if}</div>
-            {/if}
-          </div>
-        {:else if item.content.kind === 'Redacted'}
-          <div class="body muted">Message deleted</div>
-        {:else if item.content.kind === 'UnableToDecrypt'}
-          <div class="body muted">Waiting for this message. Verify this device to read it.</div>
-        {:else if item.content.kind === 'Poll'}
-          <div class="block"><PollView {item} poll={item.content.data} /></div>
-        {:else if item.content.kind === 'Location'}
-          <div class="block">
-            <LocationCard
-              geoUri={item.content.data.geo_uri}
-              description={item.content.data.description}
-              live={item.content.data.live ?? false}
-              liveUntil={item.content.data.live_until_millis ?? null}
-            />
-          </div>
-        {:else}
-          <div class="body muted">This message type is not supported yet.</div>
-        {/if}
+            </div>
+          {:else}
+            <div class="body muted">This message type is not supported yet.</div>
+          {/if}
 
-        {#if item.is_own && sending}
-          <div class="state sending" role="status" aria-label="Sending">Sending</div>
-        {:else if failed}
-          <div class="failed-actions">
-            <span class="err">Failed to send</span>
-            <button type="button" onclick={() => timelineStore.retry(item)}>Retry</button>
-            <button type="button" onclick={() => timelineStore.cancel(item)}>Discard</button>
-          </div>
-        {/if}
+          {#if item.is_own && sending}
+            <div class="state sending" role="status" aria-label="Sending">Sending</div>
+          {:else if failed}
+            <div class="failed-actions">
+              <span class="err">Failed to send</span>
+              <button type="button" onclick={() => timelineStore.retry(item)}>Retry</button>
+              <button type="button" onclick={() => timelineStore.cancel(item)}>Discard</button>
+            </div>
+          {/if}
 
-        {#if item.thread_summary && !inThread}
-          <button type="button" class="thread-chip" onclick={openThread} aria-label="Open thread, {item.thread_summary.reply_count} {item.thread_summary.reply_count === 1 ? 'reply' : 'replies'}">
-            <Icon icon={MessageSquare} size={16} />
-            <span>{item.thread_summary.reply_count} {item.thread_summary.reply_count === 1 ? 'reply' : 'replies'}</span>
-          </button>
-        {/if}
-        {#if (item.reactions ?? []).length > 0}
-          <div class="reactions">
-            {#each item.reactions ?? [] as r (r.key)}
-              <button
-                type="button"
-                class="chip"
-                class:mine={r.by_me}
-                onclick={() => void timelineStore.toggleReaction(item, r.key)}
-                aria-pressed={r.by_me}
-                aria-label="{r.key} {r.count}"
-                data-tooltip={joinNames(r.senders.map(nameOf))}
-                use:contextmenu={() => [{ id: 'who', label: 'See who reacted', icon: Users, onselect: () => openWho(r.key) }]}
-              >
-                <span class="pill"><span>{r.key}</span><span class="count">{r.count}</span></span>
-              </button>
-            {/each}
-          </div>
-        {/if}
+          {#if item.thread_summary && !inThread}
+            <button type="button" class="thread-chip" onclick={openThread} aria-label="Open thread, {item.thread_summary.reply_count} {item.thread_summary.reply_count === 1 ? 'reply' : 'replies'}">
+              <Icon icon={MessageSquare} size={16} />
+              <span>{item.thread_summary.reply_count} {item.thread_summary.reply_count === 1 ? 'reply' : 'replies'}</span>
+            </button>
+          {/if}
+          {#if (item.reactions ?? []).length > 0}
+            <div class="reactions">
+              {#each item.reactions ?? [] as r (r.key)}
+                <button
+                  type="button"
+                  class="chip"
+                  class:mine={r.by_me}
+                  onclick={() => void timelineStore.toggleReaction(item, r.key)}
+                  aria-pressed={r.by_me}
+                  aria-label="{r.key} {r.count}"
+                  data-tooltip={joinNames(r.senders.map(nameOf))}
+                  use:contextmenu={() => [{ id: 'who', label: 'See who reacted', icon: Users, onselect: () => openWho(r.key) }]}
+                >
+                  <span class="pill"><span>{r.key}</span><span class="count">{r.count}</span></span>
+                </button>
+              {/each}
+            </div>
+          {/if}
 
-        <span class="bubble-time">{time}{@render tick()}</span>
+          <span class="bubble-time">{time}{@render tick()}</span>
+        </div>
       </div>
       {#if seenAvatars}
         <div class="seen" data-tooltip="Seen by {joinNames(readerNames)}">
@@ -645,6 +653,13 @@
     .row:hover {
       background: var(--alloy-color-surface-hover);
     }
+    /* Bubbles are the surfaces: the row itself stays transparent (the delete/selection tints still show). */
+    .row[data-layout='bubbles']:hover:not(.selected):not(.highlighted) {
+      background: transparent;
+    }
+  }
+  .row[data-layout='bubbles']:focus-within:not(.selected):not(.highlighted) {
+    background: transparent;
   }
   .row.highlighted {
     background: var(--alloy-color-accent-subtle);
@@ -805,7 +820,7 @@
     color: var(--alloy-color-text-primary);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
-    line-height: 1.45;
+    line-height: var(--alloy-typography-line-height-normal);
   }
   .body.html {
     white-space: normal;
@@ -958,8 +973,11 @@
     align-items: center;
     padding: 2px var(--alloy-spacing-scale-2);
     border-radius: var(--alloy-radii-full);
-    border: 1px solid var(--alloy-color-border-prominent);
-    background: var(--alloy-color-surface-subtle);
+    border: 1px solid var(--alloy-color-border-subtle);
+    /* Opaque: a reaction is read at a glance, and it floats half over the bubble, so it cannot
+       borrow the surface behind it. */
+    background: var(--alloy-color-surface-elevated);
+    color: var(--alloy-color-text-primary);
     line-height: var(--alloy-typography-line-height-normal);
   }
   @media (hover: hover) {
@@ -970,6 +988,17 @@
   .chip.mine .pill {
     border-color: var(--alloy-color-accent-primary);
     background: var(--alloy-color-accent-subtle);
+  }
+  /* On the accent bubble the chip keeps its own solid plate; only the edge picks up the accent so
+     it still belongs to the message. */
+  .row.own[data-layout='bubbles'] .pill {
+    border-color: color-mix(
+      in srgb,
+      var(--alloy-color-accent-primary) 45%,
+      var(--alloy-color-border-subtle)
+    );
+    background: var(--alloy-color-surface-elevated);
+    color: var(--alloy-color-text-primary);
   }
   .count {
     color: var(--alloy-color-text-secondary);
@@ -982,11 +1011,13 @@
     display: none;
     align-items: center;
     gap: 2px;
-    padding: 2px;
-    background: var(--alloy-color-surface-elevated);
-    border: 1px solid var(--alloy-color-border-subtle);
-    border-radius: var(--alloy-radii-lg);
-    box-shadow: var(--alloy-elevation-sm);
+    padding: 3px;
+    background: var(--alloy-glass-sheen), var(--alloy-glass-fill-strong);
+    -webkit-backdrop-filter: var(--alloy-glass-filter);
+    backdrop-filter: var(--alloy-glass-filter);
+    border: 1px solid var(--alloy-glass-rim);
+    border-radius: var(--alloy-radii-2xl);
+    box-shadow: var(--alloy-glass-shadow-soft), var(--alloy-glass-highlight);
     z-index: 2;
   }
   @media (min-width: 900px) and (hover: hover) {
@@ -1045,19 +1076,28 @@
     display: flex;
     align-items: center;
     gap: var(--alloy-spacing-scale-3);
-    padding: var(--alloy-spacing-scale-3) var(--alloy-spacing-scale-4);
+    padding: var(--alloy-spacing-scale-4) var(--alloy-spacing-scale-4);
   }
+  /* A date is a rule across the conversation, not another floating chip. */
   .divider::before,
   .divider::after {
     content: '';
     flex: 1;
     height: 1px;
-    background: var(--alloy-color-border-prominent);
+    background: linear-gradient(90deg, transparent, var(--alloy-chat-rim));
+  }
+  .divider::after {
+    background: linear-gradient(90deg, var(--alloy-chat-rim), transparent);
   }
   .divider span {
-    font-size: var(--alloy-typography-size-sm);
+    padding: 0;
+    border: 0;
+    background: none;
+    font-size: var(--alloy-font-size-meta);
     font-weight: var(--alloy-typography-weight-semibold);
-    color: var(--alloy-color-text-secondary);
+    letter-spacing: var(--alloy-letter-spacing-caps);
+    text-transform: uppercase;
+    color: var(--alloy-color-text-muted);
     white-space: nowrap;
   }
   .system {
@@ -1070,7 +1110,7 @@
     height: 1px;
   }
 
-  /* Message layouts. Modern is the default; IRC and bubbles are chosen with prefs.messageLayout. */
+  /* Message layouts. Bubbles is the default (ADR 0013); modern and IRC stay available in prefs. */
   .bubble {
     display: contents;
   }
@@ -1124,8 +1164,16 @@
     min-width: 0;
   }
 
+  .row[data-layout='bubbles'] {
+    padding-top: 2px;
+    padding-bottom: 2px;
+  }
+  /* A new sender group starts a new breath; messages inside one group stay tight (ADR 0013). */
+  .row[data-layout='bubbles']:not(.grouped) {
+    padding-top: var(--alloy-spacing-scale-3);
+  }
   .row[data-layout='bubbles'] .gutter {
-    width: 36px;
+    width: 40px;
   }
   .row.own[data-layout='bubbles'] .gutter {
     display: none;
@@ -1136,22 +1184,62 @@
   .row.own[data-layout='bubbles'] .stack {
     align-items: flex-end;
   }
+  /* Quote and bubble are one stack: the wrapper is invisible by default, and a replied message
+     gives them a single shared column so both edges line up at a matched pair of tight corners. */
+  .row[data-layout='bubbles'] .message-stack {
+    display: contents;
+  }
+  .row.replied[data-layout='bubbles'] .message-stack {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    width: fit-content;
+    max-width: var(--alloy-bubble-max-width);
+    min-width: 0;
+  }
+  .row.replied[data-layout='bubbles'] .message-stack .bubble {
+    max-width: 100%;
+  }
+  .row[data-layout='bubbles'] .head {
+    margin-bottom: 2px;
+    font-size: var(--alloy-typography-size-sm);
+    line-height: var(--alloy-typography-line-height-tight);
+  }
   .row[data-layout='bubbles'] .bubble {
+    position: relative;
     display: flex;
     flex-direction: column;
     gap: 2px;
-    max-width: 70%;
-    padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
-    border-radius: var(--alloy-radii-lg);
-    background: var(--alloy-color-surface-subtle);
+    max-width: var(--alloy-bubble-max-width);
+    padding: var(--alloy-spacing-bubble-y) var(--alloy-spacing-bubble-x);
+    border: 1px solid color-mix(in srgb, var(--alloy-color-text-primary) 8%, transparent);
+    border-radius: var(--alloy-bubble-radius);
+    background: var(--alloy-bubble-other-surface);
+    color: var(--alloy-color-bubble-other-text);
   }
+  /* One flat saturated surface: no gradient, no top highlight, no coloured halo. The rim is the
+     only edge treatment, so the bubble reads as ink on the canvas rather than as a glass bead. */
   .row.own[data-layout='bubbles'] .bubble {
-    background: var(--alloy-color-accent-subtle);
+    border-color: color-mix(in srgb, var(--alloy-color-bubble-own-text) 12%, transparent);
+    background: var(--alloy-color-bubble-own-background);
+    color: var(--alloy-color-bubble-own-text);
+    box-shadow: none;
+  }
+  .row[data-layout='bubbles'] .bubble .body,
+  .row[data-layout='bubbles'] .bubble .edited,
+  .row[data-layout='bubbles'] .bubble .muted,
+  .row[data-layout='bubbles'] .bubble .state,
+  .row.own[data-layout='bubbles'] .thread-chip {
+    color: inherit;
+  }
+  .row[data-layout='bubbles'] .bubble .edited,
+  .row[data-layout='bubbles'] .bubble .muted {
+    opacity: 0.75;
+  }
+  .row.own[data-layout='bubbles'] .body.html :global(a) {
+    color: inherit;
   }
   /* Reactions sit on the bottom edge of the bubble, half over it, as in Messenger. */
-  .row[data-layout='bubbles'] .bubble {
-    position: relative;
-  }
   .row[data-layout='bubbles'] .bubble.has-reactions {
     margin-bottom: var(--alloy-spacing-scale-3);
   }
@@ -1168,10 +1256,16 @@
     right: var(--alloy-spacing-scale-2);
   }
   .row.grouped[data-layout='bubbles']:not(.own) .bubble {
-    border-top-left-radius: var(--alloy-radii-sm);
+    border-top-left-radius: var(--alloy-bubble-radius-tail);
   }
   .row.grouped.own[data-layout='bubbles'] .bubble {
-    border-top-right-radius: var(--alloy-radii-sm);
+    border-top-right-radius: var(--alloy-bubble-radius-tail);
+  }
+  /* The reply bubble continues the quote card above it: the junction is square on both sides, so
+     the pair reads as one stacked message with a header rather than as two rounded cards. */
+  .row.replied[data-layout='bubbles'] .bubble {
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
   }
   /* The time is always present: showing it only on hover grew the bubble and shifted every message below. */
   .row[data-layout='bubbles'] .bubble-time {
@@ -1180,9 +1274,14 @@
     font-size: var(--alloy-typography-size-xs);
     color: var(--alloy-color-text-muted);
   }
+  .row.own[data-layout='bubbles'] .bubble-time {
+    color: inherit;
+    opacity: 0.7;
+  }
   .row.jumbo[data-layout='bubbles'] .bubble,
   .row.bare[data-layout='bubbles'] .bubble {
     padding: 0;
+    border: 0;
     background: none;
   }
   .row.highlighted[data-layout='bubbles'] .bubble {
@@ -1230,9 +1329,6 @@
     }
     .block {
       max-width: 100%;
-    }
-    .row[data-layout='bubbles'] .bubble {
-      max-width: 80%;
     }
     .row[data-layout='irc'] {
       --irc-name-width: 6.5rem;

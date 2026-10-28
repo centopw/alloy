@@ -5,12 +5,12 @@
   import TagChip from '../tags/TagChip.svelte';
   import TagEditDialog from '../tags/TagEditDialog.svelte';
   import Icon from '$lib/icons/Icon.svelte';
-  import { Archive, ArchiveRestore, ArrowUpDown, Bell, BellOff, Check, CheckCheck, ChevronDown, ChevronUp, Compass, Copy, Ellipsis, Info, LogOut, Lock, Mail, Palette, Pencil, Pin, PinOff, Plus, RefreshCw, Search, Settings, StickyNote, Tag, Trash2, X } from '$lib/icons';
+  import { Archive, ArchiveRestore, ArrowUpDown, Bell, BellOff, Check, CheckCheck, ChevronDown, ChevronUp, Compass, Copy, Ellipsis, Info, LogOut, Lock, Mail, Palette, PanelLeft, Pencil, Pin, PinOff, Plus, RefreshCw, Search, Settings, StickyNote, Tag, Trash2, X } from '$lib/icons';
   import { client } from '$lib/ipc';
   import { contextmenu } from '$lib/platform/contextmenu';
   import { pullToRefresh } from '$lib/platform/pullToRefresh';
   import { shortcutLabel } from '$lib/platform/shortcuts';
-  import { contextMenu, type MenuItem } from '$lib/stores/contextmenu.svelte';
+  import type { MenuItem } from '$lib/stores/contextmenu.svelte';
   import { expect } from '$lib/stores/errors';
   import { roomInfo } from '$lib/stores/roomInfo.svelte';
   import { ROOM_FILTERS, roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
@@ -28,7 +28,6 @@
   import { formatListTime } from '$lib/content/format';
   import { highlightRuns } from '$lib/content/searchHighlight';
   import RenameRoomDialog from './RenameRoomDialog.svelte';
-  import UserPanel from './UserPanel.svelte';
   import { copyItems, notifyItems, openMenuFrom } from './roomMenus';
   import RoomSwipe from './RoomSwipe.svelte';
   import { draftsStore } from '$lib/stores/drafts.svelte';
@@ -41,8 +40,10 @@
     onnew?: () => void;
     onbrowse?: () => void;
     onsettings?: (section?: 'tags') => void;
+    /** Hides the room list on desktop; phones have no room to collapse into. */
+    oncollapse?: () => void;
   }
-  let { onselect, onnew, onbrowse, onsettings }: Props = $props();
+  let { onselect, onnew, onbrowse, onsettings, oncollapse }: Props = $props();
 
   type RoomItem = (typeof roomsStore.rooms)[number];
 
@@ -57,6 +58,10 @@
     unread: 'Unread first',
     tag: 'By tag',
   };
+  // The three filters people actually flip between; the rest stay in the More menu.
+  const PRIMARY_FILTERS = ROOM_FILTERS.filter(
+    (f) => f.value === 'all' || f.value === 'unread' || f.value === 'direct',
+  );
 
   async function answerInvite(roomId: string, accept: boolean) {
     inviteBusy = roomId;
@@ -189,15 +194,6 @@
     }));
   }
 
-  function openSortMenu(event: MouseEvent) {
-    const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
-    contextMenu.open(
-      sortItems(),
-      { x: box.left, y: box.bottom },
-      { anchor: { x: box.left, y: box.top, width: box.width, height: box.height }, ariaLabel: 'Sort rooms' },
-    );
-  }
-
   /** Marks every joined room in `list` with unread messages as read, through the same path as the room menu. */
   function markAllRead(list: readonly RoomItem[]) {
     for (const r of list) if (r.membership !== 'Invited' && roomsStore.unreadOf(r) > 0) void markRead(r.id);
@@ -207,14 +203,19 @@
     return list.some((r) => r.membership !== 'Invited' && roomsStore.unreadOf(r) > 0);
   }
 
+  /** Header add button: start a room, or discover public ones on desktop. */
+  function createItems(): MenuItem[] {
+    const items: MenuItem[] = [{ id: 'new-room', label: 'New room...', icon: Plus, onselect: () => onnew?.() }];
+    if (!viewport.isPhone) {
+      items.push({ id: 'browse', label: 'Browse public rooms...', icon: Compass, onselect: () => onbrowse?.() });
+    }
+    return items;
+  }
+
   /** Pane header and blank list area: room creation, discovery and read state. */
   function paneItems(): MenuItem[] {
-    const browse: MenuItem[] = viewport.isPhone
-      ? []
-      : [{ id: 'browse', label: 'Browse public rooms...', icon: Compass, onselect: () => onbrowse?.() }];
     return [
-      { id: 'new-room', label: 'New room...', icon: Plus, onselect: () => onnew?.() },
-      ...browse,
+      ...createItems(),
       { separator: true },
       {
         id: 'mark-all',
@@ -226,22 +227,33 @@
     ];
   }
 
-  /** Filter chip menu: read state for the rows in view, and a shortcut to show only this filter. */
-  function filterItems(filter: (typeof ROOM_FILTERS)[number]): MenuItem[] {
+  /** List controls: filter, sort, and the read state of what is in view. */
+  function filterMenuItems(): MenuItem[] {
     return [
+      ...ROOM_FILTERS.map(
+        (f): MenuItem => ({
+          id: `filter-${f.value}`,
+          label: f.label,
+          selected: roomsStore.filter === f.value,
+          onselect: () => (roomsStore.filter = f.value),
+        }),
+      ),
+      { separator: true },
+      {
+        id: 'sort',
+        label: 'Sort rooms',
+        icon: ArrowUpDown,
+        submenu: {
+          items: () => sortItems(),
+        },
+      },
+      { separator: true },
       {
         id: 'mark-view',
         label: 'Mark all in view as read',
         icon: CheckCheck,
         disabled: !hasUnread(roomsStore.visible),
         onselect: () => markAllRead(roomsStore.visible),
-      },
-      { separator: true },
-      {
-        id: `only-${filter.value}`,
-        label: `Show only ${filter.label}`,
-        disabled: roomsStore.filter === filter.value,
-        onselect: () => (roomsStore.filter = filter.value),
       },
     ];
   }
@@ -317,6 +329,13 @@
 
   const scopeSpace = $derived(ui.scope === 'home' ? null : (roomsStore.rooms.find((r) => r.id === ui.scope) ?? null));
   const scopeTitle = $derived(scopeSpace ? roomTitle(scopeSpace) : 'Messages');
+  const filterLabel = $derived(ROOM_FILTERS.find((f) => f.value === roomsStore.filter)?.label ?? 'All');
+  const moreFilterActive = $derived(!PRIMARY_FILTERS.some((f) => f.value === roomsStore.filter));
+  const unreadRoomsCount = $derived(
+    roomsStore.rooms.filter(
+      (r) => !r.is_space && r.membership !== 'Invited' && roomsStore.unreadOf(r) > 0,
+    ).length,
+  );
 
   const invites = $derived(roomsStore.visible.filter((r) => r.membership === 'Invited'));
   const joined = $derived(roomsStore.visible.filter((r) => r.membership !== 'Invited'));
@@ -480,7 +499,10 @@
   {#if prefs.roomSort === 'tag'}
     {#each groupRoomsByTag(list, tagDefs) as group (group.tag?.id ?? '')}
       <section class="tag-group" aria-label={group.tag?.name ?? 'Untagged'}>
-        <h4>{group.tag?.name ?? 'Untagged'}</h4>
+        <h4>
+          <span>{group.tag?.name ?? 'Untagged'}</span>
+          <span class="section-count">{group.rooms.length}</span>
+        </h4>
         <ul>
           {#each group.rooms as r (r.id)}
             <li>{@render listRow(r)}</li>
@@ -500,24 +522,43 @@
 <section class="sidebar" aria-label="Rooms">
   <header class="head" use:contextmenu={paneItems}>
     <h2 class="scope" title={scopeTitle}>{viewport.isPhone ? 'Chats' : scopeTitle}</h2>
-    <button
-      type="button"
-      class="icon"
-      aria-label="Refresh"
-      data-tooltip={refreshStore.busy ? 'Refreshing' : `Refresh (${shortcutLabel('R')})`}
-      disabled={refreshStore.busy}
-      onclick={() => void refreshStore.run()}
-    >
-      <span class:spin={refreshStore.busy}><Icon icon={RefreshCw} size={viewport.isPhone ? 20 : 16} /></span>
-    </button>
-    {#if !viewport.isPhone}
-      <button type="button" class="icon" aria-label="Browse public rooms" onclick={() => onbrowse?.()}>
-        <Icon icon={Compass} size={20} />
-      </button>
+    {#if unreadRoomsCount > 0}
+      <span class="scope-meta">{unreadRoomsCount} unread</span>
     {/if}
-    <button type="button" class="icon" aria-label="New room" onclick={() => onnew?.()}>
-      <Icon icon={Plus} size={20} />
-    </button>
+    <div class="actions">
+      <button
+        type="button"
+        class="icon"
+        aria-label="Refresh"
+        data-tooltip={refreshStore.busy ? 'Refreshing' : `Refresh (${shortcutLabel('R')})`}
+        disabled={refreshStore.busy}
+        onclick={() => void refreshStore.run()}
+      >
+        <span class:spin={refreshStore.busy}><Icon icon={RefreshCw} size={20} /></span>
+      </button>
+      <button
+        type="button"
+        class="icon"
+        aria-label="New room or browse"
+        aria-haspopup="menu"
+        data-tooltip="New room or browse"
+        use:contextmenu={createItems}
+        onclick={(e) => openMenuFrom(e.currentTarget as HTMLElement, createItems(), 'Create or browse')}
+      >
+        <Icon icon={Plus} size={20} />
+      </button>
+      {#if oncollapse}
+        <button
+          type="button"
+          class="icon"
+          aria-label="Hide room list"
+          data-tooltip="Hide room list"
+          onclick={() => oncollapse?.()}
+        >
+          <Icon icon={PanelLeft} size={20} />
+        </button>
+      {/if}
+    </div>
   </header>
 
   {#if refreshStore.busy}
@@ -528,18 +569,22 @@
 
   <div class="search">
     <Icon icon={Search} size={16} />
-    <input type="search" placeholder="Search rooms" aria-label="Search rooms" bind:value={roomsStore.query} />
+    <input
+      type="search"
+      placeholder="Search everything"
+      aria-label="Search rooms and messages"
+      bind:value={roomsStore.query}
+    />
     {#if !viewport.isPhone}<kbd>{shortcutLabel('K')}</kbd>{/if}
   </div>
 
   <div class="filters">
-    <div class="chips" role="group" aria-label="Show rooms">
-      {#each ROOM_FILTERS as f (f.value)}
+    <div class="filter-tabs" role="group" aria-label="Filter rooms">
+      {#each PRIMARY_FILTERS as f (f.value)}
         <button
           type="button"
-          class="chip"
-          use:contextmenu={() => filterItems(f)}
-          class:active={roomsStore.filter === f.value}
+          class="filter-tab"
+          class:on={roomsStore.filter === f.value}
           aria-pressed={roomsStore.filter === f.value}
           onclick={() => (roomsStore.filter = f.value)}
         >
@@ -547,8 +592,21 @@
         </button>
       {/each}
     </div>
-    <button type="button" class="icon sort" aria-label="Sort rooms" onclick={openSortMenu} use:contextmenu={sortItems}>
-      <Icon icon={ArrowUpDown} size={16} />
+    <button
+      type="button"
+      class="filter-more"
+      class:on={moreFilterActive}
+      aria-pressed={moreFilterActive}
+      aria-haspopup="menu"
+      aria-label={moreFilterActive ? `Room list options, filter ${filterLabel}` : 'Room list options'}
+      data-tooltip="Filter and sort"
+      use:contextmenu={filterMenuItems}
+      onclick={(e) => openMenuFrom(e.currentTarget as HTMLElement, filterMenuItems(), 'Room list options')}
+    >
+      <Icon icon={ChevronDown} size={16} />
+      {#if moreFilterActive}
+        <span class="tab-dot" aria-hidden="true"></span>
+      {/if}
     </button>
   </div>
 
@@ -576,7 +634,7 @@
     {#if prefs.roomListSections}
       {#if invites.length > 0}
         <section class="group" aria-label="Invites">
-          <h3>Invites</h3>
+          <h3><span>Invites</span><span class="section-count">{invites.length}</span></h3>
           <ul>
             {#each invites as r (r.id)}
               <li>{@render inviteRow(r)}</li>
@@ -587,21 +645,21 @@
 
       {#if pinned.length > 0}
         <section class="group" aria-label="Pinned">
-          <h3>Pinned</h3>
+          <h3><span>Pinned</span><span class="section-count">{pinned.length}</span></h3>
           {@render roomList(pinned)}
         </section>
       {/if}
 
       {#if rooms.length > 0}
         <section class="group" aria-label="Rooms">
-          <h3>Rooms</h3>
+          <h3><span>Rooms</span><span class="section-count">{rooms.length}</span></h3>
           {@render roomList(rooms)}
         </section>
       {/if}
 
       {#if direct.length > 0}
         <section class="group" aria-label="People">
-          <h3>People</h3>
+          <h3><span>People</span><span class="section-count">{direct.length}</span></h3>
           {@render roomList(direct)}
         </section>
       {/if}
@@ -613,7 +671,7 @@
 
     {#if searching}
       <section class="group" aria-label="Messages">
-        <h3>Messages</h3>
+        <h3><span>Messages</span><span class="section-count">{globalSearch.hits.length}</span></h3>
         {#if globalSearch.error}
           <p class="error" role="alert">{globalSearch.error}</p>
         {:else if globalSearch.loading && globalSearch.hits.length === 0}
@@ -653,7 +711,6 @@
   </div>
 
   <UpdateNotice />
-  <UserPanel onsettings={() => onsettings?.()} />
 </section>
 
 {#if renameRoomId}
@@ -691,18 +748,24 @@
     min-width: 0;
     min-height: 0;
     height: 100%;
-    background: var(--alloy-color-surface-panel);
+    background: transparent;
     color: var(--alloy-color-text-secondary);
   }
   .head {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: var(--alloy-spacing-scale-2);
     flex-shrink: 0;
     height: var(--alloy-layout-header-height);
-    padding: 0 var(--alloy-layout-gutter);
-    border-bottom: 1px solid var(--alloy-color-border-subtle);
+    padding: 0 var(--alloy-spacing-scale-2);
+    border-bottom: 1px solid var(--alloy-chat-rim);
+  }
+  .actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex: none;
+    margin-left: auto;
   }
   .scope {
     margin: 0;
@@ -710,90 +773,169 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: var(--alloy-typography-size-base);
+    font-size: var(--alloy-font-size-title);
     font-weight: var(--alloy-typography-weight-semibold);
+    letter-spacing: -0.015em;
     color: var(--alloy-color-text-primary);
   }
-  /* A full pill makes the search field read as the sidebar's primary quick-switcher. */
+  /* A live read of the list: one glance answers "is anything waiting for me?". */
+  .scope-meta {
+    flex: none;
+    padding: 2px var(--alloy-spacing-scale-2);
+    border: 1px solid var(--alloy-glass-rim);
+    border-radius: var(--alloy-radii-full);
+    background: var(--alloy-glass-control);
+    color: var(--alloy-color-text-secondary);
+    font-size: var(--alloy-font-size-meta);
+    font-weight: var(--alloy-typography-weight-medium);
+    white-space: nowrap;
+  }
+  /* A quiet field: the sidebar's quick-switcher, not a toolbar. */
   .search {
     display: flex;
     align-items: center;
     gap: var(--alloy-spacing-scale-2);
     flex-shrink: 0;
-    margin: var(--alloy-spacing-scale-3) var(--alloy-layout-row-inset) var(--alloy-spacing-scale-2);
-    padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x);
-    border: 1px solid var(--alloy-color-border-subtle);
-    border-radius: var(--alloy-radii-full);
-    background: var(--alloy-color-surface-canvas);
+    height: 34px;
+    margin: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-2) 6px;
+    padding: 0 var(--alloy-spacing-scale-2);
+    border: 1px solid var(--alloy-chat-rim);
+    border-radius: var(--alloy-radii-lg);
+    background: var(--alloy-glass-control);
     color: var(--alloy-color-text-muted);
-    transition: border-color var(--alloy-motion-duration-fast) ease;
+    transition:
+      border-color var(--alloy-motion-duration-fast) ease,
+      background var(--alloy-motion-duration-fast) ease;
   }
   .search:hover {
-    border-color: var(--alloy-color-border-prominent);
+    border-color: var(--alloy-glass-rim-strong);
+    background: var(--alloy-glass-control-hover);
   }
   .search:focus-within {
-    outline: 2px solid var(--alloy-color-accent-primary);
+    border-color: color-mix(in srgb, var(--alloy-color-accent-primary) 55%, transparent);
+    background: var(--alloy-glass-fill-strong);
+    outline: 2px solid color-mix(in srgb, var(--alloy-color-accent-primary) 18%, transparent);
+    outline-offset: 0;
   }
   .search input {
     flex: 1;
     min-width: 0;
-    padding: var(--alloy-spacing-scale-1) 0;
+    padding: 0;
     border: 0;
     background: transparent;
     color: var(--alloy-color-text-primary);
     font: inherit;
+    font-size: var(--alloy-font-size-preview);
+  }
+  .search input::placeholder {
+    color: var(--alloy-color-text-muted);
   }
   .search input:focus {
     outline: none;
   }
   .search kbd {
-    font-size: var(--alloy-typography-size-xs);
+    flex: none;
+    padding: 3px 5px;
+    border: 1px solid var(--alloy-glass-rim);
+    border-radius: 5px;
+    background: color-mix(in srgb, var(--alloy-color-text-primary) 4%, transparent);
+    font-family: inherit;
+    font-size: 10px;
+    line-height: 1;
     color: var(--alloy-color-text-muted);
   }
   .filters {
     display: flex;
     align-items: center;
-    gap: var(--alloy-spacing-scale-1);
-    margin: 0 var(--alloy-layout-row-inset) var(--alloy-spacing-scale-2);
+    gap: var(--alloy-spacing-scale-2);
+    margin: 0 var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-2);
   }
-  /* One bordered container turns the loose filter links into a segmented toggle. */
-  .chips {
+  /* A segmented control for the three views people flip between. Everything else — the remaining
+     filters, sorting, bulk read state — sits behind the chevron so the list keeps the room. */
+  .filter-tabs {
     display: flex;
-    flex: 1;
-    min-width: 0;
+    flex: 1 1 auto;
+    align-items: center;
     gap: 2px;
-    overflow-x: auto;
-    scrollbar-width: none;
+    min-width: 0;
     padding: 2px;
-    border: 1px solid var(--alloy-color-border-subtle);
-    border-radius: var(--alloy-radii-md);
-    background: var(--alloy-color-surface-canvas);
+    border: 1px solid var(--alloy-chat-rim);
+    border-radius: var(--alloy-radii-lg);
+    background: var(--alloy-glass-control);
   }
-  .chips::-webkit-scrollbar {
-    display: none;
-  }
-  .filters .sort {
-    flex: none;
-  }
-  .chip {
-    flex: none;
-    height: 26px;
-    padding: 0 6px;
+  .filter-tab {
+    position: relative;
+    display: inline-flex;
+    flex: 1 1 0;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    height: 24px;
+    padding: 0 var(--alloy-spacing-scale-2);
+    overflow: hidden;
     border: 0;
-    border-radius: var(--alloy-radii-sm);
+    border-radius: var(--alloy-radii-md);
     background: transparent;
     color: var(--alloy-color-text-secondary);
     font: inherit;
-    font-size: var(--alloy-typography-size-sm);
+    font-size: var(--alloy-font-size-preview);
+    font-weight: var(--alloy-typography-weight-medium);
+    white-space: nowrap;
+    text-overflow: ellipsis;
     cursor: pointer;
+    transition:
+      background var(--alloy-motion-duration-fast) ease,
+      color var(--alloy-motion-duration-fast) ease,
+      box-shadow var(--alloy-motion-duration-fast) ease;
   }
-  .chip:hover {
-    background: var(--alloy-color-surface-hover);
+  .filter-tab:hover {
+    background: var(--alloy-glass-control-hover);
     color: var(--alloy-color-text-primary);
   }
-  .chip.active {
-    background: var(--alloy-color-accent-subtle);
+  .filter-tab.on {
+    background: var(--alloy-color-accent-fill);
+    color: var(--alloy-color-text-on-accent);
+  }
+  /* The menu trigger is a quiet icon button beside the control, not a fourth segment: an empty
+     segment made the switch look unfinished on wide screens. */
+  .filter-more {
+    position: relative;
+    display: inline-grid;
+    flex: none;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--alloy-radii-md);
+    background: transparent;
+    color: var(--alloy-color-text-muted);
+    cursor: pointer;
+    transition:
+      background var(--alloy-motion-duration-fast) ease,
+      color var(--alloy-motion-duration-fast) ease;
+  }
+  .filter-more:hover {
+    background: var(--alloy-glass-control-hover);
+    color: var(--alloy-color-text-primary);
+  }
+  .filter-more.on {
+    background: var(--alloy-glass-control);
     color: var(--alloy-color-accent-primary);
+  }
+  /* A filter outside the segmented set is on; the dot is the only place that can show it. */
+  .tab-dot {
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    width: 4px;
+    height: 4px;
+    border-radius: var(--alloy-radii-full);
+    background: var(--alloy-color-accent-primary);
+  }
+  .filter-tab:focus-visible {
+    outline: 2px solid var(--alloy-color-accent-primary);
+    outline-offset: 1px;
   }
   .tag-chip {
     display: contents;
@@ -813,16 +955,34 @@
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    padding: 0 var(--alloy-layout-row-inset) var(--alloy-spacing-scale-2);
+    padding: 0 var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-2);
   }
   .group h3,
   .group h4 {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--alloy-spacing-scale-2);
     margin: 0;
-    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-row-pad-x) var(--alloy-spacing-scale-1);
-    font-size: var(--alloy-typography-size-xs);
+    padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-2) 2px;
+    font-size: var(--alloy-font-size-meta);
     font-weight: var(--alloy-typography-weight-semibold);
+    letter-spacing: var(--alloy-letter-spacing-caps);
     text-transform: uppercase;
     color: var(--alloy-color-text-muted);
+  }
+  .group > h3:first-child {
+    padding-top: var(--alloy-spacing-scale-1);
+  }
+  .section-count {
+    padding: 1px 6px;
+    border-radius: var(--alloy-radii-full);
+    background: var(--alloy-glass-control);
+    font-size: 10px;
+    font-weight: var(--alloy-typography-weight-semibold);
+    letter-spacing: 0;
+    font-variant-numeric: tabular-nums;
+    color: var(--alloy-color-text-secondary);
   }
   .group ul {
     list-style: none;
@@ -830,7 +990,7 @@
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-spacing-scale-1);
+    gap: 2px;
   }
   /* Named `.pinned`, not `.fixed`: Tailwind's utilities layer emits a global `.fixed{position:fixed}`
      and a bare `.fixed` class would turn every avatar/marks container into a viewport-fixed box. */
@@ -854,42 +1014,48 @@
     gap: var(--alloy-spacing-scale-2);
     width: 100%;
     min-width: 0;
-    padding: var(--alloy-spacing-scale-1) var(--alloy-layout-row-pad-x);
-    border: 0;
-    border-radius: var(--alloy-radii-md);
+    min-height: 48px;
+    box-sizing: border-box;
+    padding: 6px var(--alloy-spacing-scale-2);
+    border: 1px solid transparent;
+    border-radius: var(--alloy-radii-lg);
     background: transparent;
-    color: inherit;
+    color: var(--alloy-color-text-secondary);
     font: inherit;
     text-align: left;
+    transition:
+      background var(--alloy-motion-duration-fast) ease,
+      border-color var(--alloy-motion-duration-fast) ease,
+      box-shadow var(--alloy-motion-duration-fast) ease;
   }
   button.row {
     cursor: pointer;
   }
   button.row:hover {
-    background: var(--alloy-color-surface-subtle);
-    color: var(--alloy-color-text-primary);
+    background: var(--alloy-glass-control);
   }
+  /* The open room keeps a solid accent rail instead of a second glass card: on a glass pane,
+     another translucent fill reads as a smudge, while the rail reads as a fixed position. */
   button.row.active {
-    background: var(--alloy-color-surface-hover);
+    background: color-mix(in srgb, var(--alloy-color-accent-primary) 9%, transparent);
     color: var(--alloy-color-text-primary);
   }
-  /* The selected room carries a 3 px accent bar, matching the rail's active pill. */
   button.row.active::before {
     content: '';
     position: absolute;
-    left: 0;
     top: 50%;
-    translate: 0 -50%;
+    left: 3px;
     width: 3px;
-    height: 60%;
+    height: 20px;
     border-radius: var(--alloy-radii-full);
     background: var(--alloy-color-accent-primary);
+    translate: 0 -50%;
   }
   .row.unread {
     color: var(--alloy-color-text-primary);
   }
   .row.unread .title {
-    font-weight: var(--alloy-typography-weight-medium);
+    color: var(--alloy-color-text-primary);
   }
   .title {
     flex: 1;
@@ -897,7 +1063,12 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: var(--alloy-typography-size-sm);
+    font-size: var(--alloy-font-size-row);
+    font-weight: var(--alloy-typography-weight-semibold);
+    letter-spacing: -0.005em;
+  }
+  .row:not(.unread):not(.active) .title {
+    font-weight: var(--alloy-typography-weight-medium);
   }
   .row.invite {
     align-items: flex-start;
@@ -920,8 +1091,13 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: var(--alloy-typography-size-xs);
+    font-size: var(--alloy-font-size-preview);
+    line-height: 1.35;
     color: var(--alloy-color-text-secondary);
+  }
+  .row.muted .preview,
+  .row.muted .title {
+    color: var(--alloy-color-text-muted);
   }
   .row.muted {
     color: var(--alloy-color-text-muted);
@@ -940,7 +1116,7 @@
     min-height: 44px;
     padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x);
     border: 0;
-    border-radius: var(--alloy-radii-md);
+    border-radius: var(--alloy-glass-radius-control);
     background: transparent;
     color: inherit;
     font: inherit;
@@ -948,7 +1124,7 @@
     cursor: pointer;
   }
   .hit:hover {
-    background: var(--alloy-color-surface-subtle);
+    background: var(--alloy-glass-control);
   }
   .hit-meta {
     display: flex;
@@ -969,13 +1145,14 @@
     display: flex;
     justify-content: space-between;
     gap: var(--alloy-spacing-scale-2);
-    font-weight: var(--alloy-typography-weight-medium);
-    font-size: var(--alloy-typography-size-sm);
+    font-weight: var(--alloy-typography-weight-semibold);
+    font-size: var(--alloy-font-size-row);
   }
   .hit-room time {
     flex: none;
     font-weight: var(--alloy-typography-weight-regular);
-    font-size: var(--alloy-typography-size-xs);
+    font-size: var(--alloy-font-size-meta);
+    font-variant-numeric: tabular-nums;
     color: var(--alloy-color-text-muted);
   }
   .hit-body {
@@ -984,7 +1161,8 @@
     line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
-    font-size: var(--alloy-typography-size-xs);
+    font-size: var(--alloy-font-size-preview);
+    line-height: 1.4;
     color: var(--alloy-color-text-secondary);
   }
   .hit-sender {
@@ -1011,9 +1189,9 @@
     width: 28px;
     height: 28px;
     padding: 0;
-    border: 0;
+    border: 1px solid var(--alloy-glass-rim);
     border-radius: var(--alloy-radii-full);
-    background: var(--alloy-color-surface-hover);
+    background: var(--alloy-glass-fill-strong);
     color: var(--alloy-color-text-secondary);
     translate: 0 -50%;
     cursor: pointer;
@@ -1086,8 +1264,8 @@
   .icon {
     display: grid;
     place-items: center;
-    width: 28px;
-    height: 28px;
+    width: 32px;
+    height: 32px;
     padding: 0;
     border: 0;
     border-radius: var(--alloy-radii-full);
@@ -1095,9 +1273,13 @@
     color: var(--alloy-color-text-secondary);
     cursor: pointer;
   }
-  .icon:hover {
-    background: var(--alloy-color-surface-hover);
+  .icon:hover:not(:disabled) {
+    background: var(--alloy-glass-control-hover);
     color: var(--alloy-color-text-primary);
+  }
+  .icon:disabled {
+    cursor: default;
+    opacity: 0.55;
   }
   .empty {
     margin: var(--alloy-layout-section-gap) var(--alloy-layout-row-pad-x);
@@ -1124,12 +1306,14 @@
     min-height: 20px;
   }
   .time {
-    font-size: var(--alloy-typography-size-xs);
+    font-size: var(--alloy-font-size-meta);
+    font-variant-numeric: tabular-nums;
     color: var(--alloy-color-text-muted);
     white-space: nowrap;
   }
   .row.unread .time {
     color: var(--alloy-color-accent-primary);
+    font-weight: var(--alloy-typography-weight-semibold);
   }
   @media (max-width: 899px) {
     .head {
@@ -1159,27 +1343,52 @@
       margin-left: var(--alloy-layout-gutter);
       margin-right: var(--alloy-layout-gutter);
     }
-    .chip {
-      min-height: 44px;
-      min-width: 44px;
-      height: auto;
+    .filter-tabs {
+      gap: var(--alloy-spacing-scale-1);
+      padding: 0;
+      border: 0;
+      background: transparent;
+    }
+    .filter-tab {
+      height: 44px;
+      padding: 0 var(--alloy-spacing-scale-3);
+      border-radius: var(--alloy-radii-full);
+      font-size: var(--alloy-font-size-row);
+    }
+    .filter-more {
+      width: 44px;
+      height: 44px;
+      border-radius: var(--alloy-radii-full);
     }
     .groups {
       padding: 0 calc(var(--alloy-layout-gutter) - var(--alloy-layout-row-pad-x)) var(--alloy-spacing-scale-2);
       overscroll-behavior: contain;
       -webkit-overflow-scrolling: touch;
     }
-    .group h3 {
+    .group h3,
+    .group h4 {
       display: flex;
       align-items: center;
       box-sizing: border-box;
       height: 40px;
       padding: 0 var(--alloy-layout-row-pad-x);
     }
+    .group > h3:first-child {
+      padding-top: 0;
+    }
     button.row {
-      min-height: 44px;
+      min-height: 56px;
       box-sizing: border-box;
       padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x);
+    }
+    .title {
+      font-size: var(--alloy-typography-size-base);
+    }
+    .preview {
+      font-size: var(--alloy-font-size-row);
+    }
+    .time {
+      font-size: var(--alloy-font-size-preview);
     }
     button.row:active {
       background: var(--alloy-color-surface-hover);

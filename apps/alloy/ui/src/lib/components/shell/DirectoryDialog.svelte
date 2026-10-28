@@ -242,7 +242,9 @@
       padding: var(--alloy-spacing-scale-2) var(--alloy-layout-gutter);
       border: 0;
       border-radius: 0;
-      background: var(--alloy-color-surface-elevated);
+      background: var(--alloy-glass-fill-strong);
+      -webkit-backdrop-filter: var(--alloy-glass-filter);
+      backdrop-filter: var(--alloy-glass-filter);
     }
     .results {
       max-height: none;

@@ -288,7 +288,8 @@
     flex-direction: column;
     min-height: 0;
     flex: 1;
-    background: var(--alloy-chat-background, none), var(--alloy-color-surface-canvas);
+    /* The chat pane is the glass card; the timeline stays clear so messages sit on it. */
+    background: var(--alloy-chat-background, none), transparent;
   }
   .viewport {
     position: relative;
@@ -322,13 +323,15 @@
     width: 40px;
     height: 40px;
     border-radius: var(--alloy-radii-full);
-    border: 1px solid var(--alloy-color-border-prominent);
-    background: var(--alloy-color-surface-elevated);
+    border: 1px solid var(--alloy-glass-rim);
+    background: var(--alloy-glass-sheen), var(--alloy-glass-fill-strong);
+    -webkit-backdrop-filter: var(--alloy-glass-filter);
+    backdrop-filter: var(--alloy-glass-filter);
     color: var(--alloy-color-text-primary);
     display: grid;
     place-items: center;
     cursor: pointer;
-    box-shadow: var(--alloy-elevation-md);
+    box-shadow: var(--alloy-glass-shadow-soft), var(--alloy-glass-highlight);
   }
   .badge {
     position: absolute;
