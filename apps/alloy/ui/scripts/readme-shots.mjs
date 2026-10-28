@@ -1,30 +1,24 @@
 #!/usr/bin/env node
 /**
- * Regenerates the README screenshots from the built UI running on its built-in demo data (no server,
- * no account): `pnpm build && node scripts/readme-shots.mjs`. Needs Chrome (CHROME_PATH to override).
+ * Regenerates the README screenshots from the UI running on its demo engine (no server, no account):
+ * `node scripts/readme-shots.mjs`. Needs Chrome (CHROME_PATH to override).
  * Output: docs/assets/screenshots/*.png
  */
 import puppeteer from 'puppeteer-core';
-import http from 'node:http';
 import fs from 'node:fs';
-import { resolve, dirname, extname } from 'node:path';
+import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { startDevServer, waitForShell } from './dev-server.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const build = resolve(__dirname, '../build');
 const out = resolve(__dirname, '../../../../docs/assets/screenshots');
 const CHROME = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const PORT = 5198;
 fs.mkdirSync(out, { recursive: true });
 
-const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2' };
-const server = http.createServer((req, res) => {
-  let p = resolve(build, '.' + decodeURIComponent(req.url.split('?')[0]));
-  if (!p.startsWith(build) || !fs.existsSync(p) || fs.statSync(p).isDirectory()) p = resolve(build, 'index.html');
-  res.writeHead(200, { 'content-type': types[extname(p)] ?? 'application/octet-stream' });
-  fs.createReadStream(p).pipe(res);
-});
-await new Promise((r) => server.listen(PORT, r));
+// The demo engine is a development-only path (see src/lib/ipc/index.ts), so run the dev server.
+const server = await startDevServer(PORT);
+const url = server.url;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox'] });
@@ -40,8 +34,8 @@ try {
   // --- desktop
   const page = await browser.newPage();
   await page.setViewport({ width: 1360, height: 840, deviceScaleFactor: 2 });
-  await page.goto(`http://localhost:${PORT}/`);
-  await page.waitForSelector('button.row', { timeout: 20000 });
+  await page.goto(url);
+  await waitForShell(page);
   await sleep(800);
   await clickText(page, 'button.row', 'Alloy Core Dev');
   await sleep(1200);
@@ -84,8 +78,8 @@ try {
   // --- phone
   const phone = await browser.newPage();
   await phone.setViewport({ width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
-  await phone.goto(`http://localhost:${PORT}/`);
-  await phone.waitForSelector('button.row', { timeout: 20000 });
+  await phone.goto(url);
+  await waitForShell(phone);
   await sleep(800);
   await shot(phone, 'phone-chats');
   await clickText(phone, 'button.row', 'Alloy Core Dev');
@@ -95,5 +89,5 @@ try {
   console.log(`screenshots written to ${out}`);
 } finally {
   await browser.close();
-  server.close();
+  server.stop();
 }

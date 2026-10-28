@@ -1,91 +1,44 @@
 #!/usr/bin/env node
 /**
  * Alloy Timeline Scroll Performance Measurement Script
- * 
- * Measures Frame Time and FPS during rapid scrolling of the virtualized 10,000-item timeline.
+ *
+ * Measures frame time and FPS during rapid scrolling of the virtualized timeline.
  * Uses puppeteer-core + Chrome headless to drive scrolling and capture frame metrics.
+ *
+ * The demo engine exists only in a development build (see src/lib/ipc/index.ts), so this runs the
+ * dev server by default. Dev builds carry extra runtime checks: treat the result as a smoke check.
+ * For release numbers point ALLOY_UI_URL at an instance with a real engine (for example the packaged
+ * app served with a bridge) and the same measurement runs unchanged.
  */
 
 import puppeteer from "puppeteer-core";
-import http from "node:http";
+import fs from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
-import fs from "fs";
+import { startDevServer, waitForShell } from "./dev-server.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const uiDir = resolve(__dirname, "..");
-const buildDir = resolve(uiDir, "build");
 const PORT = 5173;
 const CHROME_PATH = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
 console.log("🚀 Alloy Timeline Perf Measurement");
 console.log("=".repeat(60));
 
-// Check if build exists
-if (!fs.existsSync(buildDir)) {
-  console.error(`❌ Build directory not found: ${buildDir}`);
-  console.error("Please run: pnpm build");
-  process.exit(1);
-}
-
-console.log(`✓ Build directory: ${buildDir}`);
 console.log(`✓ Chrome binary: ${CHROME_PATH}`);
 
 let server = null;
 let browser = null;
 
-// Simple HTTP server to serve the built files
-// MIME type lookup table
-const MIME_TYPES = {
-  ".html": "text/html",
-  ".js": "application/javascript",
-  ".css": "text/css",
-  ".json": "application/json",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".svg": "image/svg+xml",
-  ".wasm": "application/wasm",
-};
-
-// Simple HTTP server to serve the built files
-function startServer() {
-  return new Promise((resolvePromise) => {
-    const httpServer = http.createServer((req, res) => {
-      console.log("Incoming request:", req.url);
-      const rawUrl = req.url || "/";
-      const pathname = rawUrl.split("?")[0];
-      let relativePath = pathname === "/" ? "index.html" : pathname.replace(/^\//, "");
-      let filePath = resolve(buildDir, relativePath);
-      console.log("Resolved filePath:", filePath);
-      // Fallback for SPA routing
-      if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
-        filePath = resolve(buildDir, "index.html");
-      }
-
-      fs.readFile(filePath, (err, data) => {
-        if (err) {
-          res.writeHead(404);
-          res.end("Not Found");
-        } else {
-          const ext = filePath.slice(filePath.lastIndexOf(".")).toLowerCase();
-          const contentType = MIME_TYPES[ext] || "application/octet-stream";
-          res.writeHead(200, { "Content-Type": contentType });
-          res.end(data);
-        }
-      });
-    });
-
-    httpServer.listen(PORT, "127.0.0.1", () => {
-      console.log(`✓ HTTP Server started on http://127.0.0.1:${PORT}`);
-      resolvePromise(httpServer);
-    });
-  });
-}
-
 async function measureScrollPerformance() {
   try {
-    // Start HTTP server
-    server = await startServer();
+    // Start the UI. The demo engine is development-only, so the default is the dev server; an
+    // ALLOY_UI_URL lets the same measurement run against a release instance with a real engine.
+    const target = process.env.ALLOY_UI_URL;
+    if (target) {
+      server = { url: target, stop: () => {} };
+    } else {
+      server = await startDevServer(PORT);
+    }
     // Launch Chrome headless
     console.log("\n🔧 Launching Chrome headless...");
     browser = await puppeteer.launch({
@@ -102,12 +55,14 @@ async function measureScrollPerformance() {
     const page = await browser.newPage();
     page.setViewport({ width: 1200, height: 800 });
 
-    console.log(`✓ Navigating to http://127.0.0.1:${PORT}...`);
-    await page.goto(`http://127.0.0.1:${PORT}`, { waitUntil: "networkidle2" });
+    console.log(`✓ Navigating to ${server.url}...`);
+    await page.goto(server.url, { waitUntil: "networkidle2" });
 
-    // Wait for timeline to fully mount
-    console.log("⏳ Waiting for timeline to mount 10,000 items...");
-    await page.waitForSelector(".timeline-viewport", { timeout: 5000 });
+    // Open a chat: the timeline only exists once a room is open.
+    console.log("⏳ Waiting for the shell, then opening the first chat...");
+    await waitForShell(page);
+    await page.click(".row-wrap .row");
+    await page.waitForSelector(".timeline .viewport", { timeout: 30000 });
     await new Promise((r) => setTimeout(r, 2000)); // Give virtua time to initialize
 
     // Inject frame-time measurement script
@@ -136,7 +91,7 @@ async function measureScrollPerformance() {
         };
 
         // Start scrolling the timeline
-        const viewport = document.querySelector(".timeline-viewport");
+        const viewport = document.querySelector(".timeline .viewport");
         let scrollDistance = 0;
         const scrollInterval = setInterval(() => {
           if (viewport) {
@@ -432,7 +387,7 @@ The prototype demonstrates:
     throw error;
   } finally {
     if (browser) await browser.close();
-    if (server) server.close();
+    if (server) server.stop();
   }
 }
 
