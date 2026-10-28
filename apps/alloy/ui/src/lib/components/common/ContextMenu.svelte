@@ -515,6 +515,10 @@
   // Pointer and scroll inside any panel (root or flyout) do not dismiss.
   $effect(() => {
     if (!contextMenu.isOpen) return;
+    // Android opens the soft keyboard with adjustResize: the WebView shrinks in height and fires
+    // `resize`. Closing on that would kill the sheet the moment its search field is tapped, so a
+    // height-only change is ignored; a real window resize (or rotation) changes the width.
+    const openedWidth = window.innerWidth;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
@@ -536,17 +540,21 @@
       contextMenu.close();
     };
     const onClose = () => contextMenu.close();
+    const onResize = () => {
+      if (window.innerWidth === openedWidth) return;
+      contextMenu.close();
+    };
     window.addEventListener('keydown', onKey, true);
     window.addEventListener('pointerdown', onPointerDown, true);
     window.addEventListener('scroll', onScroll, true);
     window.addEventListener('blur', onClose);
-    window.addEventListener('resize', onClose);
+    window.addEventListener('resize', onResize);
     return () => {
       window.removeEventListener('keydown', onKey, true);
       window.removeEventListener('pointerdown', onPointerDown, true);
       window.removeEventListener('scroll', onScroll, true);
       window.removeEventListener('blur', onClose);
-      window.removeEventListener('resize', onClose);
+      window.removeEventListener('resize', onResize);
     };
   });
 
@@ -787,7 +795,7 @@
     z-index: 110;
     min-width: 180px;
     max-width: 280px;
-    padding: 5px;
+    padding: 5px; /* token-audit: menu inset, tighter than the 8px step */
     border: 1px solid var(--alloy-glass-rim);
     border-radius: var(--alloy-radii-2xl);
     background: var(--alloy-glass-sheen), var(--alloy-glass-fill-strong);
@@ -827,7 +835,7 @@
     align-items: center;
     gap: var(--alloy-spacing-scale-2);
     height: 34px;
-    padding: 0 10px;
+    padding: 0 10px; /* token-audit: row inset, sized by the menu row not the layout grid */
     border-radius: var(--alloy-radii-xl);
     cursor: pointer;
     user-select: none;
@@ -996,8 +1004,7 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 4px;
-    min-height: 48px;
+    gap: var(--alloy-spacing-scale-1);
     padding: var(--alloy-spacing-scale-1) 0;
     border: 0;
     border-radius: var(--alloy-radii-md);
