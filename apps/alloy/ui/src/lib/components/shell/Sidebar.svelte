@@ -328,7 +328,7 @@
   }
 
   const scopeSpace = $derived(ui.scope === 'home' ? null : (roomsStore.rooms.find((r) => r.id === ui.scope) ?? null));
-  const scopeTitle = $derived(scopeSpace ? roomTitle(scopeSpace) : 'Messages');
+  const scopeTitle = $derived(scopeSpace ? roomTitle(scopeSpace) : 'Chats');
   const filterLabel = $derived(ROOM_FILTERS.find((f) => f.value === roomsStore.filter)?.label ?? 'All');
   const moreFilterActive = $derived(!PRIMARY_FILTERS.some((f) => f.value === roomsStore.filter));
   const unreadRoomsCount = $derived(
@@ -522,7 +522,7 @@
 
 <section class="sidebar" aria-label="Rooms">
   <header class="head" use:contextmenu={paneItems}>
-    <h2 class="scope" title={scopeTitle}>{viewport.isPhone ? 'Chats' : scopeTitle}</h2>
+    <h2 class="scope" title={scopeTitle}>{scopeTitle}</h2>
     {#if unreadRoomsCount > 0}
       <span class="scope-meta">{unreadRoomsCount} unread</span>
     {/if}
