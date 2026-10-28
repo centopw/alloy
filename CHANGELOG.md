@@ -11,7 +11,7 @@
 - **Muted text is readable in every theme.** Timestamps, the room note and secondary labels were raised to the contrast floor, and the room pane is labelled Chats at every window width.
 
 ### Fixed
-- **Pictures and videos attached on Android keep their name and type.** A file picked from the gallery is named after its content and uploaded with the right media type, so it arrives as the picture it is instead of an untyped file.
+- **Attachments keep a real name, type and size.** A picture picked on Android is named after its content and uploaded as the picture it is; any other file becomes `attachment.<ext>` instead of an opaque provider id. Every attachment now carries its size, so a file tile reads `2.0 KB` rather than `0 B`.
 - **The tags sheet keeps its search field open on phones.** Opening the keyboard no longer closes the sheet, so a tag can be created and assigned on mobile.
 - **Notes, tags and preferences stay with the account that set them.** Signing into another account on the same device no longer carries the previous account's note, tags or display preferences over.
 - **Tags still show when the server cannot be reached.** The last known tag list is kept locally, so rooms keep their tags while offline.
