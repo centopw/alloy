@@ -546,32 +546,45 @@ try {
     throw new Error(`menu has no "${label}" entry; it offers: ${seen.join(' | ') || 'nothing'}`);
   };
   const rowKey = async (title) => page.evaluate((t) => { const el = [...document.querySelectorAll('button.row')].find((e) => e.textContent.includes(t)); el.setAttribute('data-e2e', t); return t; }, title);
-  // The list is rebuilt as chats move between sections: wait for the row and click it in one page task, so a
-  // list that is mid-update cannot make the row vanish between finding it and clicking it (nor shift under a pointer).
-  const clickRow = (title) =>
-    page.waitForFunction(
-      (t) => {
-        const el = [...document.querySelectorAll('button.row')].find((e) => e.textContent.includes(t));
-        if (!el) return false;
-        el.click();
-        return true;
-      },
+  // The list is rebuilt as chats move between sections: wait for the row, then find and click it in one
+  // page task, so a list that is mid-update cannot make the row vanish between finding it and clicking it.
+  // One attempt is one click: retrying used to hide whether the click was swallowed or the header was slow.
+  const clickRow = async (title) => {
+    await page.waitForFunction(
+      (t) => [...document.querySelectorAll('button.row')].some((e) => e.textContent.includes(t)),
       { timeout: 15000 },
       title,
     );
-  // Opens a chat and waits for its header; if the click was swallowed (a dialog still closing, a list mid-update)
-  // it clicks again, so a lost click shows up as a clear error instead of a later timeout.
+    return page.evaluate((t) => {
+      const el = [...document.querySelectorAll('button.row')].find((e) => e.textContent.includes(t));
+      el.click();
+      return el.getAttribute('data-room-id');
+    }, title);
+  };
+  // What the page looked like when a click did not open the chat: the next CI failure prints this
+  // instead of a bare timeout (issue #101).
+  const openRoomState = (title) =>
+    page.evaluate((t) => ({
+      dialogs: [...document.querySelectorAll('[role=dialog]')].map((d) => d.getAttribute('aria-label') ?? d.textContent.trim().slice(0, 40)),
+      matchingRows: [...document.querySelectorAll('button.row')].filter((e) => e.textContent.includes(t)).map((e) => ({ room: e.getAttribute('data-room-id'), current: e.getAttribute('aria-current'), text: e.textContent.trim().slice(0, 60) })),
+      currentRoom: document.querySelector('button.row[aria-current="true"]')?.getAttribute('data-room-id') ?? null,
+      header: !!document.querySelector(`button[aria-label="Room info for ${t}"]`),
+      chatVisible: !!document.querySelector('.chat'),
+    }), title);
+  // Opens a chat. A lost click is a real failure, not something to paper over: two attempts, each
+  // with a full wait and a printed page state, so the next occurrence carries its own diagnosis.
   const openRoom = async (title) => {
-    for (let attempt = 0; attempt < 4; attempt++) {
-      await clickRow(title);
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const roomId = await clickRow(title);
       try {
-        await page.waitForSelector(`button[aria-label="Room info for ${title}"]`, { timeout: 4000 });
+        await page.waitForSelector(`button[aria-label="Room info for ${title}"]`, { timeout: 8000 });
         return;
       } catch {
-        // try the click again
+        const state = await openRoomState(title);
+        console.warn(`openRoom("${title}") attempt ${attempt}: clicked ${roomId ?? '(no row)'} and the header did not appear; state: ${JSON.stringify(state)}`);
       }
     }
-    throw new Error(`the chat "${title}" did not open after four clicks`);
+    throw new Error(`the chat "${title}" did not open after two clicks (diagnostics printed above)`);
   };
   await openRoom('Pin Room');
   await page.waitForFunction(() => document.body.innerText.includes('pin target alloy-pin'), { timeout: 60000 });
