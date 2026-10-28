@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.2.8 (pre-release)
+
+### Added
+- **A welcome step before sign-in.** Onboarding now opens with a short welcome — what Alloy is, that your rooms live on your own homeserver, and the two steps that follow — instead of dropping straight into fields, with a step indicator that fills as you go.
+- **The room list resizes and collapses.** Drag the grip on the list's edge to set its width, or collapse it from the header to give the conversation the whole window. Both choices survive a restart, and the collapsed list keeps its scroll position while it is hidden.
+- **The update dialog says what it is doing.** "What's new" now shows the update's state — available, downloading with a percentage, installing, failed, or up to date — above the release notes, with Skip offered only while the update is still a choice.
+
+### Changed
+- **One flat material replaces the frosted glass.** Window chrome is lightly transparent, the conversation is near-opaque, and glass remains only on floating layers such as dialogs, sheets and menus. The white specular sheen, the top-edge highlight, the coloured halo around your own messages and the send button's glow are gone; depth now comes from the fill, a thin rim and one soft shadow.
+- **The dark theme is a slate night, not a black hole.** Surfaces moved from near-black to a slate lift, secondary text gained contrast, and the glow behind the window was cut from four bright blooms to two restrained ones. Pure black remains an option.
+- **A reply reads as one message.** The quote card and the bubble beneath it share a square junction, so a reply stacks instead of looking like two round cards touching.
+- **Bubbles are the default layout on every device.** Your own message is one solid colour with a rim rather than a gradient with a glow, and reaction pills sit on it with enough contrast to read at a glance.
+- **The shell gives the conversation more room.** Less padding around the panes, a narrower rail and quieter headers, so the chat keeps the width.
+- **Room details are read-first.** Name and topic are text until you hover the pencil, and the sections for members and shared media read as information rather than as a form to fill in.
+- **The room filters are a control plus a menu.** The extra-filters chevron is a quiet icon button beside the filter switch instead of an empty fourth segment, and on phones the filters are 44 px pills on a transparent bar.
+- **The Shared media switch fits its labels.** Media, Links and Files no longer stretch across a dead track.
+- **Choosing a display option by hand turns Follow system appearance off**, so the switch never claims to govern a choice you just made.
+- **Scrollbars are quiet and consistent** in every pane and list.
+- **The keyboard shortcuts table has even row padding**, so keys and their descriptions line up.
+
+### Fixed
+- **Pictures and videos that cannot be loaded no longer leave a broken-image icon.** A thumbnail falls back to a media glyph, and a timeline picture or the viewer says it could not be loaded and offers Retry.
+
 ## 0.2.7 (pre-release)
 
 ### Added
