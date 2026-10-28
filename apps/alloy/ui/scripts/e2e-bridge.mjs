@@ -523,7 +523,7 @@ try {
         if (!el) return { clicked: false, seen: ['(no element matches the selector)'] };
         const r = el.getBoundingClientRect();
         el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 20, clientY: r.top + 10 }));
-        const entries = () => [...document.querySelectorAll('[role=menu] [role=menuitem]')];
+        const entries = () => [...document.querySelectorAll('[role=menu] [role^=menuitem]')];
         for (let i = 0; i < 40; i++) {
           await new Promise((done) => requestAnimationFrame(() => setTimeout(done, 25)));
           const hit = entries().find((e) => e.textContent.trim() === text);
@@ -618,7 +618,8 @@ try {
   const clickRoom = async (title) => {
     await openRoom(title);
   };
-  const chip = (name) => page.evaluate((n) => [...document.querySelectorAll('.chip')].find((c) => c.textContent.trim() === n).click(), name);
+  // Primary filters are tabs; every filter, Archive included, lives in the room-list options menu.
+  const chip = (name) => menuOn('.filter-more', name);
   // A tag or unread flag is confirmed by the server and comes back through sync, which can take a while on a busy runner.
   const SYNC = 60000;
   const hasRow = (title) => page.waitForFunction((t) => [...document.querySelectorAll('button.row')].some((e) => e.textContent.includes(t)), { timeout: SYNC }, title);
@@ -653,11 +654,11 @@ try {
   step('search all chats: a message from another room is found and opens its room');
   await clickRoom('From Bob');
   await page.waitForFunction(() => document.querySelector('textarea[aria-label^=Message]'), { timeout: 15000 });
-  await page.type('input[aria-label="Search rooms"]', 'alloy-pin');
+  await page.type('input[aria-label^="Search rooms"]', 'alloy-pin');
   await page.waitForFunction(() => [...document.querySelectorAll('section[aria-label="Messages"] .hit')].some((b) => b.textContent.includes('Pin Room')), { timeout: 30000 });
   await page.evaluate(() => [...document.querySelectorAll('section[aria-label="Messages"] .hit')].find((b) => b.textContent.includes('Pin Room')).click());
   await page.waitForFunction(() => document.querySelector('button[aria-label="Room info for Pin Room"]'), { timeout: 30000 });
-  await page.$eval('input[aria-label="Search rooms"]', (el) => { el.value = ''; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  await page.$eval('input[aria-label^="Search rooms"]', (el) => { el.value = ''; el.dispatchEvent(new Event('input', { bubbles: true })); });
   step('the sidebar can be resized with the keyboard');
   const handle = '[role=separator][aria-label="Resize sidebar"]';
   const widthOf = () => page.$eval(handle, (el) => ({ now: Number(el.getAttribute('aria-valuenow')), left: el.getBoundingClientRect().left }));
