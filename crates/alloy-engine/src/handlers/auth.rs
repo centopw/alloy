@@ -66,7 +66,21 @@ async fn purge_account(ctx: &EngineContext, index: &AccountIndex, store_id: &str
     if let Err(e) = delete_account_secrets(ctx.secrets.as_ref(), Some(store_id)).await {
         tracing::warn!(error = %e, "failed to delete account secrets");
     }
-    let _ = std::fs::remove_dir_all(index.store_dir(store_id));
+    let dir = index.store_dir(store_id);
+    // Windows closes a sqlite store's file handles on its own worker thread, so the first removal
+    // can race the close. Retry briefly instead of leaking the store directory.
+    for attempt in 0..20 {
+        if !dir.exists() {
+            return;
+        }
+        match std::fs::remove_dir_all(&dir) {
+            Ok(()) => return,
+            Err(e) if attempt == 19 => {
+                tracing::warn!(path = %dir.display(), %e, "failed to remove the account store");
+            }
+            Err(_) => tokio::time::sleep(Duration::from_millis(100)).await,
+        }
+    }
 }
 
 /// Starts persisting refreshed OAuth tokens for the active session, replacing an earlier watcher.
