@@ -113,10 +113,12 @@
       <span class="label">App version</span>
       <span class="value mono">{version}</span>
     </div>
-    <div class="row">
-      <span class="label">Engine</span>
-      <span class="value mono">{engineLabel()}</span>
-    </div>
+    {#if import.meta.env.DEV}
+      <div class="row">
+        <span class="label">Engine</span>
+        <span class="value mono">{engineLabel()}</span>
+      </div>
+    {/if}
   </SettingGroup>
 
   {#if import.meta.env.DEV}
