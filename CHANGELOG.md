@@ -23,6 +23,7 @@
 ### Fixed
 - **Pictures and videos that cannot be loaded no longer leave a broken-image icon.** A thumbnail falls back to a media glyph, and a timeline picture or the viewer says it could not be loaded and offers Retry.
 - **A forwarded message shows up once.** Forwarding now sends straight to the target room instead of through its send queue, so the message no longer leaves a copy stuck on "sending" beside the delivered one.
+- **A draft survives leaving the room at once.** Text typed before the room's saved draft finished loading is now saved when you switch away instead of being dropped.
 
 ## 0.2.7 (pre-release)
 
