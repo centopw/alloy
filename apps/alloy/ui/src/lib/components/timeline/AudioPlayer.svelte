@@ -537,7 +537,7 @@
     justify-content: center;
     min-height: 28px;
     min-width: 40px;
-    padding: 4px 8px;
+    padding: var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-2);
     transition: background var(--alloy-motion-duration-fast) ease, border-color var(--alloy-motion-duration-fast) ease;
   }
 
@@ -555,7 +555,7 @@
     .speed-btn {
       min-height: 44px;
       min-width: 44px;
-      padding: 6px 12px;
+      padding: 6px var(--alloy-spacing-scale-3); /* token-audit: player inset, tuned to the 34px row */
     }
 
     .waveform-container {

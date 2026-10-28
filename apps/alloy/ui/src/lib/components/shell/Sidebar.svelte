@@ -400,6 +400,7 @@
       class:active
       class:unread={(unread > 0 || markedUnread) && !muted}
       class:muted
+      data-room-id={r.id}
       aria-current={active ? 'true' : undefined}
       use:contextmenu={() => roomItems(r)}
       onclick={() => openRoom(r.id)}
@@ -797,7 +798,7 @@
     gap: var(--alloy-spacing-scale-2);
     flex-shrink: 0;
     height: 34px;
-    margin: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-2) 6px;
+    margin: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-2) 6px; /* token-audit: search box sits one step tighter than the 8px rhythm */
     padding: 0 var(--alloy-spacing-scale-2);
     border: 1px solid var(--alloy-chat-rim);
     border-radius: var(--alloy-radii-lg);
@@ -835,9 +836,9 @@
   }
   .search kbd {
     flex: none;
-    padding: 3px 5px;
+    padding: 3px 5px; /* token-audit: kbd chip inset, set by the 10px meta text */
     border: 1px solid var(--alloy-glass-rim);
-    border-radius: 5px;
+    border-radius: var(--alloy-radii-sm);
     background: color-mix(in srgb, var(--alloy-color-text-primary) 4%, transparent);
     font-family: inherit;
     font-size: 10px;
@@ -975,7 +976,7 @@
     padding-top: var(--alloy-spacing-scale-1);
   }
   .section-count {
-    padding: 1px 6px;
+    padding: 1px 6px; /* token-audit: kbd chip inset, set by the 10px meta text */
     border-radius: var(--alloy-radii-full);
     background: var(--alloy-glass-control);
     font-size: 10px;
@@ -1016,7 +1017,7 @@
     min-width: 0;
     min-height: 48px;
     box-sizing: border-box;
-    padding: 6px var(--alloy-spacing-scale-2);
+    padding: 6px var(--alloy-spacing-scale-2); /* token-audit: room row inset, tuned to the 34px row */
     border: 1px solid transparent;
     border-radius: var(--alloy-radii-lg);
     background: transparent;

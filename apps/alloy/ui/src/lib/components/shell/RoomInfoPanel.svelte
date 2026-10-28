@@ -1110,7 +1110,7 @@
     .edit-btn {
       width: 44px;
       height: 44px;
-      margin: -10px;
+      margin: -10px; /* token-audit: grows the 24px pencil to a 44px touch target */
       opacity: 1;
     }
   }
@@ -1195,6 +1195,13 @@
     border: 1px solid var(--alloy-chat-rim);
     border-radius: var(--alloy-radii-lg);
     background: var(--alloy-glass-control);
+  }
+  /* The 7% control plate over the pane drops muted 10.5-13px text to 4.03-4.34:1 on dark and
+     phones. Secondary keeps the plate and clears 5:1 on every theme. */
+  .card .heading,
+  .card .empty-value,
+  .card .status {
+    color: var(--alloy-color-text-secondary);
   }
 
   .card-head {

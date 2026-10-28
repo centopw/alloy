@@ -61,9 +61,9 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
+    gap: 6px; /* token-audit: control rhythm between the 4px and 8px layout steps */
     height: var(--alloy-layout-control-height);
-    padding: 0 14px;
+    padding: 0 14px; /* token-audit: control inset, sized by the button not the layout grid */
     border: 1px solid transparent;
     border-radius: var(--alloy-radii-md);
     font-family: inherit;
@@ -81,11 +81,11 @@
   }
   .size-sm {
     height: var(--alloy-layout-control-height-sm);
-    padding: 0 10px;
+    padding: 0 10px; /* token-audit: control inset, sized by the button not the layout grid */
     font-size: var(--alloy-typography-size-sm, 12px);
   }
   .size-lg {
-    padding: 0 18px;
+    padding: 0 18px; /* token-audit: control inset, sized by the button not the layout grid */
     font-size: var(--alloy-typography-size-lg, 16px);
   }
   /* Icon-only buttons are square at their height. */

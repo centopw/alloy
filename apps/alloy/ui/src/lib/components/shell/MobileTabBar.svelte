@@ -70,7 +70,7 @@
     height: 56px;
     margin: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3)
       calc(var(--alloy-spacing-scale-2) + var(--alloy-safe-area-bottom));
-    padding: 0 4px;
+    padding: 0 var(--alloy-spacing-scale-1);
     border: 1px solid var(--alloy-glass-rim);
     border-radius: var(--alloy-glass-radius-shell);
     background: var(--alloy-glass-sheen), var(--alloy-glass-fill-strong);
@@ -88,7 +88,7 @@
     align-items: center;
     justify-content: center;
     gap: 2px;
-    padding: 4px 0;
+    padding: var(--alloy-spacing-scale-1) 0;
     border: 0;
     background: transparent;
     color: var(--alloy-color-text-muted);
@@ -134,7 +134,7 @@
     right: -8px;
     min-width: 18px;
     height: 18px;
-    padding: 0 5px;
+    padding: 0 5px; /* token-audit: badge inset, set by the 18px badge height */
     box-sizing: border-box;
     border-radius: var(--alloy-radius-full);
     background: var(--alloy-color-status-mention);

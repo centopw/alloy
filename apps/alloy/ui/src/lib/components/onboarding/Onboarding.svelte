@@ -224,7 +224,7 @@
     letter-spacing: -0.02em;
     line-height: 1;
     box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.35),
+      var(--alloy-brand-highlight),
       0 6px 14px -8px color-mix(in srgb, var(--alloy-color-accent-primary) 80%, transparent);
   }
   .wordmark {
@@ -366,7 +366,7 @@
   }
   .error {
     margin: 0;
-    color: var(--alloy-color-status-error, #e5484d);
+    color: var(--alloy-color-status-error);
     font-size: var(--alloy-typography-size-sm);
   }
 

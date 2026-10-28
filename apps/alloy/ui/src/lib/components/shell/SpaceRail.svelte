@@ -202,7 +202,7 @@
     letter-spacing: -0.02em;
     line-height: 1;
     box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.35),
+      var(--alloy-brand-highlight),
       0 6px 14px -8px color-mix(in srgb, var(--alloy-color-accent-primary) 80%, transparent);
   }
   .entries {
@@ -213,8 +213,7 @@
     flex: 0 1 auto;
     flex-direction: column;
     align-items: center;
-    gap: 4px;
-    width: 100%;
+    gap: var(--alloy-spacing-scale-1);
     min-height: 0;
     overflow-y: auto;
     scrollbar-width: none;

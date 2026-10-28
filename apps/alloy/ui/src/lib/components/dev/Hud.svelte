@@ -294,7 +294,7 @@
     border: 1px solid var(--alloy-color-border-subtle);
     color: var(--alloy-color-text-secondary);
     border-radius: var(--alloy-radii-sm);
-    padding: 2px 5px;
+    padding: 2px 5px; /* token-audit: HUD chip inset, developer-only surface */
     font-size: 9px;
     font-family: inherit;
     cursor: pointer;

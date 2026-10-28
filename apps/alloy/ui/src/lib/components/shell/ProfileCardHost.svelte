@@ -174,7 +174,7 @@
     z-index: 999;
     padding: 0;
     border: none;
-    background: rgba(0, 0, 0, 0.5);
+    background: var(--alloy-color-scrim);
     cursor: pointer;
   }
 </style>

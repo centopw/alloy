@@ -33,6 +33,7 @@
   import { capabilities, currentEnv } from '$lib/platform/capabilities';
   import { roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
   import { tags } from '$lib/stores/tags.svelte';
+  import { roomInfo } from '$lib/stores/roomInfo.svelte';
   import { layout, LAYOUT_LIMITS } from '$lib/stores/layout.svelte';
   import { ui } from '$lib/stores/ui.svelte';
   import { threadStore } from '$lib/stores/thread.svelte';
@@ -174,6 +175,7 @@
       void roomsStore.stop();
       stopUpdates();
       tags.reset();
+      roomInfo.reset();
       roomsStore.clearReadMarks();
       void prefs.signOut();
       teardownPrefs();
@@ -611,9 +613,9 @@
     outline-offset: 2px;
   }
   .jump kbd {
-    padding: 3px 6px;
+    padding: 3px 6px; /* token-audit: kbd chip inset, set by the 10.5px meta text */
     border: 1px solid var(--alloy-glass-rim);
-    border-radius: 5px;
+    border-radius: var(--alloy-radii-sm);
     background: color-mix(in srgb, var(--alloy-color-text-primary) 4%, transparent);
     font-family: inherit;
     font-size: var(--alloy-font-size-meta);
@@ -632,8 +634,9 @@
   .shell[data-layout='narrow'][data-pane='chat'] {
     padding-bottom: var(--alloy-safe-area-bottom);
   }
-  /* Phones are edge-to-edge: the canvas runs behind the chrome and the chrome itself is glass.
-     The list needs a readable veil over the aurora, not a transparent sheet. */
+  /* Phones are edge-to-edge, but the list still belongs to the chrome layer (ADR 0014):
+     the same lightly transparent panel and 26px chrome filter as the desktop panes. The
+     earlier canvas-at-66% veil measured 3.73:1 for muted meta over the brightest bloom. */
   .shell[data-layout='narrow'] .nav {
     display: flex;
     flex-direction: column;
@@ -641,9 +644,6 @@
     overflow: hidden;
     border: 0;
     border-radius: 0;
-    background: color-mix(in srgb, var(--alloy-color-surface-canvas) 66%, transparent);
-    -webkit-backdrop-filter: var(--alloy-glass-filter);
-    backdrop-filter: var(--alloy-glass-filter);
     box-shadow: none;
   }
   /* Phones get the roomier phone gutter back; the desktop 12px is for a narrow chat column. */

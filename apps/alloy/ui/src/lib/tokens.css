@@ -167,6 +167,12 @@ html, body {
   --alloy-bubble-max-width-phone: 85%;
   --alloy-bubble-radius: 20px;
   --alloy-bubble-radius-tail: 8px;
+  /* Bubble meta has to clear 4.5:1 at 11px; 0.7 of the own text on the own blue measured 3.92:1. */
+  --alloy-bubble-own-meta: color-mix(
+    in srgb,
+    var(--alloy-color-bubble-own-text) 82%,
+    transparent
+  );
   /* UI type scale (ADR 0014). Four sizes with distinct jobs, so chrome stops reading as one
      flat weight: panel titles, row names, previews, and tracked meta. */
   --alloy-font-size-title: 15px;
@@ -205,6 +211,10 @@ html, body {
      top-edge catch. A white gloss on a translucent pane reads as plastic, especially in dark. */
   --alloy-glass-sheen: linear-gradient(168deg, transparent, transparent);
   --alloy-glass-highlight: inset 0 0 0 0 transparent;
+  /* The brand mark is a solid accent tile rather than a floating layer, so it keeps one top-edge
+     catch even though the flat material removed it everywhere else. */
+  --alloy-brand-highlight: inset 0 1px 0
+    color-mix(in srgb, var(--alloy-color-text-on-accent) 35%, transparent);
   --alloy-glass-shadow:
     0 1px 2px rgba(9, 15, 30, 0.05), 0 20px 56px -26px rgba(9, 15, 30, 0.42);
   --alloy-glass-shadow-soft: 0 1px 2px rgba(9, 15, 30, 0.04), 0 8px 24px -14px rgba(9, 15, 30, 0.3);

@@ -744,7 +744,7 @@
     margin-top: 2px;
   }
   .seen > :global(* + *) {
-    margin-left: -6px;
+    margin-left: -6px; /* token-audit: overlaps the avatar rings in the read-receipt stack */
   }
   .seen > :global(*) {
     border-radius: var(--alloy-radii-full);
@@ -786,7 +786,7 @@
     justify-content: center;
   }
   .gutter-time {
-    padding-top: 4px;
+    padding-top: var(--alloy-spacing-scale-1);
     font-size: var(--alloy-typography-size-xs);
     color: var(--alloy-color-text-muted);
     font-variant-numeric: tabular-nums;
@@ -1234,7 +1234,7 @@
   }
   .row[data-layout='bubbles'] .bubble .edited,
   .row[data-layout='bubbles'] .bubble .muted {
-    opacity: 0.75;
+    opacity: 0.82;
   }
   .row.own[data-layout='bubbles'] .body.html :global(a) {
     color: inherit;
@@ -1272,11 +1272,23 @@
     display: block;
     text-align: right;
     font-size: var(--alloy-typography-size-xs);
-    color: var(--alloy-color-text-muted);
+    color: var(--alloy-color-text-secondary);
+  }
+  /* The sent tick inherits the muted token by default; on a bubble it must use the secondary one. */
+  .row[data-layout='bubbles'] .bubble-time .tick {
+    color: var(--alloy-color-text-secondary);
+  }
+  .row[data-layout='bubbles'] .bubble-time .tick.read {
+    color: var(--alloy-color-accent-primary);
   }
   .row.own[data-layout='bubbles'] .bubble-time {
-    color: inherit;
-    opacity: 0.7;
+    color: var(--alloy-bubble-own-meta);
+  }
+  /* Ticks carry their own colour, so they would otherwise stay muted (or accent) on the own blue.
+     The icon already distinguishes sent from read; the colour only has to be legible. */
+  .row.own[data-layout='bubbles'] .bubble-time .tick,
+  .row.own[data-layout='bubbles'] .bubble-time .tick.read {
+    color: var(--alloy-color-bubble-own-text);
   }
   .row.jumbo[data-layout='bubbles'] .bubble,
   .row.bare[data-layout='bubbles'] .bubble {

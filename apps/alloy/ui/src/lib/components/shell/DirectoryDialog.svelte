@@ -194,8 +194,7 @@
   .members {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    white-space: nowrap;
+    gap: var(--alloy-spacing-scale-1);
   }
   .topic {
     font-size: var(--alloy-typography-size-sm);

@@ -25,7 +25,7 @@ pub fn alloy_light() -> Theme {
                 text: Some(TextColors {
                     primary: Some("#18181b".into()),
                     secondary: Some("#52525b".into()),
-                    muted: Some("#71717a".into()),
+                    muted: Some("#65656d".into()),
                     link: Some("#2563eb".into()),
                     on_accent: Some("#ffffff".into()),
                 }),
