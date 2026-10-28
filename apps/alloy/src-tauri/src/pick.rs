@@ -254,6 +254,11 @@ fn resolve_picked(app: &AppHandle, picks_root: &Path, picked: FilePath) -> Resul
 }
 
 /// Copies a picked URI into a fresh, uniquely named directory and returns the copy's path.
+///
+/// Android photo providers hand out `content://` URIs whose last segment is an opaque id
+/// (`image:48`), not a file name, and no MIME type. The copy is therefore named from its actual
+/// content, so the upload carries a readable name and the engine guesses the right MIME type from
+/// the extension instead of `application/octet-stream`.
 fn copy_into_pick_dir(
     app: &AppHandle,
     ctx: &EngineContext,
@@ -273,9 +278,106 @@ fn copy_into_pick_dir(
         let _ = std::fs::remove_dir_all(&dir);
         return Err(format!("failed to read the picked file: {err}"));
     }
+    let dest = match rename_for_content(&dir, &dest) {
+        Ok(path) => path,
+        Err(err) => {
+            let _ = std::fs::remove_dir_all(&dir);
+            return Err(format!("failed to inspect the picked file: {err}"));
+        }
+    };
     dest.into_os_string()
         .into_string()
         .map_err(|_| "pick cache path is not valid UTF-8".to_owned())
+}
+
+/// Renames a copied file to carry the extension its content implies. Unchanged when the content
+/// cannot be identified, so an unknown file keeps whatever name it had.
+fn rename_for_content(dir: &Path, copy: &Path) -> io::Result<std::path::PathBuf> {
+    use std::io::Read as _;
+
+    let mut head = [0u8; 512];
+    let read = std::fs::File::open(copy)?.read(&mut head)?;
+    let Some(kind) = sniff_extension(&head[..read]) else {
+        return Ok(copy.to_path_buf());
+    };
+    let current = copy
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let name = name_with_sniffed_type(&current, kind);
+    if name == current {
+        return Ok(copy.to_path_buf());
+    }
+    let target = dir.join(name);
+    std::fs::rename(copy, &target)?;
+    Ok(target)
+}
+
+/// The file name a copy should carry for the content it holds.
+///
+/// A provider id such as `image:48` carries no usable extension and is replaced with
+/// `attachment.<kind>`. A real name keeps its stem and takes the extension the content actually
+/// implies, because the MIME type the engine sends is derived from the extension.
+fn name_with_sniffed_type(current: &str, kind: &str) -> String {
+    let extension = Path::new(current)
+        .extension()
+        .and_then(std::ffi::OsStr::to_str)
+        .filter(|ext| {
+            !ext.is_empty() && ext.len() <= 8 && ext.chars().all(|c| c.is_ascii_alphanumeric())
+        });
+    let Some(extension) = extension else {
+        return format!("{FALLBACK_NAME}.{kind}");
+    };
+    if extension.eq_ignore_ascii_case(kind) {
+        return current.to_owned();
+    }
+    let stem = Path::new(current)
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let stem = if stem.is_empty() {
+        FALLBACK_NAME.to_owned()
+    } else {
+        stem
+    };
+    format!("{stem}.{kind}")
+}
+
+/// The media type implied by the first bytes of a file, as a file extension.
+///
+/// Providers that expose neither a name nor a MIME type are common on Android, so the copy is
+/// identified by its magic number instead of trusting the picker.
+fn sniff_extension(head: &[u8]) -> Option<&'static str> {
+    if head.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]) {
+        return Some("png");
+    }
+    if head.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        return Some("jpg");
+    }
+    if head.starts_with(b"GIF87a") || head.starts_with(b"GIF89a") {
+        return Some("gif");
+    }
+    if head.starts_with(b"RIFF") && head.len() >= 12 && &head[8..12] == b"WEBP" {
+        return Some("webp");
+    }
+    if head.starts_with(b"RIFF") && head.len() >= 12 && &head[8..12] == b"AVI " {
+        return Some("avi");
+    }
+    if head.len() >= 12 && &head[4..8] == b"ftyp" {
+        return Some(match &head[8..12] {
+            b"avif" | b"avis" => "avif",
+            b"heic" | b"heix" | b"hevc" | b"hevx" | b"mif1" | b"msf1" => "heic",
+            b"qt  " => "mov",
+            _ => "mp4",
+        });
+    }
+    if head.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]) {
+        return Some("mkv");
+    }
+    if head.starts_with(b"%PDF-") {
+        return Some("pdf");
+    }
+    None
 }
 
 fn copy_uri_to(app: &AppHandle, uri: FilePath, dest: &Path) -> io::Result<()> {
@@ -468,5 +570,51 @@ mod tests {
         assert_eq!(pasted_image_name("image"), "image.png");
         assert_eq!(pasted_image_name(""), "pasted-image.png");
         assert_eq!(pasted_image_name("../../evil"), "evil.png");
+    }
+
+    #[test]
+    fn content_type_is_read_from_the_first_bytes() {
+        assert_eq!(
+            sniff_extension(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0]),
+            Some("png")
+        );
+        assert_eq!(sniff_extension(&[0xFF, 0xD8, 0xFF, 0xE0]), Some("jpg"));
+        assert_eq!(sniff_extension(b"GIF89a..."), Some("gif"));
+
+        let mut webp = b"RIFF".to_vec();
+        webp.extend_from_slice(&[0, 0, 0, 0]);
+        webp.extend_from_slice(b"WEBPVP8 ");
+        assert_eq!(sniff_extension(&webp), Some("webp"));
+
+        let mut mp4 = vec![0, 0, 0, 0x18];
+        mp4.extend_from_slice(b"ftypisom");
+        assert_eq!(sniff_extension(&mp4), Some("mp4"));
+
+        let mut mov = vec![0, 0, 0, 0x14];
+        mov.extend_from_slice(b"ftypqt  ");
+        assert_eq!(sniff_extension(&mov), Some("mov"));
+
+        assert_eq!(sniff_extension(b"%PDF-1.7"), Some("pdf"));
+        assert_eq!(sniff_extension(b"hello"), None);
+    }
+
+    #[test]
+    fn a_provider_id_becomes_a_readable_attachment_name() {
+        // Android photo providers hand out ids such as `image:48`, which carry no extension.
+        assert_eq!(name_with_sniffed_type("image:48", "jpg"), "attachment.jpg");
+        assert_eq!(
+            name_with_sniffed_type("attachment", "png"),
+            "attachment.png"
+        );
+        // A real name keeps its stem; the content wins over a misleading extension.
+        assert_eq!(
+            name_with_sniffed_type("IMG_1234.jpg", "jpg"),
+            "IMG_1234.jpg"
+        );
+        assert_eq!(
+            name_with_sniffed_type("IMG_1234.jpg", "png"),
+            "IMG_1234.png"
+        );
+        assert_eq!(name_with_sniffed_type("report.pdf", "pdf"), "report.pdf");
     }
 }
