@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.9 (pre-release)
+
+### Added
+- **Sign in through the browser on servers with a login service.** When your homeserver delegates sign-in to a service such as MAS, onboarding now offers browser sign-in first: Alloy opens the server's own page, waits while you approve there, and enters your rooms when it completes. Your password never passes through Alloy, the wait can be cancelled, and the password form stays one click away. A failed attempt says what went wrong and offers Try again or a different server.
+- **A restored session that ended says so.** If a saved session can no longer be restored, the welcome step names the server and keeps it filled in, so only the sign-in has to be repeated.
+
+### Changed
+- **The density setting changes the conversation.** Compact, Normal and Cozy now set the message rhythm and the size of avatars in the timeline instead of only being saved. Normal keeps the previous message spacing.
+- **Muted text is readable in every theme.** Timestamps, the room note and secondary labels were raised to the contrast floor, and the room pane is labelled Chats at every window width.
+
+### Fixed
+- **Pictures and videos attached on Android keep their name and type.** A file picked from the gallery is named after its content and uploaded with the right media type, so it arrives as the picture it is instead of an untyped file.
+- **The tags sheet keeps its search field open on phones.** Opening the keyboard no longer closes the sheet, so a tag can be created and assigned on mobile.
+- **Notes, tags and preferences stay with the account that set them.** Signing into another account on the same device no longer carries the previous account's note, tags or display preferences over.
+- **Tags still show when the server cannot be reached.** The last known tag list is kept locally, so rooms keep their tags while offline.
+- **A build without a reachable engine says so.** Instead of sample conversations, the app explains that it cannot reach its engine and offers a retry.
+- **A crash while saving settings no longer corrupts them.** Settings are written to a temporary file and swapped in, so an interrupted write leaves the previous settings intact.
+
 ## 0.2.8 (pre-release)
 
 ### Added
