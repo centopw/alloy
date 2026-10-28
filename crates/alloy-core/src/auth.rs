@@ -1,10 +1,27 @@
-//! Authentication: homeserver discovery, password login, session persistence, logout.
+//! Authentication: homeserver discovery, password and OIDC (MAS) login, session persistence,
+//! logout.
 //!
-//! Owned by stream core-auth. OIDC (MAS) login is tracked separately and is not
-//! implemented here.
+//! Owned by stream core-auth.
 
 use crate::client::require_secure_homeserver;
 use crate::{AlloyClient, AlloyError, AlloyResult};
+use matrix_sdk::authentication::oauth::registration::{
+    ApplicationType, ClientMetadata, Localized, OAuthGrantType,
+};
+use matrix_sdk::ruma::serde::Raw;
+use matrix_sdk::utils::UrlOrQuery;
+
+/// URI registered with the authorization server and delivered back to the app.
+///
+/// The app registers this scheme (Tauri deep link on desktop, an intent filter on Android) and
+/// passes the received URL to `CompleteOidcLogin`.
+pub const OIDC_REDIRECT_URI: &str = "alloy://oidc/callback";
+
+/// Project page advertised as the OAuth client's `client_uri`.
+const OIDC_CLIENT_URI: &str = "https://github.com/centopw/alloy";
+
+/// Name shown to the user on the authorization server's consent screen.
+const OIDC_CLIENT_NAME: &str = "Alloy";
 
 /// Result of probing a homeserver address or server name.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,6 +43,15 @@ pub struct AccountProfile {
     pub display_name: Option<String>,
     pub avatar_url: Option<String>,
     pub homeserver_url: String,
+}
+
+/// What the app needs to present an OIDC login: the URL to open and the URI to expect back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OidcLoginStart {
+    /// Authorization URL to open in the system browser.
+    pub authorization_url: String,
+    /// Redirect URI registered with the server; the app must receive this URL.
+    pub redirect_uri: String,
 }
 
 /// Resolve a server name (`example.org`) or URL into a homeserver, probing login support.
@@ -90,11 +116,76 @@ impl AlloyClient {
         let session = auth
             .session()
             .ok_or_else(|| AlloyError::Auth("login returned no session".into()))?;
-        let json = serde_json::to_string(&session).map_err(|e| AlloyError::Auth(e.to_string()))?;
-        self.secret_store
-            .set_secret(&self.session_key(), &json)
-            .await?;
-        Ok(())
+        self.save_matrix_session(session).await
+    }
+
+    /// Starts an OIDC (MAS) authorization-code login and returns the URL the app should open.
+    ///
+    /// The client registers itself with the authorization server as a native public client,
+    /// announcing [`OIDC_REDIRECT_URI`]. The PKCE verifier and CSRF state stay in this client, so
+    /// the same client must receive [`Self::complete_oidc_login`].
+    pub async fn start_oidc_login(&self) -> AlloyResult<OidcLoginStart> {
+        let redirect_uri = url::Url::parse(OIDC_REDIRECT_URI)
+            .map_err(|e| AlloyError::Auth(format!("invalid OIDC redirect URI: {e}")))?;
+        let client_uri = url::Url::parse(OIDC_CLIENT_URI)
+            .map_err(|e| AlloyError::Auth(format!("invalid OIDC client URI: {e}")))?;
+        let oauth = self.client.oauth();
+
+        // A homeserver without an authorization server cannot log anyone in this way; report it
+        // before registering anything. A transient failure stays a network error so the UI can
+        // offer a retry instead of telling the user the server does not support OIDC.
+        if let Err(e) = oauth.server_metadata().await {
+            if e.is_not_supported() {
+                return Err(AlloyError::Auth(
+                    "homeserver does not support OIDC login".into(),
+                ));
+            }
+            return Err(AlloyError::MatrixSdk(e.to_string()));
+        }
+
+        let mut metadata = ClientMetadata::new(
+            ApplicationType::Native,
+            vec![OAuthGrantType::AuthorizationCode {
+                redirect_uris: vec![redirect_uri.clone()],
+            }],
+            Localized::new(client_uri, []),
+        );
+        metadata.client_name = Some(Localized::new(OIDC_CLIENT_NAME.to_owned(), []));
+        let metadata = Raw::new(&metadata)
+            .map_err(|e| AlloyError::Auth(format!("could not build OIDC client metadata: {e}")))?;
+
+        let authorization = oauth
+            .login(redirect_uri.clone(), None, Some(metadata.into()), None)
+            .build()
+            .await
+            .map_err(|e| AlloyError::Auth(format!("could not start OIDC login: {e}")))?;
+
+        Ok(OidcLoginStart {
+            authorization_url: authorization.url.to_string(),
+            redirect_uri: redirect_uri.to_string(),
+        })
+    }
+
+    /// Finishes an OIDC login from the URL the app received, and persists the session.
+    ///
+    /// The URL's state is checked by the SDK against the one this client generated; a foreign or
+    /// expired callback is rejected.
+    pub async fn complete_oidc_login(&self, redirect_url: &str) -> AlloyResult<()> {
+        let redirect_url = redirect_url.trim();
+        if redirect_url.is_empty() {
+            return Err(AlloyError::Auth("empty OIDC callback URL".into()));
+        }
+        let input = match url::Url::parse(redirect_url) {
+            Ok(url) => UrlOrQuery::Url(url),
+            // A bare query string is accepted too, which keeps app-side parsing simple.
+            Err(_) => UrlOrQuery::Query(redirect_url.trim_start_matches('?').to_owned()),
+        };
+        self.client
+            .oauth()
+            .finish_login(input)
+            .await
+            .map_err(|e| AlloyError::Auth(format!("OIDC login failed: {e}")))?;
+        self.persist_oauth_session().await
     }
 
     /// Fetch display name and avatar of the logged-in account.
@@ -124,15 +215,25 @@ impl AlloyClient {
 
     /// Log out on the server and delete every local secret for this account.
     ///
-    /// Local secrets are deleted even when the server call fails, so a failed logout never leaves
-    /// a usable access token on this device. The remote error, if any, is still returned.
+    /// An OAuth (MAS) session is revoked through the authorization server's revocation endpoint;
+    /// a password session uses the homeserver's `/logout`. Local secrets are deleted even when the
+    /// server call fails, so a failed logout never leaves a usable access token on this device. The
+    /// remote error, if any, is still returned.
     pub async fn logout(&self) -> AlloyResult<()> {
-        let remote = self
-            .client
-            .matrix_auth()
-            .logout()
-            .await
-            .map_err(|e| AlloyError::Auth(e.to_string()));
+        let remote = if self.is_oauth_session() {
+            self.client
+                .oauth()
+                .logout()
+                .await
+                .map_err(|e| AlloyError::Auth(e.to_string()))
+        } else {
+            self.client
+                .matrix_auth()
+                .logout()
+                .await
+                .map(|_| ())
+                .map_err(|e| AlloyError::Auth(e.to_string()))
+        };
         let local = self.delete_local_secrets().await;
         remote.map(|_| ())?;
         local

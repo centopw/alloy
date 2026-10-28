@@ -56,7 +56,7 @@ export type EngineCommand = { action: "DiscoverHomeserver"; params: {
 	homeserver_url: string,
 } } | { action: "CompleteOidcLogin"; params: {
 	redirect_url: string,
-} } | { action: "RestoreSession"; params: {
+} } | { action: "CancelOidcLogin" } | { action: "RestoreSession"; params: {
 	account_id: AccountId,
 } } | { action: "Logout"; params: {
 	account_id: AccountId,
@@ -498,7 +498,13 @@ export type EngineResponse = { type: "HomeserverInfo"; payload: {
 	name: string,
 	supports_oidc: boolean,
 } } | { type: "OidcUrl"; payload: {
-	redirect_url: string,
+	/**  Authorization URL to open in the system browser. */
+	authorization_url: string,
+	/**
+	 *  Redirect URI registered with the server; the app must receive this URL and pass it
+	 *  back with `CompleteOidcLogin`.
+	 */
+	redirect_uri: string,
 } } | { type: "SessionRestored"; payload: {
 	account: Account,
 } } | { type: "LoggedIn"; payload: {

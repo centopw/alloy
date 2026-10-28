@@ -24,6 +24,7 @@ impl CommandGroup {
             | EngineCommand::LoginPassword { .. }
             | EngineCommand::StartOidcLogin { .. }
             | EngineCommand::CompleteOidcLogin { .. }
+            | EngineCommand::CancelOidcLogin
             | EngineCommand::RestoreSession { .. }
             | EngineCommand::Logout { .. }
             | EngineCommand::ListAccounts

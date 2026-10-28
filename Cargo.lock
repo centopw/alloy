@@ -169,6 +169,7 @@ dependencies = [
  "matrix-sdk-sqlite",
  "matrix-sdk-ui",
  "mime",
+ "oauth2",
  "rand 0.8.8",
  "reqwest 0.13.5",
  "rustls",
@@ -198,6 +199,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
+ "url",
  "uuid",
 ]
 

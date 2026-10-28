@@ -636,6 +636,7 @@ pub enum EngineCommand {
     CompleteOidcLogin {
         redirect_url: String,
     },
+    CancelOidcLogin,
     RestoreSession {
         account_id: AccountId,
     },
@@ -1094,7 +1095,11 @@ pub enum EngineResponse {
         supports_oidc: bool,
     },
     OidcUrl {
-        redirect_url: String,
+        /// Authorization URL to open in the system browser.
+        authorization_url: String,
+        /// Redirect URI registered with the server; the app must receive this URL and pass it
+        /// back with `CompleteOidcLogin`.
+        redirect_uri: String,
     },
     SessionRestored {
         account: Account,

@@ -1,4 +1,4 @@
-use alloy_engine::context::EngineContext;
+use alloy_engine::context::{EngineContext, PendingOidcLogin};
 use alloy_engine::router::{AppEngine, Engine};
 use alloy_protocol::{EngineCommand, EngineEvent, EngineResponse, SubscriptionId};
 use alloy_storage::{InMemorySecretStore, SecretStore};
@@ -68,25 +68,24 @@ async fn test_error_propagation() {
 
 #[tokio::test]
 async fn test_not_implemented_naming() {
-    let (engine, _tmp) = create_test_engine();
+    // Every command has a handler now; the router still names an unhandled command clearly, which
+    // is what a command in a group without a registered handler gets.
+    let tmp = tempdir().expect("failed to create temp dir");
+    let secrets: Arc<dyn SecretStore> = Arc::new(InMemorySecretStore::new());
+    let engine =
+        alloy_engine::RouterEngine::new(EngineContext::new(tmp.path().to_path_buf(), secrets));
 
-    let cases = [(
-        EngineCommand::StartOidcLogin {
+    let err = engine
+        .handle(EngineCommand::StartOidcLogin {
             homeserver_url: "https://matrix.org".into(),
-        },
-        "StartOidcLogin",
-    )];
-
-    for (cmd, expected_name) in cases {
-        let res = engine.handle(cmd).await;
-        assert!(res.is_err());
-        let err = res.unwrap_err();
-        assert_eq!(err.code, "not_implemented");
-        assert_eq!(
-            err.message,
-            format!("Command '{}' not yet implemented", expected_name)
-        );
-    }
+        })
+        .await
+        .expect_err("a command with no registered handler is not implemented");
+    assert_eq!(err.code, "not_implemented");
+    assert_eq!(
+        err.message,
+        "Command 'StartOidcLogin' not yet implemented".to_string()
+    );
 }
 
 #[tokio::test]
@@ -356,4 +355,60 @@ async fn test_a_failed_settings_write_never_replaces_the_readable_file() {
     assert_eq!(std::fs::read_to_string(&settings_path).unwrap(), readable);
     let parsed: serde_json::Value = serde_json::from_str(&readable).unwrap();
     assert_eq!(parsed["active_theme"], "alloy-dark");
+}
+
+#[tokio::test]
+async fn test_oidc_commands_require_a_pending_login() {
+    let (engine, _tmp) = create_test_engine();
+
+    let err = engine
+        .handle(EngineCommand::CompleteOidcLogin {
+            redirect_url: "alloy://oidc/callback?code=code&state=state".into(),
+        })
+        .await
+        .expect_err("completing without a started login must fail");
+    assert_eq!(err.code, "auth_failed");
+
+    // Cancelling with nothing pending is a no-op, so the UI can call it unconditionally.
+    assert!(matches!(
+        engine.handle(EngineCommand::CancelOidcLogin).await.unwrap(),
+        EngineResponse::Unit
+    ));
+}
+
+#[tokio::test]
+async fn test_an_expired_oidc_login_is_rejected_and_its_store_purged() {
+    let tmp = tempdir().expect("failed to create temp dir");
+    let ctx = EngineContext::new(
+        tmp.path().to_path_buf(),
+        Arc::new(InMemorySecretStore::new()),
+    );
+    let engine = AppEngine::new(ctx.clone());
+
+    let store_id = "expired-login";
+    let store_dir = tmp.path().join("accounts").join(store_id);
+    let client = alloy_core::AlloyClient::open(
+        "http://localhost:8008",
+        &store_dir,
+        Some(Box::new(InMemorySecretStore::new())),
+        Some(store_id),
+    )
+    .await
+    .unwrap();
+    assert!(store_dir.exists(), "the pending login has its own store");
+    *ctx.pending_oidc.lock().await = Some(PendingOidcLogin {
+        client,
+        store_id: store_id.into(),
+        started_at: std::time::Instant::now() - std::time::Duration::from_secs(11 * 60),
+    });
+
+    let err = engine
+        .handle(EngineCommand::CompleteOidcLogin {
+            redirect_url: "alloy://oidc/callback?code=code&state=state".into(),
+        })
+        .await
+        .expect_err("an expired login must not complete");
+    assert_eq!(err.code, "auth_failed");
+    assert!(err.message.contains("expired"), "{}", err.message);
+    assert!(!store_dir.exists(), "the expired login's store is purged");
 }

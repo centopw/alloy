@@ -1,18 +1,23 @@
 use crate::accounts::{AccountEntry, AccountIndex};
-use crate::context::EngineContext;
+use crate::context::{EngineContext, PendingOidcLogin};
 use crate::error::EngineError;
 use crate::router::{CommandGroup, GroupHandler, command_name};
 use alloy_core::{AlloyClient, AlloyError, auth::discover_homeserver, delete_account_secrets};
-use alloy_protocol::{EngineCommand, EngineEvent, EngineResponse};
+use alloy_protocol::{Account, EngineCommand, EngineEvent, EngineResponse};
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 /// Matrix display names are capped at 255 characters.
 const MAX_DISPLAY_NAME_CHARS: usize = 255;
 
+/// How long a started OIDC login waits for the app to deliver the authorization redirect.
+const OIDC_LOGIN_TTL: Duration = Duration::from_secs(10 * 60);
+
 /// Handler for authentication commands (`CommandGroup::Auth`).
 ///
-/// Owned by stream: `core-auth`. Supports discovery, password login, session restore,
-/// logout and account listing. OIDC (`StartOidcLogin`/`CompleteOidcLogin`) is not implemented.
+/// Owned by stream: `core-auth`. Supports discovery, password and OIDC (MAS) login, session
+/// restore, logout and account listing.
 #[derive(Default)]
 pub struct AuthHandler;
 
@@ -62,6 +67,82 @@ async fn purge_account(ctx: &EngineContext, index: &AccountIndex, store_id: &str
     let _ = std::fs::remove_dir_all(index.store_dir(store_id));
 }
 
+/// Starts persisting refreshed OAuth tokens for the active session, replacing an earlier watcher.
+fn start_session_watch(ctx: &EngineContext, client: &Arc<AlloyClient>) {
+    let mut slot = ctx
+        .session_watch
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(handle) = slot.take() {
+        handle.abort();
+    }
+    if !client.is_oauth_session() {
+        return;
+    }
+    *slot = Some(tokio::spawn(client.clone().watch_session_tokens()));
+}
+
+/// Stops the token watcher, e.g. when the session is logged out.
+fn stop_session_watch(ctx: &EngineContext) {
+    let mut slot = ctx
+        .session_watch
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(handle) = slot.take() {
+        handle.abort();
+    }
+}
+
+/// Registers a freshly authenticated client: fetches its profile, indexes the account, makes it
+/// the active client and starts its background work. Shared by password and OIDC login.
+async fn finish_login(
+    ctx: &EngineContext,
+    index: &AccountIndex,
+    client: AlloyClient,
+    store_id: &str,
+) -> Result<Account, EngineError> {
+    let profile = match client.account_profile().await {
+        Ok(profile) => profile,
+        Err(e) => {
+            // A session was stored by the login; revoke it on the server as well.
+            if let Err(logout_err) = client.logout().await {
+                tracing::warn!(error = %logout_err, "remote logout failed after login");
+            }
+            purge_account(ctx, index, store_id).await;
+            return Err(map_err(e));
+        }
+    };
+    let entry = AccountEntry {
+        user_id: profile.user_id,
+        homeserver_url: profile.homeserver_url,
+        display_name: profile.display_name,
+        avatar_url: profile.avatar_url,
+        store_id: store_id.to_owned(),
+    };
+    let account = entry.to_account();
+    let replaced = match index.upsert(entry) {
+        Ok(replaced) => replaced,
+        Err(e) => {
+            purge_account(ctx, index, store_id).await;
+            return Err(EngineError::internal_error(e.to_string()));
+        }
+    };
+    if let Some(old) = replaced {
+        purge_account(ctx, index, &old.store_id).await;
+    }
+    ctx.set_client(Some(client)).await;
+    if ctx.background
+        && let Ok(active) = ctx.active_client().await
+    {
+        super::crypto::start_background(ctx, active.clone()).await;
+        start_session_watch(ctx, &active);
+    }
+    ctx.sink.emit(EngineEvent::AuthState {
+        account: Some(account.clone()),
+    });
+    Ok(account)
+}
+
 #[async_trait::async_trait]
 impl GroupHandler for AuthHandler {
     fn group(&self) -> CommandGroup {
@@ -96,45 +177,65 @@ impl GroupHandler for AuthHandler {
                     purge_account(ctx, &index, &store_id).await;
                     return Err(map_err(e));
                 }
-                let profile = match client.account_profile().await {
-                    Ok(profile) => profile,
+                let account = finish_login(ctx, &index, client, &store_id).await?;
+                Ok(EngineResponse::LoggedIn { account })
+            }
+            EngineCommand::StartOidcLogin { homeserver_url } => {
+                // One login at a time: drop any earlier attempt and its temporary store.
+                if let Some(previous) = ctx.pending_oidc.lock().await.take() {
+                    purge_account(ctx, &index, &previous.store_id).await;
+                }
+                let store_id = uuid::Uuid::new_v4().to_string();
+                let client = open_client(ctx, &homeserver_url, &store_id).await?;
+                let start = match client.start_oidc_login().await {
+                    Ok(start) => start,
                     Err(e) => {
-                        // A session was stored by the login; revoke it on the server as well.
-                        if let Err(logout_err) = client.logout().await {
-                            tracing::warn!(error = %logout_err, "remote logout failed after login");
-                        }
+                        drop(client);
                         purge_account(ctx, &index, &store_id).await;
                         return Err(map_err(e));
                     }
                 };
-                let entry = AccountEntry {
-                    user_id: profile.user_id,
-                    homeserver_url: profile.homeserver_url,
-                    display_name: profile.display_name,
-                    avatar_url: profile.avatar_url,
-                    store_id: store_id.clone(),
-                };
-                let account = entry.to_account();
-                let replaced = match index.upsert(entry) {
-                    Ok(replaced) => replaced,
-                    Err(e) => {
-                        purge_account(ctx, &index, &store_id).await;
-                        return Err(EngineError::internal_error(e.to_string()));
-                    }
-                };
-                if let Some(old) = replaced {
-                    purge_account(ctx, &index, &old.store_id).await;
-                }
-                ctx.set_client(Some(client)).await;
-                if ctx.background
-                    && let Ok(active) = ctx.active_client().await
-                {
-                    super::crypto::start_background(ctx, active).await;
-                }
-                ctx.sink.emit(EngineEvent::AuthState {
-                    account: Some(account.clone()),
+                *ctx.pending_oidc.lock().await = Some(PendingOidcLogin {
+                    client,
+                    store_id,
+                    started_at: Instant::now(),
                 });
+                Ok(EngineResponse::OidcUrl {
+                    authorization_url: start.authorization_url,
+                    redirect_uri: start.redirect_uri,
+                })
+            }
+            EngineCommand::CompleteOidcLogin { redirect_url } => {
+                let pending = ctx
+                    .pending_oidc
+                    .lock()
+                    .await
+                    .take()
+                    .ok_or_else(|| EngineError::auth_failed("no OIDC login in progress"))?;
+                if pending.started_at.elapsed() > OIDC_LOGIN_TTL {
+                    purge_account(ctx, &index, &pending.store_id).await;
+                    return Err(EngineError::auth_failed("OIDC login expired; start again"));
+                }
+                let PendingOidcLogin {
+                    client, store_id, ..
+                } = pending;
+                if let Err(e) = client.complete_oidc_login(&redirect_url).await {
+                    // The authorization may have succeeded even when the session could not be
+                    // stored; revoke it so no usable token is left behind on the server.
+                    if let Err(logout_err) = client.logout().await {
+                        tracing::debug!(error = %logout_err, "no OIDC session to revoke");
+                    }
+                    purge_account(ctx, &index, &store_id).await;
+                    return Err(map_err(e));
+                }
+                let account = finish_login(ctx, &index, client, &store_id).await?;
                 Ok(EngineResponse::LoggedIn { account })
+            }
+            EngineCommand::CancelOidcLogin => {
+                if let Some(pending) = ctx.pending_oidc.lock().await.take() {
+                    purge_account(ctx, &index, &pending.store_id).await;
+                }
+                Ok(EngineResponse::Unit)
             }
             EngineCommand::RestoreSession { account_id } => {
                 let (client, entry) = alloy_core::restore_account(
@@ -149,7 +250,8 @@ impl GroupHandler for AuthHandler {
                 if ctx.background
                     && let Ok(active) = ctx.active_client().await
                 {
-                    super::crypto::start_background(ctx, active).await;
+                    super::crypto::start_background(ctx, active.clone()).await;
+                    start_session_watch(ctx, &active);
                 }
                 ctx.sink.emit(EngineEvent::AuthState {
                     account: Some(account.clone()),
@@ -170,6 +272,7 @@ impl GroupHandler for AuthHandler {
                 // error is still returned so the caller knows the token may remain valid.
                 let remote = match active_client {
                     Some(client) => {
+                        stop_session_watch(ctx);
                         client.stop_sync().await;
                         let remote = client.logout().await;
                         ctx.set_client(None).await;
@@ -190,9 +293,6 @@ impl GroupHandler for AuthHandler {
             EngineCommand::ListAccounts => Ok(EngineResponse::AccountsList {
                 accounts: index.list().iter().map(AccountEntry::to_account).collect(),
             }),
-            EngineCommand::StartOidcLogin { .. } | EngineCommand::CompleteOidcLogin { .. } => {
-                Err(EngineError::not_implemented(&name))
-            }
             EngineCommand::GetOwnProfile => {
                 let client = ctx.active_client().await?;
                 let profile = client.own_profile().await.map_err(map_err)?;

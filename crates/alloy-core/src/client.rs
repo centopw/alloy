@@ -5,6 +5,7 @@ use base64::Engine;
 use matrix_sdk::Client;
 use matrix_sdk_sqlite::SqliteStoreConfig;
 use std::path::Path;
+use std::sync::Arc;
 use url::Url;
 
 use crate::{AlloyError, AlloyResult};
@@ -54,6 +55,45 @@ pub async fn delete_account_secrets(
         store.delete_secret(&secret_key(namespace, name)).await?;
     }
     Ok(())
+}
+
+/// A session as it is stored in the secret store.
+///
+/// The format is tagged explicitly: an OAuth session's JSON also looks like a password session,
+/// and restoring it as one would drop its client id, refresh support and revocation path.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(tag = "format", content = "session", rename_all = "snake_case")]
+enum StoredSession {
+    Matrix(matrix_sdk::authentication::matrix::MatrixSession),
+    Oauth(StoredOAuthSession),
+}
+
+/// An OAuth session in a storable shape: the SDK's `OAuthSession` is not serializable, so the
+/// client id is stored next to the user session and put back on restore.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct StoredOAuthSession {
+    client_id: String,
+    user: matrix_sdk::authentication::oauth::UserSession,
+}
+
+impl StoredOAuthSession {
+    fn into_session(self) -> matrix_sdk::authentication::oauth::OAuthSession {
+        matrix_sdk::authentication::oauth::OAuthSession {
+            client_id: oauth2::ClientId::new(self.client_id),
+            user: self.user,
+        }
+    }
+}
+
+/// Reads a stored session. Sessions written before 0.2.9 are a bare password session with no tag.
+fn parse_stored_session(json: &str) -> AlloyResult<StoredSession> {
+    if let Ok(session) =
+        serde_json::from_str::<matrix_sdk::authentication::matrix::MatrixSession>(json)
+    {
+        return Ok(StoredSession::Matrix(session));
+    }
+    serde_json::from_str(json)
+        .map_err(|e| AlloyError::Auth(format!("stored session is unreadable: {e}")))
 }
 
 /// Lightweight Matrix client wrapper providing room list and timeline streams
@@ -145,6 +185,7 @@ impl AlloyClient {
         let client = Client::builder()
             .http_client(http)
             .homeserver_url(homeserver)
+            .handle_refresh_tokens()
             .sqlite_store_with_config_and_cache_path(store_config, None::<&Path>)
             .build()
             .await
@@ -171,18 +212,88 @@ impl AlloyClient {
         if self.client.user_id().is_some() {
             return Ok(true);
         }
-        match self.secret_store.get_secret(&self.session_key()).await {
-            Ok(json) => {
-                let session: matrix_sdk::authentication::matrix::MatrixSession =
-                    serde_json::from_str(&json).map_err(|e| AlloyError::Auth(e.to_string()))?;
-                self.client
-                    .restore_session(session)
-                    .await
-                    .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
-                Ok(true)
-            }
-            Err(_) => Ok(false),
+        let json = match self.secret_store.get_secret(&self.session_key()).await {
+            Ok(json) => json,
+            Err(_) => return Ok(false),
+        };
+        match parse_stored_session(&json)? {
+            StoredSession::Matrix(session) => self
+                .client
+                .restore_session(session)
+                .await
+                .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?,
+            StoredSession::Oauth(session) => self
+                .client
+                .oauth()
+                .restore_session(
+                    session.into_session(),
+                    matrix_sdk::store::RoomLoadSettings::default(),
+                )
+                .await
+                .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?,
         }
+        Ok(true)
+    }
+
+    /// Stores a password session, so the next start restores it.
+    pub(crate) async fn save_matrix_session(
+        &self,
+        session: matrix_sdk::authentication::matrix::MatrixSession,
+    ) -> AlloyResult<()> {
+        self.store_session(&StoredSession::Matrix(session)).await
+    }
+
+    /// Stores the current OAuth session, so restored tokens and refreshed tokens survive a restart.
+    /// A password session has nothing OAuth to store and is left untouched.
+    pub async fn persist_oauth_session(&self) -> AlloyResult<()> {
+        let Some(session) = self.client.oauth().full_session() else {
+            return Ok(());
+        };
+        let stored = StoredOAuthSession {
+            client_id: session.client_id.to_string(),
+            user: session.user,
+        };
+        self.store_session(&StoredSession::Oauth(stored)).await
+    }
+
+    /// Whether the current session authenticates through OAuth 2.0 (MAS).
+    ///
+    /// `user_session()` is not a usable check here: it is populated for password sessions too.
+    /// Only an OAuth session has the client registration data that `full_session()` requires.
+    pub fn is_oauth_session(&self) -> bool {
+        self.client.oauth().full_session().is_some()
+    }
+
+    /// Reports token refreshes and invalidated tokens for the current session.
+    pub fn session_changes(&self) -> tokio::sync::broadcast::Receiver<matrix_sdk::SessionChange> {
+        self.client.subscribe_to_session_changes()
+    }
+
+    /// Writes the OAuth session back to the secret store on every token refresh.
+    ///
+    /// Run it as a task for as long as the session is active; abort it on logout. A password
+    /// session never refreshes, so the task just waits for the client to go away.
+    pub async fn watch_session_tokens(self: Arc<Self>) {
+        let mut changes = self.session_changes();
+        loop {
+            match changes.recv().await {
+                Ok(matrix_sdk::SessionChange::TokensRefreshed) => {
+                    if let Err(e) = self.persist_oauth_session().await {
+                        tracing::warn!(error = %e, "could not persist refreshed tokens");
+                    }
+                }
+                Ok(_) => {}
+                Err(_) => break,
+            }
+        }
+    }
+
+    async fn store_session(&self, session: &StoredSession) -> AlloyResult<()> {
+        let json = serde_json::to_string(session).map_err(|e| AlloyError::Auth(e.to_string()))?;
+        self.secret_store
+            .set_secret(&self.session_key(), &json)
+            .await?;
+        Ok(())
     }
 
     pub(crate) fn session_key(&self) -> String {
@@ -287,5 +398,56 @@ impl AlloyClient {
     /// Get user ID if logged in.
     pub fn user_id(&self) -> Option<&str> {
         self.client.user_id().map(|uid| uid.as_str())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const LEGACY: &str =
+        r#"{"user_id":"@alice:example.org","device_id":"DEVICE","access_token":"token"}"#;
+    const MATRIX: &str = r#"{"format":"matrix","session":{"user_id":"@alice:example.org","device_id":"DEVICE","access_token":"token"}}"#;
+    const OAUTH: &str = r#"{"format":"oauth","session":{"client_id":"client","user":{"user_id":"@alice:example.org","device_id":"DEVICE","access_token":"token","refresh_token":"refresh"}}}"#;
+
+    #[test]
+    fn a_session_stored_before_0_2_9_is_read_as_a_password_session() {
+        assert!(matches!(
+            parse_stored_session(LEGACY).unwrap(),
+            StoredSession::Matrix(_)
+        ));
+    }
+
+    #[test]
+    fn tagged_sessions_keep_their_kind() {
+        assert!(matches!(
+            parse_stored_session(MATRIX).unwrap(),
+            StoredSession::Matrix(_)
+        ));
+        // An OAuth session must not be restored as a password session: its client id and refresh
+        // support would be dropped, and token refresh would silently stop working.
+        match parse_stored_session(OAUTH).unwrap() {
+            StoredSession::Oauth(session) => {
+                assert_eq!(session.client_id, "client");
+                assert_eq!(session.user.meta.user_id.as_str(), "@alice:example.org");
+                assert_eq!(
+                    session.user.tokens.refresh_token.as_deref(),
+                    Some("refresh")
+                );
+            }
+            StoredSession::Matrix(_) => panic!("an OAuth session parsed as a password session"),
+        }
+    }
+
+    #[test]
+    fn an_unreadable_stored_session_is_reported() {
+        assert!(matches!(
+            parse_stored_session("not json"),
+            Err(AlloyError::Auth(_))
+        ));
+        assert!(matches!(
+            parse_stored_session(r#"{"format":"oauth","session":{"client_id":1}}"#),
+            Err(AlloyError::Auth(_))
+        ));
     }
 }

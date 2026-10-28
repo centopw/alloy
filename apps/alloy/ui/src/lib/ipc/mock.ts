@@ -515,7 +515,8 @@ export class MockTransport implements Transport {
         return {
           type: 'OidcUrl',
           payload: {
-            redirect_url: `${command.params.homeserver_url}/_matrix/client/v3/auth/oidc/fallback`,
+            authorization_url: `${command.params.homeserver_url}/_matrix/client/v3/auth/oidc/fallback`,
+            redirect_uri: 'http://127.0.0.1:17897/callback',
           },
         };
 
@@ -524,6 +525,9 @@ export class MockTransport implements Transport {
           type: 'LoggedIn',
           payload: { account: MOCK_ACCOUNT },
         };
+
+      case 'CancelOidcLogin':
+        return { type: 'Unit' };
 
       case 'RestoreSession':
         return {

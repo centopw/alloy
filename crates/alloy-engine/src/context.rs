@@ -15,6 +15,16 @@ struct AttachmentAllowlist {
     roots: Vec<PathBuf>,
 }
 
+/// An OIDC login waiting for the app to deliver the authorization redirect.
+///
+/// The client holds the PKCE verifier and CSRF state, so it must be the one that finishes the
+/// login. Its store directory is temporary until the login succeeds.
+pub struct PendingOidcLogin {
+    pub client: AlloyClient,
+    pub store_id: String,
+    pub started_at: std::time::Instant,
+}
+
 /// Shared engine context passed to command handlers.
 #[derive(Clone)]
 pub struct EngineContext {
@@ -25,6 +35,10 @@ pub struct EngineContext {
     pub subscriptions: SubscriptionRegistry,
     /// Start sync, recovery and verification watchers after login (disable for headless use).
     pub background: bool,
+    /// The one OIDC login between `StartOidcLogin` and `CompleteOidcLogin`/`CancelOidcLogin`.
+    pub pending_oidc: Arc<tokio::sync::Mutex<Option<PendingOidcLogin>>>,
+    /// Persists refreshed OAuth tokens for the active session; aborted on logout.
+    pub session_watch: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
     attachments: Arc<Mutex<AttachmentAllowlist>>,
     unrestricted_attachments: bool,
 }
@@ -38,6 +52,8 @@ impl EngineContext {
             secrets,
             subscriptions: SubscriptionRegistry::new(),
             background: true,
+            pending_oidc: Arc::new(tokio::sync::Mutex::new(None)),
+            session_watch: Arc::new(Mutex::new(None)),
             attachments: Arc::new(Mutex::new(AttachmentAllowlist::default())),
             unrestricted_attachments: false,
         }
