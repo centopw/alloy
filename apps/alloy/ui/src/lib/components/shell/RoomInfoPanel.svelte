@@ -1105,16 +1105,13 @@
   }
 
   /* Touch has no hover state, so the affordance is always visible there. The icon stays 24px but
-     its hit area grows to the 44px minimum without moving the text. */
+     the box itself grows to the 44px minimum: the negative margins keep the text line unchanged. */
   @media (hover: none) {
     .edit-btn {
+      width: 44px;
+      height: 44px;
+      margin: -10px;
       opacity: 1;
-    }
-
-    .edit-btn::after {
-      content: '';
-      position: absolute;
-      inset: -10px;
     }
   }
 
