@@ -1,16 +1,32 @@
 <script lang="ts">
   import { Button, TextField } from '../common';
-  import { ChevronLeft, ExternalLink, Icon, MessageSquare, ShieldCheck, Smartphone } from '$lib/icons';
+  import {
+    ChevronDown,
+    ChevronLeft,
+    ChevronUp,
+    ExternalLink,
+    Icon,
+    MessageSquare,
+    ShieldCheck,
+    Smartphone
+  } from '$lib/icons';
   import { session } from '$lib/stores/session.svelte';
-  import { errorMessage, errorReason, oidcErrorMessage } from '$lib/stores/errors';
+  import { errorMessage, oidcErrorMessage } from '$lib/stores/errors';
 
   type Step = 'welcome' | 'server' | 'login';
-  /** How the account signs in: on the server's own page (OIDC/MAS), or with a password here. */
-  type Method = 'oidc' | 'password';
+
+  /** The host a server URL names, as the copy shows it. */
+  function hostOf(url: string): string {
+    try {
+      return new URL(url).host;
+    } catch {
+      return url;
+    }
+  }
 
   let step = $state<Step>('welcome');
-  let method = $state<Method>('password');
-  let serverInput = $state('matrix.org');
+  // A session that could not be restored leaves its server here, so the user retypes the password, not the address.
+  let serverInput = $state(session.lastHomeserver ? hostOf(session.lastHomeserver) : 'matrix.org');
   let homeserverUrl = $state('');
   let homeserverName = $state('');
   let supportsOidc = $state(false);
@@ -18,6 +34,9 @@
   let password = $state('');
   let localError = $state<string | null>(null);
   let checking = $state(false);
+  /** The password form sits behind a disclosure when the server offers browser sign-in. */
+  let passwordOpen = $state(false);
+  let waitingTitle: HTMLElement | undefined = $state();
 
   const serverHost = $derived.by(() => {
     try {
@@ -27,26 +46,27 @@
     }
   });
 
+  // The waiting panel is a new context; a screen reader should hear what the app is waiting for.
+  $effect(() => {
+    if (session.oidcWaiting) waitingTitle?.focus();
+  });
+
   function go(next: Step) {
     localError = null;
     step = next;
   }
 
-  function useMethod(next: Method) {
-    localError = null;
-    method = next;
-  }
-
   async function continueServer(e: Event) {
     e.preventDefault();
     localError = null;
+    session.clearOidcFailure();
     checking = true;
     try {
       const info = await session.discover(serverInput.trim());
       homeserverUrl = info.url;
       homeserverName = info.name;
       supportsOidc = info.supports_oidc;
-      method = info.supports_oidc ? 'oidc' : 'password';
+      passwordOpen = false;
       step = 'login';
     } catch (err) {
       localError = `Couldn't reach that server. ${errorMessage(err)}`;
@@ -55,23 +75,18 @@
     }
   }
 
+  /** Starts (or retries) the browser sign-in; the store reports any failure for the panel below. */
   async function startOidc() {
-    localError = null;
-    try {
-      await session.startOidc(homeserverUrl);
-    } catch (err) {
-      localError = oidcErrorMessage(err);
-      // The server cannot do browser sign-in after all; show the password form instead of a dead end.
-      if (supportsOidc && errorReason(err) === 'unsupported') {
-        method = 'password';
-        supportsOidc = false;
-      }
-    }
+    await session.startOidc(homeserverUrl).catch(() => {});
   }
 
   async function cancelOidc() {
-    localError = null;
     await session.cancelOidc();
+  }
+
+  function differentServer() {
+    session.clearOidcFailure();
+    go('server');
   }
 
   async function signIn(e: Event) {
@@ -121,6 +136,9 @@
         <div class="intro">
           <p class="eyebrow">Welcome to Alloy</p>
           <h2>Sign in to Matrix</h2>
+          {#if session.restoreNotice}
+            <p class="notice" role="status">{session.restoreNotice}</p>
+          {/if}
           <p class="hint">
             You’ll pick your homeserver, then your account. It takes about a minute.
           </p>
@@ -138,7 +156,7 @@
           <div class="step-head">
             <p class="eyebrow">Step 1 of 2</p>
             <h2>Where is your account?</h2>
-            <p class="hint">Your homeserver hosts your rooms and messages.</p>
+            <p class="hint">Your homeserver hosts your rooms and messages. You’ll sign in there.</p>
           </div>
           <form onsubmit={continueServer}>
             <label>
@@ -166,53 +184,125 @@
             </div>
           </form>
         {:else}
-          <div class="step-head">
-            <p class="eyebrow">Step 2 of 2 · {homeserverName}</p>
-            <h2>{method === 'oidc' ? 'Sign in through your browser' : 'Sign in'}</h2>
-            {#if method === 'oidc'}
+          {#if session.oidcWaiting}
+            <div class="step-head">
+              <p class="eyebrow">Step 2 of 2 · {homeserverName}</p>
+              <h2 class="waiting-title" tabindex="-1" bind:this={waitingTitle}>
+                Waiting for your browser
+              </h2>
               <p class="hint">
-                {#if session.oidcWaiting}
-                  Finish signing in at {serverHost} in the browser window. This screen updates by
-                  itself.
-                {:else}
-                  Your account on {serverHost} signs in on its own page, so Alloy never sees your
-                  password.
-                {/if}
+                We opened a browser window. Approve the sign-in for {serverHost}, then come back
+                here.
               </p>
-            {:else}
-              <p class="hint">Use your Matrix ID and password for this homeserver.</p>
-            {/if}
-          </div>
-          {#if method === 'oidc'}
-            {#if session.oidcWaiting}
-              <p class="waiting" role="status">
-                <span class="pulse" aria-hidden="true"></span>
-                Waiting for the browser…
-              </p>
-            {/if}
-            {#if localError}<p class="error" role="alert">{localError}</p>{/if}
-            <div class="actions">
-              <Button
-                variant="ghost"
-                type="button"
-                onclick={() => (session.oidcWaiting ? cancelOidc() : go('server'))}
-              >
-                {#if !session.oidcWaiting}
-                  <Icon icon={ChevronLeft} size={16} strokeWidth={1.5} />
-                {/if}
-                {session.oidcWaiting ? 'Cancel' : 'Back'}
-              </Button>
-              <Button type="button" onclick={startOidc} disabled={session.busy}>
-                <Icon icon={ExternalLink} size={16} strokeWidth={1.5} />
-                {session.busy ? 'Opening…' : session.oidcWaiting ? 'Open again' : 'Open browser'}
-              </Button>
             </div>
-            {#if !session.oidcWaiting}
-              <button class="link" type="button" onclick={() => useMethod('password')}>
-                Use a username and password instead
+            <p class="waiting" role="status">
+              <span class="pulse" aria-hidden="true"></span>
+              Waiting for approval…
+            </p>
+            <div class="actions waiting-actions">
+              <Button variant="ghost" type="button" onclick={startOidc} disabled={session.busy}>
+                <Icon icon={ExternalLink} size={16} strokeWidth={1.5} />
+                {session.busy ? 'Opening…' : 'Open browser again'}
+              </Button>
+              <Button variant="ghost" type="button" onclick={cancelOidc}>Cancel</Button>
+            </div>
+            <p class="footnote-inline">
+              Nothing happened? You can close the browser tab and try again.
+            </p>
+          {:else if supportsOidc}
+            <div class="step-head">
+              <p class="eyebrow">Step 2 of 2 · {homeserverName}</p>
+              <h2>Sign in</h2>
+              <p class="hint">You’ll approve sign-in on {serverHost} and come back here.</p>
+            </div>
+            {#if session.oidcFailure}
+              <p class="error" role="alert">
+                {oidcErrorMessage(session.oidcFailure, serverHost)}
+              </p>
+              <div class="actions">
+                <Button variant="ghost" type="button" onclick={differentServer}>
+                  Use a different server
+                </Button>
+                <Button type="button" onclick={startOidc} disabled={session.busy}>
+                  {session.busy ? 'Opening…' : 'Try again'}
+                </Button>
+              </div>
+            {:else}
+              <div class="browser-path">
+                <div class="browser-cta">
+                  <Button size="lg" type="button" onclick={startOidc} disabled={session.busy}>
+                    <Icon icon={ExternalLink} size={16} strokeWidth={1.5} />
+                    {session.busy ? 'Opening browser…' : 'Continue in browser'}
+                  </Button>
+                </div>
+                <p class="trust">
+                  <Icon icon={ShieldCheck} size={16} strokeWidth={1.5} />
+                  Your password stays on {serverHost}, never in Alloy.
+                </p>
+              </div>
+              <div class="divider" aria-hidden="true"></div>
+              <button
+                class="disclosure"
+                type="button"
+                aria-expanded={passwordOpen}
+                onclick={() => (passwordOpen = !passwordOpen)}
+              >
+                Use a password instead
+                <Icon icon={passwordOpen ? ChevronUp : ChevronDown} size={16} strokeWidth={1.5} />
               </button>
+              {#if passwordOpen}
+                <form onsubmit={signIn}>
+                  <label>
+                    <span>Username</span>
+                    <TextField
+                      type="text"
+                      bind:value={username}
+                      placeholder="alice"
+                      autocomplete="username"
+                      autocapitalize="off"
+                      spellcheck={false}
+                      required
+                    />
+                  </label>
+                  <label>
+                    <span>Password</span>
+                    <TextField
+                      type="password"
+                      bind:value={password}
+                      autocomplete="current-password"
+                      required
+                    />
+                  </label>
+                  {#if localError}<p class="error" role="alert">{localError}</p>{/if}
+                  <div class="actions">
+                    <Button variant="ghost" type="button" onclick={() => go('server')}>
+                      <Icon icon={ChevronLeft} size={16} strokeWidth={1.5} />
+                      Back
+                    </Button>
+                    <Button type="submit" disabled={session.busy || !username || !password}>
+                      {session.busy ? 'Signing in…' : 'Sign in'}
+                    </Button>
+                  </div>
+                </form>
+              {/if}
+            {/if}
+            {#if !passwordOpen && !session.oidcFailure}
+              <div class="back-row">
+                <Button variant="ghost" type="button" onclick={() => go('server')}>
+                  <Icon icon={ChevronLeft} size={16} strokeWidth={1.5} />
+                  Back
+                </Button>
+              </div>
             {/if}
           {:else}
+            <div class="step-head">
+              <p class="eyebrow">Step 2 of 2 · {homeserverName}</p>
+              <h2>Sign in</h2>
+              <p class="hint">
+                This server doesn’t support browser sign-in. Use your Matrix ID and password for
+                this homeserver.
+              </p>
+            </div>
             <form onsubmit={signIn}>
               <label>
                 <span>Username</span>
@@ -247,11 +337,6 @@
                 </Button>
               </div>
             </form>
-            {#if supportsOidc}
-              <button class="link" type="button" onclick={() => useMethod('oidc')}>
-                Sign in through your browser instead
-              </button>
-            {/if}
           {/if}
         {/if}
       {/if}
@@ -487,20 +572,68 @@
       animation: none;
     }
   }
+  /* The heading receives focus so a screen reader hears the new state; it is not an input. */
+  .waiting-title:focus {
+    outline: none;
+  }
+  .footnote-inline {
+    margin: 0;
+    font-size: var(--alloy-typography-size-xs);
+    color: var(--alloy-color-text-secondary);
+  }
 
-  /* A second way in, not a competing action. */
-  .link {
-    align-self: flex-start;
-    padding: 0;
+  /* Browser sign-in: one primary action, the trust note, then the password fallback. */
+  .browser-path {
+    display: flex;
+    flex-direction: column;
+    gap: var(--alloy-spacing-scale-2);
+  }
+  .browser-cta :global(button) {
+    width: 100%;
+  }
+  .trust {
+    display: flex;
+    align-items: center;
+    gap: var(--alloy-spacing-scale-2);
+    margin: 0;
+    font-size: var(--alloy-typography-size-xs);
+    color: var(--alloy-color-text-secondary);
+  }
+  .trust :global(svg) {
+    flex: none;
+    color: var(--alloy-color-accent-primary);
+  }
+  .divider {
+    height: 1px;
+    background: var(--alloy-glass-rim);
+  }
+  .disclosure {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: var(--alloy-spacing-scale-2) 0;
     border: 0;
     background: none;
-    color: var(--alloy-color-accent-primary);
+    color: var(--alloy-color-text-secondary);
     font: inherit;
     font-size: var(--alloy-typography-size-sm);
     cursor: pointer;
   }
-  .link:hover {
-    text-decoration: underline;
+  .disclosure:hover {
+    color: var(--alloy-color-text-primary);
+  }
+  .back-row {
+    display: flex;
+  }
+  .notice {
+    margin: 0;
+    padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
+    border-left: 2px solid var(--alloy-color-accent-primary);
+    border-radius: var(--alloy-radii-sm);
+    background: var(--alloy-color-accent-subtle);
+    color: var(--alloy-color-text-secondary);
+    font-size: var(--alloy-typography-size-sm);
   }
 
   /* Phone: the sheet becomes the screen. The pitch only stays on the welcome step, so forms get the room. */
@@ -565,6 +698,13 @@
     .actions {
       flex-direction: column-reverse;
       align-items: stretch;
+    }
+    /* Waiting actions stack in reading order with Cancel at thumb height, per the sign-in spec. */
+    .waiting-actions {
+      flex-direction: column;
+    }
+    .disclosure {
+      min-height: 44px;
     }
     .actions :global(button) {
       width: 100%;

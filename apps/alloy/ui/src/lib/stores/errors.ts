@@ -42,30 +42,32 @@ export function errorReason(e: unknown): string | null {
 }
 
 /**
- * What went wrong in an OIDC login, from the engine's stable `reason`. The engine reports the
- * failure on the attempt that started it, so the message always asks for a fresh attempt where
- * that is the only fix.
+ * What went wrong in a browser sign-in, from the engine's stable `reason` and the server the user
+ * chose. Copy follows the sign-in design spec: no raw engine text, no protocol jargon, and every
+ * sentence ends at something the user can do.
  */
-export function oidcErrorMessage(e: unknown): string {
+export function oidcErrorMessage(e: unknown, server: string): string {
   switch (errorReason(e)) {
     case 'not_pending':
-      return 'That sign-in attempt is no longer active. Start again.';
+      return 'Sign-in wasn’t completed. You can try again.';
     case 'expired':
-      return 'The sign-in attempt timed out. Start again.';
+      return 'This sign-in took too long and expired. Try again to get a fresh prompt.';
     case 'state_mismatch':
-      return 'The sign-in response did not belong to this attempt. Start again.';
+      return 'Sign-in didn’t complete. Try again.';
     case 'denied':
-      return 'Sign-in was cancelled in the browser.';
+      return `${server} didn’t approve the sign-in. Try again or use a different account.`;
     case 'exchange_failed':
-      return 'The server did not finish the sign-in. Try again.';
-    case 'unsupported':
-      return 'This server does not support signing in through a browser. Use a password instead.';
+      return 'We couldn’t finish signing you in. Try again. If it keeps happening, check that the server is reachable.';
     case 'registration_failed':
-      return 'Alloy could not register with this server’s login service. Try again later.';
+      return 'We couldn’t start the browser sign-in. Try again.';
+    case 'unsupported':
+      return 'This server doesn’t offer browser sign-in. Use a password if your server allows it.';
+    case 'launch_failed':
+      return 'We couldn’t open your browser. Open it manually and try again.';
     case 'network':
-      return OFFLINE_MESSAGE;
+      return `We couldn’t reach ${server}. Check your connection and try again.`;
     default:
-      return errorMessage(e);
+      return 'Sign-in didn’t complete. Try again.';
   }
 }
 
