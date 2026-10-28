@@ -715,8 +715,8 @@ impl AlloyClient {
         let mut failed = Vec::new();
 
         for target in targets {
-            let target_timeline = match self.cached_timeline(target).await {
-                Ok(t) => t,
+            let target_room = match self.room(target) {
+                Ok(room) => room,
                 Err(e) => {
                     failed.push(alloy_protocol::ForwardFailure {
                         room_id: target.clone(),
@@ -725,19 +725,37 @@ impl AlloyClient {
                     continue;
                 }
             };
+            if let Err(e) = self.ensure_encryption_state(target).await {
+                failed.push(alloy_protocol::ForwardFailure {
+                    room_id: target.clone(),
+                    error: e.to_string(),
+                });
+                continue;
+            }
 
-            let mut all_queued = true;
+            // Sent directly rather than through the room's send queue: forwarded messages have no
+            // local echo, so the synced copy is the only one that appears in the target timeline.
+            let mut all_sent = true;
             for c in &contents {
-                if let Err(e) = target_timeline.send(c.clone()).await {
+                let result = match c {
+                    AnyMessageLikeEventContent::RoomMessage(m) => {
+                        target_room.send(m.clone()).await.map(|_| ())
+                    }
+                    AnyMessageLikeEventContent::Sticker(s) => {
+                        target_room.send(s.clone()).await.map(|_| ())
+                    }
+                    _ => unreachable!("forward_events only collects room messages and stickers"),
+                };
+                if let Err(e) = result {
                     failed.push(alloy_protocol::ForwardFailure {
                         room_id: target.clone(),
                         error: e.to_string(),
                     });
-                    all_queued = false;
+                    all_sent = false;
                     break;
                 }
             }
-            if all_queued {
+            if all_sent {
                 forwarded.push(target.clone());
             }
         }
