@@ -80,9 +80,12 @@
   const time = $derived(formatTime(item.timestamp_millis, prefs.timeFormat));
   /** Gutter avatar diameter by density. Mirrors `--alloy-spacing-avatar-size` in tokens.css. */
   const DENSITY_AVATAR_PX = { compact: 28, normal: 36, cozy: 40 } as const;
-  /** Bubbles keep their own metric: the avatar sits on the bubble edge, not in a gutter column. */
+  /** Bubbles keep their own 32px metric at Normal (ADR 0013) and still tighten and loosen with density. */
+  const BUBBLE_AVATAR_PX = { compact: 28, normal: 32, cozy: 36 } as const;
   const avatarSize = $derived(
-    layout === 'bubbles' ? 32 : DENSITY_AVATAR_PX[themeStore.density]
+    layout === 'bubbles'
+      ? BUBBLE_AVATAR_PX[themeStore.density]
+      : DENSITY_AVATAR_PX[themeStore.density]
   );
   /** IRC always shows the name column; bubbles omit the head on your own messages. */
   const showHead = $derived(layout === 'irc' || (!grouped && !(layout === 'bubbles' && item.is_own)));
@@ -1172,12 +1175,13 @@
   }
 
   .row[data-layout='bubbles'] {
-    padding-top: 2px;
-    padding-bottom: 2px;
+    /* Normal reproduces ADR 0013's 2px rhythm; Compact and Cozy scale it with the density token. */
+    padding-top: calc(var(--alloy-spacing-message-padding) / 4);
+    padding-bottom: calc(var(--alloy-spacing-message-padding) / 4);
   }
   /* A new sender group starts a new breath; messages inside one group stay tight (ADR 0013). */
   .row[data-layout='bubbles']:not(.grouped) {
-    padding-top: var(--alloy-spacing-scale-3);
+    padding-top: calc(var(--alloy-spacing-message-padding) * 1.5);
   }
   .row[data-layout='bubbles'] .gutter {
     width: 40px;

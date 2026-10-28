@@ -57,4 +57,11 @@ describe('density setting', () => {
       );
     }
   });
+
+  it('keeps the default bubbles layout on the density scale', () => {
+    // Bubbles carry their own rhythm (ADR 0013); a literal there would hide the setting again.
+    expect(rowSource).toMatch(
+      /\.row\[data-layout='bubbles'\]\s*\{[^}]*var\(--alloy-spacing-message-padding\)/
+    );
+  });
 });
