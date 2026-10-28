@@ -189,8 +189,17 @@
     untrack(() => void membersStore.loadMembers(roomId).catch(() => {}));
     if (!inThread) untrack(() => void restoreDraft(id));
     return () => {
-      if (inThread || !untrack(() => draftReady) || untrack(() => editing)) return;
-      draftsStore.flushPending(id, untrack(() => text), { replyTo: untrack(() => replying?.event_id ?? null) });
+      if (inThread || untrack(() => editing)) return;
+      const typed = untrack(() => text);
+      const replyTo = untrack(() => replying?.event_id ?? null);
+      // Typed before the stored draft finished loading, the debounce never saw a ready draft;
+      // flush it directly so leaving the room at once does not lose it. An empty field still
+      // leaves an unloaded draft alone.
+      if (!untrack(() => draftReady)) {
+        if (typed) void draftsStore.flush(id, typed, { replyTo });
+        return;
+      }
+      draftsStore.flushPending(id, typed, { replyTo });
     };
   });
 

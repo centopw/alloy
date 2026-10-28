@@ -46,6 +46,7 @@ class DraftsStore {
 
   /** Saves at once, for leaving a room before the timer fires. */
   async flush(roomId: string, text: string, opts?: { replyTo?: string | null; editOf?: string | null }): Promise<void> {
+    this.#setPreview(roomId, text);
     clearTimeout(this.timers.get(roomId));
     this.timers.delete(roomId);
     try {
