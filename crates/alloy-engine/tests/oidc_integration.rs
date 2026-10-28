@@ -141,3 +141,66 @@ async fn cancelling_an_oidc_login_removes_its_temporary_store() {
         EngineResponse::Unit
     ));
 }
+
+/// A callback that cannot complete the login must reach the app, not only the browser's error
+/// page, or the waiting screen would sit until it times out. The test speaks HTTP to the loopback
+/// listener exactly as the authorization server does.
+#[tokio::test]
+async fn a_failed_callback_reports_its_reason_to_the_app() {
+    use alloy_protocol::EngineEvent;
+    use std::time::Duration;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let Ok(homeserver) = std::env::var("ALLOY_TEST_MAS") else {
+        eprintln!("skipping: ALLOY_TEST_MAS not set");
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let eng = engine(&dir);
+    let mut events = eng.sink().subscribe();
+
+    let redirect_uri = match eng
+        .handle(EngineCommand::StartOidcLogin {
+            homeserver_url: homeserver,
+        })
+        .await
+        .unwrap()
+    {
+        EngineResponse::OidcUrl { redirect_uri, .. } => redirect_uri,
+        other => panic!("unexpected {other:?}"),
+    };
+    let port = url::Url::parse(&redirect_uri).unwrap().port().unwrap();
+
+    let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
+        .await
+        .unwrap();
+    stream
+        .write_all(
+            b"GET /callback?code=made-up&state=not-ours HTTP/1.1\r\n\
+              Host: 127.0.0.1\r\nConnection: close\r\n\r\n",
+        )
+        .await
+        .unwrap();
+    let mut page = String::new();
+    stream.read_to_string(&mut page).await.unwrap();
+    assert!(
+        page.contains(" 400 "),
+        "the browser gets an error page: {page}"
+    );
+
+    let reason = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            match events.recv().await.unwrap() {
+                EngineEvent::AuthFailed { reason, .. } => break reason,
+                _ => continue,
+            }
+        }
+    })
+    .await
+    .expect("the app is told why the sign-in failed");
+    assert_eq!(reason, "state_mismatch");
+    assert!(
+        pending_store_dirs(&dir).is_empty(),
+        "the failed login's store is purged"
+    );
+}

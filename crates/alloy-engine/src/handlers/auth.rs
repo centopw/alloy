@@ -180,6 +180,15 @@ async fn await_oidc_redirect(
             respond(&mut stream, 200, &body).await;
         }
         Err(err) => {
+            // The browser shows this error page, but the app is still waiting: tell it too, so the
+            // waiting screen can end with the same reason the UI already maps.
+            ctx.sink.emit(EngineEvent::AuthFailed {
+                reason: err
+                    .reason
+                    .clone()
+                    .unwrap_or_else(|| "exchange_failed".to_owned()),
+                message: err.message.clone(),
+            });
             respond(
                 &mut stream,
                 400,

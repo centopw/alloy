@@ -461,6 +461,14 @@ export type EngineEvent = { type: "ConnectionStatus"; payload: {
 	status: ConnectionStatus,
 } } | { type: "AuthState"; payload: {
 	account: Account | null,
+} } | 
+/**
+ *  A browser sign-in failed after it started, so the app can leave its waiting state.
+ *  `reason` is the same stable discriminator `EngineError` carries; `message` is for logs.
+ */
+{ type: "AuthFailed"; payload: {
+	reason: string,
+	message: string,
 } } | { type: "RoomListDiff"; payload: {
 	subscription_id: SubscriptionId,
 	diff: VectorDiffDto<RoomSummary>,

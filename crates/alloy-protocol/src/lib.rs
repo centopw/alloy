@@ -1503,6 +1503,12 @@ pub enum EngineEvent {
     AuthState {
         account: Option<Account>,
     },
+    /// A browser sign-in failed after it started, so the app can leave its waiting state.
+    /// `reason` is the same stable discriminator `EngineError` carries; `message` is for logs.
+    AuthFailed {
+        reason: String,
+        message: String,
+    },
     RoomListDiff {
         subscription_id: SubscriptionId,
         diff: VectorDiffDto<RoomSummary>,
