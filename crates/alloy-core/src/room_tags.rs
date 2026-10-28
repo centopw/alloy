@@ -26,27 +26,28 @@ struct TagCatalogContent {
 
 impl AlloyClient {
     /// The account's room tag catalogue in display order; empty when none has been saved.
+    ///
+    /// Falls back to the sync-populated local store when the server cannot be reached, so a
+    /// restart without a connection still has the account's tags. When the server is unreachable
+    /// and nothing is cached, the server error is returned rather than an empty catalogue.
     pub async fn get_tag_catalog(&self) -> AlloyResult<Vec<RoomTagDef>> {
-        let stored = self
-            .client
-            .account()
+        let account = self.client.account();
+        let stored = match account
             .fetch_account_data(GlobalAccountDataEventType::from(TAG_CATALOG_EVENT_TYPE))
             .await
-            .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
-        match stored {
-            None => Ok(Vec::new()),
-            Some(raw) => {
-                let content = raw
-                    .cast_unchecked::<TagCatalogContent>()
-                    .deserialize()
-                    .map_err(|e| {
-                        AlloyError::InvalidRoomTag(format!(
-                            "stored tag catalogue is malformed: {e}"
-                        ))
-                    })?;
-                Ok(content.tags)
+        {
+            Ok(stored) => stored,
+            Err(server_error) => {
+                match account
+                    .account_data_raw(GlobalAccountDataEventType::from(TAG_CATALOG_EVENT_TYPE))
+                    .await
+                {
+                    Ok(Some(cached)) => Some(cached),
+                    _ => return Err(AlloyError::MatrixSdk(server_error.to_string())),
+                }
             }
-        }
+        };
+        catalog_from_stored(stored)
     }
 
     /// Replaces the room tag catalogue. Entries are validated and trimmed before storing.
@@ -116,6 +117,24 @@ impl AlloyClient {
             .await
             .map(|_| ())
             .map_err(|e| AlloyError::MatrixSdk(e.to_string()))
+    }
+}
+
+/// Parses a stored catalogue event; a missing event is an empty catalogue.
+fn catalog_from_stored(
+    stored: Option<Raw<AnyGlobalAccountDataEventContent>>,
+) -> AlloyResult<Vec<RoomTagDef>> {
+    match stored {
+        None => Ok(Vec::new()),
+        Some(raw) => {
+            let content = raw
+                .cast_unchecked::<TagCatalogContent>()
+                .deserialize()
+                .map_err(|e| {
+                    AlloyError::InvalidRoomTag(format!("stored tag catalogue is malformed: {e}"))
+                })?;
+            Ok(content.tags)
+        }
     }
 }
 
@@ -214,6 +233,29 @@ mod tests {
         assert!(matches!(
             user_tag_name("work").unwrap(),
             TagName::User(ref name) if name.as_ref() == "u.work"
+        ));
+    }
+
+    #[test]
+    fn stored_catalogues_parse_and_malformed_ones_are_reported() {
+        assert!(catalog_from_stored(None).unwrap().is_empty());
+
+        let raw = Raw::new(&TagCatalogContent {
+            tags: vec![tag("work", "Work")],
+        })
+        .unwrap()
+        .cast_unchecked::<AnyGlobalAccountDataEventContent>();
+        let parsed = catalog_from_stored(Some(raw)).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].id, "work");
+        assert_eq!(parsed[0].name, "Work");
+
+        let malformed = Raw::new(&serde_json::json!({ "tags": "not a list" }))
+            .unwrap()
+            .cast_unchecked::<AnyGlobalAccountDataEventContent>();
+        assert!(matches!(
+            catalog_from_stored(Some(malformed)),
+            Err(AlloyError::InvalidRoomTag(_))
         ));
     }
 }
