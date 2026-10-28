@@ -184,6 +184,40 @@ impl AlloyClient {
         if let Some(text) = caption.map(str::trim).filter(|t| !t.is_empty()) {
             config.caption = Some(TextMessageEventContent::plain(text));
         }
+        // matrix-sdk leaves `info.size` empty unless it is given one, and a file tile then reads
+        // "0 B". The size is local metadata, so it costs no extra read of the file.
+        if let Some(size) = std::fs::metadata(file_path)
+            .ok()
+            .map(|meta| meta.len())
+            .and_then(|bytes| matrix_sdk::ruma::UInt::try_from(bytes).ok())
+        {
+            use matrix_sdk::attachment::{
+                AttachmentInfo, BaseAudioInfo, BaseFileInfo, BaseImageInfo, BaseVideoInfo,
+            };
+            let size = Some(size);
+            config.info = Some(match mime.type_() {
+                mime::IMAGE => AttachmentInfo::Image(BaseImageInfo {
+                    height: None,
+                    width: None,
+                    size,
+                    blurhash: None,
+                    is_animated: None,
+                }),
+                mime::VIDEO => AttachmentInfo::Video(BaseVideoInfo {
+                    duration: None,
+                    height: None,
+                    width: None,
+                    size,
+                    blurhash: None,
+                }),
+                mime::AUDIO => AttachmentInfo::Audio(BaseAudioInfo {
+                    duration: None,
+                    size,
+                    waveform: None,
+                }),
+                _ => AttachmentInfo::File(BaseFileInfo { size }),
+            });
+        }
         let upload = timeline.send_attachment(file_path, mime, config);
         let mut progress = upload.subscribe_to_send_progress();
         let forward = tokio::spawn(async move {

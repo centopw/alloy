@@ -86,7 +86,7 @@ async fn roundtrip(eng: &AppEngine, ctx: &EngineContext, encrypted: bool, dir: &
     .unwrap();
 
     let mut mirror: Vec<TimelineItemDto> = vec![];
-    let (uri, kind) = tokio::time::timeout(Duration::from_secs(60), async {
+    let (uri, kind, size) = tokio::time::timeout(Duration::from_secs(60), async {
         loop {
             if let EngineEvent::TimelineDiff {
                 subscription_id,
@@ -96,15 +96,18 @@ async fn roundtrip(eng: &AppEngine, ctx: &EngineContext, encrypted: bool, dir: &
                 && subscription_id == sub
             {
                 collect(&mut mirror, *diff);
-                if let Some((uri, kind)) = mirror.iter().find_map(|i| match &i.content {
+                if let Some((uri, kind, size)) = mirror.iter().find_map(|i| match &i.content {
                     TimelineItemContent::Media {
-                        uri, media_kind, ..
+                        uri,
+                        media_kind,
+                        size_bytes,
+                        ..
                     } if matches!(i.send_state, alloy_protocol::EventSendState::Sent { .. }) => {
-                        Some((uri.clone(), media_kind.clone()))
+                        Some((uri.clone(), media_kind.clone(), *size_bytes))
                     }
                     _ => None,
                 }) {
-                    return (uri, kind);
+                    return (uri, kind, size);
                 }
             }
         }
@@ -112,6 +115,11 @@ async fn roundtrip(eng: &AppEngine, ctx: &EngineContext, encrypted: bool, dir: &
     .await
     .expect("attachment never appeared as sent media");
     assert_eq!(kind, "image");
+    assert_eq!(
+        size,
+        PNG.len() as u64,
+        "the sent event carries the file's size, so the bubble does not read 0 B"
+    );
     assert_eq!(
         uri.starts_with('{'),
         encrypted,
