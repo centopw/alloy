@@ -166,11 +166,16 @@ try {
   }
   await page.goto(`http://localhost:${UI_PORT}/?engine=ws://127.0.0.1:${BRIDGE_PORT}&token=${BRIDGE_TOKEN}`, { waitUntil: 'networkidle0' });
 
-  step('onboarding: discover server, sign in');
   // A fresh profile opens on the welcome step; acknowledging it is what reveals the server field.
-  await page.waitForFunction(() => [...document.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Get started'), { timeout: 20000 });
-  await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Get started').click());
-  await page.waitForSelector('input[placeholder*="matrix.org"]');
+  // Signing out comes back to the same step, so both entries into onboarding use this.
+  const welcomeDone = async () => {
+    await page.waitForFunction(() => [...document.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Get started'), { timeout: 20000 });
+    await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Get started').click());
+    await page.waitForSelector('input[placeholder*="matrix.org"]');
+  };
+
+  step('onboarding: discover server, sign in');
+  await welcomeDone();
   await page.$eval('input[placeholder*="matrix.org"]', (el) => (el.value = ''));
   await page.type('input[placeholder*="matrix.org"]', HS);
   await page.click('button[type=submit]');
@@ -917,7 +922,7 @@ try {
   await page.waitForFunction(() => document.querySelector('[role=dialog] input')?.value?.length > 0, { timeout: 15000 });
   await uxShot(page, 'settings-account');
   await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Sign out').click());
-  await page.waitForSelector('input[placeholder*="matrix.org"]', { timeout: 30000 });
+  await welcomeDone();
   if (pageErrors.length) throw new Error(`the page reported ${pageErrors.length} error(s): ${[...new Set(pageErrors)].join(' | ')}`);
   console.log('E2E OK');
 } catch (e) {
