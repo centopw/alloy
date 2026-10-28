@@ -218,7 +218,7 @@ async fn finish_oidc_from_query(
     let index = AccountIndex::new(&ctx.data_dir);
     if started_at.elapsed() > OIDC_LOGIN_TTL {
         let _ = client.logout().await;
-        purge_account(ctx, &index, &store_id).await;
+        drop_pending_store(ctx, &index, client, &store_id).await;
         return Err(EngineError::auth_failed_with(
             "expired",
             "OIDC login expired; start again",
@@ -226,10 +226,24 @@ async fn finish_oidc_from_query(
     }
     if let Err(e) = client.complete_oidc_login(&format!("?{query}")).await {
         let _ = client.logout().await;
-        purge_account(ctx, &index, &store_id).await;
+        drop_pending_store(ctx, &index, client, &store_id).await;
         return Err(map_err(e));
     }
     finish_login(ctx, &index, client, &store_id).await
+}
+
+/// Releases a pending login's client before deleting its store.
+///
+/// Windows keeps the store's file handles open until the client is dropped, so purging first
+/// would leave the directory behind and leak an account store on every cancelled attempt.
+async fn drop_pending_store(
+    ctx: &EngineContext,
+    index: &AccountIndex,
+    client: AlloyClient,
+    store_id: &str,
+) {
+    drop(client);
+    purge_account(ctx, index, store_id).await;
 }
 
 /// The request target (`/callback?...`) of the first GET line, or `None` for anything else.
@@ -326,7 +340,10 @@ impl GroupHandler for AuthHandler {
                     if let Some(handle) = previous.callback {
                         handle.abort();
                     }
-                    purge_account(ctx, &index, &previous.store_id).await;
+                    let PendingOidcLogin {
+                        client, store_id, ..
+                    } = previous;
+                    drop_pending_store(ctx, &index, client, &store_id).await;
                 }
                 let store_id = uuid::Uuid::new_v4().to_string();
                 let client = open_client(ctx, &homeserver_url, &store_id).await?;
@@ -385,23 +402,26 @@ impl GroupHandler for AuthHandler {
                 if let Some(handle) = pending.callback {
                     handle.abort();
                 }
-                if pending.started_at.elapsed() > OIDC_LOGIN_TTL {
-                    purge_account(ctx, &index, &pending.store_id).await;
+                let PendingOidcLogin {
+                    client,
+                    store_id,
+                    started_at,
+                    ..
+                } = pending;
+                if started_at.elapsed() > OIDC_LOGIN_TTL {
+                    drop_pending_store(ctx, &index, client, &store_id).await;
                     return Err(EngineError::auth_failed_with(
                         "expired",
                         "OIDC login expired; start again",
                     ));
                 }
-                let PendingOidcLogin {
-                    client, store_id, ..
-                } = pending;
                 if let Err(e) = client.complete_oidc_login(&redirect_url).await {
                     // The authorization may have succeeded even when the session could not be
                     // stored; revoke it so no usable token is left behind on the server.
                     if let Err(logout_err) = client.logout().await {
                         tracing::debug!(error = %logout_err, "no OIDC session to revoke");
                     }
-                    purge_account(ctx, &index, &store_id).await;
+                    drop_pending_store(ctx, &index, client, &store_id).await;
                     return Err(map_err(e));
                 }
                 let account = finish_login(ctx, &index, client, &store_id).await?;
@@ -412,7 +432,10 @@ impl GroupHandler for AuthHandler {
                     if let Some(handle) = pending.callback {
                         handle.abort();
                     }
-                    purge_account(ctx, &index, &pending.store_id).await;
+                    let PendingOidcLogin {
+                        client, store_id, ..
+                    } = pending;
+                    drop_pending_store(ctx, &index, client, &store_id).await;
                 }
                 Ok(EngineResponse::Unit)
             }
