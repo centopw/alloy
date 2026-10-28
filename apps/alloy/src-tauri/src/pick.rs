@@ -290,27 +290,61 @@ fn copy_into_pick_dir(
         .map_err(|_| "pick cache path is not valid UTF-8".to_owned())
 }
 
-/// Renames a copied file to carry the extension its content implies. Unchanged when the content
-/// cannot be identified, so an unknown file keeps whatever name it had.
+/// Renames a copied file to carry the extension its content implies. A provider id such as
+/// `msf:19` becomes a readable `attachment.txt`/`attachment.bin`; any other name is kept.
 fn rename_for_content(dir: &Path, copy: &Path) -> io::Result<std::path::PathBuf> {
     use std::io::Read as _;
 
     let mut head = [0u8; 512];
     let read = std::fs::File::open(copy)?.read(&mut head)?;
-    let Some(kind) = sniff_extension(&head[..read]) else {
-        return Ok(copy.to_path_buf());
-    };
+    let head = &head[..read];
     let current = copy
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let name = name_with_sniffed_type(&current, kind);
+    let name = match sniff_extension(head) {
+        Some(kind) => name_with_sniffed_type(&current, kind),
+        // A provider id (`msf:19`, `image:48`) is not a name. Plain text is common and safe to
+        // recognize; anything else becomes a generic file instead of an opaque row id.
+        None if is_provider_id(&current) => {
+            let kind = if looks_like_text(head) { "txt" } else { "bin" };
+            format!("{FALLBACK_NAME}.{kind}")
+        }
+        None => return Ok(copy.to_path_buf()),
+    };
     if name == current {
         return Ok(copy.to_path_buf());
     }
     let target = dir.join(name);
     std::fs::rename(copy, &target)?;
     Ok(target)
+}
+
+/// True when a picked name is really a content-provider row id, not a file name.
+///
+/// DocumentsUI and the photo picker hand out `content://…/document/msf%3A19` style URIs, whose last
+/// segment carries no name and no extension.
+fn is_provider_id(name: &str) -> bool {
+    let stem = Path::new(name)
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    !stem.is_empty() && (stem.contains(':') || stem.chars().all(|c| c.is_ascii_digit()))
+}
+
+/// True when the first bytes are text: valid UTF-8 with no control characters but whitespace.
+fn looks_like_text(head: &[u8]) -> bool {
+    if head.is_empty() || head.contains(&0) {
+        return false;
+    }
+    if head
+        .iter()
+        .any(|b| b.is_ascii_control() && !b.is_ascii_whitespace())
+    {
+        return false;
+    }
+    // A short prefix can split the last multi-byte character; ignore up to three trailing bytes.
+    (0..=3.min(head.len())).any(|cut| std::str::from_utf8(&head[..head.len() - cut]).is_ok())
 }
 
 /// The file name a copy should carry for the content it holds.
@@ -608,13 +642,45 @@ mod tests {
         );
         // A real name keeps its stem; the content wins over a misleading extension.
         assert_eq!(
-            name_with_sniffed_type("IMG_1234.jpg", "jpg"),
-            "IMG_1234.jpg"
-        );
-        assert_eq!(
             name_with_sniffed_type("IMG_1234.jpg", "png"),
             "IMG_1234.png"
         );
         assert_eq!(name_with_sniffed_type("report.pdf", "pdf"), "report.pdf");
+    }
+
+    #[test]
+    fn a_provider_id_without_a_known_type_becomes_a_readable_file() {
+        let dir = scratch_dir();
+        let copy = dir.join("msf:19");
+        std::fs::write(&copy, [0u8, 1, 2, 3]).unwrap();
+        let renamed = rename_for_content(&dir, &copy).unwrap();
+        assert_eq!(renamed.file_name().unwrap(), "attachment.bin");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn provider_text_becomes_a_txt_file() {
+        let dir = scratch_dir();
+        let copy = dir.join("msf:20");
+        std::fs::write(&copy, "release notes\n- one\n").unwrap();
+        let renamed = rename_for_content(&dir, &copy).unwrap();
+        assert_eq!(renamed.file_name().unwrap(), "attachment.txt");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_real_name_is_left_alone_when_the_content_is_unknown() {
+        let dir = scratch_dir();
+        let copy = dir.join("notes");
+        std::fs::write(&copy, [0u8, 1, 2]).unwrap();
+        let renamed = rename_for_content(&dir, &copy).unwrap();
+        assert_eq!(renamed, copy);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn scratch_dir() -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("alloy-pick-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
     }
 }
