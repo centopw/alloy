@@ -71,7 +71,7 @@ const MOCK_SESSION_INFO: SessionInfoDto = {
 };
 
 function invalidArgument(message: string): EngineError {
-  return { code: 'invalid_argument', message };
+  return { code: 'invalid_argument', message, reason: null };
 }
 
 const MOCK_MEMBERS: RoomMemberDto[] = [

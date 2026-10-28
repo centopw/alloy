@@ -450,6 +450,11 @@ export type EngineCommand = { action: "DiscoverHomeserver"; params: {
 export type EngineError = {
 	code: string,
 	message: string,
+	/**
+	 *  Stable machine-readable detail for a coarse `code`, for example why an auth attempt
+	 *  failed. The UI branches on this; `message` is for humans and may change.
+	 */
+	reason: string | null,
 };
 
 export type EngineEvent = { type: "ConnectionStatus"; payload: {

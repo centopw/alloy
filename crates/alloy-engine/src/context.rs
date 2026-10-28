@@ -23,6 +23,8 @@ pub struct PendingOidcLogin {
     pub client: AlloyClient,
     pub store_id: String,
     pub started_at: std::time::Instant,
+    /// Loopback listener waiting for the authorization redirect; aborted when the attempt ends.
+    pub callback: Option<tokio::task::JoinHandle<()>>,
 }
 
 /// Shared engine context passed to command handlers.

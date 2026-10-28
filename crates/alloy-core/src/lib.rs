@@ -42,6 +42,14 @@ pub enum AlloyError {
     Io(#[from] std::io::Error),
     #[error("Auth error: {0}")]
     Auth(String),
+    /// An OIDC/MAS login failure. `reason` is a stable discriminator for the UI
+    /// (`denied`, `expired`, `state_mismatch`, `exchange_failed`, `unsupported`,
+    /// `registration_failed`, `network`); `message` is for humans.
+    #[error("OIDC login failed ({reason}): {message}")]
+    Oidc {
+        reason: &'static str,
+        message: String,
+    },
     #[error("Not logged in")]
     NotLoggedIn,
     #[error("Account not found: {0}")]

@@ -11,12 +11,6 @@ use matrix_sdk::authentication::oauth::registration::{
 use matrix_sdk::ruma::serde::Raw;
 use matrix_sdk::utils::UrlOrQuery;
 
-/// URI registered with the authorization server and delivered back to the app.
-///
-/// The app registers this scheme (Tauri deep link on desktop, an intent filter on Android) and
-/// passes the received URL to `CompleteOidcLogin`.
-pub const OIDC_REDIRECT_URI: &str = "alloy://oidc/callback";
-
 /// Project page advertised as the OAuth client's `client_uri`.
 const OIDC_CLIENT_URI: &str = "https://github.com/centopw/alloy";
 
@@ -122,13 +116,18 @@ impl AlloyClient {
     /// Starts an OIDC (MAS) authorization-code login and returns the URL the app should open.
     ///
     /// The client registers itself with the authorization server as a native public client,
-    /// announcing [`OIDC_REDIRECT_URI`]. The PKCE verifier and CSRF state stay in this client, so
-    /// the same client must receive [`Self::complete_oidc_login`].
-    pub async fn start_oidc_login(&self) -> AlloyResult<OidcLoginStart> {
-        let redirect_uri = url::Url::parse(OIDC_REDIRECT_URI)
-            .map_err(|e| AlloyError::Auth(format!("invalid OIDC redirect URI: {e}")))?;
-        let client_uri = url::Url::parse(OIDC_CLIENT_URI)
-            .map_err(|e| AlloyError::Auth(format!("invalid OIDC client URI: {e}")))?;
+    /// announcing the loopback `redirect_uri` the caller is listening on (RFC 8252). The PKCE
+    /// verifier and CSRF state stay in this client, so the same client must receive
+    /// [`Self::complete_oidc_login`].
+    pub async fn start_oidc_login(&self, redirect_uri: &str) -> AlloyResult<OidcLoginStart> {
+        let redirect_uri = url::Url::parse(redirect_uri).map_err(|e| AlloyError::Oidc {
+            reason: "invalid_redirect",
+            message: format!("invalid OIDC redirect URI: {e}"),
+        })?;
+        let client_uri = url::Url::parse(OIDC_CLIENT_URI).map_err(|e| AlloyError::Oidc {
+            reason: "registration_failed",
+            message: format!("invalid OIDC client URI: {e}"),
+        })?;
         let oauth = self.client.oauth();
 
         // A homeserver without an authorization server cannot log anyone in this way; report it
@@ -136,11 +135,15 @@ impl AlloyClient {
         // offer a retry instead of telling the user the server does not support OIDC.
         if let Err(e) = oauth.server_metadata().await {
             if e.is_not_supported() {
-                return Err(AlloyError::Auth(
-                    "homeserver does not support OIDC login".into(),
-                ));
+                return Err(AlloyError::Oidc {
+                    reason: "unsupported",
+                    message: "homeserver does not support OIDC login".into(),
+                });
             }
-            return Err(AlloyError::MatrixSdk(e.to_string()));
+            return Err(AlloyError::Oidc {
+                reason: "network",
+                message: e.to_string(),
+            });
         }
 
         let mut metadata = ClientMetadata::new(
@@ -151,14 +154,19 @@ impl AlloyClient {
             Localized::new(client_uri, []),
         );
         metadata.client_name = Some(Localized::new(OIDC_CLIENT_NAME.to_owned(), []));
-        let metadata = Raw::new(&metadata)
-            .map_err(|e| AlloyError::Auth(format!("could not build OIDC client metadata: {e}")))?;
+        let metadata = Raw::new(&metadata).map_err(|e| AlloyError::Oidc {
+            reason: "registration_failed",
+            message: format!("could not build OIDC client metadata: {e}"),
+        })?;
 
         let authorization = oauth
             .login(redirect_uri.clone(), None, Some(metadata.into()), None)
             .build()
             .await
-            .map_err(|e| AlloyError::Auth(format!("could not start OIDC login: {e}")))?;
+            .map_err(|e| AlloyError::Oidc {
+                reason: "registration_failed",
+                message: format!("could not start OIDC login: {e}"),
+            })?;
 
         Ok(OidcLoginStart {
             authorization_url: authorization.url.to_string(),
@@ -184,7 +192,10 @@ impl AlloyClient {
             .oauth()
             .finish_login(input)
             .await
-            .map_err(|e| AlloyError::Auth(format!("OIDC login failed: {e}")))?;
+            .map_err(|e| AlloyError::Oidc {
+                reason: oidc_failure_reason(&e),
+                message: format!("OIDC login failed: {e}"),
+            })?;
         self.persist_oauth_session().await
     }
 
@@ -237,5 +248,36 @@ impl AlloyClient {
         let local = self.delete_local_secrets().await;
         remote.map(|_| ())?;
         local
+    }
+}
+
+/// Stable reason for a failed OIDC completion, so the UI can branch on states rather than prose.
+///
+/// The SDK does not expose the authorization-code error variants publicly, so a cancellation,
+/// denial or state mismatch is recognised from the error text and everything else falls back to
+/// `exchange_failed`. The reason set is stable even if the text changes.
+fn oidc_failure_reason(error: &matrix_sdk::Error) -> &'static str {
+    use matrix_sdk::authentication::oauth::OAuthError;
+
+    match error {
+        matrix_sdk::Error::OAuth(inner) => match inner.as_ref() {
+            OAuthError::Discovery(_) => "unsupported",
+            OAuthError::ClientRegistration(_) => "registration_failed",
+            OAuthError::SessionMismatch | OAuthError::NotRegistered => "state_mismatch",
+            OAuthError::NotAuthenticated => "not_pending",
+            OAuthError::AuthorizationCode(_) => {
+                let text = inner.to_string().to_ascii_lowercase();
+                if text.contains("cancel") || text.contains("denied") {
+                    "denied"
+                } else if text.contains("state") {
+                    "state_mismatch"
+                } else {
+                    "exchange_failed"
+                }
+            }
+            _ => "exchange_failed",
+        },
+        matrix_sdk::Error::Http(_) => "network",
+        _ => "exchange_failed",
     }
 }

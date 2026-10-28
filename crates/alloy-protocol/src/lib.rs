@@ -1420,6 +1420,9 @@ pub enum EngineResponse {
 pub struct EngineError {
     pub code: String,
     pub message: String,
+    /// Stable machine-readable detail for a coarse `code`, for example why an auth attempt
+    /// failed. The UI branches on this; `message` is for humans and may change.
+    pub reason: Option<String>,
 }
 
 impl EngineError {
@@ -1427,6 +1430,7 @@ impl EngineError {
         Self {
             code: "not_implemented".to_string(),
             message: format!("Command '{}' not yet implemented", command),
+            reason: None,
         }
     }
 
@@ -1434,6 +1438,16 @@ impl EngineError {
         Self {
             code: "auth_failed".to_string(),
             message: msg.into(),
+            reason: None,
+        }
+    }
+
+    /// An auth failure with a stable machine-readable reason for the UI to branch on.
+    pub fn auth_failed_with(reason: impl Into<String>, msg: impl Into<String>) -> Self {
+        Self {
+            code: "auth_failed".to_string(),
+            message: msg.into(),
+            reason: Some(reason.into()),
         }
     }
 
@@ -1441,6 +1455,7 @@ impl EngineError {
         Self {
             code: "network_error".to_string(),
             message: msg.into(),
+            reason: None,
         }
     }
 
@@ -1448,6 +1463,7 @@ impl EngineError {
         Self {
             code: "not_found".to_string(),
             message: msg.into(),
+            reason: None,
         }
     }
 
@@ -1455,6 +1471,7 @@ impl EngineError {
         Self {
             code: "invalid_argument".to_string(),
             message: msg.into(),
+            reason: None,
         }
     }
 
@@ -1462,6 +1479,7 @@ impl EngineError {
         Self {
             code: "forbidden".to_string(),
             message: msg.into(),
+            reason: None,
         }
     }
 
@@ -1469,6 +1487,7 @@ impl EngineError {
         Self {
             code: "internal_error".to_string(),
             message: msg.into(),
+            reason: None,
         }
     }
 }

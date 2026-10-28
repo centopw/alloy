@@ -29,6 +29,7 @@ impl AuthHandler {
 
 fn map_err(e: AlloyError) -> EngineError {
     match e {
+        AlloyError::Oidc { reason, message } => EngineError::auth_failed_with(reason, message),
         AlloyError::Auth(m) => EngineError::auth_failed(m),
         AlloyError::AccountNotFound(m) => EngineError::not_found(m),
         AlloyError::NotLoggedIn => EngineError::auth_failed("not logged in"),
@@ -36,6 +37,7 @@ fn map_err(e: AlloyError) -> EngineError {
         AlloyError::InsecureHomeserverUrl => EngineError {
             code: "insecure_homeserver".to_string(),
             message: "homeserver must use https (http is allowed only for localhost)".to_string(),
+            reason: None,
         },
         AlloyError::MatrixSdk(m) => EngineError::network_error(m),
         other => EngineError::internal_error(other.to_string()),
@@ -143,6 +145,144 @@ async fn finish_login(
     Ok(account)
 }
 
+/// Waits for the browser's loopback redirect and finishes the pending login.
+///
+/// The listener is bound before the authorization URL is handed to the UI, so the redirect can
+/// never arrive before the app is ready for it. Exactly one request is served; a timeout leaves
+/// the pending login to expire on its own.
+async fn await_oidc_redirect(
+    ctx: EngineContext,
+    listener: tokio::net::TcpListener,
+    store_id: String,
+) {
+    let accepted = tokio::time::timeout(OIDC_LOGIN_TTL, listener.accept()).await;
+    let Ok(Ok((mut stream, _peer))) = accepted else {
+        return;
+    };
+    let Some(target) = read_request_target(&mut stream).await else {
+        respond(&mut stream, 400, "This is not an OIDC redirect.").await;
+        return;
+    };
+    let Some((path, query)) = target.split_once('?') else {
+        respond(&mut stream, 400, "The authorization response is missing.").await;
+        return;
+    };
+    if path != "/callback" {
+        respond(&mut stream, 404, "Not found.").await;
+        return;
+    }
+    match finish_oidc_from_query(&ctx, &store_id, query).await {
+        Ok(account) => {
+            let body = format!(
+                "You are signed in as {}. You can close this window and return to Alloy.",
+                account.user_id.0
+            );
+            respond(&mut stream, 200, &body).await;
+        }
+        Err(err) => {
+            respond(
+                &mut stream,
+                400,
+                &format!("Sign-in failed: {}", err.message),
+            )
+            .await;
+        }
+    }
+}
+
+/// Completes the pending login for `store_id` from the redirect's query string.
+async fn finish_oidc_from_query(
+    ctx: &EngineContext,
+    store_id: &str,
+    query: &str,
+) -> Result<Account, EngineError> {
+    let pending = {
+        let mut slot = ctx.pending_oidc.lock().await;
+        match slot.as_ref() {
+            Some(pending) if pending.store_id == store_id => slot.take(),
+            _ => None,
+        }
+    };
+    let Some(pending) = pending else {
+        return Err(EngineError::auth_failed_with(
+            "not_pending",
+            "no OIDC login in progress",
+        ));
+    };
+    let PendingOidcLogin {
+        client,
+        store_id,
+        started_at,
+        ..
+    } = pending;
+    let index = AccountIndex::new(&ctx.data_dir);
+    if started_at.elapsed() > OIDC_LOGIN_TTL {
+        let _ = client.logout().await;
+        purge_account(ctx, &index, &store_id).await;
+        return Err(EngineError::auth_failed_with(
+            "expired",
+            "OIDC login expired; start again",
+        ));
+    }
+    if let Err(e) = client.complete_oidc_login(&format!("?{query}")).await {
+        let _ = client.logout().await;
+        purge_account(ctx, &index, &store_id).await;
+        return Err(map_err(e));
+    }
+    finish_login(ctx, &index, client, &store_id).await
+}
+
+/// The request target (`/callback?...`) of the first GET line, or `None` for anything else.
+async fn read_request_target(stream: &mut tokio::net::TcpStream) -> Option<String> {
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 1024];
+    loop {
+        let read = tokio::io::AsyncReadExt::read(stream, &mut chunk)
+            .await
+            .ok()?;
+        if read == 0 {
+            break;
+        }
+        buf.extend_from_slice(&chunk[..read]);
+        if buf.windows(4).any(|window| window == b"\r\n\r\n") || buf.len() > 16 * 1024 {
+            break;
+        }
+    }
+    let head = String::from_utf8_lossy(&buf);
+    let mut parts = head.lines().next()?.split_whitespace();
+    if parts.next()? != "GET" {
+        return None;
+    }
+    parts.next().map(ToOwned::to_owned)
+}
+
+/// Writes one small HTML page and closes the connection.
+async fn respond(stream: &mut tokio::net::TcpStream, status: u16, message: &str) {
+    let reason = match status {
+        200 => "OK",
+        404 => "Not Found",
+        _ => "Bad Request",
+    };
+    let body = format!(
+        "<!doctype html><meta charset=\"utf-8\"><title>Alloy</title><p>{}</p>",
+        html_escape(message)
+    );
+    let head = format!(
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    let _ = tokio::io::AsyncWriteExt::write_all(stream, head.as_bytes()).await;
+    let _ = tokio::io::AsyncWriteExt::write_all(stream, body.as_bytes()).await;
+    let _ = tokio::io::AsyncWriteExt::flush(stream).await;
+}
+
+fn html_escape(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
 #[async_trait::async_trait]
 impl GroupHandler for AuthHandler {
     fn group(&self) -> CommandGroup {
@@ -183,11 +323,38 @@ impl GroupHandler for AuthHandler {
             EngineCommand::StartOidcLogin { homeserver_url } => {
                 // One login at a time: drop any earlier attempt and its temporary store.
                 if let Some(previous) = ctx.pending_oidc.lock().await.take() {
+                    if let Some(handle) = previous.callback {
+                        handle.abort();
+                    }
                     purge_account(ctx, &index, &previous.store_id).await;
                 }
                 let store_id = uuid::Uuid::new_v4().to_string();
                 let client = open_client(ctx, &homeserver_url, &store_id).await?;
-                let start = match client.start_oidc_login().await {
+                // RFC 8252 loopback redirect: the authorization server rejects a custom scheme
+                // by default (MAS does), so the engine listens on an ephemeral local port and
+                // receives the code itself. Nothing else needs a platform deep-link registration.
+                let listener = match tokio::net::TcpListener::bind(("127.0.0.1", 0)).await {
+                    Ok(listener) => listener,
+                    Err(e) => {
+                        drop(client);
+                        purge_account(ctx, &index, &store_id).await;
+                        return Err(EngineError::internal_error(format!(
+                            "cannot listen for the OIDC redirect: {e}"
+                        )));
+                    }
+                };
+                let port = match listener.local_addr() {
+                    Ok(addr) => addr.port(),
+                    Err(e) => {
+                        drop(client);
+                        purge_account(ctx, &index, &store_id).await;
+                        return Err(EngineError::internal_error(format!(
+                            "cannot read the OIDC redirect address: {e}"
+                        )));
+                    }
+                };
+                let redirect_uri = format!("http://127.0.0.1:{port}/callback");
+                let start = match client.start_oidc_login(&redirect_uri).await {
                     Ok(start) => start,
                     Err(e) => {
                         drop(client);
@@ -195,10 +362,16 @@ impl GroupHandler for AuthHandler {
                         return Err(map_err(e));
                     }
                 };
+                let listener_ctx = ctx.clone();
+                let listener_store_id = store_id.clone();
+                let callback = tokio::spawn(async move {
+                    await_oidc_redirect(listener_ctx, listener, listener_store_id).await;
+                });
                 *ctx.pending_oidc.lock().await = Some(PendingOidcLogin {
                     client,
                     store_id,
                     started_at: Instant::now(),
+                    callback: Some(callback),
                 });
                 Ok(EngineResponse::OidcUrl {
                     authorization_url: start.authorization_url,
@@ -206,15 +379,18 @@ impl GroupHandler for AuthHandler {
                 })
             }
             EngineCommand::CompleteOidcLogin { redirect_url } => {
-                let pending = ctx
-                    .pending_oidc
-                    .lock()
-                    .await
-                    .take()
-                    .ok_or_else(|| EngineError::auth_failed("no OIDC login in progress"))?;
+                let pending = ctx.pending_oidc.lock().await.take().ok_or_else(|| {
+                    EngineError::auth_failed_with("not_pending", "no OIDC login in progress")
+                })?;
+                if let Some(handle) = pending.callback {
+                    handle.abort();
+                }
                 if pending.started_at.elapsed() > OIDC_LOGIN_TTL {
                     purge_account(ctx, &index, &pending.store_id).await;
-                    return Err(EngineError::auth_failed("OIDC login expired; start again"));
+                    return Err(EngineError::auth_failed_with(
+                        "expired",
+                        "OIDC login expired; start again",
+                    ));
                 }
                 let PendingOidcLogin {
                     client, store_id, ..
@@ -233,6 +409,9 @@ impl GroupHandler for AuthHandler {
             }
             EngineCommand::CancelOidcLogin => {
                 if let Some(pending) = ctx.pending_oidc.lock().await.take() {
+                    if let Some(handle) = pending.callback {
+                        handle.abort();
+                    }
                     purge_account(ctx, &index, &pending.store_id).await;
                 }
                 Ok(EngineResponse::Unit)

@@ -368,6 +368,11 @@ async fn test_oidc_commands_require_a_pending_login() {
         .await
         .expect_err("completing without a started login must fail");
     assert_eq!(err.code, "auth_failed");
+    assert_eq!(
+        err.reason.as_deref(),
+        Some("not_pending"),
+        "the UI needs a stable reason"
+    );
 
     // Cancelling with nothing pending is a no-op, so the UI can call it unconditionally.
     assert!(matches!(
@@ -400,6 +405,7 @@ async fn test_an_expired_oidc_login_is_rejected_and_its_store_purged() {
         client,
         store_id: store_id.into(),
         started_at: std::time::Instant::now() - std::time::Duration::from_secs(11 * 60),
+        callback: None,
     });
 
     let err = engine
@@ -409,6 +415,7 @@ async fn test_an_expired_oidc_login_is_rejected_and_its_store_purged() {
         .await
         .expect_err("an expired login must not complete");
     assert_eq!(err.code, "auth_failed");
+    assert_eq!(err.reason.as_deref(), Some("expired"));
     assert!(err.message.contains("expired"), "{}", err.message);
     assert!(!store_dir.exists(), "the expired login's store is purged");
 }
