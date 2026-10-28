@@ -650,8 +650,9 @@ mod tests {
 
     #[test]
     fn a_provider_id_without_a_known_type_becomes_a_readable_file() {
+        // A numeric row id: provider ids with `:` are not legal file names on Windows.
         let dir = scratch_dir();
-        let copy = dir.join("msf:19");
+        let copy = dir.join("1234");
         std::fs::write(&copy, [0u8, 1, 2, 3]).unwrap();
         let renamed = rename_for_content(&dir, &copy).unwrap();
         assert_eq!(renamed.file_name().unwrap(), "attachment.bin");
@@ -661,7 +662,7 @@ mod tests {
     #[test]
     fn provider_text_becomes_a_txt_file() {
         let dir = scratch_dir();
-        let copy = dir.join("msf:20");
+        let copy = dir.join("5678");
         std::fs::write(&copy, "release notes\n- one\n").unwrap();
         let renamed = rename_for_content(&dir, &copy).unwrap();
         assert_eq!(renamed.file_name().unwrap(), "attachment.txt");
