@@ -290,3 +290,70 @@ async fn test_get_theme_css_output() {
         panic!("Expected SettingsRetrieved");
     }
 }
+
+#[tokio::test]
+async fn test_unreadable_settings_are_reported_and_never_overwritten() {
+    let tmp = tempdir().expect("failed to create temp dir");
+    let settings_path = tmp.path().join("settings.json");
+    // What a truncated write leaves behind: the user's settings are unreadable, not empty.
+    let corrupt = "{ \"prefs\": { \"fontScale\": ";
+    std::fs::write(&settings_path, corrupt).unwrap();
+
+    let secrets: Arc<dyn SecretStore> = Arc::new(InMemorySecretStore::new());
+    let ctx = EngineContext::new(tmp.path().to_path_buf(), secrets);
+    let engine = AppEngine::new(ctx);
+
+    // A failed read is an error, not an empty object: the UI keeps its local copy instead of
+    // pushing defaults over settings it could not read.
+    let err = engine
+        .handle(EngineCommand::GetSettings)
+        .await
+        .expect_err("reading corrupt settings must fail");
+    assert_eq!(err.code, "internal_error");
+
+    // A write also fails, so the unreadable file is left exactly as it was.
+    let err = engine
+        .handle(EngineCommand::SetSetting {
+            key: "prefs".into(),
+            value_json: "{}".into(),
+        })
+        .await
+        .expect_err("writing over corrupt settings must fail");
+    assert_eq!(err.code, "internal_error");
+    assert_eq!(std::fs::read_to_string(&settings_path).unwrap(), corrupt);
+}
+
+#[tokio::test]
+async fn test_a_failed_settings_write_never_replaces_the_readable_file() {
+    let tmp = tempdir().expect("failed to create temp dir");
+    let settings_path = tmp.path().join("settings.json");
+    let secrets: Arc<dyn SecretStore> = Arc::new(InMemorySecretStore::new());
+    let engine = AppEngine::new(EngineContext::new(tmp.path().to_path_buf(), secrets));
+
+    // A successful write leaves the readable file and no temp file behind.
+    engine
+        .handle(EngineCommand::SetSetting {
+            key: "active_theme".into(),
+            value_json: "\"alloy-dark\"".into(),
+        })
+        .await
+        .unwrap();
+    assert!(!tmp.path().join("settings.json.tmp").exists());
+    let readable = std::fs::read_to_string(&settings_path).unwrap();
+
+    // Make the temp path unusable: the write must fail before the rename, so the readable file
+    // and its contents are untouched.
+    std::fs::create_dir(tmp.path().join("settings.json.tmp")).unwrap();
+    let err = engine
+        .handle(EngineCommand::SetSetting {
+            key: "prefs".into(),
+            value_json: "{}".into(),
+        })
+        .await
+        .expect_err("a write that cannot stage its temp file must fail");
+    assert_eq!(err.code, "internal_error");
+
+    assert_eq!(std::fs::read_to_string(&settings_path).unwrap(), readable);
+    let parsed: serde_json::Value = serde_json::from_str(&readable).unwrap();
+    assert_eq!(parsed["active_theme"], "alloy-dark");
+}

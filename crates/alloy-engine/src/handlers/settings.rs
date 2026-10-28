@@ -4,18 +4,23 @@ use crate::router::{CommandGroup, GroupHandler, command_name};
 use alloy_protocol::{EngineCommand, EngineResponse};
 use alloy_theme::{ThemeLoader, ThemeResolver};
 use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 /// Handler for theme and settings operations (`CommandGroup::Settings`).
 ///
 /// Owned by stream: `theme-runtime`
 /// Provides a complete vertical slice for theme management and user preferences.
 #[derive(Default)]
-pub struct SettingsHandler;
+pub struct SettingsHandler {
+    /// Serializes settings read-modify-write cycles, so two commands cannot lose each other's keys.
+    settings_lock: Mutex<()>,
+}
 
 impl SettingsHandler {
     pub fn new() -> Self {
-        Self
+        Self::default()
     }
 
     /// Returns the directory that holds user theme files.
@@ -201,7 +206,26 @@ impl SettingsHandler {
             .map_err(|e| EngineError::internal_error(format!("Invalid settings JSON: {}", e)))
     }
 
+    /// Runs a settings read-modify-write with the write lock held. The callback must not await:
+    /// the lock is a `std::sync::Mutex` and everything it guards is synchronous file I/O.
+    fn with_settings_lock<T>(
+        &self,
+        update: impl FnOnce() -> Result<T, EngineError>,
+    ) -> Result<T, EngineError> {
+        // A panic elsewhere must not make settings permanently unwritable.
+        let _guard = self
+            .settings_lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        update()
+    }
+
     /// Writes settings.json to data_dir, creating parent directories if needed.
+    ///
+    /// The write goes to `settings.json.tmp`, is flushed to disk, and is then renamed over
+    /// `settings.json`. A crash mid-write therefore leaves the previous readable file in place
+    /// instead of a truncated one. Callers hold [`Self::settings_lock`], so the one temp path is
+    /// never shared by two writers.
     fn write_settings_file(
         &self,
         ctx: &EngineContext,
@@ -212,12 +236,26 @@ impl SettingsHandler {
         })?;
 
         let settings_path = ctx.data_dir.join("settings.json");
+        let temp_path = ctx.data_dir.join("settings.json.tmp");
         let json_str = serde_json::to_string_pretty(&settings).map_err(|e| {
             EngineError::internal_error(format!("Failed to serialize settings: {}", e))
         })?;
 
-        fs::write(&settings_path, json_str)
-            .map_err(|e| EngineError::internal_error(format!("Failed to write settings: {}", e)))?;
+        let write = || -> std::io::Result<()> {
+            let mut file = fs::File::create(&temp_path)?;
+            file.write_all(json_str.as_bytes())?;
+            // Make sure the bytes are on disk before the rename replaces the readable file.
+            file.sync_all()?;
+            fs::rename(&temp_path, &settings_path)
+        };
+        if let Err(e) = write() {
+            // Do not leave a half-written temp file behind when the rename or write failed.
+            let _ = fs::remove_file(&temp_path);
+            return Err(EngineError::internal_error(format!(
+                "Failed to write settings: {}",
+                e
+            )));
+        }
 
         Ok(())
     }
@@ -249,9 +287,11 @@ impl GroupHandler for SettingsHandler {
                 let _ = self.get_theme(ctx, &id).await?;
 
                 // Store in settings
-                let mut settings = self.get_settings_file(ctx)?;
-                settings["active_theme"] = serde_json::Value::String(id);
-                self.write_settings_file(ctx, settings)?;
+                self.with_settings_lock(|| {
+                    let mut settings = self.get_settings_file(ctx)?;
+                    settings["active_theme"] = serde_json::Value::String(id);
+                    self.write_settings_file(ctx, settings)
+                })?;
 
                 Ok(EngineResponse::ThemeSetActive)
             }
@@ -268,14 +308,17 @@ impl GroupHandler for SettingsHandler {
                     EngineError::invalid_argument(format!("Invalid JSON value: {}", e))
                 })?;
 
-                // Load, update, and save
-                let mut settings = self.get_settings_file(ctx)?;
-                if let serde_json::Value::Object(obj) = &mut settings {
-                    obj.insert(key.clone(), value);
-                } else {
-                    return Err(EngineError::internal_error("Settings is not a JSON object"));
-                }
-                self.write_settings_file(ctx, settings)?;
+                // Load, update, and save under the write lock, so concurrent commands cannot
+                // lose each other's keys.
+                self.with_settings_lock(|| {
+                    let mut settings = self.get_settings_file(ctx)?;
+                    if let serde_json::Value::Object(obj) = &mut settings {
+                        obj.insert(key.clone(), value);
+                    } else {
+                        return Err(EngineError::internal_error("Settings is not a JSON object"));
+                    }
+                    self.write_settings_file(ctx, settings)
+                })?;
 
                 Ok(EngineResponse::SettingSet { key })
             }
