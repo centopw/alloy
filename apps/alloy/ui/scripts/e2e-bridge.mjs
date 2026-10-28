@@ -167,6 +167,9 @@ try {
   await page.goto(`http://localhost:${UI_PORT}/?engine=ws://127.0.0.1:${BRIDGE_PORT}&token=${BRIDGE_TOKEN}`, { waitUntil: 'networkidle0' });
 
   step('onboarding: discover server, sign in');
+  // A fresh profile opens on the welcome step; acknowledging it is what reveals the server field.
+  await page.waitForFunction(() => [...document.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Get started'), { timeout: 20000 });
+  await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Get started').click());
   await page.waitForSelector('input[placeholder*="matrix.org"]');
   await page.$eval('input[placeholder*="matrix.org"]', (el) => (el.value = ''));
   await page.type('input[placeholder*="matrix.org"]', HS);
@@ -295,7 +298,7 @@ try {
     await page.evaluate(() => document.querySelector('button[aria-label="Close room info"], button[aria-label="Back"]')?.click()); await settle();
     step('mobile: back to list, new room, directory, settings');
     await page.evaluate(() => document.querySelector('button[aria-label="Back to rooms"]')?.click()); await settle();
-    await tapSel('button[aria-label="New room"]'); await audit('6-new-room'); await page.keyboard.press('Escape'); await settle();
+    await tapSel('button[aria-label="New room or browse"]'); await audit('6-new-room'); await page.keyboard.press('Escape'); await settle();
     await page.evaluate(() => [...document.querySelectorAll('nav[aria-label=Primary] button')].find((b) => b.textContent.includes('Discover')).click()); await settle(); await audit('7-directory'); await page.keyboard.press('Escape'); await settle();
     await page.evaluate(() => [...document.querySelectorAll('nav[aria-label=Primary] button')].find((b) => b.textContent.includes('Settings')).click()); await settle(); await audit('8-settings-nav');
     await page.evaluate(() => [...document.querySelectorAll('[role=dialog] button')].find((b) => b.textContent.trim() === 'Appearance').click()); await settle();
@@ -395,10 +398,11 @@ try {
   step('room info panel: rename, topic and a private note');
   await page.click('button[aria-label^="Room info for"]');
   await page.waitForSelector('section[aria-label="Room info"]', { visible: true, timeout: 15000 });
-  await page.waitForSelector('section[aria-label="Room info"] textarea', { visible: true, timeout: 15000 });
+  // Identity is read-first: the note becomes an editor only after its pencil is pressed.
+  await page.click('section[aria-label="Room info"] button[aria-label="Edit private note"]');
+  await page.waitForSelector('section[aria-label="Room info"] textarea[aria-label="Private note"]', { visible: true, timeout: 15000 });
   await page.evaluate(() => {
-    const areas = [...document.querySelectorAll('section[aria-label="Room info"] textarea')];
-    const note = areas[areas.length - 1];
+    const note = document.querySelector('section[aria-label="Room info"] textarea[aria-label="Private note"]');
     note.focus();
     note.value = 'remember: e2e note';
     note.dispatchEvent(new Event('input', { bubbles: true }));
@@ -476,7 +480,9 @@ try {
   await page.waitForFunction(() => [...document.querySelectorAll('button.row')].some((e) => e.textContent.includes('Invite me')), { timeout: 30000 });
 
   step('create an encrypted room from the UI and send a message in it');
-  await page.click('button[aria-label="New room"]');
+  await page.click('button[aria-label="New room or browse"]');
+  await page.waitForSelector('[role=menuitem]', { visible: true, timeout: 5000 });
+  await page.evaluate(() => [...document.querySelectorAll('[role=menuitem]')].find((b) => b.textContent.includes('New room')).click());
   await page.waitForSelector('[role=dialog] input[type=text]');
   await page.type('[role=dialog] input[type=text]', 'Created in UI');
   await page.evaluate(() => [...document.querySelectorAll('[role=dialog] button')].find((b) => b.textContent.trim() === 'Create').click());
@@ -749,7 +755,9 @@ try {
   if (switched.gap === null || switched.gap > 80 || switched.badge) throw new Error(`the next room did not open at its newest message: ${JSON.stringify(switched)}`);
 
   step('browse the public room directory');
-  await page.click('button[aria-label="Browse public rooms"]');
+  await page.click('button[aria-label="New room or browse"]');
+  await page.waitForSelector('[role=menuitem]', { visible: true, timeout: 5000 });
+  await page.evaluate(() => [...document.querySelectorAll('[role=menuitem]')].find((b) => b.textContent.includes('Browse public rooms')).click());
   await page.waitForSelector('input[aria-label="Search public rooms"]', { visible: true });
   await page.type('input[aria-label="Search public rooms"]', dirName);
   await page.waitForFunction((name) => document.querySelector('.results li')?.innerText.includes(name), { timeout: 30000 }, dirName);
