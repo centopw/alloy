@@ -462,6 +462,12 @@ impl ThemeResolver {
             if let Some(v) = &r.lg {
                 out.insert("radii.lg".into(), v.clone());
             }
+            if let Some(v) = &r.xl {
+                out.insert("radii.xl".into(), v.clone());
+            }
+            if let Some(v) = &r.xxl {
+                out.insert("radii.2xl".into(), v.clone());
+            }
             if let Some(v) = &r.full {
                 out.insert("radii.full".into(), v.clone());
             }

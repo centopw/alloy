@@ -132,8 +132,10 @@ pub fn alloy_light() -> Theme {
                     m.insert("2".into(), "8px".into());
                     m.insert("3".into(), "12px".into());
                     m.insert("4".into(), "16px".into());
+                    m.insert("5".into(), "20px".into());
                     m.insert("6".into(), "24px".into());
-                    m.insert("8".into(), "32px".into());
+                    m.insert("7".into(), "32px".into());
+                    m.insert("8".into(), "40px".into());
                     m
                 }),
                 message_padding: Some("8px".into()),
@@ -142,8 +144,10 @@ pub fn alloy_light() -> Theme {
             radii: Some(RadiiTokens {
                 none: Some("0px".into()),
                 sm: Some("4px".into()),
-                md: Some("8px".into()),
-                lg: Some("16px".into()),
+                md: Some("6px".into()),
+                lg: Some("8px".into()),
+                xl: Some("12px".into()),
+                xxl: Some("16px".into()),
                 full: Some("9999px".into()),
             }),
             elevation: Some(ElevationTokens {
@@ -197,47 +201,47 @@ pub fn alloy_dark() -> Theme {
         tokens: Tokens {
             color: Some(ColorTokens {
                 surface: Some(SurfaceColors {
-                    canvas: Some("#18181b".into()),
-                    subtle: Some("#27272a".into()),
-                    panel: Some("#1f1f23".into()),
-                    elevated: Some("#27272a".into()),
-                    hover: Some("#3f3f46".into()),
-                    active: Some("#252a3a".into()),
+                    canvas: Some("#141821".into()),
+                    subtle: Some("#1a1f2b".into()),
+                    panel: Some("#1a1f2b".into()),
+                    elevated: Some("#242a38".into()),
+                    hover: Some("#212734".into()),
+                    active: Some("#2c3442".into()),
                 }),
-                background: Some("#18181b".into()),
+                background: Some("#141821".into()),
                 text: Some(TextColors {
-                    primary: Some("#f4f4f5".into()),
-                    secondary: Some("#a1a1aa".into()),
-                    muted: Some("#71717a".into()),
+                    primary: Some("#f1f5f9".into()),
+                    secondary: Some("#94a3b8".into()),
+                    muted: Some("#8491a6".into()),
                     link: Some("#60a5fa".into()),
                     on_accent: Some("#ffffff".into()),
                 }),
                 accent: Some(AccentColors {
-                    primary: Some("#5865f2".into()),
+                    primary: Some("#3b82f6".into()),
                     secondary: Some("#818cf8".into()),
-                    subtle: Some("#312e81".into()),
+                    subtle: Some("#1b2b47".into()),
                     hover: Some("#1d4ed8".into()),
                     fill: Some("#2563eb".into()),
                 }),
                 status: Some(StatusColors {
-                    online: Some("#22c55e".into()),
+                    online: Some("#10b981".into()),
                     away: Some("#f59e0b".into()),
                     busy: Some("#ef4444".into()),
-                    offline: Some("#71717a".into()),
+                    offline: Some("#64748b".into()),
                     error: Some("#ef4444".into()),
                     warning: Some("#f59e0b".into()),
                     info: Some("#3b82f6".into()),
-                    success: Some("#22c55e".into()),
-                    mention: Some("#f97316".into()),
+                    success: Some("#10b981".into()),
+                    mention: Some("#3b82f6".into()),
                 }),
                 bubble: Some(BubbleColors {
                     own: Some(BubbleEndpointColors {
-                        background: Some("#4f46e5".into()),
+                        background: Some("#1d4ed8".into()),
                         text: Some("#ffffff".into()),
                     }),
                     other: Some(BubbleEndpointColors {
-                        background: Some("#27272a".into()),
-                        text: Some("#f4f4f5".into()),
+                        background: Some("#242a38".into()),
+                        text: Some("#f1f5f9".into()),
                     }),
                 }),
                 user: Some(UserColors {
@@ -255,9 +259,9 @@ pub fn alloy_dark() -> Theme {
                     c12: Some("#22d3ee".into()),
                 }),
                 border: Some(BorderColors {
-                    subtle: Some("#27272a".into()),
-                    prominent: Some("#3f3f46".into()),
-                    floating: Some("#2e3446".into()),
+                    subtle: Some("#2b3242".into()),
+                    prominent: Some("#3e4860".into()),
+                    floating: Some("#3a4458".into()),
                 }),
                 scrim: Some("#05070ab3".into()),
             }),
@@ -315,8 +319,10 @@ pub fn alloy_dark() -> Theme {
                     m.insert("2".into(), "8px".into());
                     m.insert("3".into(), "12px".into());
                     m.insert("4".into(), "16px".into());
+                    m.insert("5".into(), "20px".into());
                     m.insert("6".into(), "24px".into());
-                    m.insert("8".into(), "32px".into());
+                    m.insert("7".into(), "32px".into());
+                    m.insert("8".into(), "40px".into());
                     m
                 }),
                 message_padding: Some("8px".into()),
@@ -325,8 +331,10 @@ pub fn alloy_dark() -> Theme {
             radii: Some(RadiiTokens {
                 none: Some("0px".into()),
                 sm: Some("4px".into()),
-                md: Some("8px".into()),
-                lg: Some("16px".into()),
+                md: Some("6px".into()),
+                lg: Some("8px".into()),
+                xl: Some("12px".into()),
+                xxl: Some("16px".into()),
                 full: Some("9999px".into()),
             }),
             elevation: Some(ElevationTokens {

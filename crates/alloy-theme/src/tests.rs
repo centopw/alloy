@@ -133,7 +133,7 @@ fn test_builtin_themes_resolve_and_pass_contrast() {
         dark.contrast_report.passes_aa,
         "alloy-dark must pass WCAG AA"
     );
-    assert_eq!(dark.get("color.surface.canvas"), Some("#18181b"));
+    assert_eq!(dark.get("color.surface.canvas"), Some("#141821"));
     let amoled = resolver
         .resolve(&alloy_amoled())
         .expect("alloy-amoled resolves");
@@ -203,7 +203,7 @@ fn test_extends_and_deep_merge() {
     let resolved = resolver.resolve(&child).expect("Child must resolve");
 
     // Inherited from alloy-dark base
-    assert_eq!(resolved.get("color.surface.canvas"), Some("#18181b"));
+    assert_eq!(resolved.get("color.surface.canvas"), Some("#141821"));
     assert_eq!(
         resolved.get("typography.font_family.sans"),
         Some("Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif")
@@ -234,7 +234,9 @@ fn test_css_vars_snapshot_assertion() {
     assert!(css.contains("  --alloy-typography-font-family-sans: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;\n"));
     assert!(css.contains("  --alloy-typography-size-base: 14px;\n"));
     assert!(css.contains("  --alloy-spacing-density: normal;\n"));
-    assert!(css.contains("  --alloy-radii-md: 8px;\n"));
+    assert!(css.contains("  --alloy-radii-md: 6px;\n"));
+    assert!(css.contains("  --alloy-radii-xl: 12px;\n"));
+    assert!(css.contains("  --alloy-radii-2xl: 16px;\n"));
     assert!(css.contains("  --alloy-layout-message-style: bubble;\n"));
     assert!(css.contains("  --alloy-layout-avatar-shape: circle;\n"));
 }

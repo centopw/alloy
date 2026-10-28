@@ -37,39 +37,39 @@ html, body {
 
 :root:not([data-theme]) {
   /* Fallback defaults for tokens before theme loads */
-  --alloy-color-surface-canvas: #0e1015;
-  --alloy-color-surface-subtle: #151821;
-  --alloy-color-surface-panel: #151821;
-  --alloy-color-surface-elevated: #1c202d;
-  --alloy-color-surface-hover: #1a1e2b;
-  --alloy-color-surface-active: #252a3a;
-  --alloy-color-background: #0e1015;
+  --alloy-color-surface-canvas: #141821;
+  --alloy-color-surface-subtle: #1a1f2b;
+  --alloy-color-surface-panel: #1a1f2b;
+  --alloy-color-surface-elevated: #242a38;
+  --alloy-color-surface-hover: #212734;
+  --alloy-color-surface-active: #2c3442;
+  --alloy-color-background: #141821;
   --alloy-color-text-primary: #f1f5f9;
   --alloy-color-text-secondary: #94a3b8;
-  --alloy-color-text-muted: #64748b;
+  --alloy-color-text-muted: #8491a6;
   --alloy-color-text-link: #60a5fa;
   --alloy-color-text-on-accent: #ffffff;
   --alloy-color-accent-primary: #3b82f6;
   --alloy-color-accent-secondary: #818cf8;
-  --alloy-color-accent-subtle: #152137;
+  --alloy-color-accent-subtle: #1b2b47;
   --alloy-color-accent-hover: #1d4ed8;
   --alloy-color-accent-fill: #2563eb;
-  --alloy-color-status-online: #22c55e;
+  --alloy-color-status-online: #10b981;
   --alloy-color-status-away: #f59e0b;
   --alloy-color-status-busy: #ef4444;
-  --alloy-color-status-offline: #71717a;
+  --alloy-color-status-offline: #64748b;
   --alloy-color-status-error: #ef4444;
   --alloy-color-status-warning: #f59e0b;
   --alloy-color-status-info: #3b82f6;
-  --alloy-color-status-success: #22c55e;
-  --alloy-color-status-mention: #f97316;
+  --alloy-color-status-success: #10b981;
+  --alloy-color-status-mention: #3b82f6;
   --alloy-color-bubble-own-background: #1d4ed8;
   --alloy-color-bubble-own-text: #ffffff;
-  --alloy-color-bubble-other-background: #1c202d;
+  --alloy-color-bubble-other-background: #242a38;
   --alloy-color-bubble-other-text: #f1f5f9;
-  --alloy-color-border-subtle: #232734;
-  --alloy-color-border-prominent: #333a4d;
-  --alloy-color-border-floating: #2e3446;
+  --alloy-color-border-subtle: #2b3242;
+  --alloy-color-border-prominent: #3e4860;
+  --alloy-color-border-floating: #3a4458;
   --alloy-color-scrim: #05070ab3;
 
   --alloy-typography-font-family-sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -105,6 +105,8 @@ html, body {
   --alloy-radii-sm: 4px;
   --alloy-radii-md: 6px;
   --alloy-radii-lg: 8px;
+  --alloy-radii-xl: 12px;
+  --alloy-radii-2xl: 16px;
   --alloy-radii-full: 9999px;
 
   --alloy-elevation-none: none;
@@ -154,11 +156,195 @@ html, body {
   --alloy-radius-sm: var(--alloy-radii-sm);
   --alloy-radius-md: var(--alloy-radii-md);
   --alloy-radius-lg: var(--alloy-radii-lg);
+  --alloy-radius-xl: var(--alloy-radii-xl);
+  --alloy-radius-2xl: var(--alloy-radii-2xl);
   --alloy-radius-full: var(--alloy-radii-full);
+  /* Conversation rhythm (ADR 0014): bubbles and input surfaces, not the shell. */
+  --alloy-spacing-bubble-x: 14px;
+  --alloy-spacing-bubble-y: 10px;
+  --alloy-avatar-grouped-size: 32px;
+  --alloy-bubble-max-width: 72%;
+  --alloy-bubble-max-width-phone: 85%;
+  --alloy-bubble-radius: 20px;
+  --alloy-bubble-radius-tail: 8px;
+  /* UI type scale (ADR 0014). Four sizes with distinct jobs, so chrome stops reading as one
+     flat weight: panel titles, row names, previews, and tracked meta. */
+  --alloy-font-size-title: 15px;
+  --alloy-font-size-row: 13px;
+  --alloy-font-size-preview: 12px;
+  --alloy-font-size-meta: 10.5px;
+  --alloy-letter-spacing-caps: 0.08em;
   --alloy-font-sans: var(--alloy-typography-font-family-sans);
   --alloy-font-mono: var(--alloy-typography-font-family-mono);
   --alloy-shadow-sm: var(--alloy-elevation-sm);
   --alloy-shadow-md: var(--alloy-elevation-md);
+}
+
+/* Materials (ADR 0014). Every value is derived from the active theme's tokens, so a new theme gets
+   the material without new theme keys.
+   Depth comes from surfaces and hairlines, not from stacked glass cards:
+     1. canvas — a chromatic aurora with a fine grain, visible around the conversation;
+     2. chrome — the navigation and side panes are lightly transparent (86-90% panel) with a blur,
+        so the wash drifts behind them while text keeps its contrast;
+     3. conversation — near-opaque canvas (92%), because reading must not depend on what is behind;
+     4. floating layers — menus, dialogs, pickers and the composer's popovers keep the full glass
+        recipe, so the only genuinely "frosted" things are the things that float.
+   A light theme needs a little more opacity in the chrome than a dark one: the same fill is already
+   tinted by the blooms behind it, and secondary 12px text has to clear 4.5:1 on top. */
+:root {
+  --alloy-glass-filter: blur(28px) saturate(190%);
+  --alloy-glass-filter-strong: blur(44px) saturate(200%);
+  --alloy-glass-fill: color-mix(in srgb, var(--alloy-color-surface-panel) 64%, transparent);
+  --alloy-glass-fill-strong: color-mix(in srgb, var(--alloy-color-surface-panel) 84%, transparent);
+  --alloy-glass-fill-soft: color-mix(in srgb, var(--alloy-color-surface-panel) 48%, transparent);
+  --alloy-glass-control: color-mix(in srgb, var(--alloy-color-text-primary) 7%, transparent);
+  --alloy-glass-control-hover: color-mix(in srgb, var(--alloy-color-text-primary) 12%, transparent);
+  --alloy-glass-rim: color-mix(in srgb, var(--alloy-color-text-primary) 12%, transparent);
+  --alloy-glass-rim-strong: color-mix(in srgb, var(--alloy-color-text-primary) 20%, transparent);
+  /* Flat material: depth comes from the fill, the rim and the shadow — no specular sheen, no
+     top-edge catch. A white gloss on a translucent pane reads as plastic, especially in dark. */
+  --alloy-glass-sheen: linear-gradient(168deg, transparent, transparent);
+  --alloy-glass-highlight: inset 0 0 0 0 transparent;
+  --alloy-glass-shadow:
+    0 1px 2px rgba(9, 15, 30, 0.05), 0 20px 56px -26px rgba(9, 15, 30, 0.42);
+  --alloy-glass-shadow-soft: 0 1px 2px rgba(9, 15, 30, 0.04), 0 8px 24px -14px rgba(9, 15, 30, 0.3);
+  --alloy-glass-radius-shell: 26px;
+  --alloy-glass-radius-panel: 18px;
+  --alloy-glass-radius-control: 12px;
+  --alloy-shell-edge: 16px;
+  /* The chrome panes: lightly transparent so the aurora drifts behind the rail, list and side panel,
+     while the room rows and header still read at 12-13px. Not a card: no radius, no shadow. */
+  --alloy-chrome-surface: color-mix(in srgb, var(--alloy-color-surface-panel) 86%, transparent);
+  --alloy-chrome-surface-strong: color-mix(
+    in srgb,
+    var(--alloy-color-surface-panel) 90%,
+    transparent
+  );
+  --alloy-chrome-filter: blur(26px) saturate(160%);
+  /* The conversation pane: most of the canvas colour, a little of the aurora, no legibility gamble. */
+  --alloy-chat-surface: color-mix(in srgb, var(--alloy-color-surface-canvas) 92%, transparent);
+  --alloy-chat-filter: blur(30px) saturate(140%);
+  --alloy-chat-rim: color-mix(in srgb, var(--alloy-color-text-primary) 8%, transparent);
+  /* Received bubbles carry a trace of the text colour, so they stay legible on the near-white
+     light canvas and on the dark card without a theme-specific rule. */
+  --alloy-bubble-other-surface: color-mix(
+    in srgb,
+    var(--alloy-color-bubble-other-background) 93%,
+    var(--alloy-color-text-primary)
+  );
+
+  /* Fine monochrome grain. It hides radial-gradient banding and gives the glass something to hold. */
+  --alloy-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)' opacity='0.32'/%3E%3C/svg%3E");
+  /* A vivid aurora: chrome refracts the blooms, content sits on the calmer center. */
+  --alloy-canvas-art:
+    var(--alloy-grain),
+    radial-gradient(
+      46vw 40vw at 4% -6%,
+      color-mix(in srgb, var(--alloy-color-accent-primary) 82%, transparent),
+      transparent 66%
+    ),
+    radial-gradient(
+      40vw 36vw at 98% 2%,
+      color-mix(in srgb, var(--alloy-color-accent-secondary) 76%, transparent),
+      transparent 64%
+    ),
+    radial-gradient(
+      52vw 46vw at 78% 112%,
+      color-mix(in srgb, var(--alloy-color-text-link) 60%, transparent),
+      transparent 66%
+    ),
+    radial-gradient(
+      34vw 30vw at 0% 104%,
+      color-mix(in srgb, var(--alloy-color-status-mention) 34%, transparent),
+      transparent 66%
+    ),
+    linear-gradient(
+      155deg,
+      color-mix(in srgb, var(--alloy-color-surface-canvas) 88%, var(--alloy-color-accent-secondary)),
+      color-mix(in srgb, var(--alloy-color-surface-canvas) 92%, var(--alloy-color-text-link))
+    );
+}
+
+/* A near-opaque conversation pane is right over a light canvas, but on a dark theme the same 92%
+   leaves a black rectangle where the aurora cannot be seen. Dark themes expose a little more of the
+   wash so the rail, list and conversation stay readable as three layers; bubbles and the composer
+   keep their own opaque surfaces, and primary/secondary text stays far above 4.5:1 on the tint. */
+:root:not([data-theme='alloy-light']) {
+  --alloy-chat-surface: color-mix(in srgb, var(--alloy-color-surface-canvas) 84%, transparent);
+  --alloy-chrome-surface: color-mix(in srgb, var(--alloy-color-surface-panel) 80%, transparent);
+  --alloy-chrome-surface-strong: color-mix(
+    in srgb,
+    var(--alloy-color-surface-panel) 86%,
+    transparent
+  );
+  /* Two restrained blooms, not four neon ones: at full strength the aurora reads as a glossy wash
+     over the dark panes, which is exactly the plastic look dark themes should avoid. */
+  --alloy-canvas-art:
+    var(--alloy-grain),
+    radial-gradient(
+      46vw 40vw at 4% -6%,
+      color-mix(in srgb, var(--alloy-color-accent-primary) 42%, transparent),
+      transparent 66%
+    ),
+    radial-gradient(
+      52vw 46vw at 88% 108%,
+      color-mix(in srgb, var(--alloy-color-text-link) 30%, transparent),
+      transparent 68%
+    ),
+    linear-gradient(
+      155deg,
+      color-mix(in srgb, var(--alloy-color-surface-canvas) 92%, var(--alloy-color-accent-secondary)),
+      var(--alloy-color-surface-canvas)
+    );
+}
+
+/* Reduced transparency and engines without backdrop-filter keep the layout but drop the glass.
+   The dark-material rule above is more specific than these, so it is named again here: without
+   that, a dark theme would keep its translucency even when the user asks for none. */
+@media (prefers-reduced-transparency: reduce) {
+  :root,
+  :root:not([data-theme='alloy-light']) {
+    --alloy-glass-filter: none;
+    --alloy-glass-filter-strong: none;
+    --alloy-glass-fill: var(--alloy-color-surface-panel);
+    --alloy-glass-fill-strong: var(--alloy-color-surface-panel);
+    --alloy-glass-fill-soft: var(--alloy-color-surface-subtle);
+    --alloy-glass-control: var(--alloy-color-surface-subtle);
+    --alloy-glass-control-hover: var(--alloy-color-surface-hover);
+    --alloy-chrome-surface: var(--alloy-color-surface-panel);
+    --alloy-chrome-surface-strong: var(--alloy-color-surface-panel);
+    --alloy-chrome-filter: none;
+    --alloy-chat-surface: var(--alloy-color-surface-canvas);
+    --alloy-chat-filter: none;
+    --alloy-bubble-other-surface: var(--alloy-color-bubble-other-background);
+    --alloy-canvas-art: var(--alloy-color-surface-canvas);
+  }
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root,
+  :root:not([data-theme='alloy-light']) {
+    --alloy-glass-filter: none;
+    --alloy-glass-filter-strong: none;
+    --alloy-glass-fill: var(--alloy-color-surface-panel);
+    --alloy-glass-fill-strong: var(--alloy-color-surface-panel);
+    --alloy-glass-fill-soft: var(--alloy-color-surface-subtle);
+    --alloy-glass-control: var(--alloy-color-surface-subtle);
+    --alloy-glass-control-hover: var(--alloy-color-surface-hover);
+    --alloy-chrome-surface: var(--alloy-color-surface-panel);
+    --alloy-chrome-surface-strong: var(--alloy-color-surface-panel);
+    --alloy-chrome-filter: none;
+    --alloy-chat-surface: var(--alloy-color-surface-canvas);
+    --alloy-chat-filter: none;
+    --alloy-bubble-other-surface: var(--alloy-color-bubble-other-background);
+    --alloy-canvas-art: var(--alloy-color-surface-canvas);
+  }
+}
+
+/* Phones get a wider bubble: the reading column is the whole screen. */
+@media (max-width: 899px) {
+  :root {
+    --alloy-bubble-max-width: var(--alloy-bubble-max-width-phone);
+  }
 }
 
 /* 3. Density Preset Scopes */

@@ -303,6 +303,8 @@
             "sm": { "type": "string" },
             "md": { "type": "string" },
             "lg": { "type": "string" },
+            "xl": { "type": "string" },
+            "2xl": { "type": "string" },
             "full": { "type": "string" }
           },
           "additionalProperties": false

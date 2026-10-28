@@ -408,6 +408,12 @@ pub struct RadiiTokens {
     pub md: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lg: Option<String>,
+    /// Soft radius for conversation surfaces (bubbles, attachment cards).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub xl: Option<String>,
+    /// Soft radius for primary input surfaces (the composer field).
+    #[serde(rename = "2xl", skip_serializing_if = "Option::is_none")]
+    pub xxl: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub full: Option<String>,
 }

@@ -85,6 +85,30 @@ describe("ThemeStore", () => {
     expect(themeStore.followSystem).toBe(true);
   });
 
+  it("drops followSystem when the user picks a theme explicitly", () => {
+    themeStore.setFollowSystem(true);
+    expect(themeStore.followSystem).toBe(true);
+
+    themeStore.setTheme("alloy-light");
+
+    expect(themeStore.followSystem).toBe(false);
+    const stored = JSON.parse(localStorage.getItem("alloy.theme.v1") || "{}");
+    expect(stored.followSystem).toBe(false);
+    expect(stored.theme).toBe("alloy-light");
+  });
+
+  it("applies the system scheme as soon as followSystem is turned on", () => {
+    themeStore.setFollowSystem(false);
+    themeStore.setTheme("alloy-amoled");
+    expect(themeStore.activeTheme).toBe("alloy-amoled");
+
+    themeStore.setFollowSystem(true);
+
+    // jsdom's matchMedia never reports a light preference, so the system reads as dark.
+    expect(themeStore.activeTheme).toBe("alloy-dark");
+    expect(document.documentElement.getAttribute("data-theme")).toBe("alloy-dark");
+  });
+
   it("injects and replaces custom theme CSS via loadCustomTheme", () => {
     const customCss1 = ":root { --alloy-color-accent-primary: #ff00ff; }";
     loadCustomTheme(customCss1);

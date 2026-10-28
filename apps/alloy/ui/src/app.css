@@ -134,3 +134,40 @@
     cursor: pointer;
   }
 }
+
+/*
+ * One quiet scrollbar everywhere (ADR 0014): a thin inset thumb over a transparent track, so a
+ * scrolling pane never draws a bright gutter through the material. The standard properties win
+ * where both are honoured; the WebKit pseudo-elements are the fallback for the macOS webview.
+ */
+:root {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--alloy-color-text-primary) 18%, transparent) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: var(--alloy-radii-full);
+  background: color-mix(in srgb, var(--alloy-color-text-primary) 18%, transparent);
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--alloy-color-text-primary) 32%, transparent);
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:active {
+  background: color-mix(in srgb, var(--alloy-color-accent-primary) 55%, transparent);
+  background-clip: content-box;
+}

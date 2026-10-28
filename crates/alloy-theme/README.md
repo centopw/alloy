@@ -116,7 +116,7 @@ All dots (`.`) and underscores (`_`) become hyphens (`-`). All names are lowerca
 | `spacing.density` | `--alloy-spacing-density` | `"compact"`, `"normal"`, `"cozy"` |
 | `spacing.message_padding` | `--alloy-spacing-message-padding` | `4px` / `8px` / `12px` |
 | `spacing.avatar_size` | `--alloy-spacing-avatar-size` | `28px` / `36px` / `40px` |
-| `spacing.scale.1` .. `scale.8` | `--alloy-spacing-scale-1` .. `-8` | `4px`, `8px`, `12px`, `16px`, `24px`, `32px` |
+| `spacing.scale.1` .. `scale.8` | `--alloy-spacing-scale-1` .. `-8` | `4px`, `8px`, `12px`, `16px`, `20px`, `24px`, `32px`, `40px` |
 
 #### Radii Tokens (`--alloy-radii-*`)
 | Token Path | CSS Custom Property | Value |

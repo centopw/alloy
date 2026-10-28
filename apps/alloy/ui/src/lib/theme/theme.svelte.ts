@@ -109,11 +109,32 @@ class ThemeStore {
     if (stored.messageStyle) this.messageStyle = stored.messageStyle;
     if (stored.followSystem !== undefined) this.followSystem = stored.followSystem;
 
+    // While following the system, the system owns the theme: resolve it before the first paint so
+    // startup does not flash the last explicit choice.
+    if (this.followSystem) {
+      this.activeTheme = this.systemTheme();
+    }
+
     // Initialize in browser
     if (typeof window !== "undefined") {
       this.applyToDOM();
       this.setupListeners();
     }
+  }
+
+  /** The theme that satisfies the current system colour scheme. */
+  private systemTheme(): Theme {
+    return this.systemPreferences.colorScheme === "light" ? "alloy-light" : "alloy-dark";
+  }
+
+  /** Write a theme without changing the follow-system preference. */
+  private commitTheme(theme: Theme): void {
+    this.activeTheme = theme;
+    if (typeof document !== "undefined") {
+      document.documentElement.setAttribute("data-theme", theme);
+    }
+    const stored = loadStoredPreferences();
+    saveStoredPreferences({ ...stored, theme });
   }
 
   applyToDOM(): void {
@@ -134,7 +155,7 @@ class ThemeStore {
     colorSchemeQuery.addEventListener("change", (e) => {
       this.systemPreferences.colorScheme = e.matches ? "light" : "dark";
       if (this.followSystem) {
-        this.setTheme(this.systemPreferences.colorScheme === "light" ? "alloy-light" : "alloy-dark");
+        this.commitTheme(this.systemTheme());
       }
     });
 
@@ -161,13 +182,10 @@ class ThemeStore {
     });
   }
 
+  /** An explicit choice: it takes the theme back from the system. */
   setTheme(theme: Theme): void {
-    this.activeTheme = theme;
-    if (typeof document !== "undefined") {
-      document.documentElement.setAttribute("data-theme", theme);
-    }
-    const stored = loadStoredPreferences();
-    saveStoredPreferences({ ...stored, theme });
+    this.commitTheme(theme);
+    if (this.followSystem) this.setFollowSystem(false);
   }
 
   setDensity(density: Density): void {
@@ -190,6 +208,8 @@ class ThemeStore {
 
   setFollowSystem(follow: boolean): void {
     this.followSystem = follow;
+    // Turning the follow on takes effect at once, rather than waiting for the next OS change.
+    if (follow) this.commitTheme(this.systemTheme());
     const stored = loadStoredPreferences();
     saveStoredPreferences({ ...stored, followSystem: follow });
   }
