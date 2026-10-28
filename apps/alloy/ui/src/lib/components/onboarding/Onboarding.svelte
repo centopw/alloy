@@ -1,23 +1,40 @@
 <script lang="ts">
   import { Button, TextField } from '../common';
-  import { ChevronLeft, Icon, MessageSquare, ShieldCheck, Smartphone } from '$lib/icons';
+  import { ChevronLeft, ExternalLink, Icon, MessageSquare, ShieldCheck, Smartphone } from '$lib/icons';
   import { session } from '$lib/stores/session.svelte';
-  import { errorMessage } from '$lib/stores/errors';
+  import { errorMessage, errorReason, oidcErrorMessage } from '$lib/stores/errors';
 
   type Step = 'welcome' | 'server' | 'login';
+  /** How the account signs in: on the server's own page (OIDC/MAS), or with a password here. */
+  type Method = 'oidc' | 'password';
 
   let step = $state<Step>('welcome');
+  let method = $state<Method>('password');
   let serverInput = $state('matrix.org');
   let homeserverUrl = $state('');
   let homeserverName = $state('');
+  let supportsOidc = $state(false);
   let username = $state('');
   let password = $state('');
   let localError = $state<string | null>(null);
   let checking = $state(false);
 
+  const serverHost = $derived.by(() => {
+    try {
+      return new URL(homeserverUrl).host;
+    } catch {
+      return homeserverName;
+    }
+  });
+
   function go(next: Step) {
     localError = null;
     step = next;
+  }
+
+  function useMethod(next: Method) {
+    localError = null;
+    method = next;
   }
 
   async function continueServer(e: Event) {
@@ -28,12 +45,33 @@
       const info = await session.discover(serverInput.trim());
       homeserverUrl = info.url;
       homeserverName = info.name;
+      supportsOidc = info.supports_oidc;
+      method = info.supports_oidc ? 'oidc' : 'password';
       step = 'login';
     } catch (err) {
       localError = `Couldn't reach that server. ${errorMessage(err)}`;
     } finally {
       checking = false;
     }
+  }
+
+  async function startOidc() {
+    localError = null;
+    try {
+      await session.startOidc(homeserverUrl);
+    } catch (err) {
+      localError = oidcErrorMessage(err);
+      // The server cannot do browser sign-in after all; show the password form instead of a dead end.
+      if (supportsOidc && errorReason(err) === 'unsupported') {
+        method = 'password';
+        supportsOidc = false;
+      }
+    }
+  }
+
+  async function cancelOidc() {
+    localError = null;
+    await session.cancelOidc();
   }
 
   async function signIn(e: Event) {
@@ -130,43 +168,91 @@
         {:else}
           <div class="step-head">
             <p class="eyebrow">Step 2 of 2 · {homeserverName}</p>
-            <h2>Sign in</h2>
-            <p class="hint">Use your Matrix ID and password for this homeserver.</p>
+            <h2>{method === 'oidc' ? 'Sign in through your browser' : 'Sign in'}</h2>
+            {#if method === 'oidc'}
+              <p class="hint">
+                {#if session.oidcWaiting}
+                  Finish signing in at {serverHost} in the browser window. This screen updates by
+                  itself.
+                {:else}
+                  Your account on {serverHost} signs in on its own page, so Alloy never sees your
+                  password.
+                {/if}
+              </p>
+            {:else}
+              <p class="hint">Use your Matrix ID and password for this homeserver.</p>
+            {/if}
           </div>
-          <form onsubmit={signIn}>
-            <label>
-              <span>Username</span>
-              <TextField
-                type="text"
-                bind:value={username}
-                placeholder="alice"
-                autocomplete="username"
-                autocapitalize="off"
-                spellcheck={false}
-                autofocus
-                required
-              />
-            </label>
-            <label>
-              <span>Password</span>
-              <TextField
-                type="password"
-                bind:value={password}
-                autocomplete="current-password"
-                required
-              />
-            </label>
+          {#if method === 'oidc'}
+            {#if session.oidcWaiting}
+              <p class="waiting" role="status">
+                <span class="pulse" aria-hidden="true"></span>
+                Waiting for the browser…
+              </p>
+            {/if}
             {#if localError}<p class="error" role="alert">{localError}</p>{/if}
             <div class="actions">
-              <Button variant="ghost" type="button" onclick={() => go('server')}>
-                <Icon icon={ChevronLeft} size={16} strokeWidth={1.5} />
-                Back
+              <Button
+                variant="ghost"
+                type="button"
+                onclick={() => (session.oidcWaiting ? cancelOidc() : go('server'))}
+              >
+                {#if !session.oidcWaiting}
+                  <Icon icon={ChevronLeft} size={16} strokeWidth={1.5} />
+                {/if}
+                {session.oidcWaiting ? 'Cancel' : 'Back'}
               </Button>
-              <Button type="submit" disabled={session.busy || !username || !password}>
-                {session.busy ? 'Signing in…' : 'Sign in'}
+              <Button type="button" onclick={startOidc} disabled={session.busy}>
+                <Icon icon={ExternalLink} size={16} strokeWidth={1.5} />
+                {session.busy ? 'Opening…' : session.oidcWaiting ? 'Open again' : 'Open browser'}
               </Button>
             </div>
-          </form>
+            {#if !session.oidcWaiting}
+              <button class="link" type="button" onclick={() => useMethod('password')}>
+                Use a username and password instead
+              </button>
+            {/if}
+          {:else}
+            <form onsubmit={signIn}>
+              <label>
+                <span>Username</span>
+                <TextField
+                  type="text"
+                  bind:value={username}
+                  placeholder="alice"
+                  autocomplete="username"
+                  autocapitalize="off"
+                  spellcheck={false}
+                  autofocus
+                  required
+                />
+              </label>
+              <label>
+                <span>Password</span>
+                <TextField
+                  type="password"
+                  bind:value={password}
+                  autocomplete="current-password"
+                  required
+                />
+              </label>
+              {#if localError}<p class="error" role="alert">{localError}</p>{/if}
+              <div class="actions">
+                <Button variant="ghost" type="button" onclick={() => go('server')}>
+                  <Icon icon={ChevronLeft} size={16} strokeWidth={1.5} />
+                  Back
+                </Button>
+                <Button type="submit" disabled={session.busy || !username || !password}>
+                  {session.busy ? 'Signing in…' : 'Sign in'}
+                </Button>
+              </div>
+            </form>
+            {#if supportsOidc}
+              <button class="link" type="button" onclick={() => useMethod('oidc')}>
+                Sign in through your browser instead
+              </button>
+            {/if}
+          {/if}
         {/if}
       {/if}
     </div>
@@ -368,6 +454,53 @@
     margin: 0;
     color: var(--alloy-color-status-error);
     font-size: var(--alloy-typography-size-sm);
+  }
+
+  /* Waiting for the browser: quiet, but alive. */
+  .waiting {
+    display: flex;
+    align-items: center;
+    gap: var(--alloy-spacing-scale-2);
+    margin: 0;
+    font-size: var(--alloy-typography-size-sm);
+    color: var(--alloy-color-text-secondary);
+  }
+  .pulse {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: var(--alloy-radii-full);
+    background: var(--alloy-color-accent-primary);
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%,
+    100% {
+      opacity: 0.3;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .pulse {
+      animation: none;
+    }
+  }
+
+  /* A second way in, not a competing action. */
+  .link {
+    align-self: flex-start;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--alloy-color-accent-primary);
+    font: inherit;
+    font-size: var(--alloy-typography-size-sm);
+    cursor: pointer;
+  }
+  .link:hover {
+    text-decoration: underline;
   }
 
   /* Phone: the sheet becomes the screen. The pitch only stays on the welcome step, so forms get the room. */

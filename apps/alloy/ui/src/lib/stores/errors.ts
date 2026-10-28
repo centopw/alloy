@@ -33,6 +33,42 @@ export function errorCode(e: unknown): string | null {
   return null;
 }
 
+/** The engine's stable machine-readable detail for a failure, when it carries one. */
+export function errorReason(e: unknown): string | null {
+  if (e && typeof e === 'object' && typeof (e as { reason?: unknown }).reason === 'string') {
+    return (e as { reason: string }).reason;
+  }
+  return null;
+}
+
+/**
+ * What went wrong in an OIDC login, from the engine's stable `reason`. The engine reports the
+ * failure on the attempt that started it, so the message always asks for a fresh attempt where
+ * that is the only fix.
+ */
+export function oidcErrorMessage(e: unknown): string {
+  switch (errorReason(e)) {
+    case 'not_pending':
+      return 'That sign-in attempt is no longer active. Start again.';
+    case 'expired':
+      return 'The sign-in attempt timed out. Start again.';
+    case 'state_mismatch':
+      return 'The sign-in response did not belong to this attempt. Start again.';
+    case 'denied':
+      return 'Sign-in was cancelled in the browser.';
+    case 'exchange_failed':
+      return 'The server did not finish the sign-in. Try again.';
+    case 'unsupported':
+      return 'This server does not support signing in through a browser. Use a password instead.';
+    case 'registration_failed':
+      return 'Alloy could not register with this server’s login service. Try again later.';
+    case 'network':
+      return OFFLINE_MESSAGE;
+    default:
+      return errorMessage(e);
+  }
+}
+
 /** Narrow a response to one variant or throw (a protocol bug, not a user error). */
 export function expect<T extends EngineResponse['type']>(
   res: EngineResponse,

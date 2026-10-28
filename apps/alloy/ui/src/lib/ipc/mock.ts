@@ -266,6 +266,15 @@ export class MockTransport implements Transport {
     homeserver: MOCK_ACCOUNT.homeserver_url,
   };
   private mediaCacheBytes = 42_991_616;
+  private oidcTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** Drops a pending mock OIDC sign-in so a cancel or a second attempt cannot sign in later. */
+  private cancelMockOidc(): void {
+    if (this.oidcTimer !== null) {
+      clearTimeout(this.oidcTimer);
+      this.oidcTimer = null;
+    }
+  }
 
   /** Default level for a room, by its direct flag: one-to-one or group. */
   private defaultRoomLevel(roomId: string): NotificationLevel {
@@ -512,10 +521,17 @@ export class MockTransport implements Transport {
         };
 
       case 'StartOidcLogin':
+        // No browser exists to authorize in: answer with a URL the opener ignores and sign in
+        // shortly after, so the waiting screen and the signed-in shell stay walkable.
+        this.cancelMockOidc();
+        this.oidcTimer = setTimeout(() => {
+          this.oidcTimer = null;
+          this.emit({ type: 'AuthState', payload: { account: MOCK_ACCOUNT } });
+        }, 700);
         return {
           type: 'OidcUrl',
           payload: {
-            authorization_url: `${command.params.homeserver_url}/_matrix/client/v3/auth/oidc/fallback`,
+            authorization_url: 'alloy-mock://oidc',
             redirect_uri: 'http://127.0.0.1:17897/callback',
           },
         };
@@ -527,6 +543,7 @@ export class MockTransport implements Transport {
         };
 
       case 'CancelOidcLogin':
+        this.cancelMockOidc();
         return { type: 'Unit' };
 
       case 'RestoreSession':

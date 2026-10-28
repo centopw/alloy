@@ -113,6 +113,10 @@ export class AlloyClient {
     });
   }
 
+  async cancelOidcLogin() {
+    return this.transport.invoke({ action: 'CancelOidcLogin' });
+  }
+
   async restoreSession(account_id: AccountId) {
     return this.transport.invoke({
       action: 'RestoreSession',
