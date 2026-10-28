@@ -9,6 +9,7 @@
   import { formatDay, formatTime, isEmojiOnly, isFileName } from '$lib/content/format';
   import { isHiddenState, stateEventSummary } from '$lib/content/stateEvents';
   import { prefs } from '$lib/stores/prefs.svelte';
+  import { themeStore } from '$lib/theme/theme.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
   import { emojiPicker } from '$lib/stores/emojiPicker.svelte';
   import { interceptLinks } from '$lib/platform/links';
@@ -77,7 +78,12 @@
   /** Bubbles layout: the quote is a bubble stacked above the reply, not a panel inside it. */
   const stackedReply = $derived(layout === 'bubbles' && Boolean(item.reply_to));
   const time = $derived(formatTime(item.timestamp_millis, prefs.timeFormat));
-  const avatarSize = $derived(layout === 'bubbles' ? 32 : viewport.isPhone ? 36 : 40);
+  /** Gutter avatar diameter by density. Mirrors `--alloy-spacing-avatar-size` in tokens.css. */
+  const DENSITY_AVATAR_PX = { compact: 28, normal: 36, cozy: 40 } as const;
+  /** Bubbles keep their own metric: the avatar sits on the bubble edge, not in a gutter column. */
+  const avatarSize = $derived(
+    layout === 'bubbles' ? 32 : DENSITY_AVATAR_PX[themeStore.density]
+  );
   /** IRC always shows the name column; bubbles omit the head on your own messages. */
   const showHead = $derived(layout === 'irc' || (!grouped && !(layout === 'bubbles' && item.is_own)));
   /** A short run of emoji renders large when the pref is on. */  const jumbo = $derived(
@@ -639,12 +645,13 @@
     display: flex;
     align-items: flex-start;
     margin: 0 var(--alloy-layout-row-inset);
-    padding: var(--alloy-spacing-scale-1) var(--alloy-layout-row-pad-x);
+    /* Half the token per side keeps Normal at the previous rhythm; Compact and Cozy scale with it. */
+    padding: calc(var(--alloy-spacing-message-padding) / 2) var(--alloy-layout-row-pad-x);
     border-radius: var(--alloy-radii-md);
     min-width: 0;
   }
   .row:not(.grouped) {
-    padding-top: var(--alloy-spacing-scale-2);
+    padding-top: var(--alloy-spacing-message-padding);
   }
   .row:focus-within {
     background: var(--alloy-color-surface-hover);
