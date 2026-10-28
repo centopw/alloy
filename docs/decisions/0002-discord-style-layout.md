@@ -10,7 +10,7 @@ tags: [adr, ui, layout]
 
 # 0002: Discord-style layout, rounded surfaces, settings in a menu
 
-- Status: accepted (supersedes items 2, 4, 5 and 6 of 0001; keeps 1 (no emoji), 3 (per-user colours), 7, 8)
+- Status: accepted (supersedes items 2, 4, 5 and 6 of 0001; keeps 1 (no emoji), 3 (per-user colours), 7, 8; shell material and geometry superseded by 0014)
 - Date: 2026-10-17
 - Source: maintainer direction with a Discord screenshot as the reference.
 
