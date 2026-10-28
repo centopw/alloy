@@ -4,25 +4,25 @@
 
 ```json
 {
-  "timestamp": "2026-10-16T06:40:50.850Z",
+  "timestamp": "2026-10-28T13:42:30.567Z",
   "environment": {
     "platform": "macOS arm64 (9router/lite)",
     "chrome": "155.0.8059.85",
-    "node": "v22.19.0"
+    "node": "v24.18.1"
   },
   "measurements": {
     "frameCount": 1199,
-    "totalTime_ms": 19982.6,
+    "totalTime_ms": 19983.2,
     "avgFps": 60,
     "avgFrameTime_ms": 16.67,
     "p50_ms": 16.7,
-    "p90_ms": 17,
-    "p95_ms": 17.2,
-    "p99_ms": 17.5,
+    "p90_ms": 17.3,
+    "p95_ms": 17.5,
+    "p99_ms": 17.6,
     "maxFrameTime_ms": 17.7
   },
   "qualityMetrics": {
-    "droppedFrames_over16ms": 733,
+    "droppedFrames_over16ms": 732,
     "droppedFrames_over20ms": 0,
     "percentageSmooth": 39
   },
@@ -37,12 +37,12 @@
 
 **Frame Time Distribution:**
 - **p50 (median):** 16.7 ms
-- **p95:** 17.2 ms
-- **p99:** 17.5 ms
+- **p95:** 17.5 ms
+- **p99:** 17.6 ms
 - **max:** 17.7 ms
 
 **Dropped Frames Analysis:**
-- Frames exceeding 16.6ms (60 fps budget): 733
+- Frames exceeding 16.6ms (60 fps budget): 732
 - Frames exceeding 20.8ms (48 fps budget): 0
 - Overall smoothness: 39%
 
