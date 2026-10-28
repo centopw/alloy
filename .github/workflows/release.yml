@@ -407,12 +407,35 @@ jobs:
             *) echo "APK version does not match $TAG (expected code $code, name $ver)" >&2; exit 1 ;;
           esac
 
-      - name: Compute SHA256 Checksums
-        run: sha256sum alloy-android.apk > SHA256SUMS
-
-      - name: Upload Android APK and Checksums to Release
+      - name: Upload Android APK to Release
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
-        run: gh release upload "$TAG" alloy-android.apk SHA256SUMS --clobber
+        run: gh release upload "$TAG" alloy-android.apk --clobber
+
+  # Every release asset, not just the APK: desktop users verify their download the same way.
+  # Runs after every build job so nothing is uploaded after the checksums are computed.
+  checksums:
+    name: Publish SHA256SUMS for every artifact
+    needs: [build-tauri, build-android]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - name: Download the published assets and checksum them
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          mkdir dist
+          gh release download "$TAG" -D dist
+          cd dist
+          # Installables and SBOMs; the update manifest, signatures and the checksum file are not entries.
+          find . -maxdepth 1 -type f \
+            ! -name 'SHA256SUMS' ! -name 'latest.json' ! -name '*.sig' \
+            -printf '%f\n' | sort | xargs sha256sum > SHA256SUMS
+          cat SHA256SUMS
+          gh release upload "$TAG" SHA256SUMS --clobber
