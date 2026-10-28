@@ -53,15 +53,28 @@ impl AlloyClient {
         let content = Raw::new(&value)
             .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?
             .cast_unchecked::<AnyGlobalAccountDataEventContent>();
-        self.client
+        // Claim the value before it leaves the device: the server can echo it back over sync
+        // before the request returns, and the watcher must not report our own write as another
+        // device's.
+        let previous = self.prefs_updated_at.swap(updated_at, Ordering::SeqCst);
+        if let Err(e) = self
+            .client
             .account()
             .set_account_data_raw(
                 GlobalAccountDataEventType::from(ACCOUNT_PREFS_EVENT_TYPE),
                 content,
             )
             .await
-            .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
-        self.prefs_updated_at.store(updated_at, Ordering::SeqCst);
+        {
+            // Undo the claim unless a newer document has already been seen meanwhile.
+            let _ = self.prefs_updated_at.compare_exchange(
+                updated_at,
+                previous,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            );
+            return Err(AlloyError::MatrixSdk(e.to_string()));
+        }
         Ok(())
     }
 
