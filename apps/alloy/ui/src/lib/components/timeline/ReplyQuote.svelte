@@ -4,6 +4,8 @@
   import { membersStore } from '$lib/stores/members.svelte.js';
   import { displayNameFor } from '$lib/platform/names.js';
   import { getUserColorValue } from '$lib/identity/userColor.js';
+  import Icon from '$lib/icons/Icon.svelte';
+  import { Reply } from '$lib/icons';
 
   interface Props {
     replyTo: TimelineItemDto | null | undefined;
@@ -85,7 +87,7 @@
       onclick={jump}
       aria-label="Jump to message from {senderName || 'user'}"
     >
-      {#if senderName}
+      {#if senderName && !stacked}
         <span class="sender" style="color: {userColor};">{senderName}</span>
       {/if}
       <span class="excerpt" class:unavailable={isUnavailable}>{excerptText}</span>
@@ -97,7 +99,7 @@
       class:stacked
       style="--quote-border-color: {userColor};"
     >
-      {#if senderName}
+      {#if senderName && !stacked}
         <span class="sender" style="color: {userColor};">{senderName}</span>
       {/if}
       <span class="excerpt" class:unavailable={isUnavailable}>{excerptText}</span>
@@ -106,9 +108,13 @@
 {/snippet}
 
 {#if stacked}
-  <div class="quote-stack">
-    {@render quoteBubble()}
-  </div>
+  <!-- The header names the quoted message and sits outside both cards: the pair is two separately
+       rounded surfaces with a small gap, never a glued column of different widths. -->
+  <span class="reply-header">
+    <Icon icon={Reply} size={16} />
+    <span class="reply-header-text">Reply to <span class="reply-header-name">{senderName || 'user'}</span></span>
+  </span>
+  {@render quoteBubble()}
 {:else}
   {@render quoteBubble()}
 {/if}
@@ -136,28 +142,58 @@
     text-decoration: none;
   }
 
-  /* Stacked reply: the quote is a card joined to the top of the message bubble. Both share one
-     column width and meet at a pair of matched tight corners, so the two read as a single message
-     rather than as two unrelated bubbles. The sender colour stays as the leading bar. */
-  .quote-stack {
+  /* Stacked reply: the header names the message, then the quote is its own rounded card above the
+     reply bubble. Each card hugs its content, so a short reply next to a long quote no longer turns
+     the width difference into a notch. The sender colour stays as an inset spine. */
+  .reply-header {
     display: flex;
-    flex-direction: column;
+    align-items: center;
+    gap: var(--alloy-spacing-scale-1);
+    max-width: 100%;
     min-width: 0;
-    width: 100%;
+    color: var(--alloy-color-text-secondary);
+    font-size: var(--alloy-typography-size-sm);
+    line-height: var(--alloy-typography-line-height-tight);
+  }
+  .reply-header-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .reply-header-name {
+    color: var(--alloy-color-text-primary);
+    font-weight: var(--alloy-typography-weight-semibold);
   }
   .reply-quote.stacked {
-    width: 100%;
+    position: relative;
+    width: fit-content;
     max-width: 100%;
     margin: 0;
-    padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
+    padding: var(--alloy-spacing-scale-3) var(--alloy-spacing-scale-3) var(--alloy-spacing-scale-3)
+      calc(var(--alloy-spacing-scale-3) + var(--alloy-spacing-scale-2));
     border: 0;
-    border-left: 3px solid var(--quote-border-color, var(--alloy-color-border-prominent));
-    border-radius: var(--alloy-bubble-radius) var(--alloy-bubble-radius) 0 0;
+    border-radius: var(--alloy-bubble-radius);
     background: color-mix(
       in srgb,
       var(--quote-border-color, var(--alloy-color-border-prominent)) 7%,
       var(--alloy-bubble-other-surface)
     );
+  }
+  /* A border-left would be clipped by the 20px radius, so the spine sits inside the card. */
+  .reply-quote.stacked::before {
+    content: '';
+    position: absolute;
+    top: var(--alloy-spacing-scale-2);
+    bottom: var(--alloy-spacing-scale-2);
+    left: var(--alloy-spacing-scale-2);
+    width: 2px;
+    border-radius: var(--alloy-radii-full);
+    background: var(--quote-border-color, var(--alloy-color-border-prominent));
+  }
+  .reply-quote.stacked .excerpt {
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
   }
   /* On the saturated own bubble the quote is a lighter plate of the same blue, not a grey card. */
   .reply-quote.stacked.own-bubble {
@@ -166,11 +202,14 @@
       var(--alloy-color-bubble-own-text) 12%,
       var(--alloy-color-bubble-own-background)
     );
-    border-left-color: color-mix(
+    --quote-spine: color-mix(
       in srgb,
       var(--alloy-color-bubble-own-text) 55%,
       var(--quote-border-color)
     );
+  }
+  .reply-quote.stacked.own-bubble::before {
+    background: var(--quote-spine, var(--quote-border-color));
   }
   .reply-quote.stacked.own-bubble .sender {
     color: var(--alloy-color-bubble-own-text);

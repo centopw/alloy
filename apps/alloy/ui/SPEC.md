@@ -57,13 +57,14 @@ names the sender and there is no bubble corner to shape. Own bubbles are the one
 bubbles use `--alloy-bubble-other-surface` over a 1px text-at-8% edge. Rhythm is tokenised
 (`--alloy-spacing-bubble-x/y`, `--alloy-avatar-grouped-size`), message meta is the xs token and sender
 names are `--alloy-font-size-preview`, semibold; date separators are centred pills. **Replies stack:**
-in the bubble layout the quoted message is its own bubble above the reply (`ReplyQuote` `stacked`),
-flush with it so the two 1px edges form one seam; the junction is square on both sides, the quote
-keeps the 20px outer top (tightened to the tail radius on the sender side when the message joins a
-group above) and the reply keeps the bubble's bottom corners including the tail, so the pair reads as
-one card. The
-quoted sender's colour is kept as a leading bar; inline quotes remain for `modern` and `irc`. The scroll
-engine (paging, anchoring, prepend) is untouched.
+in the bubble layout a replied message is a header, a quote card and the reply bubble — three
+separately rounded surfaces with a 4px gap, each hugging its content and sharing only the sender
+edge (right for own, left for received), so a two-character reply beside a long quote cannot open a
+notch. The header reads `Reply to <Name>` above the cards; the quote card is `ReplyQuote` `stacked`
+(the name is not repeated inside it), takes the full 20px radius and carries the quoted sender's
+colour as a 2px inset spine, clamped to three lines. In a group the quote card is the first surface,
+so it takes the 8px tail on the outer corner and the bubble below keeps its own radius. Inline
+quotes remain for `modern` and `irc`. The scroll engine (paging, anchoring, prepend) is untouched.
 
 ### Room list
 

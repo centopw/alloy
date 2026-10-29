@@ -1340,21 +1340,27 @@
   .row.own[data-layout='bubbles'] .stack {
     align-items: flex-end;
   }
-  /* Quote and bubble are one stack: the wrapper is invisible by default, and a replied message
-     gives them a single shared column so both edges line up at a matched pair of tight corners. */
+  /* A replied message stacks header, quote card and reply bubble as three separately rounded
+     surfaces. Nothing is glued and no width is shared: each hugs its content and the sender edge
+     aligns, so a short reply beside a long quote does not open a notch. */
   .row[data-layout='bubbles'] .message-stack {
     display: contents;
   }
   .row.replied[data-layout='bubbles'] .message-stack {
     display: flex;
     flex-direction: column;
-    align-items: stretch;
+    align-items: flex-start;
+    gap: var(--alloy-spacing-scale-1);
     width: fit-content;
-    /* The anchor holds the 72% cap; the shared quote+bubble column fills it. */
+    /* The anchor holds the 72% cap; the cards fill it only when their content is that wide. */
     max-width: none;
     min-width: 0;
   }
+  .row.own.replied[data-layout='bubbles'] .message-stack {
+    align-items: flex-end;
+  }
   .row.replied[data-layout='bubbles'] .message-stack .bubble {
+    width: fit-content;
     max-width: 100%;
   }
   .row[data-layout='bubbles'] .head {
@@ -1445,19 +1451,21 @@
   .row.grouped.own[data-layout='bubbles'] .bubble {
     border-top-right-radius: var(--alloy-bubble-radius-tail);
   }
-  /* The reply bubble continues the quote card above it: the junction is square on both sides, so
-     the pair reads as one stacked message with a header rather than as two rounded cards. This
-     holds inside a group as well, where the outer corners of the quote carry the spine instead. */
-  .row.replied[data-layout='bubbles'] .bubble,
+  /* In a group the first card of the stack carries the tight outer corner, not the bubble: the
+     quote card is what sits at the top, and the bubble keeps its own full radius below it. */
   .row.replied.grouped[data-layout='bubbles'] .bubble {
-    border-top-left-radius: 0;
-    border-top-right-radius: 0;
+    border-top-left-radius: var(--alloy-bubble-radius);
+    border-top-right-radius: var(--alloy-bubble-radius);
   }
   .row.grouped[data-layout='bubbles']:not(.own) :global(.reply-quote.stacked) {
     border-top-left-radius: var(--alloy-bubble-radius-tail);
   }
   .row.grouped.own[data-layout='bubbles'] :global(.reply-quote.stacked) {
     border-top-right-radius: var(--alloy-bubble-radius-tail);
+  }
+  /* Two replied messages in a group need air between the stacks; plain bubbles may sit closer. */
+  .row.replied.grouped[data-layout='bubbles'] {
+    padding-top: max(calc(var(--alloy-spacing-message-padding) / 2), var(--alloy-spacing-scale-2));
   }
   /* The time is always present: showing it only on hover grew the bubble and shifted every message below. */
   .row[data-layout='bubbles'] .bubble-time {
