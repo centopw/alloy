@@ -247,7 +247,9 @@ Every release APK is signed by `scripts/sign-android-apk.sh`; the CI log no long
 ```bash
 apksigner verify --print-certs alloy-android.apk
 ```
-Record the certificate SHA-256 in the release notes. Two consecutive releases signed with the same key are what make in-place Android updates possible.
+The release certificate is `CN=Alloy, O=Alloy, C=US` with SHA-256
+`FB:43:2F:8B:62:F1:57:1E:40:EF:3C:50:64:CD:C8:17:03:A8:78:8E:CF:3D:9B:0B:E9:C2:2D:62:82:E8:1A:B4`
+(first proven on the 2026-10-29 nightly, APK SHA-256 `56ab510b…709c7`). Record it in the release notes; two consecutive releases signed with the same key are what make in-place Android updates possible.
 
 ---
 
