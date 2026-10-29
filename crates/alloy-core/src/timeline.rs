@@ -623,19 +623,28 @@ impl AlloyClient {
         Ok(())
     }
 
-    /// Send a read receipt up to the given event and mark the room as read.
+    /// Send a public read receipt up to the given event and mark the room as read.
+    ///
+    /// This is an explicit "mark read up to here" action, so the receipt is sent unconditionally.
+    /// `Timeline::send_single_receipt` may decide not to send one — for example when the target
+    /// is the account's own newest event — and still report success, so the wire would never
+    /// carry the receipt the caller asked for. Request failures are returned, never swallowed.
     pub async fn mark_read(
         &self,
         room_id: &RoomId,
         target: &alloy_protocol::EventId,
     ) -> AlloyResult<()> {
         use matrix_sdk::ruma::api::client::receipt::create_receipt::v3::ReceiptType;
-        let timeline = self.cached_timeline(room_id).await?;
-        timeline
-            .send_single_receipt(ReceiptType::Read, event_id(target)?)
-            .await
-            .map(|_| ())
-            .map_err(sdk)
+        use matrix_sdk::ruma::events::receipt::ReceiptThread;
+        let room = self.room(room_id)?;
+        room.send_single_receipt(
+            ReceiptType::Read,
+            ReceiptThread::Unthreaded,
+            event_id(target)?,
+        )
+        .await
+        .map(|_| ())
+        .map_err(sdk)
     }
 
     /// Forward one or more events to one or more target rooms.
