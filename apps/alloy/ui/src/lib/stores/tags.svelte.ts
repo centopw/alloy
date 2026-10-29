@@ -2,7 +2,7 @@ import type { RoomTagDef, TagColour } from '../generated/index.js';
 import { client } from '../ipc/index.js';
 import { errorMessage, expect } from './errors.js';
 import { registerFlushHandler } from './prefs.svelte.js';
-import { makeTagId, refuseCatalogueWrite } from './tags.js';
+import { refuseTagWrite } from './tags.js';
 /** The account's custom room tag catalogue, plus per-room assignment through the engine. */
 class TagStore {
   defs = $state<RoomTagDef[]>([]);
@@ -62,17 +62,52 @@ class TagStore {
     }
   }
 
-  /** Replaces the whole catalogue. Returns false (and sets `error`) when the engine refuses. */
-  #save(next: RoomTagDef[], op: string): Promise<boolean> {
+  /** Adds one tag through the engine, which assigns the id. Returns the stored definition. */
+  async create(name: string, colour: TagColour): Promise<RoomTagDef | null> {
+    const trimmed = name.trim();
+    if (trimmed === '') return null;
+    const refusal = refuseTagWrite('create', this.loaded);
+    if (refusal) {
+      console.warn(refusal);
+      return null;
+    }
     return this.#track(async () => {
-      const refusal = refuseCatalogueWrite(op, { loaded: this.loaded, next: next.length });
-      if (refusal) {
-        console.warn(refusal);
-        return false;
-      }
       try {
-        expect(await client.invoke({ action: 'SaveTagCatalog', params: { tags: next } }), 'Unit');
-        this.defs = next;
+        const res = await client.invoke({ action: 'CreateRoomTag', params: { name: trimmed, colour } });
+        const tag = { ...expect(res, 'RoomTagCreated').payload.tag };
+        this.defs = [...this.defs, tag];
+        this.error = null;
+        return tag;
+      } catch (e) {
+        this.error = errorMessage(e);
+        return null;
+      }
+    });
+  }
+
+  /** Renames and/or recolours one tag; the engine refuses an id the catalogue does not hold. */
+  async update(id: string, patch: { name?: string; colour?: TagColour }): Promise<boolean> {
+    const name = patch.name?.trim();
+    if (name === '') return false;
+    // An orphan chip (a room tag with no catalogue entry) has nothing to rename, and a rename sent
+    // before the catalogue was read would name an id this client has not seen yet.
+    const refusal = refuseTagWrite(`update ${id}`, this.loaded, this.defs.some((d) => d.id === id));
+    if (refusal) {
+      console.warn(refusal);
+      return false;
+    }
+    return this.#track(async () => {
+      try {
+        expect(
+          await client.invoke({
+            action: 'RenameRoomTag',
+            params: { id, name: name ?? null, colour: patch.colour ?? null },
+          }),
+          'Unit',
+        );
+        this.defs = this.defs.map((d) =>
+          d.id === id ? { ...d, name: name ?? d.name, colour: patch.colour ?? d.colour } : d,
+        );
         this.error = null;
         return true;
       } catch (e) {
@@ -82,42 +117,30 @@ class TagStore {
     });
   }
 
-  /** Adds a tag at the end of the catalogue. Returns the new definition, or null on failure. */
-  async create(name: string, colour: TagColour): Promise<RoomTagDef | null> {
-    const trimmed = name.trim();
-    if (trimmed === '') return null;
-    const def: RoomTagDef = {
-      id: makeTagId(trimmed, new Set(this.defs.map((d) => d.id))),
-      name: trimmed,
-      colour,
-    };
-    return (await this.#save([...this.defs, def], 'create')) ? def : null;
-  }
-
-  /** Renames and/or recolours a tag. The id never changes, so room assignments are kept. */
-  async update(id: string, patch: { name?: string; colour?: TagColour }): Promise<boolean> {
-    const name = patch.name?.trim();
-    if (name === '') return false;
-    // An orphan chip (a room tag with no catalogue entry) has nothing to rename: writing the local
-    // list back would drop every entry this client has not read yet.
-    if (!this.defs.some((d) => d.id === id)) {
-      console.warn(`[tags] refusing to update ${id}: it is not in the catalogue`);
-      return false;
-    }
-    const next = this.defs.map((d) =>
-      d.id === id ? { ...d, name: name ?? d.name, colour: patch.colour ?? d.colour } : d,
-    );
-    return this.#save(next, 'update');
-  }
-
-  /** Moves a tag one step up (-1) or down (+1) in the display order. */
+  /** Moves a tag one step up (-1) or down (+1). The engine validates the order as a permutation. */
   async move(id: string, step: -1 | 1): Promise<boolean> {
     const from = this.defs.findIndex((d) => d.id === id);
     const to = from + step;
     if (from === -1 || to < 0 || to >= this.defs.length) return false;
-    const next = [...this.defs];
-    [next[from], next[to]] = [next[to], next[from]];
-    return this.#save(next, 'move');
+    const refusal = refuseTagWrite(`move ${id}`, this.loaded, true);
+    if (refusal) {
+      console.warn(refusal);
+      return false;
+    }
+    const ids = this.defs.map((d) => d.id);
+    [ids[from], ids[to]] = [ids[to], ids[from]];
+    return this.#track(async () => {
+      try {
+        expect(await client.invoke({ action: 'ReorderRoomTags', params: { ids } }), 'Unit');
+        const byId = new Map(this.defs.map((d) => [d.id, d] as const));
+        this.defs = ids.map((tagId) => byId.get(tagId)!);
+        this.error = null;
+        return true;
+      } catch (e) {
+        this.error = errorMessage(e);
+        return false;
+      }
+    });
   }
 
   /** Deletes a tag from the catalogue and from every room that carries it. */

@@ -21,6 +21,7 @@ import type {
   EngineError,
 } from '../generated/index.js';
 import type { Transport, EventHandler, Unsubscribe } from './transport.js';
+import { makeTagId } from '../stores/tags.js';
 type SearchRoomMessagesParams = Extract<EngineCommand, { action: 'SearchRoomMessages' }>['params'];
 type RoomSearchResults = Extract<EngineResponse, { type: 'RoomSearchResults' }>['payload'];
 type RoomSearchHit = RoomSearchResults['hits'][number];
@@ -251,6 +252,8 @@ export class MockTransport implements Transport {
   private roomFavourites = new Map<string, boolean>(); // room_id -> is_favourite
   private roomLowPriorities = new Map<string, boolean>(); // room_id -> is_low_priority
   private tagCatalog: RoomTagDef[] = [];
+  /** Rooms whose timeline was closed: reopening one drops this mark. */
+  private closedTimelines = new Set<string>();
   private notificationSettings: NotificationSettingsDto = {
     one_to_one: 'All',
     group: 'Mentions',
@@ -687,6 +690,8 @@ export class MockTransport implements Transport {
         const subId = `sub_tl_${++this.subCounter}`;
         const roomId = command.params.room_id;
         this.timelineSubscriptions.set(subId, roomId);
+        // Subscribing is what reopens a room's timeline after it was closed.
+        this.closedTimelines.delete(roomId);
 
         const items = this.timelineByRoom.get(roomId) ?? [];
 
@@ -1096,6 +1101,45 @@ export class MockTransport implements Transport {
       case 'SaveTagCatalog':
         this.tagCatalog = command.params.tags.map((t) => ({ ...t }));
         return { type: 'Unit' };
+
+      case 'CloseTimeline': {
+        const { room_id } = command.params;
+        const closed = !this.closedTimelines.has(room_id);
+        this.closedTimelines.add(room_id);
+        return { type: 'TimelineClosed', payload: { room_id, closed } };
+      }
+
+      case 'CreateRoomTag': {
+        const tag: RoomTagDef = {
+          id: makeTagId(command.params.name, new Set(this.tagCatalog.map((t) => t.id))),
+          name: command.params.name.trim(),
+          colour: command.params.colour,
+        };
+        this.tagCatalog = [...this.tagCatalog, tag];
+        return { type: 'RoomTagCreated', payload: { tag: { ...tag } } };
+      }
+
+      case 'RenameRoomTag': {
+        const index = this.tagCatalog.findIndex((t) => t.id === command.params.id);
+        if (index === -1) throw invalidArgument('no such tag');
+        const current = this.tagCatalog[index];
+        const next: RoomTagDef = {
+          ...current,
+          name: command.params.name?.trim() || current.name,
+          colour: command.params.colour ?? current.colour,
+        };
+        this.tagCatalog = this.tagCatalog.map((t, i) => (i === index ? next : t));
+        return { type: 'Unit' };
+      }
+
+      case 'ReorderRoomTags': {
+        const ids = command.params.ids;
+        const known = new Set(this.tagCatalog.map((t) => t.id));
+        const isPermutation = ids.length === known.size && ids.every((id) => known.has(id)) && new Set(ids).size === ids.length;
+        if (!isPermutation) throw invalidArgument('ids must list the catalogue exactly once');
+        this.tagCatalog = ids.map((id) => this.tagCatalog.find((t) => t.id === id)!);
+        return { type: 'Unit' };
+      }
 
       case 'SetRoomTag': {
         const room = this.rooms.find((r) => r.id === command.params.room_id);

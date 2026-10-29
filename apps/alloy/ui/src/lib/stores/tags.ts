@@ -46,18 +46,13 @@ export function displayTags(defs: readonly RoomTagDef[], rooms: readonly RoomSum
 }
 
 /**
- * Why a catalogue write must be refused, or null when it may proceed. Writes are built from the
- * local list, so a client that has not read the catalogue, or that holds a partial one, would push
- * that state over the server copy. Deleting the last tag does not come through here: it goes
- * through the engine's `DeleteRoomTag`, which knows the id it is deleting.
+ * Why a tag write must be refused, or null when it may proceed. Every write now names one tag (or
+ * one ordering) instead of replacing the whole catalogue, but a write sent before the catalogue was
+ * read can still name an id this client has not seen, so the read has to come first. `known` is
+ * false for an orphan chip (a room tag the catalogue does not define).
  */
-export function refuseCatalogueWrite(
-  op: string,
-  state: { loaded: boolean; next: number },
-): string | null {
-  if (!state.loaded) {
-    return `[tags] refusing to save (${op}) before the catalogue was read; it would overwrite the server copy`;
-  }
-  if (state.next === 0) return `[tags] refusing to save an empty catalogue (${op})`;
+export function refuseTagWrite(op: string, loaded: boolean, known = true): string | null {
+  if (!loaded) return `[tags] refusing to ${op} before the catalogue was read`;
+  if (!known) return `[tags] refusing to ${op}: it is not in the catalogue`;
   return null;
 }

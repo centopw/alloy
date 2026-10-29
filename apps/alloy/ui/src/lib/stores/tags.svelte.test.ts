@@ -13,7 +13,7 @@ vi.mock('../ipc/index.js', () => ({ client: { invoke: mocks.invoke } }));
 vi.mock('./prefs.svelte.js', () => ({ registerFlushHandler: vi.fn() }));
 
 import { tags } from './tags.svelte';
-import { refuseCatalogueWrite } from './tags.js';
+import { refuseTagWrite } from './tags.js';
 
 const work: RoomTagDef = { id: 'work', name: 'Work', colour: 'blue' };
 const home: RoomTagDef = { id: 'home', name: 'Home', colour: 'green' };
@@ -88,8 +88,8 @@ describe('tag catalogue reads', () => {
 
     mocks.invoke.mockResolvedValueOnce(answers([]));
     await tags.load();
-    mocks.invoke.mockResolvedValueOnce({ type: 'Unit' });
-    expect(await tags.create('Work', 'blue')).toEqual({ id: 'work', name: 'Work', colour: 'blue' });
+    mocks.invoke.mockResolvedValueOnce({ type: 'RoomTagCreated', payload: { tag: work } });
+    expect(await tags.create('Work', 'blue')).toEqual(work);
   });
 
   it('reports a failed read without dropping the list', async () => {
@@ -142,9 +142,41 @@ describe('catalogue writes', () => {
     expect(tags.defs).toEqual([work, home]);
   });
 
+  it('writes one tag per command instead of sending a whole list', async () => {
+    mocks.invoke.mockResolvedValueOnce(answers([work]));
+    await tags.load();
+    mocks.invoke.mockClear();
+
+    mocks.invoke.mockResolvedValueOnce({ type: 'RoomTagCreated', payload: { tag: home } });
+    expect(await tags.create('Home', 'green')).toEqual(home);
+    expect(mocks.invoke).toHaveBeenLastCalledWith({ action: 'CreateRoomTag', params: { name: 'Home', colour: 'green' } });
+    expect(tags.defs).toEqual([work, home]);
+
+    mocks.invoke.mockResolvedValueOnce({ type: 'Unit' });
+    expect(await tags.update('home', { name: 'House' })).toBe(true);
+    expect(mocks.invoke).toHaveBeenLastCalledWith({ action: 'RenameRoomTag', params: { id: 'home', name: 'House', colour: null } });
+    expect(tags.defs[1].name).toBe('House');
+
+    mocks.invoke.mockResolvedValueOnce({ type: 'Unit' });
+    expect(await tags.move('home', -1)).toBe(true);
+    expect(mocks.invoke).toHaveBeenLastCalledWith({ action: 'ReorderRoomTags', params: { ids: ['home', 'work'] } });
+    expect(tags.defs.map((d) => d.id)).toEqual(['home', 'work']);
+    // A whole-list write is never sent.
+    expect(mocks.invoke.mock.calls.some(([c]) => c.action === 'SaveTagCatalog')).toBe(false);
+  });
+
+  it('leaves the order alone when the engine refuses a reorder', async () => {
+    mocks.invoke.mockResolvedValueOnce(answers([work, home]));
+    await tags.load();
+    mocks.invoke.mockRejectedValueOnce(new Error('the catalogue changed on another device'));
+    expect(await tags.move('home', -1)).toBe(false);
+    expect(tags.defs.map((d) => d.id)).toEqual(['work', 'home']);
+    expect(tags.error).toContain('another device');
+  });
+
   it('names the operation when a write is refused', () => {
-    expect(refuseCatalogueWrite('update', { loaded: false, next: 1 })).toContain('(update)');
-    expect(refuseCatalogueWrite('move', { loaded: true, next: 0 })).toContain('empty catalogue (move)');
-    expect(refuseCatalogueWrite('create', { loaded: true, next: 1 })).toBeNull();
+    expect(refuseTagWrite('create', false)).toContain('refusing to create before the catalogue was read');
+    expect(refuseTagWrite('update orphan', true, false)).toContain('not in the catalogue');
+    expect(refuseTagWrite('create', true)).toBeNull();
   });
 });
