@@ -53,6 +53,39 @@ async fn subscribe_timeline(eng: &AppEngine, room_id: &RoomId) -> SubscriptionId
     }
 }
 
+/// `JoinRoom` returns when the homeserver accepts the join, but the client's own room state can
+/// still read `Invited` for a moment after that — a sync fetched before the join can land after
+/// it. The SDK's send queue refuses to enqueue for a room it does not see as joined, so retry
+/// only that exact refusal, briefly; every other error is a real failure and is not retried.
+async fn send_text_when_joined(eng: &AppEngine, room_id: &RoomId, body: String) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let result = eng
+            .handle(EngineCommand::SendText {
+                room_id: room_id.clone(),
+                body: body.clone(),
+                markdown: Some(false),
+                reply_to: None,
+                mentions: None,
+                mention_room: false,
+                in_thread_root: None,
+                txn_id: None,
+            })
+            .await;
+        match result {
+            Ok(_) => return,
+            Err(e)
+                if e.code == "network_error"
+                    && e.message == "the room isn't in the joined state"
+                    && tokio::time::Instant::now() < deadline =>
+            {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            Err(e) => panic!("send failed: {e:?}"),
+        }
+    }
+}
+
 /// Mirror of the room list, kept the way the UI keeps it.
 fn apply_room(list: &mut Vec<RoomSummary>, diff: VectorDiffDto<RoomSummary>) {
     match diff {
@@ -191,18 +224,7 @@ async fn read_receipt_and_mark_room_read_clear_unread_count() {
 
     for round in 0..2 {
         for n in 0..3 {
-            bob.handle(EngineCommand::SendText {
-                room_id: room_id.clone(),
-                body: format!("unread {round}-{n}"),
-                markdown: Some(false),
-                reply_to: None,
-                mentions: None,
-                mention_room: false,
-                in_thread_root: None,
-                txn_id: None,
-            })
-            .await
-            .unwrap();
+            send_text_when_joined(&bob, &room_id, format!("unread {round}-{n}")).await;
         }
         let newest = format!("unread {round}-2");
         pump_until(
@@ -345,18 +367,7 @@ async fn mark_read_publishes_a_receipt_for_peer_and_own_events() {
     let mut items: Vec<TimelineItemDto> = vec![];
 
     // A peer's message: the receipt goes to that event.
-    bob.handle(EngineCommand::SendText {
-        room_id: room_id.clone(),
-        body: "peer receipt".into(),
-        markdown: Some(false),
-        reply_to: None,
-        mentions: None,
-        mention_room: false,
-        in_thread_root: None,
-        txn_id: None,
-    })
-    .await
-    .unwrap();
+    send_text_when_joined(&bob, &room_id, "peer receipt".into()).await;
     pump_until(
         &mut rx,
         &room_sub,
