@@ -168,6 +168,9 @@ pub struct SessionInfoDto {
     pub curve25519_key: Option<String>,
     pub cross_signing_ready: bool,
     pub backup_enabled: bool,
+    /// This device is cross-signing verified — the same check `DeviceDto::verified` makes. When it
+    /// is true the session is already trusted; when it is false the UI can offer verification.
+    pub verified: bool,
 }
 
 /// Whether a room's messages were searched on the homeserver.

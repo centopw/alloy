@@ -88,6 +88,27 @@ async fn wait_for<T>(
     .unwrap_or_else(|_| panic!("timed out waiting for {what}"))
 }
 
+/// `GetSessionInfo.verified` for the engine's current session.
+async fn session_verified(eng: &AppEngine) -> bool {
+    match eng.handle(EngineCommand::GetSessionInfo).await.unwrap() {
+        EngineResponse::SessionInfo { info } => info.verified,
+        other => panic!("unexpected {other:?}"),
+    }
+}
+
+/// The flag is read from the client's own device data, which the SDK updates as the SAS flow
+/// finishes signing, so give that a moment to land.
+async fn wait_until_verified(eng: &AppEngine, want: bool) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    while session_verified(eng).await != want {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the session never reported verified = {want}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
 #[tokio::test]
 async fn recovery_key_and_sas_verification() {
     let Ok(hs) = std::env::var("ALLOY_TEST_HS") else {
@@ -140,6 +161,9 @@ async fn recovery_key_and_sas_verification() {
     // Device C: fresh device verifies against A with emojis.
     let (c, c_ctx, _dc) = device(&hs, &user).await;
     let mut c_rx = c_ctx.sink.subscribe();
+    // A device that has not been through verification reports itself unverified, which is what
+    // lets the Encryption panel offer verification instead of claiming trust.
+    wait_until_verified(&c, false).await;
     let mut tries = 0;
     loop {
         match c.handle(EngineCommand::RequestSelfVerification).await {
@@ -206,4 +230,9 @@ async fn recovery_key_and_sas_verification() {
         })
         .await;
     }
+
+    // The same session that reported false now reports true, so the panel can show the status
+    // instead of offering verification again.
+    wait_until_verified(&c, true).await;
+    wait_until_verified(&a, true).await;
 }

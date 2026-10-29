@@ -1023,6 +1023,11 @@ export type SessionInfoDto = {
 	curve25519_key: string | null,
 	cross_signing_ready: boolean,
 	backup_enabled: boolean,
+	/**
+	 *  This device is cross-signing verified — the same check `DeviceDto::verified` makes. When it
+	 *  is true the session is already trusted; when it is false the UI can offer verification.
+	 */
+	verified: boolean,
 };
 
 /**  A room and the joined spaces that contain it. */

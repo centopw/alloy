@@ -102,22 +102,26 @@ impl AlloyClient {
 
     /// Crypto identity of this session: device, device keys, cross-signing and key backup state.
     pub async fn session_info(&self) -> AlloyResult<SessionInfoDto> {
-        let device_id = self
-            .client
-            .device_id()
-            .ok_or(AlloyError::NotLoggedIn)?
-            .to_string();
+        let own_user = self.client.user_id().ok_or(AlloyError::NotLoggedIn)?;
+        let own_device = self.client.device_id().ok_or(AlloyError::NotLoggedIn)?;
+        let device_id = own_device.to_string();
         let encryption = self.client.encryption();
         let cross_signing_ready = encryption
             .cross_signing_status()
             .await
             .is_some_and(|status| status.is_complete());
+        let verified = encryption
+            .get_device(own_user, own_device)
+            .await
+            .map_err(sdk_err)?
+            .is_some_and(|known| known.is_verified_with_cross_signing());
         Ok(SessionInfoDto {
             device_id,
             ed25519_key: encryption.ed25519_key().await,
             curve25519_key: encryption.curve25519_key().await.map(|key| key.to_base64()),
             cross_signing_ready,
             backup_enabled: encryption.backups().are_enabled().await,
+            verified,
         })
     }
 

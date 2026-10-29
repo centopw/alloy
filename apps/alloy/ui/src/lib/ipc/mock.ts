@@ -68,6 +68,7 @@ const MOCK_SESSION_INFO: SessionInfoDto = {
   curve25519_key: 'Qm8fLr2NdV6wYc0ZkH4sTa9BpXe1UjG7oRi3KlWvCyA',
   cross_signing_ready: true,
   backup_enabled: true,
+  verified: true,
 };
 
 function invalidArgument(message: string): EngineError {
