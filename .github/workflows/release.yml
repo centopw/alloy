@@ -67,7 +67,7 @@ jobs:
             gh release edit "$TAG" -R "$REPO" \
               --title "Alloy $TAG" --notes-file /tmp/release-notes.md
           else
-            gh release create "$TAG" -R "$REPO" --prerelease \
+            gh release create "$TAG" -R "$REPO" \
               --title "Alloy $TAG" --notes-file /tmp/release-notes.md
           fi
 
@@ -278,15 +278,16 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: 'Alloy ${{ github.ref_name }}'
           releaseDraft: false
-          prerelease: true
+          prerelease: false
           includeRelease: true
           includeDebug: false
           includeUpdaterJson: true
           args: ${{ matrix.tauri_args }}
 
-  # GitHub's `releases/latest` skips pre-releases, so the app reads its update manifest from a
-  # fixed tag instead. Only the tauri-action job's latest.json is published, after every desktop
-  # platform has uploaded its bundle (tauri-action merges the platforms into that file).
+  # The app's update endpoint is a fixed tag (`updater-feed/latest.json`), not `releases/latest`, so the
+  # URL stays the same whatever the newest release is. Only the tauri-action job's latest.json is
+  # published, after every desktop platform has uploaded its bundle (tauri-action merges the platforms
+  # into that file).
   publish-update-feed:
     name: Publish update manifest
     needs: build-tauri
@@ -310,6 +311,8 @@ jobs:
           jq --rawfile notes notes.md '.notes = $notes' latest.json > latest.notes.json
           mv latest.notes.json latest.json
           jq -e '.notes | length > 0' latest.json
+          # The feed release stays a pre-release on purpose: it is a machine-readable asset store, not a
+          # release, and it must not compete for "latest" or appear as the newest release on the repo page.
           gh release view updater-feed -R "$REPO" >/dev/null 2>&1 || \
             gh release create updater-feed -R "$REPO" --prerelease \
               --title "Update feed" \
