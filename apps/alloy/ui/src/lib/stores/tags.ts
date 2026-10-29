@@ -44,3 +44,20 @@ export function displayTags(defs: readonly RoomTagDef[], rooms: readonly RoomSum
   const extra = [...orphans].sort().map((id) => ({ id, name: id, colour: 'grey' as const }));
   return [...defs, ...extra];
 }
+
+/**
+ * Why a catalogue write must be refused, or null when it may proceed. Writes are built from the
+ * local list, so a client that has not read the catalogue, or that holds a partial one, would push
+ * that state over the server copy. Deleting the last tag does not come through here: it goes
+ * through the engine's `DeleteRoomTag`, which knows the id it is deleting.
+ */
+export function refuseCatalogueWrite(
+  op: string,
+  state: { loaded: boolean; next: number },
+): string | null {
+  if (!state.loaded) {
+    return `[tags] refusing to save (${op}) before the catalogue was read; it would overwrite the server copy`;
+  }
+  if (state.next === 0) return `[tags] refusing to save an empty catalogue (${op})`;
+  return null;
+}

@@ -2,7 +2,7 @@ import type { RoomTagDef, TagColour } from '../generated/index.js';
 import { client } from '../ipc/index.js';
 import { errorMessage, expect } from './errors.js';
 import { registerFlushHandler } from './prefs.svelte.js';
-import { makeTagId } from './tags.js';
+import { makeTagId, refuseCatalogueWrite } from './tags.js';
 /** The account's custom room tag catalogue, plus per-room assignment through the engine. */
 class TagStore {
   defs = $state<RoomTagDef[]>([]);
@@ -42,7 +42,19 @@ class TagStore {
   async #fetch(): Promise<void> {
     try {
       const res = await client.invoke({ action: 'GetTagCatalog' });
-      this.defs = expect(res, 'TagCatalog').payload.tags;
+      const next = expect(res, 'TagCatalog').payload.tags;
+      // An empty answer is also what a catalogue the server never stored looks like, so it cannot
+      // be used to erase a list we already have: the chips and their filter would vanish until the
+      // next read. Deleting the last tag in the app empties `defs` first, so that case still lands.
+      if (next.length === 0 && this.defs.length > 0) {
+        console.warn(
+          `[tags] GetTagCatalog returned no tags while ${this.defs.length} are loaded; keeping the local catalogue`
+        );
+        this.loaded = true;
+        this.error = null;
+        return;
+      }
+      this.defs = next;
       this.loaded = true;
       this.error = null;
     } catch (e) {
@@ -51,8 +63,13 @@ class TagStore {
   }
 
   /** Replaces the whole catalogue. Returns false (and sets `error`) when the engine refuses. */
-  #save(next: RoomTagDef[]): Promise<boolean> {
+  #save(next: RoomTagDef[], op: string): Promise<boolean> {
     return this.#track(async () => {
+      const refusal = refuseCatalogueWrite(op, { loaded: this.loaded, next: next.length });
+      if (refusal) {
+        console.warn(refusal);
+        return false;
+      }
       try {
         expect(await client.invoke({ action: 'SaveTagCatalog', params: { tags: next } }), 'Unit');
         this.defs = next;
@@ -74,17 +91,23 @@ class TagStore {
       name: trimmed,
       colour,
     };
-    return (await this.#save([...this.defs, def])) ? def : null;
+    return (await this.#save([...this.defs, def], 'create')) ? def : null;
   }
 
   /** Renames and/or recolours a tag. The id never changes, so room assignments are kept. */
   async update(id: string, patch: { name?: string; colour?: TagColour }): Promise<boolean> {
     const name = patch.name?.trim();
     if (name === '') return false;
+    // An orphan chip (a room tag with no catalogue entry) has nothing to rename: writing the local
+    // list back would drop every entry this client has not read yet.
+    if (!this.defs.some((d) => d.id === id)) {
+      console.warn(`[tags] refusing to update ${id}: it is not in the catalogue`);
+      return false;
+    }
     const next = this.defs.map((d) =>
       d.id === id ? { ...d, name: name ?? d.name, colour: patch.colour ?? d.colour } : d,
     );
-    return this.#save(next);
+    return this.#save(next, 'update');
   }
 
   /** Moves a tag one step up (-1) or down (+1) in the display order. */
@@ -94,11 +117,17 @@ class TagStore {
     if (from === -1 || to < 0 || to >= this.defs.length) return false;
     const next = [...this.defs];
     [next[from], next[to]] = [next[to], next[from]];
-    return this.#save(next);
+    return this.#save(next, 'move');
   }
 
   /** Deletes a tag from the catalogue and from every room that carries it. */
   remove(id: string): Promise<boolean> {
+    // The engine re-reads the catalogue and rewrites it without this tag, so an id the catalogue
+    // does not know would turn the rewrite into "drop everything else too".
+    if (!this.defs.some((d) => d.id === id)) {
+      console.warn(`[tags] refusing to remove ${id}: it is not in the catalogue`);
+      return Promise.resolve(false);
+    }
     return this.#track(async () => {
       try {
         expect(await client.invoke({ action: 'DeleteRoomTag', params: { tag_id: id } }), 'Unit');
