@@ -95,7 +95,7 @@
   .swipe {
     position: relative;
     overflow: hidden;
-    border-radius: var(--alloy-radii-md);
+    border-radius: var(--alloy-radii-lg);
   }
   .front {
     position: relative;

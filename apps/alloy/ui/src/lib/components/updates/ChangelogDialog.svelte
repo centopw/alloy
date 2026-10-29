@@ -208,7 +208,7 @@
     padding: var(--alloy-spacing-scale-3);
     overflow-x: auto;
     border: 1px solid var(--alloy-color-border-subtle);
-    border-radius: var(--alloy-radii-md);
+    border-radius: var(--alloy-radii-lg);
     font-size: var(--alloy-typography-size-sm);
     white-space: pre;
   }

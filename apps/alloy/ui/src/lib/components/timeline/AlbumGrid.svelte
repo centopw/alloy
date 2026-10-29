@@ -93,7 +93,7 @@
     gap: 2px;
     width: min(400px, 100%);
     overflow: hidden;
-    border-radius: var(--alloy-radii-lg);
+    border-radius: var(--alloy-bubble-radius);
   }
   .album[data-count='2'] {
     grid-template-columns: 1fr 1fr;

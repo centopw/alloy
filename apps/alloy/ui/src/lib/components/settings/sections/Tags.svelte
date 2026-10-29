@@ -124,7 +124,7 @@
     gap: var(--alloy-spacing-scale-2);
     min-height: 44px;
     padding: 0 var(--alloy-spacing-scale-2);
-    border-radius: var(--alloy-radii-md);
+    border-radius: var(--alloy-radii-lg);
     background: var(--alloy-color-surface-subtle);
   }
   .dot {

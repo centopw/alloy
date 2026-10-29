@@ -47,7 +47,7 @@
     max-width: min(360px, 100%);
     padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
     border: 1px solid var(--alloy-color-border-subtle);
-    border-radius: var(--alloy-radii-lg);
+    border-radius: var(--alloy-bubble-radius-nested);
     background: var(--alloy-color-surface-subtle);
   }
   .pin {

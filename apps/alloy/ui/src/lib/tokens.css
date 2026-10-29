@@ -166,7 +166,12 @@ html, body {
   --alloy-bubble-max-width: 72%;
   --alloy-bubble-max-width-phone: 85%;
   --alloy-bubble-radius: 20px;
+  /* The sender-side corner: it reads as the message's tail and joins grouped messages into one
+     column rooted at that person's avatar. */
   --alloy-bubble-radius-tail: 8px;
+  /* Cards that live inside a bubble (pictures, files, link and location cards) step down one size,
+     so a nested card never competes with the message surface around it. */
+  --alloy-bubble-radius-nested: 12px;
   /* Bubble meta has to clear 4.5:1 at 11px; 0.7 of the own text on the own blue measured 3.92:1. */
   --alloy-bubble-own-meta: color-mix(
     in srgb,

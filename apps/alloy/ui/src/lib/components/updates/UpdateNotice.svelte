@@ -110,7 +110,7 @@
     margin: var(--alloy-layout-row-inset) var(--alloy-layout-row-inset) 0;
     padding: 0 var(--alloy-spacing-scale-1) 0 0;
     overflow: hidden;
-    border-radius: var(--alloy-radii-md);
+    border-radius: var(--alloy-radii-lg);
     background: var(--alloy-color-accent-subtle);
   }
 
@@ -134,7 +134,7 @@
     flex: none;
     width: 8px;
     height: 8px;
-    border-radius: var(--alloy-radius-full);
+    border-radius: var(--alloy-radii-full);
     background: var(--alloy-color-accent-primary);
   }
 

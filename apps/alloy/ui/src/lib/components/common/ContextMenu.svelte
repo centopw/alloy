@@ -797,7 +797,7 @@
     max-width: 280px;
     padding: 5px; /* token-audit: menu inset, tighter than the 8px step */
     border: 1px solid var(--alloy-glass-rim);
-    border-radius: var(--alloy-radii-2xl);
+    border-radius: var(--alloy-glass-radius-panel);
     background: var(--alloy-glass-sheen), var(--alloy-glass-fill-strong);
     -webkit-backdrop-filter: var(--alloy-glass-filter-strong);
     backdrop-filter: var(--alloy-glass-filter-strong);
@@ -836,7 +836,7 @@
     gap: var(--alloy-spacing-scale-2);
     height: 34px;
     padding: 0 10px; /* token-audit: row inset, sized by the menu row not the layout grid */
-    border-radius: var(--alloy-radii-xl);
+    border-radius: var(--alloy-radii-lg);
     cursor: pointer;
     user-select: none;
     white-space: nowrap;
@@ -934,7 +934,7 @@
     padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-2)
       calc(var(--alloy-spacing-scale-2) + var(--alloy-safe-area-bottom));
     border: 0;
-    border-radius: var(--alloy-radii-lg) var(--alloy-radii-lg) 0 0;
+    border-radius: var(--alloy-glass-radius-panel) var(--alloy-glass-radius-panel) 0 0;
     box-shadow: var(--alloy-elevation-lg);
     animation: alloy-action-sheet-up var(--alloy-motion-duration-normal) ease-out backwards;
   }
@@ -946,7 +946,7 @@
     height: 44px;
     padding: 0 var(--alloy-spacing-scale-4);
     font-size: var(--alloy-typography-size-lg);
-    border-radius: var(--alloy-radii-md);
+    border-radius: var(--alloy-radii-lg);
   }
   .sheet .shortcut {
     display: none;
@@ -995,7 +995,7 @@
       calc(var(--alloy-spacing-scale-3) + var(--alloy-safe-area-bottom));
     background: var(--alloy-color-surface-panel);
     border-top: 1px solid var(--alloy-color-border-subtle);
-    border-radius: var(--alloy-radii-lg) var(--alloy-radii-lg) 0 0;
+    border-radius: var(--alloy-glass-radius-panel) var(--alloy-glass-radius-panel) 0 0;
     box-shadow: var(--alloy-elevation-lg);
     animation: alloy-action-sheet-up var(--alloy-motion-duration-normal) ease-out backwards;
   }

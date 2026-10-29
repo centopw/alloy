@@ -201,7 +201,7 @@
       border-left: 0;
       border-right: 0;
       border-bottom: 0;
-      border-radius: var(--alloy-radii-2xl) var(--alloy-radii-2xl) 0 0;
+      border-radius: var(--alloy-glass-radius-panel) var(--alloy-glass-radius-panel) 0 0;
       padding-bottom: var(--alloy-safe-area-bottom);
       animation: alloy-sheet-up var(--alloy-motion-duration-normal) ease-out backwards;
     }

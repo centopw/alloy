@@ -870,7 +870,7 @@
     width: 40px;
     height: 40px;
     object-fit: cover;
-    border-radius: var(--alloy-radii-md);
+    border-radius: var(--alloy-radii-lg);
     flex: none;
     background: var(--alloy-color-surface-hover);
   }
@@ -880,7 +880,7 @@
     flex: none;
     display: inline-grid;
     place-items: center;
-    border-radius: var(--alloy-radii-md);
+    border-radius: var(--alloy-radii-lg);
     background: var(--alloy-color-surface-hover);
     color: var(--alloy-color-text-secondary);
   }
@@ -930,7 +930,7 @@
       var(--alloy-spacing-scale-1);
     background: var(--alloy-glass-control);
     border: 1px solid var(--alloy-chat-rim);
-    border-radius: var(--alloy-radii-xl);
+    border-radius: var(--alloy-radii-2xl);
     transition:
       border-color var(--alloy-motion-duration-fast) var(--alloy-motion-easing-ease),
       background var(--alloy-motion-duration-fast) var(--alloy-motion-easing-ease);

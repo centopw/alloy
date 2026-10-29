@@ -154,7 +154,7 @@
     width: 100%;
     max-height: 90dvh;
     overscroll-behavior: contain;
-    border-radius: var(--alloy-radii-lg) var(--alloy-radii-lg) 0 0;
+    border-radius: var(--alloy-glass-radius-panel) var(--alloy-glass-radius-panel) 0 0;
     border-bottom: none;
     padding-bottom: calc(var(--alloy-spacing-scale-4) + var(--alloy-safe-area-bottom));
   }

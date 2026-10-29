@@ -92,7 +92,7 @@
     padding: 0;
     list-style: none;
     border: 1px solid var(--alloy-color-border-subtle);
-    border-radius: var(--alloy-radii-md);
+    border-radius: var(--alloy-radii-lg);
     background: var(--alloy-color-surface-panel);
   }
   .row {

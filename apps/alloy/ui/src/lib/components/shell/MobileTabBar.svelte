@@ -104,7 +104,7 @@
   .tab:focus-visible {
     outline: 2px solid var(--alloy-color-accent-primary);
     outline-offset: -2px;
-    border-radius: var(--alloy-radius-md);
+    border-radius: var(--alloy-radii-md);
   }
 
   .glyph {
@@ -136,7 +136,7 @@
     height: 18px;
     padding: 0 5px; /* token-audit: badge inset, set by the 18px badge height */
     box-sizing: border-box;
-    border-radius: var(--alloy-radius-full);
+    border-radius: var(--alloy-radii-full);
     background: var(--alloy-color-status-mention);
     color: var(--alloy-color-text-on-accent);
     font-size: var(--alloy-typography-size-xs);

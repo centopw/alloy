@@ -228,7 +228,7 @@
     min-width: 120px;
     max-height: 360px;
     border: 1px solid var(--alloy-color-border-subtle);
-    border-radius: var(--alloy-radii-xl);
+    border-radius: var(--alloy-bubble-radius-nested);
     overflow: hidden;
   }
   .frame-open {
@@ -245,7 +245,7 @@
   button.frame-open:focus-visible {
     outline: 2px solid var(--alloy-color-accent-primary);
     outline-offset: 2px;
-    border-radius: var(--alloy-radii-xl);
+    border-radius: var(--alloy-bubble-radius-nested);
   }
 
   canvas {
@@ -268,7 +268,7 @@
     align-items: center;
     padding: var(--alloy-spacing-scale-2);
     border: 1px solid var(--alloy-color-border-subtle);
-    border-radius: var(--alloy-radii-xl);
+    border-radius: var(--alloy-bubble-radius-nested);
     background: var(--alloy-color-surface-elevated);
   }
 

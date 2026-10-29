@@ -88,7 +88,7 @@
     gap: var(--alloy-spacing-scale-2);
     max-width: 220px;
     padding: 0 var(--alloy-spacing-scale-3) 0 var(--alloy-spacing-scale-2);
-    border-radius: var(--alloy-radius-full);
+    border-radius: var(--alloy-radii-full);
     background: var(--alloy-glass-sheen), var(--alloy-glass-fill-soft);
     -webkit-backdrop-filter: var(--alloy-glass-filter);
     backdrop-filter: var(--alloy-glass-filter);
@@ -121,7 +121,7 @@
     justify-content: center;
     width: 44px;
     padding: 0;
-    border-radius: var(--alloy-radius-full);
+    border-radius: var(--alloy-radii-full);
     background: var(--alloy-glass-sheen), var(--alloy-glass-fill-soft);
     -webkit-backdrop-filter: var(--alloy-glass-filter);
     backdrop-filter: var(--alloy-glass-filter);

@@ -99,7 +99,8 @@
     color: var(--alloy-color-text-primary);
     background: var(--alloy-color-surface-subtle);
     border: 1px solid var(--alloy-color-border-subtle);
-    border-radius: var(--alloy-radii-md);
+    /* An answer is a card inside the message bubble, so it steps down to the nested radius. */
+    border-radius: var(--alloy-bubble-radius-nested);
     cursor: pointer;
   }
   .answer.selected {

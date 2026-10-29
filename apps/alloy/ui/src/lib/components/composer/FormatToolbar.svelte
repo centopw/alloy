@@ -42,7 +42,7 @@
     gap: 2px;
     padding: 2px;
     border: 1px solid var(--alloy-glass-rim);
-    border-radius: var(--alloy-radii-xl);
+    border-radius: var(--alloy-glass-radius-control);
     background: var(--alloy-glass-sheen), var(--alloy-glass-fill-strong);
     -webkit-backdrop-filter: var(--alloy-glass-filter);
     backdrop-filter: var(--alloy-glass-filter);

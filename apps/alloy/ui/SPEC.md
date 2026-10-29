@@ -45,16 +45,80 @@ must survive that. Geometry (`src/lib/layout.css`, `LAYOUT_LIMITS`): 56px rail, 
 The chat keeps the shadcn chat *anatomy* without vendoring its React components (decision 0013), and
 its visual values now follow decision 0014. Bubbles are the default layout on every device; `modern`
 (flat rows) and `irc` remain choices in Settings > Appearance. Bubbles use
-`--alloy-bubble-radius` (20px), the joined/tail corner `--alloy-bubble-radius-tail` (8px), and cap at
-`--alloy-bubble-max-width` (72%, 85% on phones). Own bubbles are the one saturated surface; received
+`--alloy-bubble-radius` (20px), the sender-side tail `--alloy-bubble-radius-tail` (8px), and cap at
+`--alloy-bubble-max-width` (72%, 85% on phones). The sender side is the avatar side: left for received
+messages, right for own ones. Its corners tighten to the tail radius on every message, so a lone
+message shows the tail and a run from one sender joins into one column; bare pictures and albums are
+message surfaces too, so they take the same radius and tail. Cards nested inside a bubble (pictures,
+files, link and location cards, poll answers) use `--alloy-bubble-radius-nested` (12px) and never
+compete with the message surface around them. `modern` and `irc` draw no bubble, so a bare picture is
+the message surface there: it takes the 20px radius with no tail, because the avatar gutter already
+names the sender and there is no bubble corner to shape. Own bubbles are the one saturated surface; received
 bubbles use `--alloy-bubble-other-surface` over a 1px text-at-8% edge. Rhythm is tokenised
 (`--alloy-spacing-bubble-x/y`, `--alloy-avatar-grouped-size`), message meta is the xs token and sender
 names are `--alloy-font-size-preview`, semibold; date separators are centred pills. **Replies stack:**
 in the bubble layout the quoted message is its own bubble above the reply (`ReplyQuote` `stacked`),
-flush with it so the two 1px edges form one seam; the junction is square on both sides and the quote
-keeps a 20px outer top while the reply keeps its 20px bottom, so the pair reads as one card. The
+flush with it so the two 1px edges form one seam; the junction is square on both sides, the quote
+keeps the 20px outer top (tightened to the tail radius on the sender side when the message joins a
+group above) and the reply keeps the bubble's bottom corners including the tail, so the pair reads as
+one card. The
 quoted sender's colour is kept as a leading bar; inline quotes remain for `modern` and `irc`. The scroll
 engine (paging, anchoring, prepend) is untouched.
+
+### Radius scale
+
+One scale for the whole interface: each step is a role, not a size, and a surface takes the step that
+matches its job. Two roles may share a value when they never appear in the same plane (the 12px
+nested message card and the 12px control inside a floating layer); a role may not have two values.
+The conversation steps are owned by decision 0014 (`--alloy-bubble-*`); the rest use the component and
+glass tokens in `tokens.css`.
+
+| Step | Token | Job | Surfaces |
+|---|---|---|---|
+| 20px | `--alloy-bubble-radius` | message surface | text bubble; bare picture, video, sticker, album |
+| 8px | `--alloy-bubble-radius-tail` | sender-side corners | every message on the avatar side: bottom always, top when joined to a run |
+| 12px | `--alloy-bubble-radius-nested` | card inside a message | picture frame, file tile, link preview, location card, poll answer |
+| 16px | `--alloy-radii-2xl` | composer surface | composer field, staged attachment strip, composer banner |
+| 26px | `--alloy-glass-radius-shell` | floating shell | dialog, settings, command palette, onboarding, mobile tab bar |
+| 18px | `--alloy-glass-radius-panel` | floating panel | context menu, mention/emoji popover and sheet top, profile card, action sheet |
+| 12px | `--alloy-glass-radius-control` | control in a floating layer | message action bar, format/upload strip, settings nav item, side-panel inset |
+| 8px | `--alloy-radii-lg` | card or row | settings group, radio card, room-info card and rows, sidebar row, search and filter tabs, rail tile, menu row, list row, notice, thumbnail |
+| 6px | `--alloy-radii-md` | control | button, text field/area, select, segmented outer, small icon button, chip; a message row's hover band and the menu spotlight hole (they frame the row, not the bubble) |
+| 4px | `--alloy-radii-sm` | inline mark | tooltip, keyboard key, inline code, search hit, picker tab and cell, inline reply quote |
+| 0 | — | flush junction | docked phone panel, narrow nav, composer attached state, quote-to-reply seam |
+| full | `--alloy-radii-full` | round affordance | avatar, badge, tag, dot, circular button |
+
+The 8px tail and the 12px nested card are deliberately distinct: the tail is an outer corner of the
+message surface against the avatar side; the nested card is inset 10–14px inside that surface. They
+never share a plane, so the four-pixel difference does not read as drift; unifying them would either
+erase the tail into the 20px bubble or pinch every attachment.
+
+**Normalization queue** (the scale above is the target; these are the places the tree still differs):
+
+| Area | Selector (file) | Now → target |
+|---|---|---|
+| Composer field | `.field` (`Composer.svelte`) | 12 → 16 |
+| Context menu shell | `.context-menu` (`ContextMenu.svelte`) | 16 → 18 |
+| Menu rows | `.item`, `.sheet .item` (`ContextMenu.svelte`); `.option` (`MentionPicker.svelte`); `button` (`CommandPalette.svelte`) | 12/6/6/6 → 8 |
+| Sheet tops | `.context-menu.sheet`, `.host.sheet` (`ProfileCardHost.svelte`), `.sheet` (`VerificationDialog.svelte`), `.dialog` phone top (`Modal.svelte`) | 8/8/8/16 → 18 |
+| Mention popover | `.picker` (`MentionPicker.svelte`) | 12 → 18 |
+| Rows and cards | `.row` (`Tags.svelte`), `.list` (`PermissionsPanel.svelte`), `.results li` (`DirectoryDialog.svelte`), `.media-cell`, `.notice` (`RoomInfoPanel.svelte`), `.choice` (`SettingRadioMatrix.svelte`), `.notice` (`UpdateNotice.svelte`), `.swipe` (`RoomSwipe.svelte`), `.picture img/video`, `.picture-icon` (`Composer.svelte`), `pre` (`ChangelogDialog.svelte`) | 6 → 8 |
+| Rail tile | `.space` (`SpaceRail.svelte`) | 12 → 8 |
+| Action bar | `.toolbar` (`MessageRow.svelte`) | 16 → 12 |
+| Legacy aliases | `SpaceChips`, `MobileTabBar`, `Badge`, `UpdateNotice` | `--alloy-radius-*` → `--alloy-radii-*` (no visual change) |
+
+No other radius value is permitted; `0` is a junction, not a size. Values that are not in the table
+are a review finding.
+
+### Settings surfaces
+
+A settings group is one plate; its rows are separated by hairlines and nothing inside the group draws
+a second outline. A choice that shows a preview (Settings > Appearance, message layout;
+`SettingRadioCards`) is an even grid of tiles — three across when the column allows, one column below
+36rem, so the last option never sits alone in a half-empty row. The tile *is* the chat canvas, so the
+preview shows the real bubble contrast without a frame inside a card. Selection is the accent ring
+plus a check in the footer and never repaints the surface, because a tint would wash out the preview
+it is meant to show; the check slot is always reserved, so labels keep their width in every state.
 
 ### Room details panel
 

@@ -172,7 +172,7 @@
       justify-content: center;
       min-height: 44px;
       border: 1px solid var(--alloy-color-border-prominent);
-      border-radius: var(--alloy-radii-md);
+      border-radius: var(--alloy-radii-lg);
       color: var(--alloy-color-text-primary);
       cursor: pointer;
     }

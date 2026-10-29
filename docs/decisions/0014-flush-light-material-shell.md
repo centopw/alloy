@@ -105,10 +105,19 @@ Chrome uses four sizes with distinct jobs instead of one flat weight
 In the bubble layout a quoted message is **its own bubble above the reply**, not a panel inside it
 (`ReplyQuote.svelte` `stacked`). The two bubbles sit flush — their two 1px edges read as one seam —
 and the junction is square on both sides: the quote keeps its 20px outer top corners and the reply
-keeps its 20px bottom corners, so the pair reads as one card with a coloured header. The quote keeps
-the original sender's colour as a 3px leading bar and shows that sender's name in the same colour; on
+keeps its bottom corners including the sender-side tail, so the pair reads as one card with a
+coloured header. The quote keeps the original sender's colour as a 3px leading bar and shows that
+sender's name in the same colour; on
 own messages the header is a lighter plate of the own-bubble blue. Inline quotes remain for the
 `modern` and `irc` layouts, where a stack would break the row model.
+
+The sender side is the avatar side — left for received messages, right for own ones. Its corners
+tighten to `--alloy-bubble-radius-tail` (8px) on every message: the bottom corner always, and the top
+corner too when the message joins a run from the same sender. A lone message therefore shows the tail,
+and a run reads as one column rooted at that person's avatar instead of a stack of separately rounded
+cards. Attachments that fill the message (a bare picture, video, sticker or album) are message
+surfaces too, so they take the same 20px radius and tail; cards nested inside a bubble use
+`--alloy-bubble-radius-nested` (12px).
 
 ### 5. Read-first panels
 
@@ -153,6 +162,7 @@ required, because every material derives from existing theme tokens.
 | `--alloy-chat-rim` | text at 8% |
 | `--alloy-bubble-radius` | 20px |
 | `--alloy-bubble-radius-tail` | 8px |
+| `--alloy-bubble-radius-nested` | 12px |
 | `--alloy-bubble-max-width` | 72% (85% on phones) |
 | `--alloy-font-size-title/row/preview/meta` | 15 / 13 / 12 / 10.5px |
 | `--alloy-letter-spacing-caps` | 0.08em |

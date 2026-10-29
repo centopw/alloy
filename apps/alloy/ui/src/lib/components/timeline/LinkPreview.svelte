@@ -95,7 +95,7 @@
     min-width: 0;
     width: 100%;
     border-left: 3px solid var(--alloy-color-accent-primary);
-    border-radius: var(--alloy-radii-md);
+    border-radius: var(--alloy-bubble-radius-nested);
     background: var(--alloy-color-surface-subtle);
     overflow: hidden;
   }

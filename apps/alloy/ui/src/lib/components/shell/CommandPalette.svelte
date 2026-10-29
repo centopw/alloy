@@ -179,7 +179,7 @@
     color: inherit;
     font: inherit;
     padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x);
-    border-radius: var(--alloy-radii-md);
+    border-radius: var(--alloy-radii-lg);
     cursor: pointer;
     text-align: left;
   }

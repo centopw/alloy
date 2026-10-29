@@ -1029,7 +1029,7 @@
     -webkit-backdrop-filter: var(--alloy-glass-filter);
     backdrop-filter: var(--alloy-glass-filter);
     border: 1px solid var(--alloy-glass-rim);
-    border-radius: var(--alloy-radii-2xl);
+    border-radius: var(--alloy-glass-radius-control);
     box-shadow: var(--alloy-glass-shadow-soft), var(--alloy-glass-highlight);
     z-index: 2;
   }
@@ -1298,8 +1298,10 @@
     border-top-right-radius: var(--alloy-bubble-radius-tail);
   }
   /* The reply bubble continues the quote card above it: the junction is square on both sides, so
-     the pair reads as one stacked message with a header rather than as two rounded cards. */
-  .row.replied[data-layout='bubbles'] .bubble {
+     the pair reads as one stacked message with a header rather than as two rounded cards. This
+     holds inside a group as well, where the outer corners of the quote carry the spine instead. */
+  .row.replied[data-layout='bubbles'] .bubble,
+  .row.replied.grouped[data-layout='bubbles'] .bubble {
     border-top-left-radius: 0;
     border-top-right-radius: 0;
   }
@@ -1399,3 +1401,55 @@
     }
   }
 </style>
+  /* The sender side is the side of the avatar: left for received messages, right for own ones. Its
+     corners tighten to the tail radius, so the small corner marks who sent the message even on a
+     single message, and a run from one person merges into one column (the joined spine) rather than
+     a stack of separately rounded cards. */
+  .row[data-layout='bubbles']:not(.own) .bubble {
+    border-bottom-left-radius: var(--alloy-bubble-radius-tail);
+  }
+  .row.own[data-layout='bubbles'] .bubble {
+    border-bottom-right-radius: var(--alloy-bubble-radius-tail);
+  }
+  .row.grouped[data-layout='bubbles']:not(.own) :global(.reply-quote.stacked) {
+    border-top-left-radius: var(--alloy-bubble-radius-tail);
+  }
+  .row.grouped.own[data-layout='bubbles'] :global(.reply-quote.stacked) {
+    border-top-right-radius: var(--alloy-bubble-radius-tail);
+  }
+  /* A picture-only message draws no bubble, so its attachment card becomes the message surface: it
+     takes the bubble radius and the same sender-side tail, or a photo would not identify its sender
+     the way a text bubble does. A card nested inside a bubble keeps the smaller nested radius. */
+  .row.bare[data-layout='bubbles'] .message-anchor :global(.frame),
+  .row.bare[data-layout='bubbles'] .message-anchor :global(.file),
+  .row.bare[data-layout='bubbles'] .message-anchor :global(.album) {
+    border-radius: var(--alloy-bubble-radius);
+  }
+  .row.bare[data-layout='bubbles']:not(.own) .message-anchor :global(.frame),
+  .row.bare[data-layout='bubbles']:not(.own) .message-anchor :global(.file),
+  .row.bare[data-layout='bubbles']:not(.own) .message-anchor :global(.album) {
+    border-bottom-left-radius: var(--alloy-bubble-radius-tail);
+  }
+  .row.bare.own[data-layout='bubbles'] .message-anchor :global(.frame),
+  .row.bare.own[data-layout='bubbles'] .message-anchor :global(.file),
+  .row.bare.own[data-layout='bubbles'] .message-anchor :global(.album) {
+    border-bottom-right-radius: var(--alloy-bubble-radius-tail);
+  }
+  .row.bare.grouped[data-layout='bubbles']:not(.own) .message-anchor :global(.frame),
+  .row.bare.grouped[data-layout='bubbles']:not(.own) .message-anchor :global(.file),
+  .row.bare.grouped[data-layout='bubbles']:not(.own) .message-anchor :global(.album) {
+    border-top-left-radius: var(--alloy-bubble-radius-tail);
+  }
+  .row.bare.grouped.own[data-layout='bubbles'] .message-anchor :global(.frame),
+  .row.bare.grouped.own[data-layout='bubbles'] .message-anchor :global(.file),
+  .row.bare.grouped.own[data-layout='bubbles'] .message-anchor :global(.album) {
+    border-top-right-radius: var(--alloy-bubble-radius-tail);
+  }
+  /* Modern and IRC draw no bubble, so a bare picture is the message surface itself and takes the
+     bubble radius there too. No tail: those rows have no bubble corner to shape, and the sender is
+     already read from the avatar gutter. */
+  .row.bare:not([data-layout='bubbles']) .message-anchor :global(.frame),
+  .row.bare:not([data-layout='bubbles']) .message-anchor :global(.file),
+  .row.bare:not([data-layout='bubbles']) .message-anchor :global(.album) {
+    border-radius: var(--alloy-bubble-radius);
+  }

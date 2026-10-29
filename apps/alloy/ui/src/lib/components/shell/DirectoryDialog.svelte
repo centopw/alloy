@@ -165,7 +165,7 @@
     align-items: center;
     gap: var(--alloy-spacing-scale-3);
     padding: var(--alloy-spacing-scale-2);
-    border-radius: var(--alloy-radii-md);
+    border-radius: var(--alloy-radii-lg);
   }
   .results li:hover {
     background: var(--alloy-color-surface-hover);

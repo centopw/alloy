@@ -144,7 +144,7 @@
     box-sizing: border-box;
     background: var(--alloy-color-surface-elevated);
     color: var(--alloy-color-text-primary);
-    border-radius: var(--alloy-radii-lg) var(--alloy-radii-lg) 0 0;
+    border-radius: var(--alloy-glass-radius-panel) var(--alloy-glass-radius-panel) 0 0;
     box-shadow: var(--alloy-elevation-lg);
     padding-bottom: var(--alloy-safe-area-bottom);
     outline: 0;

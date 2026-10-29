@@ -70,7 +70,7 @@
     -webkit-backdrop-filter: var(--alloy-glass-filter-strong);
     backdrop-filter: var(--alloy-glass-filter-strong);
     border: 1px solid var(--alloy-glass-rim);
-    border-radius: var(--alloy-radii-xl);
+    border-radius: var(--alloy-glass-radius-panel);
     box-shadow: var(--alloy-glass-shadow), var(--alloy-glass-highlight);
   }
   .option {
@@ -78,7 +78,7 @@
     align-items: center;
     gap: var(--alloy-spacing-scale-2);
     padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x);
-    border-radius: var(--alloy-radii-md);
+    border-radius: var(--alloy-radii-lg);
     cursor: pointer;
     font-size: var(--alloy-typography-size-sm);
     color: var(--alloy-color-text-primary);
