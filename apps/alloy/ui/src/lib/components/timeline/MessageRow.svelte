@@ -479,7 +479,8 @@
         </div>
       {/if}
 
-      <div class="message-stack">
+      <div class="message-anchor">
+        <div class="message-stack">
         {#if stackedReply && item.reply_to}
           <ReplyQuote replyTo={item.reply_to} stacked own={item.is_own} />
         {/if}
@@ -526,6 +527,7 @@
                   width={item.content.data.width}
                   height={item.content.data.height}
                   thumbnailUri={item.content.data.thumbnail_uri}
+                  ondownload={downloadMediaItem}
                 />
               {/if}
               {#if item.content.data.media_kind === 'image' && item.content.data.body && !isFileName(item.content.data.body)}
@@ -587,7 +589,40 @@
           {/if}
 
           <span class="bubble-time">{time}{@render tick()}</span>
+          </div>
         </div>
+      {#if canAct}
+        <div class="toolbar" role="toolbar" aria-label="Message actions">
+          <QuickReactions
+            emojis={prefs.quickReactions}
+            active={myReactions}
+            onpick={reactWith}
+            onmore={() => rowEl && openReactions(rowEl.getBoundingClientRect())}
+          />
+          <span class="tool-sep" aria-hidden="true"></span>
+          {#if !inThread}
+            <button type="button" aria-label="Reply" title="Reply" onclick={() => timelineStore.startReply(item)}>
+              <Icon icon={Reply} size={16} />
+            </button>
+          {/if}
+          {#if item.event_id && !inThread}
+            <button type="button" aria-label="Reply in thread" title="Reply in thread" onclick={openThread}>
+              <Icon icon={MessageSquare} size={16} />
+            </button>
+          {/if}
+          {#if canEdit}
+            <button type="button" aria-label="Edit" title="Edit" onclick={() => timelineStore.startEdit(item)}>
+              <Icon icon={Pencil} size={16} />
+            </button>
+          {/if}
+          {#if canDelete}
+            <button type="button" aria-label="Delete" title="Delete" onclick={() => (timelineStore.pendingDelete = [item])}>
+              <Icon icon={Trash2} size={16} />
+            </button>
+          {/if}
+        </div>
+
+      {/if}
       </div>
       {#if seenAvatars}
         <div class="seen" data-tooltip="Seen by {joinNames(readerNames)}">
@@ -600,38 +635,6 @@
       {/if}
     </div>
 
-    {#if canAct}
-      <div class="toolbar" role="toolbar" aria-label="Message actions">
-        <QuickReactions
-          emojis={prefs.quickReactions}
-          active={myReactions}
-          onpick={reactWith}
-          onmore={() => rowEl && openReactions(rowEl.getBoundingClientRect())}
-        />
-        <span class="tool-sep" aria-hidden="true"></span>
-        {#if !inThread}
-          <button type="button" aria-label="Reply" title="Reply" onclick={() => timelineStore.startReply(item)}>
-            <Icon icon={Reply} size={16} />
-          </button>
-        {/if}
-        {#if item.event_id && !inThread}
-          <button type="button" aria-label="Reply in thread" title="Reply in thread" onclick={openThread}>
-            <Icon icon={MessageSquare} size={16} />
-          </button>
-        {/if}
-        {#if canEdit}
-          <button type="button" aria-label="Edit" title="Edit" onclick={() => timelineStore.startEdit(item)}>
-            <Icon icon={Pencil} size={16} />
-          </button>
-        {/if}
-        {#if canDelete}
-          <button type="button" aria-label="Delete" title="Delete" onclick={() => (timelineStore.pendingDelete = [item])}>
-            <Icon icon={Trash2} size={16} />
-          </button>
-        {/if}
-      </div>
-
-    {/if}
   </div>
   {#if whoOpen}
     <ReactionsSheet {item} open={whoOpen} initialKey={whoKey} onclose={() => (whoOpen = false)} />
@@ -1029,6 +1032,28 @@
     border-radius: var(--alloy-radii-2xl);
     box-shadow: var(--alloy-glass-shadow-soft), var(--alloy-glass-highlight);
     z-index: 2;
+  }
+
+  /* Actions belong to the message, not to the row: the anchor is sized to the bubble, so in the
+     bubbles layout the toolbar sits just outside the bubble's top corner instead of at the far
+     right of a full-width row. */
+  .message-anchor {
+    display: contents;
+  }
+  .row[data-layout='bubbles'] .message-anchor {
+    position: relative;
+    display: block;
+    width: fit-content;
+    max-width: 100%;
+  }
+  .row[data-layout='bubbles'] .toolbar {
+    top: calc(-1 * var(--alloy-spacing-scale-3));
+    right: auto;
+    left: calc(100% + var(--alloy-spacing-scale-2));
+  }
+  .row.own[data-layout='bubbles'] .toolbar {
+    left: auto;
+    right: calc(100% + var(--alloy-spacing-scale-2));
   }
   @media (min-width: 900px) and (hover: hover) {
     .row:hover .toolbar,

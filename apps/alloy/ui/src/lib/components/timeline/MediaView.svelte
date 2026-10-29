@@ -7,6 +7,8 @@
   import { viewerItemsFrom, indexOfEvent } from '$lib/content/mediaItems';
   import { fetchMediaFile } from '$lib/content/mediaFetch';
   import MediaViewer from './MediaViewer.svelte';
+  import Icon from '$lib/icons/Icon.svelte';
+  import { Download } from '$lib/icons';
 
   interface Props {
     uri: string;
@@ -20,6 +22,8 @@
     thumbnailUri?: string | null;
     /** Optional event ID for gallery building. */
     eventId?: string | null;
+    /** Saves a file row through the caller's download path; omitted for callers that cannot save. */
+    ondownload?: (() => void) | null;
   }
 
   let {
@@ -32,6 +36,7 @@
     height = null,
     thumbnailUri = null,
     eventId = null,
+    ondownload = null,
   }: Props = $props();
 
   let src = $state<string | null>(null);
@@ -189,8 +194,21 @@
     </button>
   {:else}
     <div class="file">
-      <span class="file-name">{body || 'Attachment'}</span>
-      <span class="file-meta">{formatBytes(sizeBytes)}</span>
+      <span class="file-copy">
+        <span class="file-name">{body || 'Attachment'}</span>
+        <span class="file-meta">{formatBytes(sizeBytes)}</span>
+      </span>
+      {#if ondownload}
+        <button
+          type="button"
+          class="file-download"
+          aria-label="Download {body || 'attachment'}"
+          title="Download"
+          onclick={ondownload}
+        >
+          <Icon icon={Download} size={16} />
+        </button>
+      {/if}
     </div>
   {/if}
 {/if}
@@ -245,13 +263,47 @@
 
   .file {
     display: flex;
-    flex-direction: column;
-    gap: var(--alloy-spacing-scale-1);
-    align-items: flex-start;
+    flex-direction: row;
+    gap: var(--alloy-spacing-scale-2);
+    align-items: center;
     padding: var(--alloy-spacing-scale-2);
     border: 1px solid var(--alloy-color-border-subtle);
     border-radius: var(--alloy-radii-xl);
     background: var(--alloy-color-surface-elevated);
+  }
+
+  .file-copy {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: var(--alloy-spacing-scale-1);
+    align-items: flex-start;
+    min-width: 0;
+  }
+
+  /* A file row keeps its download control visible: the tile is the only affordance on touch. */
+  .file-download {
+    display: inline-grid;
+    flex: none;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--alloy-radii-md);
+    background: transparent;
+    color: var(--alloy-color-text-secondary);
+    cursor: pointer;
+  }
+
+  .file-download:hover {
+    background: var(--alloy-color-surface-hover);
+    color: var(--alloy-color-text-primary);
+  }
+
+  .file-download:focus-visible {
+    outline: 2px solid var(--alloy-color-accent-primary);
+    outline-offset: 1px;
   }
 
   button.file {
