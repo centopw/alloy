@@ -8,12 +8,14 @@
     colour?: TagColour;
     count?: number;
     pressed: boolean;
+    /** Hover text for a chip whose label alone is ambiguous (the grouping toggle). */
+    title?: string;
     onclick: () => void;
   }
-  let { label, colour, count, pressed, onclick }: Props = $props();
+  let { label, colour, count, pressed, title, onclick }: Props = $props();
 </script>
 
-<button type="button" class="chip" class:pressed aria-pressed={pressed} {onclick}>
+<button type="button" class="chip" class:pressed aria-pressed={pressed} {title} {onclick}>
   {#if colour}<span class="dot" style:background-color={TAG_COLOUR_VARS[colour]}></span>{/if}
   <span class="label">{label}</span>
   {#if count !== undefined}<span class="count">{count}</span>{/if}

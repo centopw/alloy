@@ -611,6 +611,14 @@
           />
         </div>
       {/each}
+      <!-- Grouping lives beside the tags rather than only in the sort submenu: on a phone the list
+           showed the chips but never the sections, because nothing in the header said they existed. -->
+      <TagChip
+        label="Group"
+        title={prefs.roomSort === 'tag' ? 'Show one list' : 'Group rooms by tag'}
+        pressed={prefs.roomSort === 'tag'}
+        onclick={() => prefs.set('roomSort', prefs.roomSort === 'tag' ? 'activity' : 'tag')}
+      />
     </div>
   {/if}
 
@@ -619,7 +627,26 @@
   {/if}
 
   <div class="groups" use:contextmenu={paneItems} use:pullToRefresh={{ onrefresh: () => void refreshStore.run(), enabled: viewport.isPhone }}>
-    {#if prefs.roomListSections}
+    {#if prefs.roomSort === 'tag'}
+      <!-- Tag groups are the sections. Splitting the same rooms into Pinned/Rooms/People first
+           repeated every tag heading once per outer section (a room tagged Work showed up under
+           "Work" twice), so grouping replaces those sections instead of nesting inside them. -->
+      {#if invites.length > 0}
+        <section class="group" aria-label="Invites">
+          <h3><span>Invites</span><span class="section-count">{invites.length}</span></h3>
+          <ul>
+            {#each invites as r (r.id)}
+              <li>{@render inviteRow(r)}</li>
+            {/each}
+          </ul>
+        </section>
+      {/if}
+      {#if pinned.length + unpinned.length > 0}
+        <section class="group" aria-label="Rooms by tag">
+          {@render roomList([...pinned, ...unpinned])}
+        </section>
+      {/if}
+    {:else if prefs.roomListSections}
       {#if invites.length > 0}
         <section class="group" aria-label="Invites">
           <h3><span>Invites</span><span class="section-count">{invites.length}</span></h3>

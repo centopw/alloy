@@ -65,6 +65,17 @@ one card. The
 quoted sender's colour is kept as a leading bar; inline quotes remain for `modern` and `irc`. The scroll
 engine (paging, anchoring, prepend) is untouched.
 
+### Room list
+
+A room's tags are the account's, not the install's: the catalogue is the synced `chat.alloy.room_tags`
+account-data event and each assignment is a `u.<tag>` room tag, so a reinstall, a restart or an update
+finds the same groups. The list shows one chip per tag that any room carries (catalogue order, then
+anything a room still references), and a chip filters the list to that tag. Beside the chips, **Group**
+turns the list into one section per tag, untagged rooms last; it is the same `roomSort` preference as
+"By tag" in the sort menu, so the two controls always agree. Chips and the grouping control are
+present on every layout including the phone — a phone that showed tags but no way to group them was
+the reported defect — and they use the same quiet chip, 44px tall on touch.
+
 ### Radius scale
 
 One scale for the whole interface: each step is a role, not a size, and a surface takes the step that
