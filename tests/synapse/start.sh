@@ -22,6 +22,11 @@ if [ ! -f "synapse_data/homeserver.yaml" ]; then
 enable_registration: true
 enable_registration_without_verification: true
 
+# Let the user directory find users who share no room with the searcher, so the palette's People
+# results can be checked against a real directory (see register_test_users.sh).
+user_directory:
+  search_all_users: true
+
 experimental_features:
   msc4186_enabled: true
 
