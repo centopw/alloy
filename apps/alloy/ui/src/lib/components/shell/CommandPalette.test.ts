@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   onclose: vi.fn(),
   onpick: vi.fn(),
   pushBack: vi.fn(() => () => {}),
+  invoke: vi.fn(),
+  openProfile: vi.fn(),
 }));
 
 vi.mock('$lib/stores/rooms.svelte', () => ({
@@ -20,6 +22,12 @@ vi.mock('$lib/stores/viewport.svelte', () => ({
 
 vi.mock('$lib/platform/backstack', () => ({
   pushBack: mocks.pushBack,
+}));
+
+vi.mock('$lib/ipc', () => ({ client: { invoke: mocks.invoke } }));
+
+vi.mock('$lib/stores/profileCard.svelte', () => ({
+  profileCard: { open: mocks.openProfile },
 }));
 
 import CommandPalette from './CommandPalette.svelte';
@@ -125,5 +133,42 @@ describe('CommandPalette accessibility', () => {
 
     unmount(component);
     target.remove();
+  });
+});
+
+describe('CommandPalette people search', () => {
+  it('lists user-directory matches and opens the profile card', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.invoke.mockResolvedValue({
+        type: 'UserSearchResults',
+        payload: {
+          results: [{ user_id: '@bob:example.org', display_name: 'Bob', avatar_url: null, already_in_room: true }],
+          limited: false,
+        },
+      });
+      mocks.rooms.length = 0;
+      const { target, component } = render();
+      const input = target.querySelector('input') as HTMLInputElement;
+      input.value = 'bob';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      await vi.advanceTimersByTimeAsync(300);
+      flushSync();
+
+      expect(mocks.invoke).toHaveBeenCalledWith({ action: 'SearchUsers', params: { query: 'bob', limit: 6 } });
+      const options = [...target.querySelectorAll('[role="option"]')];
+      const person = options.find((o) => o.textContent?.includes('Bob'));
+      expect(person, 'the directory match is an option').toBeTruthy();
+      expect(person!.textContent).toContain('in a room');
+
+      (person!.querySelector('button') as HTMLButtonElement).click();
+      flushSync();
+      expect(mocks.openProfile).toHaveBeenCalledWith('@bob:example.org', null, expect.any(Object));
+      expect(mocks.onpick).not.toHaveBeenCalled();
+      unmount(component);
+      target.remove();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

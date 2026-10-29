@@ -6,6 +6,10 @@
   import { ChevronLeft, Search } from '$lib/icons';
   import { roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
   import { pushBack } from '$lib/platform/backstack';
+  import { client } from '$lib/ipc';
+  import { expect } from '$lib/stores/errors';
+  import { profileCard } from '$lib/stores/profileCard.svelte';
+  import type { UserSearchResultDto } from '$lib/generated';
 
   interface Props {
     open: boolean;
@@ -32,6 +36,50 @@
       .slice(0, 8)
   );
 
+  // People come from the server's user directory: the same query, a page of six. The directory is
+  // the only way to reach someone you share no room with, which is why this lives in the palette.
+  const PEOPLE_LIMIT = 6;
+  const PEOPLE_MIN_CHARS = 2;
+  let people = $state<UserSearchResultDto[]>([]);
+  let peopleBusy = $state(false);
+  let peopleError = $state<string | null>(null);
+  let peopleRequest = 0;
+
+  $effect(() => {
+    const q = query.trim();
+    const id = ++peopleRequest;
+    if (q.length < PEOPLE_MIN_CHARS) {
+      people = [];
+      peopleBusy = false;
+      peopleError = null;
+      return;
+    }
+    peopleBusy = true;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const res = await client.invoke({ action: 'SearchUsers', params: { query: q, limit: PEOPLE_LIMIT } });
+          if (id !== peopleRequest) return;
+          people = expect(res, 'UserSearchResults').payload.results;
+          peopleError = null;
+        } catch (e) {
+          if (id !== peopleRequest) return;
+          people = [];
+          peopleError = e instanceof Error ? e.message : 'User search failed';
+        } finally {
+          if (id === peopleRequest) peopleBusy = false;
+        }
+      })();
+    }, 250);
+    return () => window.clearTimeout(timer);
+  });
+
+  /** Rooms first, then people: one list for the keyboard, two groups on screen. */
+  const options = $derived([
+    ...results.map((r) => ({ kind: 'room' as const, id: r.id, title: roomTitle(r) })),
+    ...people.map((p) => ({ kind: 'person' as const, id: `person-${p.user_id}`, title: p.display_name ?? p.user_id, user: p })),
+  ]);
+
   $effect(() => {
     if (open) {
       query = '';
@@ -48,19 +96,30 @@
   // The highlighted option's id. The input keeps DOM focus and points at it with
   // aria-activedescendant, which is the combobox pattern: screen readers announce the active
   // option without moving focus off the text field.
-  const activeOptionId = $derived(results[index] ? `palette-option-${results[index].id}` : undefined);
+  const activeOptionId = $derived(options[index] ? `palette-option-${options[index].id}` : undefined);
+
+  /** Opens a room, or the profile card of a person found in the directory. */
+  function choose(option: (typeof options)[number]) {
+    if (option.kind === 'room') {
+      onpick(option.id);
+      return;
+    }
+    const anchor = input?.getBoundingClientRect();
+    onclose();
+    profileCard.open(option.user.user_id, null, { x: anchor?.left ?? 0, y: anchor?.bottom ?? 0 });
+  }
 
   function onKey(e: KeyboardEvent) {
     if (e.key === 'Escape') onclose();
     else if (e.key === 'ArrowDown') {
       e.preventDefault();
-      index = Math.min(index + 1, results.length - 1);
+      index = Math.min(index + 1, options.length - 1);
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       index = Math.max(index - 1, 0);
-    } else if (e.key === 'Enter' && results[index]) {
+    } else if (e.key === 'Enter' && options[index]) {
       e.preventDefault();
-      onpick(results[index].id);
+      choose(options[index]);
     } else if (e.key === 'Tab') {
       // Trap Tab inside the modal. Options are not in the tab order (keyboard moves through the
       // input), so the only focusable elements are the back button and the input.
@@ -117,14 +176,36 @@
       <ul id="palette-results" role="listbox">
         {#each results as r, i (r.id)}
           <li id={`palette-option-${r.id}`} role="option" aria-selected={i === index}>
-            <button type="button" tabindex="-1" class:sel={i === index} onclick={() => onpick(r.id)}>
+            <button type="button" tabindex="-1" class:sel={i === index} onclick={() => choose(options[i])}>
               <Avatar userId={r.id} displayName={roomTitle(r)} size={viewport.isPhone ? 48 : 'sm'} />
               <span>{roomTitle(r)}</span>
             </button>
           </li>
-        {:else}
-          <li class="none">No matching conversations</li>
         {/each}
+        {#if people.length > 0}
+          <li class="group" role="presentation">People</li>
+          {#each people as p, j (p.user_id)}
+            <li id={`palette-option-person-${p.user_id}`} role="option" aria-selected={results.length + j === index}>
+              <button
+                type="button"
+                tabindex="-1"
+                class:sel={results.length + j === index}
+                onclick={() => choose(options[results.length + j])}
+              >
+                <Avatar userId={p.user_id} displayName={p.display_name} src={p.avatar_url} size={viewport.isPhone ? 48 : 'sm'} />
+                <span class="who">
+                  <span class="name">{p.display_name ?? p.user_id}</span>
+                  <span class="id">{p.user_id}{p.already_in_room ? ' · in a room' : ''}</span>
+                </span>
+              </button>
+            </li>
+          {/each}
+        {:else if results.length === 0 && !peopleBusy}
+          <li class="none">No matching conversations or people</li>
+        {/if}
+        {#if peopleError}
+          <li class="none" role="alert">{peopleError}</li>
+        {/if}
       </ul>
       <footer class="hints" aria-hidden="true">
         <span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span>
@@ -204,6 +285,30 @@
   button.sel,
   button:hover {
     background: var(--alloy-glass-control-hover);
+  }
+  .group {
+    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-row-pad-x) var(--alloy-spacing-scale-1);
+    color: var(--alloy-color-text-muted);
+    font-size: var(--alloy-typography-size-xs);
+    letter-spacing: var(--alloy-letter-spacing-caps);
+    text-transform: uppercase;
+  }
+  .who {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .who .name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .who .id {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--alloy-color-text-muted);
+    font-size: var(--alloy-typography-size-xs);
   }
   .none {
     padding: var(--alloy-spacing-scale-4);
