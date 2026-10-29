@@ -155,6 +155,37 @@ describe('RoomMediaStore', () => {
     expect(store.view('!other:alloy.chat', 'Media').items).toHaveLength(1);
   });
 
+  it('prepends media that arrived since the first read, keeping the pages already loaded', async () => {
+    invoke.mockResolvedValueOnce(page(['m5', 'm4'], 'cursor1'));
+    await store.load(ROOM, 'Media');
+    invoke.mockResolvedValueOnce(page(['m4'], 'cursor2'));
+    await store.loadMore(ROOM, 'Media');
+    // The second page repeated m4 and had nothing new, so nothing is appended.
+    expect(store.view(ROOM, 'Media').items.map((i) => i.event_id)).toEqual(['m5', 'm4']);
+
+    // A picture sent while the panel is open: the first page now starts with it.
+    invoke.mockResolvedValueOnce(page(['m7', 'm6', 'm5', 'm4'], 'cursor3'));
+    await store.refresh(ROOM, 'Media');
+
+    expect(store.view(ROOM, 'Media').items.map((i) => i.event_id)).toEqual(['m7', 'm6', 'm5', 'm4']);
+  });
+
+  it('leaves the list alone when a refresh fails', async () => {
+    invoke.mockResolvedValueOnce(page(['m1'], null));
+    await store.load(ROOM, 'Media');
+    invoke.mockRejectedValueOnce(new Error('offline'));
+    await store.refresh(ROOM, 'Media');
+    expect(store.view(ROOM, 'Media').items.map((i) => i.event_id)).toEqual(['m1']);
+    expect(store.view(ROOM, 'Media').error).toBeNull();
+  });
+
+  it('treats a refresh before the first read as the first read', async () => {
+    invoke.mockResolvedValueOnce(page(['m1'], null));
+    await store.refresh(ROOM, 'Files');
+    expect(store.view(ROOM, 'Files').items.map((i) => i.event_id)).toEqual(['m1']);
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
   it('records a failure and retries on the next load', async () => {
     invoke.mockRejectedValueOnce(new Error('boom'));
     await store.load(ROOM, 'Links');

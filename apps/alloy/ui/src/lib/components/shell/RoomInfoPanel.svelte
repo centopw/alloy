@@ -39,6 +39,7 @@
   import type { RoomMediaItem, RoomMediaKind } from '$lib/generated/protocol';
   import { contextmenu } from '$lib/platform/contextmenu';
   import { roomsStore } from '$lib/stores/rooms.svelte';
+  import { timelineStore } from '$lib/stores/timeline.svelte';
   import { userProfile } from '$lib/stores/userProfile.svelte';
   import type { MenuItem } from '$lib/stores/contextmenu.svelte';
   import type { RoomMemberDto } from '$lib/generated';
@@ -343,6 +344,22 @@
     untrack(() => {
       for (const k of kinds) void roomMedia.load(id, MEDIA_KIND[k]);
     });
+  });
+
+  // A picture sent while the panel is open has to appear without reopening it. The lists are read
+  // from the server once, so watch the room's newest event and refresh the visible kind; the delay
+  // collapses a burst into one read, and a failed refresh keeps the list it already has.
+  $effect(() => {
+    const id = roomId;
+    const v = view;
+    const newest = timelineStore.roomId === id ? (timelineStore.items.at(-1)?.event_id ?? null) : null;
+    void newest;
+    if (newest === null) return;
+    const timer = window.setTimeout(() => {
+      const kinds: MediaView[] = v === 'overview' ? ['media', 'files', 'links'] : isMediaView(v) ? [v] : [];
+      for (const k of kinds) void roomMedia.refresh(id, MEDIA_KIND[k]);
+    }, 350);
+    return () => window.clearTimeout(timer);
   });
 
   // Infinite scroll: load the next page when the sentinel at the bottom becomes visible.

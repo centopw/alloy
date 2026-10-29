@@ -63,6 +63,41 @@ export class RoomMediaStore {
     return this.start(roomId, kind, feed.nextBatch, true);
   }
 
+  /**
+   * Re-reads the first page and prepends what arrived since the last read, keeping the pages
+   * already loaded. A refresh failure leaves the list as it was: a stale preview is better than an
+   * empty one, and the next event or reopen tries again.
+   */
+  refresh(roomId: string, kind: RoomMediaKind): Promise<void> {
+    const key = feedKey(roomId, kind);
+    if (!this.feeds[key]?.loaded) return this.load(roomId, kind);
+    const pending = this.inflight.get(key);
+    if (pending) return pending;
+
+    const id = ++this.nextRequest;
+    this.requests.set(key, id);
+    const p: Promise<void> = (async () => {
+      try {
+        const res = await client.invoke({
+          action: 'GetRoomMedia',
+          params: { room_id: roomId, kind, from: null, limit: ROOM_MEDIA_PAGE_SIZE },
+        });
+        if (this.requests.get(key) !== id) return;
+        const page = expect(res, 'RoomMedia').payload;
+        const feed = this.feeds[key];
+        const seen = new Set(feed.items.map((item) => item.event_id));
+        const fresh = page.items.filter((item) => !seen.has(item.event_id));
+        if (fresh.length > 0) this.setFeed(key, { items: [...fresh, ...feed.items] });
+      } catch {
+        // Keep the list; the refresh is opportunistic.
+      }
+    })().finally(() => {
+      if (this.inflight.get(key) === p) this.inflight.delete(key);
+    });
+    this.inflight.set(key, p);
+    return p;
+  }
+
   /** Drops every list of a room; responses still in flight for it are ignored. */
   reset(roomId: string): void {
     const prefix = `${roomId}\u0000`;
