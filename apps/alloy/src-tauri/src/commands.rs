@@ -22,10 +22,20 @@ pub async fn alloy_subscribe(
 
     // Spawn a forwarder task from engine broadcast to the Tauri IPC Channel
     tokio::spawn(async move {
-        while let Ok(event) = rx.recv().await {
-            if on_event.send(event).is_err() {
-                // Channel closed by receiver; stop forwarding
-                break;
+        loop {
+            match rx.recv().await {
+                Ok(event) => {
+                    if on_event.send(event).is_err() {
+                        // Channel closed by receiver; stop forwarding
+                        break;
+                    }
+                }
+                // A slow webview missed events. Ending the loop here would freeze the UI until
+                // the window reloads, so keep forwarding; the missed diffs are reported.
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(dropped)) => {
+                    tracing::warn!(dropped, "webview event stream lagged");
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             }
         }
     });
