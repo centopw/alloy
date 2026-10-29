@@ -29,6 +29,7 @@ export interface Prefs {
   fontScale: FontScale;
   timeFormat: TimeFormat;
   bigEmoji: boolean;
+  /** Publish your read receipts and show other people's. Off means neither. */
   showReadReceipts: boolean;
   notifyDesktop: boolean;
   notifySound: boolean;

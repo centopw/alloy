@@ -4,6 +4,7 @@ import { FrameBatcher, Subscription } from './subscription.js';
 import { errorMessage, expect } from './errors.js';
 import { uploadsStore } from './uploads.svelte.js';
 import { roomsStore } from './rooms.svelte.js';
+import { prefs } from './prefs.svelte.js';
 import { lastOwnEventId, readersByEvent } from '../content/receipts.js';
 import { voiceExtension, writeTempFile } from '../platform/files.js';
 import type { VoiceClip } from '../platform/voiceRecorder.js';
@@ -36,13 +37,18 @@ class TimelineStore {
   lastOwnEventId = $derived(lastOwnEventId(this.items));
   /** The selected messages in timeline order. */
   selectedItems = $derived(this.items.filter((i) => !!i.event_id && this.selectedIds.includes(i.event_id)));
+  /** The newest event a read receipt was confirmed for; it is not published twice. */
+  lastReceiptEvent = $state<string | null>(null);
+  /** Why the last receipt could not be published, shown next to the timeline's other failures. */
+  receiptError = $state<string | null>(null);
 
   private jumpSeq = 0;
   private highlightTimer: number | NodeJS.Timeout | null = null;
   private sub: Subscription<TimelineDiffEvent> | null = null;
   private batcher: FrameBatcher<TimelineDiffEvent> | null = null;
   private unlisten: (() => void) | null = null;
-  private lastReceiptEvent: string | null = null;
+  /** The event whose receipt is in flight, so overlapping triggers share one request. */
+  private receiptPending: string | null = null;
 
   /** Open a room (closing the previous one). Pass null to just close. */
   async open(roomId: string | null) {
@@ -87,6 +93,8 @@ class TimelineStore {
     this.replyTo = null;
     this.editing = null;
     this.lastReceiptEvent = null;
+    this.receiptError = null;
+    this.receiptPending = null;
     if (this.highlightTimer) {
       clearTimeout(this.highlightTimer);
       this.highlightTimer = null;
@@ -264,20 +272,52 @@ class TimelineStore {
     });
   }
 
-  /** Report the newest confirmed event as read (call when the user is at the bottom). */
+  /**
+   * Publish a read receipt for the newest confirmed event.
+   *
+   * The receipt is only remembered once the engine confirms it: a failed send is left retryable and
+   * reported, instead of being swallowed while the event id was already marked as done.
+   */
   async markRead() {
-    if (!this.roomId) return;
-    roomsStore.markRead(this.roomId);
+    const roomId = this.roomId;
+    if (!roomId) return;
+    // A hidden window has not read anything, whatever the scroll position says.
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+
+    const eventId = this.newestEventId();
+    if (!eventId) return;
+    // "Show who has read your messages" governs publishing as well as display: with it off the room
+    // still clears locally, but no read position leaves the device.
+    if (!prefs.showReadReceipts) {
+      roomsStore.markRead(roomId);
+      return;
+    }
+    if (eventId === this.lastReceiptEvent || eventId === this.receiptPending) {
+      roomsStore.markRead(roomId);
+      return;
+    }
+
+    this.receiptPending = eventId;
+    try {
+      await client.markRead(roomId, eventId);
+      this.lastReceiptEvent = eventId;
+      this.receiptError = null;
+      roomsStore.markRead(roomId);
+    } catch (e) {
+      // Keep the event retryable and say so: the unread badge is left alone rather than pretending.
+      this.receiptError = errorMessage(e);
+    } finally {
+      if (this.receiptPending === eventId) this.receiptPending = null;
+    }
+  }
+
+  /** The newest event that the engine has confirmed (a sending echo has no event id yet). */
+  private newestEventId(): string | null {
     for (let i = this.items.length - 1; i >= 0; i--) {
       const id = this.items[i].event_id;
-      if (id) {
-        if (id !== this.lastReceiptEvent) {
-          this.lastReceiptEvent = id;
-          await client.markRead(this.roomId, id).catch(() => {});
-        }
-        return;
-      }
+      if (id) return id;
     }
+    return null;
   }
 
   startReply(item: TimelineItemDto) {

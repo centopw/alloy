@@ -122,7 +122,7 @@
       onchange={(v) => prefs.set('bigEmoji', v)}
     />
     <SettingToggle
-      label="Show who has read your messages"
+      label="Send and show read receipts"
       checked={prefs.showReadReceipts}
       onchange={(v) => prefs.set('showReadReceipts', v)}
     />

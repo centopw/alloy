@@ -143,25 +143,25 @@
     return () => (cancelled = true);
   });
 
-  // The newest event counts as read while it is on screen: when the room opens, when a message
-  // arrives while the user is at the bottom, and when the window comes back to the foreground.
+  // The newest event counts as read when the room opens, when a message arrives while the user is
+  // at the bottom, when the window returns to the foreground, and when the user's own message
+  // arrives (they have read up to it even if the list is scrolled up).
+  // "Visible" means the document is not hidden: a merely unfocused window is still showing the
+  // conversation, and treating a desktop click elsewhere as "not reading" stopped receipts entirely.
   // (Scrolling alone never fires for a short list, which left the unread dot on.)
-  let windowActive = $state(typeof document === 'undefined' || (document.visibilityState === 'visible' && !document.hidden));
+  let windowVisible = $state(typeof document === 'undefined' || document.visibilityState === 'visible');
   $effect(() => {
-    const update = () => (windowActive = document.visibilityState === 'visible');
-    const blur = () => (windowActive = false);
+    const update = () => (windowVisible = document.visibilityState === 'visible');
     document.addEventListener('visibilitychange', update);
-    window.addEventListener('focus', update);
-    window.addEventListener('blur', blur);
-    return () => {
-      document.removeEventListener('visibilitychange', update);
-      window.removeEventListener('focus', update);
-      window.removeEventListener('blur', blur);
-    };
+    return () => document.removeEventListener('visibilitychange', update);
   });
   $effect(() => {
-    const newest = rows.findLast((r) => r.event_id)?.event_id;
-    if (newest && atBottom && windowActive && !timelineStore.loading) untrack(() => void timelineStore.markRead());
+    const newest = rows.findLast((r) => r.event_id);
+    void windowVisible;
+    if (!newest || timelineStore.loading) return;
+    // Your own message is read by definition; anything else needs the viewport at the bottom.
+    if (!atBottom && newest.is_own !== true) return;
+    untrack(() => void timelineStore.markRead());
   });
 
   // Distance between the visible bottom edge and the end of the content, kept from the last scroll.
@@ -275,8 +275,8 @@
       </div>
     {/if}
 
-    {#if timelineStore.error}
-      <div class="toast" role="alert">{timelineStore.error}</div>
+    {#if timelineStore.error || timelineStore.receiptError}
+      <div class="toast" role="alert">{timelineStore.error ?? timelineStore.receiptError}</div>
     {/if}
   </div>
   <TypingIndicator {roomId} />
