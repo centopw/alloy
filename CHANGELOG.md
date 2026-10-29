@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.10 (pre-release)
+
+### Changed
+- **The app is now `vn.hce.alloy`.** The desktop bundle identifier and the Android application id both change, so this release is a clean install: Android must uninstall the old app, and desktop starts a fresh profile. On desktop that also means a new device on the account (verify it again, or restore history from key backup); the previous `chat.alloy` data directory is left untouched, not migrated.
+
+### Added
+- **Read receipts are published, not just displayed.** Opening a room, returning to the window and sending your own message all publish a receipt for the newest message, a failed attempt is shown instead of swallowed and can be retried, and "Send and show read receipts" governs publishing as well as the ticks.
+- **The phone can group rooms by tag.** A Group chip sits beside the tag chips on every layout, backed by the same sort preference as Sort → By tag.
+
+### Fixed
+- **Message actions sit with their message.** The hover toolbar is anchored to the message it acts on in all three layouts and collapses to the actions that matter instead of covering the text; file and audio tiles now carry a download control.
+- **Shared media shows the picture.** When the server cannot thumbnail an image (HEIC, SVG, or no pre-generated thumbnail), Alloy shows the full file instead of a placeholder.
+- **Room tags come back.** The room tags and the tag catalogue both reload from the server after a restart or a clean install, and grouping no longer renders the same tag under a second heading.
+- **Live updates survive a slow interface.** Engine events keep flowing when the webview falls behind instead of stopping until the next restart.
+- **One corner scale.** Message surfaces, the sender-side tail, nested cards and the composer use one documented radius scale, and own bubbles sit flush to their side of the conversation.
+- **The room-list toggle stays put.** The control keeps one position whether the list is open or closed, and the closed edge still resizes it open.
+- **Settings and attachments read as one surface.** The settings panel is a bounded window again, the quick switcher shows search and keyboard hints, and attachment cards no longer collapse or overflow their bubble.
+
 ## 0.2.9 (pre-release)
 
 ### Added
