@@ -16,6 +16,7 @@ pub mod rooms;
 pub mod timeline;
 pub mod tls;
 pub mod url_preview;
+pub mod user_directory;
 
 pub use account::DeleteDevicesOutcome;
 pub use accounts::{

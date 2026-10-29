@@ -255,6 +255,17 @@ pub struct UserProfileDto {
     pub is_me: bool,
 }
 
+/// One user-directory match returned by `SearchUsers`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct UserSearchResultDto {
+    pub user_id: UserId,
+    pub display_name: Option<String>,
+    /// `mxc://` avatar URI, if any; fetch it with `GetMedia`.
+    pub avatar_url: Option<String>,
+    /// The user joins or is invited to a room the active account is joined to.
+    pub already_in_room: bool,
+}
+
 /// One room listed in a homeserver's public room directory.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct PublicRoomDto {
@@ -731,6 +742,13 @@ pub enum EngineCommand {
     StartDirectMessage {
         user_id: UserId,
     },
+    /// Searches the homeserver user directory by user id and display name. `query` must not be
+    /// blank and is sent as given; `limit` is clamped to 1..=50. Each result's `already_in_room`
+    /// is derived from locally known joined-room membership.
+    SearchUsers {
+        query: String,
+        limit: u32,
+    },
     /// Lists shared media, files or links of a room, newest first. `from` is the `next_batch` of
     /// the previous page. Pages may hold fewer than `limit` items; keep paging while `next_batch`
     /// is set.
@@ -1143,6 +1161,12 @@ pub enum EngineResponse {
     },
     UserProfile {
         profile: UserProfileDto,
+    },
+    /// One page of user-directory results for `SearchUsers`; `limited` is the server's flag that
+    /// more matches exist than the returned page holds.
+    UserSearchResults {
+        results: Vec<UserSearchResultDto>,
+        limited: bool,
     },
     /// The direct-message room opened by `StartDirectMessage`.
     DirectMessageRoom {
@@ -1575,6 +1599,7 @@ pub fn register_types() -> Types {
         .register::<RoomSearchScope>()
         .register::<RoomSearchHit>()
         .register::<UserProfileDto>()
+        .register::<UserSearchResultDto>()
         .register::<SpaceParentDto>()
         .register::<NotificationCount>()
         .register::<TimelineItemPreview>()

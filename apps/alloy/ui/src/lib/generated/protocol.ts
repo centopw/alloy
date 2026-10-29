@@ -145,6 +145,15 @@ export type EngineCommand = { action: "DiscoverHomeserver"; params: {
 	user_id: UserId,
 } } | 
 /**
+ *  Searches the homeserver user directory by user id and display name. `query` must not be
+ *  blank and is sent as given; `limit` is clamped to 1..=50. Each result's `already_in_room`
+ *  is derived from locally known joined-room membership.
+ */
+{ action: "SearchUsers"; params: {
+	query: string,
+	limit: number,
+} } | 
+/**
  *  Lists shared media, files or links of a room, newest first. `from` is the `next_batch` of
  *  the previous page. Pages may hold fewer than `limit` items; keep paging while `next_batch`
  *  is set.
@@ -550,6 +559,14 @@ export type EngineResponse = { type: "HomeserverInfo"; payload: {
 	tags: RoomTagDef[],
 } } | { type: "UserProfile"; payload: {
 	profile: UserProfileDto,
+} } | 
+/**
+ *  One page of user-directory results for `SearchUsers`; `limited` is the server's flag that
+ *  more matches exist than the returned page holds.
+ */
+{ type: "UserSearchResults"; payload: {
+	results: UserSearchResultDto[],
+	limited: boolean,
 } } | 
 /**  The direct-message room opened by `StartDirectMessage`. */
 { type: "DirectMessageRoom"; payload: {
@@ -1129,6 +1146,16 @@ export type UserProfileDto = {
 	/**  An existing direct-message room with this user. */
 	dm_room_id: RoomId | null,
 	is_me: boolean,
+};
+
+/**  One user-directory match returned by `SearchUsers`. */
+export type UserSearchResultDto = {
+	user_id: UserId,
+	display_name: string | null,
+	/**  `mxc://` avatar URI, if any; fetch it with `GetMedia`. */
+	avatar_url: string | null,
+	/**  The user joins or is invited to a room the active account is joined to. */
+	already_in_room: boolean,
 };
 
 export type VectorDiffDto<T> = { type: "Append"; content: {

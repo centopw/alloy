@@ -1192,6 +1192,33 @@ export class MockTransport implements Transport {
         return { type: 'UserProfile', payload: { profile } };
       }
 
+      case 'SearchUsers': {
+        const q = command.params.query.trim().toLowerCase();
+        if (!q) throw invalidArgument('search query must not be blank');
+        const people = [
+          ...MOCK_MEMBERS.map((m) => ({ user_id: m.user_id, display_name: m.display_name })),
+          // People outside the shared rooms, so the People group shows both states.
+          { user_id: '@dana:alloy.chat', display_name: 'Dana Okafor' },
+          { user_id: '@erin:alloy.chat', display_name: 'Erin Blake' },
+        ];
+        const limit = command.params.limit;
+        const matches = people.filter(
+          (p) =>
+            p.display_name?.toLowerCase().includes(q) ||
+            p.user_id.toLowerCase().includes(q),
+        );
+        const results = matches.slice(0, limit).map((p) => ({
+          user_id: p.user_id,
+          display_name: p.display_name,
+          avatar_url: null,
+          already_in_room: MOCK_MEMBERS.some((m) => m.user_id === p.user_id),
+        }));
+        return {
+          type: 'UserSearchResults',
+          payload: { results, limited: matches.length > limit },
+        };
+      }
+
       case 'StartDirectMessage': {
         const userId = command.params.user_id;
         const existing = this.dmRooms.get(userId);

@@ -54,6 +54,7 @@ impl CommandGroup {
             | EngineCommand::MarkRoomRead { .. }
             | EngineCommand::GetUserProfile { .. }
             | EngineCommand::StartDirectMessage { .. }
+            | EngineCommand::SearchUsers { .. }
             | EngineCommand::GetNotificationSettings
             | EngineCommand::SetDefaultNotificationLevel { .. }
             | EngineCommand::SetMentionRules { .. }

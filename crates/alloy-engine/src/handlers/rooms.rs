@@ -317,6 +317,14 @@ impl GroupHandler for RoomsHandler {
                     .map_err(map_err)?;
                 Ok(EngineResponse::DirectMessageRoom { room_id, created })
             }
+            EngineCommand::SearchUsers { query, limit } => {
+                let client = ctx.active_client().await?;
+                let page = client.search_users(&query, limit).await.map_err(map_err)?;
+                Ok(EngineResponse::UserSearchResults {
+                    results: page.results,
+                    limited: page.limited,
+                })
+            }
             EngineCommand::GetNotificationSettings => {
                 let client = ctx.active_client().await?;
                 let settings = client.get_notification_settings().await.map_err(map_err)?;
