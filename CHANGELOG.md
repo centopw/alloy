@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.11 (pre-release)
+
+### Changed
+- **Updating from 0.2.9 or earlier still needs a clean install.** These builds are `vn.hce.alloy`, so a device still on 0.2.9 or older updates into a fresh profile (desktop) or must reinstall (Android), as described under 0.2.10; the old `chat.alloy` data is left in place, not migrated. From 0.2.10 this is a normal in-place update.
+
+### Fixed
+- **Verification is not offered twice.** The Encryption panel reads the device's verification state the way Settings → Devices does, so a device that is already verified no longer shows a verify prompt.
+- **Opening a room does not empty the tag catalogue.** A catalogue read that comes back empty no longer replaces the tags you already have; the previous list is kept and the occurrence is logged so a repeat can be diagnosed.
+
 ## 0.2.10 (pre-release)
 
 ### Changed
