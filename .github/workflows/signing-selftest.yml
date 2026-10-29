@@ -40,14 +40,26 @@ jobs:
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$tmp/release.jks"
           echo "keystore decoded: $(wc -c < "$tmp/release.jks") bytes"
 
-          # certreq needs the key password, so a wrong alias or key password fails here.
-          keytool -certreq \
+          # Never echo the file or a password; keytool errors name the alias or the password, not the value.
+          if ! keytool -list -keystore "$tmp/release.jks" -storepass "$ANDROID_KEYSTORE_PASSWORD" > "$tmp/aliases.txt" 2>&1; then
+            echo "::error::the keystore password or file is wrong"
+            cat "$tmp/aliases.txt"
+            exit 1
+          fi
+          echo "keystore opened with ANDROID_KEYSTORE_PASSWORD; entries:"
+          grep -E 'PrivateKeyEntry|SecretKeyEntry|trustedCertEntry' "$tmp/aliases.txt" | sed 's/^[[:space:]]*/  /'
+
+          if ! keytool -certreq \
             -keystore "$tmp/release.jks" \
             -alias "$ANDROID_KEY_ALIAS" \
             -storepass "$ANDROID_KEYSTORE_PASSWORD" \
             -keypass "$ANDROID_KEY_PASSWORD" \
-            -file "$tmp/request.csr" >/dev/null
-          echo "store password, alias and key password all accepted"
+            -file "$tmp/request.csr" > "$tmp/certreq.txt" 2>&1; then
+            echo "::error::ANDROID_KEY_ALIAS or ANDROID_KEY_PASSWORD does not match this keystore"
+            cat "$tmp/certreq.txt"
+            exit 1
+          fi
+          echo "alias and key password accepted"
 
           keytool -list -v \
             -keystore "$tmp/release.jks" \
