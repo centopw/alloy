@@ -77,7 +77,7 @@ Per specification, `gen/android/` sources must be tracked while generated build 
 !! apps/alloy/src-tauri/gen/android/app/build/
 !! apps/alloy/src-tauri/gen/android/app/proguard-tauri.pro
 !! apps/alloy/src-tauri/gen/android/app/src/main/assets/
-!! apps/alloy/src-tauri/gen/android/app/src/main/java/chat/alloy/generated/
+!! apps/alloy/src-tauri/gen/android/app/src/main/java/vn/hce/alloy/generated/
 !! apps/alloy/src-tauri/gen/android/app/src/main/jniLibs/
 !! apps/alloy/src-tauri/gen/android/app/tauri.build.gradle.kts
 !! apps/alloy/src-tauri/gen/android/app/tauri.properties
@@ -95,12 +95,12 @@ Per specification, `gen/android/` sources must be tracked while generated build 
 - `gen/android/app/build.gradle.kts`
 - `gen/android/app/proguard-rules.pro`
 - `gen/android/app/src/main/AndroidManifest.xml`
-- `gen/android/app/src/main/java/chat/alloy/MainActivity.kt`
+- `gen/android/app/src/main/java/vn/hce/alloy/MainActivity.kt`
 - `gen/android/app/src/main/res/**` (icons, colors, strings, themes)
 - `gen/android/build.gradle.kts`
 - `gen/android/buildSrc/build.gradle.kts`
-- `gen/android/buildSrc/src/main/java/chat/alloy/kotlin/BuildTask.kt`
-- `gen/android/buildSrc/src/main/java/chat/alloy/kotlin/RustPlugin.kt`
+- `gen/android/buildSrc/src/main/java/vn/hce/alloy/kotlin/BuildTask.kt`
+- `gen/android/buildSrc/src/main/java/vn/hce/alloy/kotlin/RustPlugin.kt`
 - `gen/android/gradle.properties`
 - `gen/android/gradle/wrapper/**`
 - `gen/android/gradlew`, `gradlew.bat`

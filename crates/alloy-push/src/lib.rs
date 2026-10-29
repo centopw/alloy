@@ -570,7 +570,7 @@ mod tests {
     #[test]
     fn pusher_config_deserialization() {
         let json = r#"{
-            "app_id": "chat.alloy.android",
+            "app_id": "vn.hce.alloy.android",
             "pushkey": "https://push.example.org/endpoint",
             "gateway_url": "https://gateway.example.org",
             "app_display_name": "Alloy",
@@ -579,7 +579,7 @@ mod tests {
         }"#;
 
         let config: PusherConfig = serde_json::from_str(json).unwrap();
-        assert_eq!(config.app_id, "chat.alloy.android");
+        assert_eq!(config.app_id, "vn.hce.alloy.android");
         assert_eq!(config.pushkey, "https://push.example.org/endpoint");
         assert_eq!(config.gateway_url, "https://gateway.example.org");
         assert_eq!(config.app_display_name, "Alloy");

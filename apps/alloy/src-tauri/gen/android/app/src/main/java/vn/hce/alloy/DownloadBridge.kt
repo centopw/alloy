@@ -1,4 +1,4 @@
-package chat.alloy
+package vn.hce.alloy
 
 import android.content.ContentValues
 import android.content.Context

@@ -126,7 +126,7 @@ async function measure() {
       environment: {
         platform: "Android 16 arm64 (Emulator: HCE/Medium_Phone)",
         browser: "Chrome 153.0.8010.36 WebView",
-        target: "chat.alloy",
+        target: "vn.hce.alloy",
       },
       measurements: {
         frameCount: frameTimes.length,

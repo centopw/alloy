@@ -1,4 +1,4 @@
-package chat.alloy
+package vn.hce.alloy
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -181,7 +181,7 @@ class AlloyPushService : PushService() {
   private fun buildPusherConfig(endpoint: String, gateway: String): String {
     val deviceName = "${Build.MANUFACTURER} ${Build.MODEL}".take(100)
     val obj = org.json.JSONObject().apply {
-      put("app_id", "chat.alloy.android")
+      put("app_id", "vn.hce.alloy.android")
       put("pushkey", endpoint)
       put("gateway_url", gateway)
       put("app_display_name", "Alloy")

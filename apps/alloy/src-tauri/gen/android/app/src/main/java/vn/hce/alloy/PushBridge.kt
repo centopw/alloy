@@ -1,4 +1,4 @@
-package chat.alloy
+package vn.hce.alloy
 
 import android.content.Context
 import android.content.SharedPreferences
@@ -238,7 +238,7 @@ class PushBridge(private val context: Context) {
           val gateway = getStoredGateway(context) ?: "https://matrix.gateway.unifiedpush.org/_matrix/push/v1/notify"
           val deviceName = "${Build.MANUFACTURER} ${Build.MODEL}".take(100)
           val config = JSONObject().apply {
-            put("app_id", "chat.alloy.android")
+            put("app_id", "vn.hce.alloy.android")
             put("pushkey", endpoint)
             put("gateway_url", gateway)
             put("app_display_name", "Alloy")

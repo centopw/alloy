@@ -17,10 +17,10 @@ val appVersionCode: Int = appVersionName.substringBefore('-').split('.').map { i
 
 android {
     compileSdk = 37
-    namespace = "chat.alloy"
+    namespace = "vn.hce.alloy"
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
-        applicationId = "chat.alloy"
+        applicationId = "vn.hce.alloy"
         minSdk = 24
         targetSdk = 37
         versionCode = appVersionCode

@@ -465,15 +465,15 @@ Mobile OS environments restrict background execution. Alloy uses UnifiedPush (An
    - Endpoint registration: `PushNative.setPusher(dataDir, config)` calls `matrix_sdk::pusher().set()` with HTTP pusher, gateway=event_id_only format.
    - Payload arrives on Android service, Kotlin calls `PushNative.fetchNotification(dataDir, rawJson)`.
 2. **Background Notification Fetch (alloy-ffi/JNI)**:
-   - `Java_chat_alloy_PushNative_fetchNotification(dataDir, payload)`:
+   - `Java_vn_hce_alloy_PushNative_fetchNotification(dataDir, payload)`:
      - Parses push ref (room_id, event_id, unread count).
      - Calls `restore_active_account(dataDir, None)` from `alloy-core` (matches engine's active-account logic; reuses `accounts.json` + FileSecretStore at `secrets.json`).
      - Initializes tokio runtime and `NotificationClient` in `MultipleProcesses` mode (no main sync running; avoids lock contention).
      - Enforces total timeout ≤20s; falls back to generic notification on timeout.
      - Returns JSON: `{"status":"event","title":"...","body":"...","room_id":"...","..."}` or `{"status":"generic"}` or `{"status":"skip"}` or `{"status":"error","error":"..."}`.
-   - `Java_chat_alloy_PushNative_setPusher(dataDir, configJson)` and `removePusher()`: CRUD for pushers via `alloy-core` client.
+   - `Java_vn_hce_alloy_PushNative_setPusher(dataDir, configJson)` and `removePusher()`: CRUD for pushers via `alloy-core` client.
 3. **Crypto & Decryption**:
-   - Account data dir (`/data/user/0/chat.alloy/files`) shared between app and background service.
+   - Account data dir (`/data/user/0/vn.hce.alloy/files`) shared between app and background service.
    - SQLite state store at `accounts/<store_id>/matrix/` encrypted with passphrase from `secrets.json`.
    - Megolm keys are persisted; NotificationClient decrypts events in-memory without starting sync.
 4. **Android Permissions**:

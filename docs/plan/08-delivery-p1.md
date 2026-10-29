@@ -60,7 +60,7 @@ Limits:
   Instruments first paint timestamp minus process startup monotonic timestamp.
 - **Android Measurement:**
   ```bash
-  adb shell am start-activity -W -n chat.alloy/chat.alloy.MainActivity -S
+  adb shell am start-activity -W -n vn.hce.alloy/vn.hce.alloy.MainActivity -S
   ```
   Captures `TotalTime` reported by the Android Activity Manager.
   - *Observed Baseline (Phase 0 Spike):* 874 ms (Pixel-class warm), 1,844 ms (fresh wipe cold boot), 1,119 ms (Low-End 720p).

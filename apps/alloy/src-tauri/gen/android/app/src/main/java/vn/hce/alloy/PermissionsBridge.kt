@@ -1,4 +1,4 @@
-package chat.alloy
+package vn.hce.alloy
 
 import android.Manifest
 import android.content.Intent

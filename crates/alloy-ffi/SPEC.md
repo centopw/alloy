@@ -10,7 +10,7 @@ depends-on: [alloy-push]
 
 ## Responsibility
 
-The Android JNI surface for headless background push. It wraps `alloy-push` behind `Java_chat_alloy_PushNative_*` exports, runs a lazy multi-thread tokio runtime, catches panics at the boundary and returns errors as JSON strings so a panic never crosses into the JVM.
+The Android JNI surface for headless background push. It wraps `alloy-push` behind `Java_vn_hce_alloy_PushNative_*` exports, runs a lazy multi-thread tokio runtime, catches panics at the boundary and returns errors as JSON strings so a panic never crosses into the JVM.
 
 ## Boundary
 

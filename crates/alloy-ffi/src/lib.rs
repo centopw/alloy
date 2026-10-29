@@ -35,7 +35,7 @@ fn error_to_jstring(env: &mut JNIEnv, err_json: &str) -> jstring {
 ///
 /// JNI signature: `(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;`
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_chat_alloy_PushNative_fetchNotification<'local>(
+pub extern "system" fn Java_vn_hce_alloy_PushNative_fetchNotification<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     data_dir: JString<'local>,
@@ -96,7 +96,7 @@ pub extern "system" fn Java_chat_alloy_PushNative_fetchNotification<'local>(
 ///
 /// JNI signature: `(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;`
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_chat_alloy_PushNative_setPusher<'local>(
+pub extern "system" fn Java_vn_hce_alloy_PushNative_setPusher<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     data_dir: JString<'local>,
@@ -157,7 +157,7 @@ pub extern "system" fn Java_chat_alloy_PushNative_setPusher<'local>(
 ///
 /// JNI signature: `(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;`
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_chat_alloy_PushNative_removePusher<'local>(
+pub extern "system" fn Java_vn_hce_alloy_PushNative_removePusher<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     data_dir: JString<'local>,

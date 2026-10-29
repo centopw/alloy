@@ -8,7 +8,7 @@ F-Droid reviewer because the project did not meet the inclusion policy's require
 for at least three months (or qualify for one of its exceptions). Reopen it or submit a new request only once Alloy
 meets that requirement.
 
-Checked: `fdroid lint chat.alloy` (fdroidserver Docker image `registry.gitlab.com/fdroid/docker-executable-fdroidserver`,
+Checked: `fdroid lint vn.hce.alloy` (fdroidserver Docker image `registry.gitlab.com/fdroid/docker-executable-fdroidserver`,
 with `config/categories.yml` taken from fdroiddata) reported no findings. The category is `Messaging`. `fdroid lint`
 exits 0 even when it prints findings, so judge it by its output.
 
@@ -22,7 +22,9 @@ release. A later submission still needs the complete build and review to pass.
   the demo data of the UI, not from a real account) and `changelogs/<versionCode>.txt`. F-Droid reads these from the
   tagged commit. Add a `changelogs/<versionCode>.txt` for each release; the version code is
   `major * 1000000 + minor * 1000 + patch` (0.2.3 is 2003).
-- `docs/fdroid/chat.alloy.yml`: the draft build recipe for the `fdroiddata` repository.
+- `docs/fdroid/vn.hce.alloy.yml`: the draft build recipe for the `fdroiddata` repository. The application id became
+  `vn.hce.alloy` in 0.2.10 (it was `chat.alloy`); the metadata filename must equal the application id, and no listing
+  was ever published under either id, so there is no update path to preserve.
 - Store builds set `ALLOY_DISTRIBUTION=fdroid` while compiling. The app then skips its release-page update check,
   because F-Droid delivers updates.
 
@@ -35,13 +37,13 @@ release. A later submission still needs the complete build and review to pass.
 
 ## Open points before submitting
 
-1. **Run the recipe.** Check it with fdroidserver (`fdroid build -v -l chat.alloy` in a `fdroiddata` checkout). A cold
+1. **Run the recipe.** Check it with fdroidserver (`fdroid build -v -l vn.hce.alloy` in a `fdroiddata` checkout). A cold
    Rust build is slow, so check it fits the build server's time limit.
 2. **Architectures.** Only arm64 is built. Add `armeabi-v7a` and `x86_64` targets if you want older and emulator devices.
 3. **Signing.** F-Droid signs with its own key, so the F-Droid app and the signed GitHub APK cannot update each other.
    Say so in the README, or work towards reproducible builds (hard with Rust and the NDK).
 4. **Binary scan.** F-Droid rejects prebuilt binaries; `gradle/wrapper/gradle-wrapper.jar` is the likely finding.
    It is normally accepted when it matches the official checksum.
-5. **Merge request.** Open it against `gitlab.com/fdroid/fdroiddata` with `metadata/chat.alloy.yml`. Review takes weeks.
+5. **Merge request.** Open it against `gitlab.com/fdroid/fdroiddata` with `metadata/vn.hce.alloy.yml`. Review takes weeks.
 
 A faster first step is IzzyOnDroid, which serves the signed GitHub release APKs and reads the same metadata.

@@ -155,8 +155,15 @@ Builds signed ad hoc (`codesign -s -`) have a designated requirement tied direct
 #### Transition to the stable identity and the one-time "Always Allow" prompt
 Releases are signed with a stable self-signed certificate with Subject `CN=Alloy Release Signing, O=Alloy`. All builds signed with this certificate share the exact same designated requirement:
 ```
-identifier "chat.alloy" and certificate root = H"f0dca1b41b0a35fb57bd2120c062e95fa0559963"
+identifier "vn.hce.alloy" and certificate root = H"f0dca1b41b0a35fb57bd2120c062e95fa0559963"
 ```
+
+> Releases up to 0.2.9 were signed with the bundle identifier `chat.alloy` and therefore carried
+> `identifier "chat.alloy" and certificate root = H"f0dca1b41b0a35fb57bd2120c062e95fa0559963"`. 0.2.10 renamed the
+> identifier to `vn.hce.alloy`, so its designated requirement differs from the one that guards every keychain item
+> created by 0.2.9 and earlier. The first 0.2.10 launch shows one macOS keychain dialog; **"Always Allow"** re-binds the
+> existing items to the new identity and later updates do not prompt again. The keyring service name stays `chat.alloy`,
+> so no secret is lost.
 
 When users upgrade from an earlier ad-hoc signed release (e.g. v0.2.2 / v0.2.3) to the first release signed with this stable identity:
 1. macOS detects that the designated requirement changed from the previous ad-hoc `cdhash`.
@@ -273,9 +280,18 @@ adb install -r alloy-android.apk
 > **Note on Signature Conflicts:**  
 > Android forbids installing a release-signed APK over a debug-signed build (or vice-versa) with error `INSTALL_FAILED_UPDATE_INCOMPATIBLE`. To switch build types:
 > ```bash
-> adb uninstall chat.alloy
+> adb uninstall vn.hce.alloy
 > adb install alloy-android.apk
 > ```
+>
+> **0.2.10 renamed the Android application id from `chat.alloy` to `vn.hce.alloy`.** The old id is a different app to
+> the OS: `adb install -r` fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`, so users must uninstall `chat.alloy` once
+> before installing 0.2.10. That uninstall deletes the app-private directory `/data/user/0/chat.alloy`, including the
+> local E2EE store; there is no data migration, so the device signs in again and re-verifies. The Matrix account data
+> (`chat.alloy.prefs`, `chat.alloy.room_note`, `chat.alloy.room_tags`) and the keyring service names are unchanged and
+> come back from the server after login. Desktop data does not carry over either: the identifier also selects
+> `$APPDATA/vn.hce.alloy`, `$APPLOCALDATA`, `$APPCACHE` and `$APPLOG`, so 0.2.10 starts with an empty local store, a cold
+> media cache and no local read marks. The old `chat.alloy` directories are left in place, not deleted.
 
 ---
 
