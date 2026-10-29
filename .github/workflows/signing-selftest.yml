@@ -1,0 +1,56 @@
+name: Android Signing Self-Test
+
+# Checks the four Android signing secrets without building an APK: the keystore must decode, the
+# store password, alias and key password must work, and the key must produce a certificate request.
+# Prints only public certificate data, never the keystore or a password.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Validate the release keystore
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Decode and inspect the keystore
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          tmp=$(mktemp -d)
+          trap 'rm -rf "$tmp"' EXIT
+
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            [ -n "${!name:-}" ] || { echo "::error::$name is not set"; exit 1; }
+          done
+
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$tmp/release.jks"
+          echo "keystore decoded: $(wc -c < "$tmp/release.jks") bytes"
+
+          # certreq needs the key password, so a wrong alias or key password fails here.
+          keytool -certreq \
+            -keystore "$tmp/release.jks" \
+            -alias "$ANDROID_KEY_ALIAS" \
+            -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+            -keypass "$ANDROID_KEY_PASSWORD" \
+            -file "$tmp/request.csr" >/dev/null
+          echo "store password, alias and key password all accepted"
+
+          keytool -list -v \
+            -keystore "$tmp/release.jks" \
+            -alias "$ANDROID_KEY_ALIAS" \
+            -storepass "$ANDROID_KEYSTORE_PASSWORD" |
+            grep -E '^(Alias name|Owner|Valid from)|SHA256:' | sed 's/^[[:space:]]*/  /'
