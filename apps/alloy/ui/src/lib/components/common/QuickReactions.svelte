@@ -4,6 +4,8 @@
   interface Props {
     /** Emoji to offer, in order (the user's quick-reaction list). */
     emojis: readonly string[];
+    /** Show only the first `limit` emoji: the narrow bar keeps the most-used ones, in the user's order. */
+    limit?: number;
     /** Emoji the current user already reacted with; shown pressed. */
     active?: readonly string[];
     onpick: (emoji: string) => void;
@@ -13,11 +15,12 @@
     size?: 'compact' | 'touch';
   }
 
-  let { emojis, active = [], onpick, onmore, size = 'compact' }: Props = $props();
+  let { emojis, limit, active = [], onpick, onmore, size = 'compact' }: Props = $props();
+  const shown = $derived(limit === undefined ? emojis : emojis.slice(0, limit));
 </script>
 
 <div class="bar" class:touch={size === 'touch'} role="group" aria-label="Quick reactions">
-  {#each emojis as emoji (emoji)}
+  {#each shown as emoji (emoji)}
     <button
       type="button"
       class="emoji"

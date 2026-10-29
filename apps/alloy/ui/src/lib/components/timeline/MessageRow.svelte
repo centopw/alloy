@@ -3,7 +3,7 @@
   import type { TimelineItemDto } from '$lib/generated';
   import { Avatar, QuickReactions, UserName } from '../common';
   import Icon from '$lib/icons/Icon.svelte';
-  import { Reply, Pencil, Trash2, Copy, MessageSquare, Download, Check, CheckCheck, Users, Forward, Pin, PinOff, Flag } from '$lib/icons';
+  import { Reply, Pencil, Trash2, Copy, MessageSquare, Download, Check, CheckCheck, Users, Forward, Pin, PinOff, Flag, Ellipsis } from '$lib/icons';
   import { timelineStore } from '$lib/stores/timeline.svelte';
   import { threadStore } from '$lib/stores/thread.svelte';
   import { sanitizeHtml, SPOILER_SELECTOR } from '$lib/content/html';
@@ -30,7 +30,7 @@
   import { profileCard } from '$lib/stores/profileCard.svelte';
   import { canCopyImage, copyImageFromUrl } from '$lib/platform/clipboard';
   import { fetchMediaFile } from '$lib/content/mediaFetch';
-  import type { MenuItem, MenuOptions } from '$lib/stores/contextmenu.svelte';
+  import { contextMenu, type MenuItem, type MenuOptions } from '$lib/stores/contextmenu.svelte';
   import MediaView from './MediaView.svelte';
   import AudioPlayer from './AudioPlayer.svelte';
   import AlbumGrid from './AlbumGrid.svelte';
@@ -134,13 +134,17 @@
    * outside the content. Measured once when the bar is shown, never per pointer move.
    */
   let toolbarLeft = $state<number | null>(null);
-  /** The bar drops its quick-reaction group when the full bar cannot fit beside the message. */
+  let toolbarTop = $state<number | null>(null);
+  /** Compact = three reactions, reply and an overflow menu; derived on every show, never remembered. */
   let compact = $state(false);
+  /** Compact keeps the three most-used reactions; the picker chevron still reaches the rest. */
+  const COMPACT_REACTIONS = 3;
 
   $effect(() => {
     // A layout switch invalidates a measured position; the CSS fallback takes over again.
     void layout;
     toolbarLeft = null;
+    toolbarTop = null;
     compact = false;
   });
 
@@ -172,9 +176,15 @@
     const bar = row.querySelector<HTMLElement>('.toolbar');
     const bubble = row.querySelector<HTMLElement>('.bubble');
     if (!anchor || !bar) return;
-    // The bar only has a width once the hover rule has made it visible.
+    // The CSS keeps the bar laid out while it is hidden, so its width is readable before hover paints it.
     await new Promise<void>((done) => requestAnimationFrame(() => done()));
     if (bar.offsetWidth === 0) return;
+
+    // Which bar fits follows the current pane and is never remembered: a row first measured while
+    // the pane was narrow used to stay compact after the pane grew back.
+    compact = false;
+    await flush();
+    await new Promise<void>((done) => requestAnimationFrame(() => done()));
 
     const boxed = (value: string) => Number.parseFloat(value) || 0;
     const anchorRect = anchor.getBoundingClientRect();
@@ -183,6 +193,7 @@
     const rowContentLeft = rowRect.left + boxed(rowStyle.paddingLeft) + boxed(rowStyle.borderLeftWidth);
     const rowContentRight = rowRect.right - boxed(rowStyle.paddingRight) - boxed(rowStyle.borderRightWidth);
     const gap = 8; // --alloy-spacing-scale-2, the same gap the CSS fallback uses
+    const pinnedGap = 4; // tier C: pinned just inside the row's content edge
     const targetRect =
       layout === 'bubbles' ? (bubble?.getBoundingClientRect() ?? anchorRect) : anchorRect;
     // Own bubbles hang their actions on the left of the message; every other case puts them right.
@@ -191,19 +202,51 @@
       ? anchorRect.left - gap - (rowContentLeft + gap)
       : rowContentRight - gap - (anchorRect.right + gap);
 
-    if (!compact && bar.offsetWidth > available) {
+    if (bar.offsetWidth > available) {
       compact = true;
       // Flush the DOM so the next measurement sees the narrow bar, not the one being replaced.
       await flush();
       await new Promise<void>((done) => requestAnimationFrame(() => done()));
     }
 
+    const width = bar.offsetWidth;
+    // Tier C: not even the compact bar fits beside the message, so it is pinned inside the row.
+    const pinned = compact && width > available;
     const origin = anchorRect.left + boxed(getComputedStyle(anchor).borderLeftWidth);
-    // A compact bar always fits; a full-width message still clamps inside the row's content box.
-    const left = mirrored
-      ? Math.max(targetRect.left - origin - gap - bar.offsetWidth, rowContentLeft + gap - origin)
-      : Math.min(targetRect.right - origin + gap, rowContentRight - gap - bar.offsetWidth - origin);
+    const left = pinned
+      ? mirrored
+        ? rowContentLeft + pinnedGap - origin
+        : rowContentRight - pinnedGap - width - origin
+      : mirrored
+        ? Math.max(targetRect.left - origin - gap - width, rowContentLeft + gap - origin)
+        : Math.min(targetRect.right - origin + gap, rowContentRight - gap - width - origin);
     toolbarLeft = Math.round(left);
+
+    // Vertical: the bar's centre follows the message's first line, not the bubble's centre — on a
+    // five-line message the centre would sit in the middle of the text. The pinned bar is the one
+    // case that overlaps the message, so it hangs on the top edge and covers the corner, never the
+    // first characters.
+    if (layout === 'bubbles') {
+      const target = bubble ?? anchor;
+      const targetRect2 = target.getBoundingClientRect();
+      if (pinned) {
+        toolbarTop = Math.round(targetRect2.top - bar.offsetHeight + 8 - anchorRect.top);
+      } else {
+        const style = getComputedStyle(target);
+        const line = Number.parseFloat(style.lineHeight) || Number.parseFloat(style.fontSize) * 1.4;
+        const paddingTop = Number.parseFloat(style.paddingTop) || 0;
+        const centre = targetRect2.top + paddingTop + line / 2;
+        toolbarTop = Math.round(centre - bar.offsetHeight / 2 - anchorRect.top);
+      }
+    } else {
+      toolbarTop = null;
+    }
+  }
+
+  /** The compact bar's overflow: the same menu right-click offers, so no action is ever unreachable. */
+  function openMoreActions(button: HTMLElement) {
+    const rect = button.getBoundingClientRect();
+    contextMenu.open(menuItems(), { x: rect.left, y: rect.bottom }, menuOptions());
   }
 
   /** Opens the shared emoji picker beside `anchor`; choosing an emoji toggles that reaction. */
@@ -524,6 +567,7 @@
     class:mention={item.mentions_me && !item.is_own}
     style:--toolbar-left={toolbarLeft === null ? undefined : `${toolbarLeft}px`}
     style:--toolbar-right={toolbarLeft === null ? undefined : 'auto'}
+    style:--toolbar-top={toolbarTop === null ? undefined : `${toolbarTop}px`}
     style:transform={swipeX > 0 ? `translateX(${swipeX}px)` : undefined}
     data-layout={layout}
     data-event-id={item.event_id ?? undefined}
@@ -680,38 +724,49 @@
         </div>
       {#if canAct}
         <div class="toolbar" role="toolbar" aria-label="Message actions">
-          {#if !compact}
-            <!-- The quick-reaction group is the widest part of the bar. When the full bar does not
-                 fit beside the message, the bar collapses to the icon actions; the same reactions
-                 stay one click away in the context menu. -->
-            <span class="quick">
-              <QuickReactions
-                emojis={prefs.quickReactions}
-                active={myReactions}
-                onpick={reactWith}
-                onmore={() => rowEl && openReactions(rowEl.getBoundingClientRect())}
-              />
-              <span class="tool-sep" aria-hidden="true"></span>
-            </span>
-          {/if}
+          <!-- Reactions lead in both states. Compact narrows them to the three the user put first and
+               keeps the picker chevron, so the full emoji set is never more than one click away. -->
+          <span class="quick">
+            <QuickReactions
+              emojis={prefs.quickReactions}
+              limit={compact ? COMPACT_REACTIONS : undefined}
+              active={myReactions}
+              onpick={reactWith}
+              onmore={() => rowEl && openReactions(rowEl.getBoundingClientRect())}
+            />
+            <span class="tool-sep" aria-hidden="true"></span>
+          </span>
           {#if !inThread}
             <button type="button" aria-label="Reply" title="Reply" onclick={() => timelineStore.startReply(item)}>
               <Icon icon={Reply} size={16} />
             </button>
           {/if}
-          {#if item.event_id && !inThread}
-            <button type="button" aria-label="Reply in thread" title="Reply in thread" onclick={openThread}>
-              <Icon icon={MessageSquare} size={16} />
-            </button>
-          {/if}
-          {#if canEdit}
-            <button type="button" aria-label="Edit" title="Edit" onclick={() => timelineStore.startEdit(item)}>
-              <Icon icon={Pencil} size={16} />
-            </button>
-          {/if}
-          {#if canDelete}
-            <button type="button" aria-label="Delete" title="Delete" onclick={() => (timelineStore.pendingDelete = [item])}>
-              <Icon icon={Trash2} size={16} />
+          {#if !compact}
+            {#if item.event_id && !inThread}
+              <button type="button" aria-label="Reply in thread" title="Reply in thread" onclick={openThread}>
+                <Icon icon={MessageSquare} size={16} />
+              </button>
+            {/if}
+            {#if canEdit}
+              <button type="button" aria-label="Edit" title="Edit" onclick={() => timelineStore.startEdit(item)}>
+                <Icon icon={Pencil} size={16} />
+              </button>
+            {/if}
+            {#if canDelete}
+              <button type="button" aria-label="Delete" title="Delete" onclick={() => (timelineStore.pendingDelete = [item])}>
+                <Icon icon={Trash2} size={16} />
+              </button>
+            {/if}
+          {:else}
+            <!-- Compact folds thread, edit and delete into the menu right-click already offers. -->
+            <button
+              type="button"
+              aria-label="More actions"
+              title="More actions"
+              aria-haspopup="menu"
+              onclick={(e) => openMoreActions(e.currentTarget as HTMLElement)}
+            >
+              <Icon icon={Ellipsis} size={16} />
             </button>
           {/if}
         </div>
@@ -1115,7 +1170,15 @@
     position: absolute;
     top: calc(-1 * var(--alloy-spacing-scale-3));
     right: var(--alloy-spacing-scale-4);
-    display: none;
+    /* Laid out but invisible: the placement is measured from the full bar's width, and `display`
+       cannot transition, so the bar fades and rises instead of popping in. */
+    display: flex;
+    opacity: 0;
+    visibility: hidden;
+    translate: 0 4px;
+    transition:
+      opacity 80ms cubic-bezier(0.4, 0, 1, 1),
+      visibility 0s linear 80ms;
     align-items: center;
     gap: 2px;
     padding: 3px;
@@ -1149,7 +1212,8 @@
     max-width: none;
   }
   .row[data-layout='bubbles'] .toolbar {
-    top: calc(-1 * var(--alloy-spacing-scale-3));
+    /* The measured first-line centre; the calc is the pre-measurement fallback. */
+    top: var(--toolbar-top, calc(-1 * var(--alloy-spacing-scale-3)));
     right: var(--toolbar-right, auto);
     left: var(--toolbar-left, calc(100% + var(--alloy-spacing-scale-2)));
   }
@@ -1174,7 +1238,25 @@
   @media (min-width: 900px) and (hover: hover) {
     .row:hover .toolbar,
     .row:focus-within .toolbar {
-      display: flex;
+      opacity: 1;
+      visibility: visible;
+      translate: 0 0;
+      /* Enter: decelerate in 120ms, no delay (a delay reads as lag). Exit stays opacity-only so the
+         bar does not slide out from under a pointer that is leaving. */
+      transition:
+        opacity 120ms cubic-bezier(0.2, 0, 0, 1),
+        translate 120ms cubic-bezier(0.2, 0, 0, 1),
+        visibility 0s;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .toolbar,
+    .row:hover .toolbar,
+    .row:focus-within .toolbar {
+      translate: none;
+      transition:
+        opacity 1ms linear,
+        visibility 0s;
     }
   }
   .tool-sep {

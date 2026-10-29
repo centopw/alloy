@@ -70,17 +70,44 @@ describe('message actions', () => {
     // and a row-filling message leaves no room outside its content.
     expect(rowSource).toContain('function placeToolbar');
     expect(rowSource).toContain("layout === 'bubbles' ? (bubble?.getBoundingClientRect() ?? anchorRect) : anchorRect");
-    expect(rowSource).toContain('rowContentRight - gap - bar.offsetWidth - origin');
+    expect(rowSource).toContain('rowContentRight - gap - width - origin');
     expect(rowSource).toContain("addEventListener('mouseenter', show)");
   });
 
-  it('drops the quick-reaction group before clamping over the message', () => {
-    // The bar is one fixed width with quick reactions; on an own message beside a wide bubble that
-    // width does not fit, and clamping alone would cover the text instead of clipping it.
-    expect(rowSource).toContain('if (!compact && bar.offsetWidth > available)');
-    expect(rowSource).toMatch(/\{#if !compact\}[\s\S]*?<QuickReactions/);
+  it('derives the compact bar from the current width every time', () => {
+    // A remembered `compact` left a row that was first hovered in a narrow pane compact after the
+    // pane grew back: 96px of bar with 400px free.
+    expect(rowSource).toContain('compact = false;\n    await flush();');
+    expect(rowSource).toContain('if (bar.offsetWidth > available) {');
+    expect(rowSource).not.toContain('if (!compact && bar.offsetWidth > available)');
+  });
+
+  it('keeps reactions, reply and an overflow in the compact bar', () => {
+    // Compact used to drop the quick reactions — the most-used action — and keep thread/edit/delete.
+    expect(rowSource).toContain('limit={compact ? COMPACT_REACTIONS : undefined}');
+    expect(rowSource).toContain('const COMPACT_REACTIONS = 3;');
+    expect(rowSource).toContain("aria-label=\"More actions\"");
+    // The overflow opens the same menu right-click offers, so thread/edit/delete stay reachable.
+    expect(rowSource).toContain('contextMenu.open(menuItems(), { x: rect.left, y: rect.bottom }, menuOptions())');
+    expect(rowSource).toMatch(/\{:else\}[\s\S]*?aria-label="More actions"/);
     expect(rowSource).toContain('class="quick"');
     expect(rowSource).toContain('.quick {\n    display: contents;');
+  });
+
+  it('pins the bar inside the row when even the compact bar does not fit', () => {
+    expect(rowSource).toContain('const pinned = compact && width > available;');
+    expect(rowSource).toContain('rowContentLeft + pinnedGap - origin');
+    expect(rowSource).toContain('rowContentRight - pinnedGap - width - origin');
+  });
+
+  it('centres the bar on the message first line and animates without moving the placement', () => {
+    expect(rowSource).toContain('const centre = targetRect2.top + paddingTop + line / 2;');
+    expect(rowSource).toContain('toolbarTop = Math.round(centre - bar.offsetHeight / 2 - anchorRect.top);');
+    expect(rowSource).toContain('top: var(--toolbar-top, calc(-1 * var(--alloy-spacing-scale-3)));');
+    // The bar is laid out while hidden so its width can be measured, and fades rather than pops.
+    expect(rowSource).toContain('visibility: hidden;');
+    expect(rowSource).toContain('transition:\n      opacity 80ms cubic-bezier(0.4, 0, 1, 1),');
+    expect(rowSource).toContain('@media (prefers-reduced-motion: reduce) {');
   });
 
   it('never shadows the Svelte scheduler with the read-tick snippet', () => {
