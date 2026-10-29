@@ -22,7 +22,7 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
   import Icon from '$lib/icons/Icon.svelte';
-  import { Pause, Play } from '$lib/icons';
+  import { Pause, Play, Download } from '$lib/icons';
   import { prefs, type VoiceSpeed } from '$lib/stores/prefs.svelte';
   import { barIndexAt, downsample, fallbackBars } from '$lib/content/waveform';
   import { fetchMediaFile } from '$lib/content/mediaFetch';
@@ -35,6 +35,8 @@
     durationMs?: number | null;
     waveform?: readonly number[] | null;
     voice?: boolean;
+    /** Saves the audio file; omitted where the caller cannot download. */
+    ondownload?: (() => void) | null;
   }
   let props: Props = $props();
   let audioEl: HTMLAudioElement | undefined = $state();
@@ -360,6 +362,19 @@
     >
       {prefs.voiceSpeed}x
     </button>
+
+    <!-- Audio is a file like any other: the tile carries its own save control (#114). -->
+    {#if props.ondownload}
+      <button
+        type="button"
+        class="download-btn"
+        aria-label="Download {props.body || 'audio'}"
+        title="Download"
+        onclick={props.ondownload}
+      >
+        <Icon icon={Download} size={16} />
+      </button>
+    {/if}
   </div>
 </div>
 
@@ -547,6 +562,30 @@
   }
 
   .speed-btn:focus-visible {
+    outline: 2px solid var(--alloy-color-accent-primary);
+    outline-offset: 2px;
+  }
+
+  /* Same 28px affordance and radius as the file tile's save control, so both tiles read alike. */
+  .download-btn {
+    display: inline-grid;
+    flex: none;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--alloy-radii-md);
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+  }
+
+  .download-btn:hover {
+    background: color-mix(in srgb, currentColor 10%, transparent);
+  }
+
+  .download-btn:focus-visible {
     outline: 2px solid var(--alloy-color-accent-primary);
     outline-offset: 2px;
   }

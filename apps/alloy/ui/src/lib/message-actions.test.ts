@@ -16,6 +16,10 @@ const mediaSource = readFileSync(
   resolve(process.cwd(), 'src/lib/components/timeline/MediaView.svelte'),
   'utf8'
 );
+const audioSource = readFileSync(
+  resolve(process.cwd(), 'src/lib/components/timeline/AudioPlayer.svelte'),
+  'utf8'
+);
 
 describe('message actions', () => {
   it('renders the toolbar inside the anchor sized to the message', () => {
@@ -36,10 +40,40 @@ describe('message actions', () => {
     expect(incoming, 'the bubbles toolbar has a rule').toBeTruthy();
     expect(own, 'own messages have their own rule').toBeTruthy();
     // Incoming bubbles are left-aligned, so the toolbar comes after them; own messages mirror it.
-    expect(incoming).toContain('left: calc(100%');
-    expect(incoming).toContain('right: auto');
-    expect(own).toContain('right: calc(100%');
-    expect(own).toContain('left: auto');
+    // The measured --toolbar-left/--toolbar-right wins once the row has hovered; the calc() is the
+    // first-paint fallback for the same geometry.
+    expect(incoming).toContain('left: var(--toolbar-left, calc(100%');
+    expect(incoming).toContain('right: var(--toolbar-right, auto)');
+    expect(own).toContain('right: var(--toolbar-right, calc(100%');
+    expect(own).toContain('left: var(--toolbar-left, auto)');
+  });
+
+  it('measures the bar against the message and clamps it inside the row', () => {
+    // Placement is a measurement, not a constant: the anchor can be wider than a wrapped bubble,
+    // and a row-filling message leaves no room outside its content.
+    expect(rowSource).toContain('function placeToolbar');
+    expect(rowSource).toContain("layout === 'bubbles' ? (bubble?.getBoundingClientRect() ?? anchorRect) : anchorRect");
+    expect(rowSource).toContain('rowContentRight - gap - bar.offsetWidth - origin');
+    expect(rowSource).toContain("addEventListener('mouseenter', show)");
+  });
+
+  it('drops the quick-reaction group before clamping over the message', () => {
+    // The bar is one fixed width with quick reactions; on an own message beside a wide bubble that
+    // width does not fit, and clamping alone would cover the text instead of clipping it.
+    expect(rowSource).toContain('if (!compact && bar.offsetWidth > available)');
+    expect(rowSource).toMatch(/\{#if !compact\}[\s\S]*?<QuickReactions/);
+    expect(rowSource).toContain('class="quick"');
+    expect(rowSource).toContain('.quick {\n    display: contents;');
+  });
+
+  it('never shadows the Svelte scheduler with the read-tick snippet', () => {
+    // The collapse awaits the scheduler to flush the narrow bar. A snippet named `tick` shadows that
+    // import in the render scope, so the first collapse throws `invalid_snippet_arguments` and the
+    // bar silently stays at the CSS fallback position.
+    expect(rowSource).toContain("import { tick as flush } from 'svelte'");
+    expect(rowSource).toContain('await flush()');
+    expect(rowSource).toContain('{#snippet readTicks()}');
+    expect(rowSource).not.toContain('{#snippet tick()}');
   });
 });
 
@@ -53,5 +87,22 @@ describe('file tiles', () => {
   it('is wired to the row download path rather than a second implementation', () => {
     expect(rowSource).toContain('ondownload={downloadMediaItem}');
     expect(rowSource).toContain('function downloadMediaItem()');
+  });
+
+});
+
+describe('audio tiles', () => {
+  it('offers a labelled download control like a file tile', () => {
+    expect(audioSource).toContain('class="download-btn"');
+    expect(audioSource).toContain('aria-label="Download {props.body || \'audio\'}"');
+    expect(audioSource).toContain('onclick={props.ondownload}');
+  });
+
+  it('is wired to the same row download path', () => {
+    const audioStart = rowSource.indexOf('<AudioPlayer');
+    const audioEnd = rowSource.indexOf('/>', audioStart);
+    expect(audioStart, 'the row renders an audio player').toBeGreaterThanOrEqual(0);
+    expect(audioEnd, 'the audio player element closes').toBeGreaterThan(audioStart);
+    expect(rowSource.slice(audioStart, audioEnd)).toContain('ondownload={downloadMediaItem}');
   });
 });

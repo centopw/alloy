@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick as flush } from 'svelte';
   import type { TimelineItemDto } from '$lib/generated';
   import { Avatar, QuickReactions, UserName } from '../common';
   import Icon from '$lib/icons/Icon.svelte';
@@ -122,6 +123,84 @@
   const selected = $derived(!!item.event_id && timelineStore.selectedIds.includes(item.event_id));
 
   let rowEl = $state<HTMLElement | undefined>();
+
+  /**
+   * Places the action bar against the message itself, not against its containing box: a wrapped
+   * bubble makes the anchor wider than the bubble, and a row-filling flat message leaves no room
+   * outside the content. Measured once when the bar is shown, never per pointer move.
+   */
+  let toolbarLeft = $state<number | null>(null);
+  /** The bar drops its quick-reaction group when the full bar cannot fit beside the message. */
+  let compact = $state(false);
+
+  $effect(() => {
+    // A layout switch invalidates a measured position; the CSS fallback takes over again.
+    void layout;
+    toolbarLeft = null;
+    compact = false;
+  });
+
+  $effect(() => {
+    // Registered here rather than in markup: the row is a container, not a widget, and the handlers
+    // only exist to time the one measurement the placement needs.
+    const row = rowEl;
+    if (!row) return;
+    const show = () => placeToolbar();
+    row.addEventListener('mouseenter', show);
+    row.addEventListener('focusin', show);
+    return () => {
+      row.removeEventListener('mouseenter', show);
+      row.removeEventListener('focusin', show);
+    };
+  });
+
+  /**
+   * Places the action bar against the message itself, not against its containing box: a wrapped
+   * bubble makes the anchor wider than the bubble, and a row-filling message leaves no room outside
+   * the content. The full bar collapses to its icon actions when the sender side has no room for it;
+   * the quick reactions stay one click away in the context menu. Measured once when the bar is
+   * shown, never per pointer move.
+   */
+  async function placeToolbar() {
+    const row = rowEl;
+    if (!row) return;
+    const anchor = row.querySelector<HTMLElement>('.message-anchor');
+    const bar = row.querySelector<HTMLElement>('.toolbar');
+    const bubble = row.querySelector<HTMLElement>('.bubble');
+    if (!anchor || !bar) return;
+    // The bar only has a width once the hover rule has made it visible.
+    await new Promise<void>((done) => requestAnimationFrame(() => done()));
+    if (bar.offsetWidth === 0) return;
+
+    const boxed = (value: string) => Number.parseFloat(value) || 0;
+    const anchorRect = anchor.getBoundingClientRect();
+    const rowRect = row.getBoundingClientRect();
+    const rowStyle = getComputedStyle(row);
+    const rowContentLeft = rowRect.left + boxed(rowStyle.paddingLeft) + boxed(rowStyle.borderLeftWidth);
+    const rowContentRight = rowRect.right - boxed(rowStyle.paddingRight) - boxed(rowStyle.borderRightWidth);
+    const gap = 8; // --alloy-spacing-scale-2, the same gap the CSS fallback uses
+    const targetRect =
+      layout === 'bubbles' ? (bubble?.getBoundingClientRect() ?? anchorRect) : anchorRect;
+    // Own bubbles hang their actions on the left of the message; every other case puts them right.
+    const mirrored = layout === 'bubbles' && item.is_own;
+    const available = mirrored
+      ? anchorRect.left - gap - (rowContentLeft + gap)
+      : rowContentRight - gap - (anchorRect.right + gap);
+
+    if (!compact && bar.offsetWidth > available) {
+      compact = true;
+      // Flush the DOM so the next measurement sees the narrow bar, not the one being replaced.
+      await flush();
+      await new Promise<void>((done) => requestAnimationFrame(() => done()));
+    }
+
+    const origin = anchorRect.left + boxed(getComputedStyle(anchor).borderLeftWidth);
+    // A compact bar always fits; a full-width message still clamps inside the row's content box.
+    const left = mirrored
+      ? Math.max(targetRect.left - origin - gap - bar.offsetWidth, rowContentLeft + gap - origin)
+      : Math.min(targetRect.right - origin + gap, rowContentRight - gap - bar.offsetWidth - origin);
+    toolbarLeft = Math.round(left);
+  }
 
   /** Opens the shared emoji picker beside `anchor`; choosing an emoji toggles that reaction. */
   function openReactions(anchor: DOMRect) {
@@ -401,7 +480,7 @@
   }
 </script>
 
-{#snippet tick()}
+{#snippet readTicks()}
   {#if showTick}
     <span
       class="tick"
@@ -438,6 +517,8 @@
     class:selected
     onclickcapture={onRowClickCapture}
     class:mention={item.mentions_me && !item.is_own}
+    style:--toolbar-left={toolbarLeft === null ? undefined : `${toolbarLeft}px`}
+    style:--toolbar-right={toolbarLeft === null ? undefined : 'auto'}
     style:transform={swipeX > 0 ? `translateX(${swipeX}px)` : undefined}
     data-layout={layout}
     data-event-id={item.event_id ?? undefined}
@@ -458,7 +539,7 @@
     {/if}
     <div class="gutter">
       {#if layout === 'irc' || (layout === 'modern' && grouped)}
-        <span class="gutter-time">{time}{@render tick()}</span>
+        <span class="gutter-time">{time}{@render readTicks()}</span>
       {:else if layout === 'modern' || (!grouped && !item.is_own)}
         <button type="button" class="avatar-btn" aria-label="Show profile of {senderName}" onclick={openSenderProfile}>
           <Avatar
@@ -475,7 +556,7 @@
       {#if showHead}
         <div class="head">
           <UserName userId={item.sender} displayName={item.sender_display_name} roomId={timelineStore.roomId} interactive />
-          {#if layout !== 'bubbles'}<span class="ts">{time}</span>{@render tick()}{/if}
+          {#if layout !== 'bubbles'}<span class="ts">{time}</span>{@render readTicks()}{/if}
         </div>
       {/if}
 
@@ -515,6 +596,7 @@
                   durationMs={item.content.data.duration_ms ?? null}
                   waveform={item.content.data.waveform ?? null}
                   voice={item.content.data.voice ?? false}
+                  ondownload={downloadMediaItem}
                 />
               {:else}
                 <MediaView
@@ -588,18 +670,25 @@
             </div>
           {/if}
 
-          <span class="bubble-time">{time}{@render tick()}</span>
+          <span class="bubble-time">{time}{@render readTicks()}</span>
           </div>
         </div>
       {#if canAct}
         <div class="toolbar" role="toolbar" aria-label="Message actions">
-          <QuickReactions
-            emojis={prefs.quickReactions}
-            active={myReactions}
-            onpick={reactWith}
-            onmore={() => rowEl && openReactions(rowEl.getBoundingClientRect())}
-          />
-          <span class="tool-sep" aria-hidden="true"></span>
+          {#if !compact}
+            <!-- The quick-reaction group is the widest part of the bar. When the full bar does not
+                 fit beside the message, the bar collapses to the icon actions; the same reactions
+                 stay one click away in the context menu. -->
+            <span class="quick">
+              <QuickReactions
+                emojis={prefs.quickReactions}
+                active={myReactions}
+                onpick={reactWith}
+                onmore={() => rowEl && openReactions(rowEl.getBoundingClientRect())}
+              />
+              <span class="tool-sep" aria-hidden="true"></span>
+            </span>
+          {/if}
           {#if !inThread}
             <button type="button" aria-label="Reply" title="Reply" onclick={() => timelineStore.startReply(item)}>
               <Icon icon={Reply} size={16} />
@@ -1034,9 +1123,9 @@
     z-index: 2;
   }
 
-  /* Actions belong to the message, not to the row: the anchor is sized to the bubble, so in the
-     bubbles layout the toolbar sits just outside the bubble's top corner instead of at the far
-     right of a full-width row. */
+  /* Actions belong to the message, not to the row: the anchor is sized to the content, so the
+     toolbar sits just outside the message's top corner instead of at the far right of a wide row.
+     Flat layouts draw no bubble, so their content block is the text body or the attachment card. */
   .message-anchor {
     display: contents;
   }
@@ -1048,12 +1137,26 @@
   }
   .row[data-layout='bubbles'] .toolbar {
     top: calc(-1 * var(--alloy-spacing-scale-3));
-    right: auto;
-    left: calc(100% + var(--alloy-spacing-scale-2));
+    right: var(--toolbar-right, auto);
+    left: var(--toolbar-left, calc(100% + var(--alloy-spacing-scale-2)));
   }
   .row.own[data-layout='bubbles'] .toolbar {
-    left: auto;
-    right: calc(100% + var(--alloy-spacing-scale-2));
+    left: var(--toolbar-left, auto);
+    right: var(--toolbar-right, calc(100% + var(--alloy-spacing-scale-2)));
+  }
+  /* Flat layouts: the content block hugs its text, so the bar attaches 8px after the content and
+     level with its first line. Own messages are left-aligned there too, so the bar stays on the
+     right; only the bubbles layout mirrors it. --toolbar-* is the measured position. */
+  .row:not([data-layout='bubbles']) .message-anchor {
+    position: relative;
+    display: block;
+    width: fit-content;
+    max-width: 100%;
+  }
+  .row:not([data-layout='bubbles']) .toolbar {
+    top: 0;
+    right: var(--toolbar-right, auto);
+    left: var(--toolbar-left, calc(100% + var(--alloy-spacing-scale-2)));
   }
   @media (min-width: 900px) and (hover: hover) {
     .row:hover .toolbar,
@@ -1066,6 +1169,10 @@
     height: 16px;
     margin: 0 2px;
     background: var(--alloy-color-border-subtle);
+  }
+  /* The group is only a wrapper for the compact rule: its children stay in the toolbar's flex row. */
+  .quick {
+    display: contents;
   }
   .toolbar > button {
     display: inline-grid;
@@ -1260,6 +1367,14 @@
     background: var(--alloy-color-bubble-own-background);
     color: var(--alloy-color-bubble-own-text);
     box-shadow: none;
+  }
+  /* The anchor shrink-wraps the message's unwrapped text, so a bubble capped at 72% of the anchor
+     is narrower than the anchor and would sit at the anchor's start: a ~190px gap to the message
+     column's right edge, with no room beside it for the action bar. Own messages end where the
+     composer ends. */
+  .row.own[data-layout='bubbles'] .bubble,
+  .row.own.replied[data-layout='bubbles'] .message-stack {
+    margin-left: auto;
   }
   .row[data-layout='bubbles'] .bubble .body,
   .row[data-layout='bubbles'] .bubble .edited,
