@@ -382,6 +382,13 @@ export class MockTransport implements Transport {
     };
     items[2].reactions = [{ key: '\u{1F44D}', count: 2, senders: ['@bob:alloy.chat', '@charlie:alloy.chat'], by_me: false }];
     items[4].reply_to = items[3];
+    // A short own reply to a long message: the case where gluing the quote to the bubble used to
+    // open a notch, kept in the demo data so the reply layout has a mobile frame in the walk.
+    items.push(
+      text(6, MOCK_ACCOUNT.user_id, 'Noted, thanks!', 6, {
+        reply_to: items[0],
+      } as Partial<TimelineItemDto>)
+    );
     return items;
   }
 
