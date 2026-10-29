@@ -38,15 +38,21 @@ jobs:
           done
 
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$tmp/release.jks"
-          echo "keystore decoded: $(wc -c < "$tmp/release.jks") bytes"
+          echo "keystore decoded: $(wc -c < "$tmp/release.jks") bytes, header $(head -c 4 "$tmp/release.jks" | od -An -tx1 | tr -d '\n')"
 
           # Never echo the file or a password; keytool errors name the alias or the password, not the value.
-          if ! keytool -list -keystore "$tmp/release.jks" -storepass "$ANDROID_KEYSTORE_PASSWORD" > "$tmp/aliases.txt" 2>&1; then
-            echo "::error::the keystore password or file is wrong"
+          if keytool -list -keystore "$tmp/release.jks" -storepass "$ANDROID_KEYSTORE_PASSWORD" > "$tmp/aliases.txt" 2>&1; then
+            echo "keystore opened with ANDROID_KEYSTORE_PASSWORD"
+          elif keytool -list -keystore "$tmp/release.jks" -storepass "$ANDROID_KEY_PASSWORD" > "$tmp/aliases.txt" 2>&1; then
+            echo "::error::the store opens with ANDROID_KEY_PASSWORD, not ANDROID_KEYSTORE_PASSWORD — the two secrets are swapped"
+            exit 1
+          else
+            echo "::error::neither ANDROID_KEYSTORE_PASSWORD nor ANDROID_KEY_PASSWORD opens the decoded file"
             cat "$tmp/aliases.txt"
+            echo "header 3082/feef = keystore; 2d2d2d2d = base64 of a PEM file pasted into the base64 secret"
             exit 1
           fi
-          echo "keystore opened with ANDROID_KEYSTORE_PASSWORD; entries:"
+          echo "entries:"
           grep -E 'PrivateKeyEntry|SecretKeyEntry|trustedCertEntry' "$tmp/aliases.txt" | sed 's/^[[:space:]]*/  /'
 
           if ! keytool -certreq \
