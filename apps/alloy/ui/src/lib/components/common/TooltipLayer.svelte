@@ -29,6 +29,8 @@
   let shown = $state.raw<Shown | null>(null);
   let timer: number | null = null;
   let lastHiddenAt = 0;
+  /** Set while the document listeners are being torn down: events they still see must not write state. */
+  let disposed = false;
 
   function interactiveFrom(target: EventTarget | null): HTMLElement | null {
     if (!(target instanceof Element)) return null;
@@ -52,10 +54,24 @@
 
   function hide() {
     clearTimer();
+    // Unmounting this layer blurs whatever had focus, and that focusout reaches this handler while
+    // the effect is being destroyed. Writing `shown` there is a state mutation during teardown,
+    // which Svelte rejects; the teardown itself already un-describes the anchor.
+    if (disposed) return;
     if (shown === null) return;
     undescribe(shown);
     lastHiddenAt = Date.now();
     shown = null;
+  }
+
+  /**
+   * Event entry point for hiding. A dialog that removes its DOM blurs the control inside it, and
+   * that `focusout` arrives while Svelte is still tearing the dialog's block effect down — writing
+   * `shown` synchronously there is the `state_unsafe_mutation` the walk recorded. A microtask runs
+   * after that flush, where the write is ordinary state.
+   */
+  function hideSoon() {
+    queueMicrotask(hide);
   }
 
   function show(el: HTMLElement) {
@@ -102,7 +118,7 @@
     const from = interactiveFrom(e.target);
     if (from === null) return;
     if (e.relatedTarget instanceof Node && from.contains(e.relatedTarget)) return;
-    hide();
+    hideSoon();
   }
 
   function onFocusIn(e: FocusEvent) {
@@ -113,33 +129,37 @@
   }
 
   function onFocusOut(e: FocusEvent) {
-    if (interactiveFrom(e.target) !== null) hide();
+    if (interactiveFrom(e.target) !== null) hideSoon();
   }
 
   function onKeyDown(e: KeyboardEvent) {
-    if (e.key === 'Escape') hide();
+    if (e.key === 'Escape') hideSoon();
   }
 
   // Document-level capture listeners: one set for the whole app, active for the layer's lifetime.
   $effect(() => {
+    disposed = false;
     document.addEventListener('pointerover', onPointerOver, true);
     document.addEventListener('pointerout', onPointerOut, true);
-    document.addEventListener('pointerdown', hide, true);
+    document.addEventListener('pointerdown', hideSoon, true);
     document.addEventListener('focusin', onFocusIn, true);
     document.addEventListener('focusout', onFocusOut, true);
     document.addEventListener('keydown', onKeyDown, true);
-    document.addEventListener('scroll', hide, true);
-    window.addEventListener('resize', hide);
+    document.addEventListener('scroll', hideSoon, true);
+    window.addEventListener('resize', hideSoon);
     return () => {
+      // Before the listeners come off: a blur caused by this teardown can still dispatch focusout
+      // synchronously, and `hide()` must be inert by then rather than write state mid-teardown.
+      disposed = true;
+      clearTimer();
       document.removeEventListener('pointerover', onPointerOver, true);
       document.removeEventListener('pointerout', onPointerOut, true);
-      document.removeEventListener('pointerdown', hide, true);
+      document.removeEventListener('pointerdown', hideSoon, true);
       document.removeEventListener('focusin', onFocusIn, true);
       document.removeEventListener('focusout', onFocusOut, true);
       document.removeEventListener('keydown', onKeyDown, true);
-      document.removeEventListener('scroll', hide, true);
-      window.removeEventListener('resize', hide);
-      clearTimer();
+      document.removeEventListener('scroll', hideSoon, true);
+      window.removeEventListener('resize', hideSoon);
       if (shown !== null) undescribe(shown);
     };
   });

@@ -392,6 +392,25 @@ try {
   await page.waitForFunction(() => document.querySelector('[role=tooltip]')?.textContent.includes('Search'), { timeout: 5000 });
   await page.mouse.move(5, 5);
 
+  step('closing a dialog with a tooltip on screen does not write state during teardown');
+  // Removing the focused control blurs it, and that focusout reaches the tooltip layer while Svelte
+  // is still destroying the dialog's effect. The hide must not mutate state in that flush.
+  await page.click('button[aria-label="Settings"]');
+  await page.waitForSelector('[role=dialog]', { visible: true, timeout: 15000 });
+  await page.evaluate(() => [...document.querySelectorAll('[role=dialog] button')].find((b) => b.textContent.trim() === 'Help & About')?.click());
+  await new Promise((r) => setTimeout(r, 500));
+  for (let i = 0; i < 14; i++) {
+    await page.keyboard.press('Tab');
+    await new Promise((r) => setTimeout(r, 120));
+    if (await page.evaluate(() => !!document.querySelector('[data-alloy-tooltip]'))) break;
+  }
+  if (!(await page.evaluate(() => !!document.querySelector('[data-alloy-tooltip]')))) throw new Error('no tooltip was shown, so the teardown path was not exercised');
+  await page.keyboard.press('Escape');
+  await new Promise((r) => setTimeout(r, 400));
+  if (pageErrors.some((m) => m.includes('state_unsafe_mutation'))) {
+    throw new Error('tearing the dialog down with a tooltip visible wrote state during teardown');
+  }
+
   step('clicking a sender name opens the profile card');
   await page.evaluate(() => [...document.querySelectorAll('.row button.alloy-user-name')].find((b) => !b.closest('.own')).click());
   await page.waitForSelector('[role=dialog][aria-label="User profile"]', { visible: true, timeout: 15000 });
