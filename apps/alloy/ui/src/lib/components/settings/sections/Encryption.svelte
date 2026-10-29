@@ -30,6 +30,12 @@
     void loadInfo();
   });
 
+  // A verification started from this panel finishes while it is open: re-read the session so the
+  // status row and the offer agree instead of leaving a freshly verified device looking unverified.
+  $effect(() => {
+    if (verification.view.step === 'done') void loadInfo();
+  });
+
   async function loadInfo() {
     try {
       info = expect(await client.invoke({ action: 'GetSessionInfo' }), 'SessionInfo').payload.info;
@@ -70,6 +76,10 @@
         <span class="row-value mono">{info.device_id}</span>
       </div>
       <div class="row">
+        <span class="row-label">Status</span>
+        <span class="row-value">{info.verified ? 'Verified' : 'Not verified'}</span>
+      </div>
+      <div class="row">
         <span class="row-label">Session key</span>
         <span class="row-value">
           {#if info.ed25519_key}
@@ -103,17 +113,22 @@
     {/if}
   </SettingGroup>
 
-  <SettingGroup title="Verify this device">
-    <SettingButtonRow
-      label="This device"
-      description="Confirm it is you by comparing emojis with another signed-in device."
-      buttonLabel="Start verification"
-      onclick={() => {
-        onclose();
-        void verification.requestVerification();
-      }}
-    />
-  </SettingGroup>
+  <!-- Only an unverified session is offered verification: showing "Start verification" to a device
+       that is already verified tells the user their trust state is still in doubt. Devices.svelte
+       gates the same control on the same flag. Nothing renders while the state is unknown. -->
+  {#if info && !info.verified}
+    <SettingGroup title="Verify this device">
+      <SettingButtonRow
+        label="This device"
+        description="Confirm it is you by comparing emojis with another signed-in device."
+        buttonLabel="Start verification"
+        onclick={() => {
+          onclose();
+          void verification.requestVerification();
+        }}
+      />
+    </SettingGroup>
+  {/if}
 
   <SettingGroup title="Recovery key">
     <div class="recovery">
