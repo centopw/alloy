@@ -1138,7 +1138,15 @@
     position: relative;
     display: block;
     width: fit-content;
-    max-width: 100%;
+    /* The cap belongs here, not on the bubble: in a shrink-to-fit box a 72% child resolves against
+       the anchor's own intrinsic width, so a short message was capped at 72% of its own text and
+       wrapped into a narrow column, growing every row and stalling the history backfill. */
+    max-width: var(--alloy-bubble-max-width);
+  }
+  .row[data-layout='bubbles'] .message-anchor .bubble {
+    /* The anchor already caps the width. A percentage here would resolve against the anchor's own
+       intrinsic width and collapse every short message to its narrowest word. */
+    max-width: none;
   }
   .row[data-layout='bubbles'] .toolbar {
     top: calc(-1 * var(--alloy-spacing-scale-3));
@@ -1342,7 +1350,8 @@
     flex-direction: column;
     align-items: stretch;
     width: fit-content;
-    max-width: var(--alloy-bubble-max-width);
+    /* The anchor holds the 72% cap; the shared quote+bubble column fills it. */
+    max-width: none;
     min-width: 0;
   }
   .row.replied[data-layout='bubbles'] .message-stack .bubble {
@@ -1384,10 +1393,8 @@
     --file-surface-hover: color-mix(in srgb, var(--alloy-color-bubble-own-text) 18%, transparent);
     --file-border: color-mix(in srgb, var(--alloy-color-bubble-own-text) 18%, transparent);
   }
-  /* The anchor shrink-wraps the message's unwrapped text, so a bubble capped at 72% of the anchor
-     is narrower than the anchor and would sit at the anchor's start: a ~190px gap to the message
-     column's right edge, with no room beside it for the action bar. Own messages end where the
-     composer ends. */
+  /* Own bubbles end where the composer ends: the stack aligns the anchor to its right edge, and the
+     auto margins keep the replied column on that edge when the quote and bubble share one column. */
   .row.own[data-layout='bubbles'] .bubble,
   .row.own.replied[data-layout='bubbles'] .message-stack {
     margin-left: auto;

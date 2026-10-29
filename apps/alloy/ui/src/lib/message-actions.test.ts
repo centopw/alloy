@@ -32,6 +32,23 @@ describe('message actions', () => {
     expect(toolbar, 'the toolbar sits inside the anchor').toBeLessThan(anchorEnd);
   });
 
+  it('caps the bubble against the row, never against the shrink-to-fit anchor', () => {
+    // The anchor is `width: fit-content`, so a 72% cap left on the bubble resolves against the
+    // anchor's own intrinsic width: every short message wrapped into a narrow column, rows grew
+    // ~24px and the tall-window backfill stopped eight messages early (T18). The cap belongs on
+    // the anchor, where the percentage resolves against the row.
+    const anchor = rowSource.match(
+      /\n {2}\.row\[data-layout='bubbles'\] \.message-anchor \{[^}]*\}/
+    )?.[0];
+    expect(anchor, 'the bubbles anchor has a rule').toBeTruthy();
+    expect(anchor).toContain('width: fit-content;');
+    expect(anchor).toContain('max-width: var(--alloy-bubble-max-width);');
+    expect(rowSource).toContain(".row[data-layout='bubbles'] .message-anchor .bubble {");
+    expect(rowSource).toMatch(
+      /\.row\[data-layout='bubbles'\] \.message-anchor \.bubble \{[^}]*max-width: none;/
+    );
+  });
+
   it('places the toolbar beside the bubble, on the inner side of each message', () => {
     const incoming = rowSource.match(
       /\n {2}\.row\[data-layout='bubbles'\] \.toolbar \{[^}]*\}/
