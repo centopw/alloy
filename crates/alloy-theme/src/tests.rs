@@ -123,7 +123,9 @@ fn test_builtin_themes_resolve_and_pass_contrast() {
         light.contrast_report.passes_aa,
         "alloy-light must pass WCAG AA"
     );
-    assert_eq!(light.get("color.surface.canvas"), Some("#ffffff"));
+    // Light keeps the dark theme's elevation direction: the chrome sits above the conversation.
+    assert_eq!(light.get("color.surface.canvas"), Some("#f2f4f7"));
+    assert_eq!(light.get("color.surface.panel"), Some("#fbfcfd"));
     assert_eq!(light.get("layout.message_style"), Some("bubble"));
 
     let dark = resolver
@@ -228,7 +230,7 @@ fn test_css_vars_snapshot_assertion() {
     assert!(css.ends_with("}\n"));
 
     // Verify stable token paths converted to CSS variables
-    assert!(css.contains("  --alloy-color-surface-canvas: #ffffff;\n"));
+    assert!(css.contains("  --alloy-color-surface-canvas: #f2f4f7;\n"));
     assert!(css.contains("  --alloy-color-text-primary: #18181b;\n"));
     assert!(css.contains("  --alloy-color-accent-primary: #4f46e5;\n"));
     assert!(css.contains("  --alloy-typography-font-family-sans: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;\n"));

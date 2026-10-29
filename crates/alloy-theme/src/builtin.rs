@@ -14,14 +14,16 @@ pub fn alloy_light() -> Theme {
         tokens: Tokens {
             color: Some(ColorTokens {
                 surface: Some(SurfaceColors {
-                    canvas: Some("#ffffff".into()),
-                    subtle: Some("#f4f4f5".into()),
-                    panel: Some("#fafafa".into()),
+                    // Light runs the same elevation direction as dark: the chrome sits above the
+                    // conversation. canvas is the lowest surface, panel the raised one.
+                    canvas: Some("#f2f4f7".into()),
+                    subtle: Some("#eaeef3".into()),
+                    panel: Some("#fbfcfd".into()),
                     elevated: Some("#ffffff".into()),
-                    hover: Some("#e4e4e7".into()),
-                    active: Some("#d4d4d8".into()),
+                    hover: Some("#e4e9ee".into()),
+                    active: Some("#d8dee6".into()),
                 }),
-                background: Some("#ffffff".into()),
+                background: Some("#f2f4f7".into()),
                 text: Some(TextColors {
                     primary: Some("#18181b".into()),
                     secondary: Some("#52525b".into()),

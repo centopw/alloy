@@ -9,14 +9,14 @@
   "tokens": {
     "color": {
       "surface": {
-        "canvas": "#ffffff",
-        "subtle": "#f4f4f5",
-        "panel": "#fafafa",
+        "canvas": "#f2f4f7",
+        "subtle": "#eaeef3",
+        "panel": "#fbfcfd",
         "elevated": "#ffffff",
-        "hover": "#e4e4e7",
-        "active": "#d4d4d8"
+        "hover": "#e4e9ee",
+        "active": "#d8dee6"
       },
-      "background": "#ffffff",
+      "background": "#f2f4f7",
       "text": {
         "primary": "#18181b",
         "secondary": "#52525b",
