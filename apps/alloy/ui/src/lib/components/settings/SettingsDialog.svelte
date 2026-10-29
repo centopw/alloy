@@ -292,6 +292,11 @@ import Permissions from './sections/Permissions.svelte';
     display: flex;
     width: 100%;
     height: 100%;
+    /* A settings window, not a second app: cap it so the 640px reading column sits in a
+       deliberate frame instead of floating in a full-bleed pane. */
+    max-width: 1040px;
+    max-height: 760px;
+    margin: auto;
     overflow: hidden;
     background: var(--alloy-glass-sheen), var(--alloy-glass-fill-strong);
     -webkit-backdrop-filter: var(--alloy-glass-filter-strong);
@@ -437,6 +442,9 @@ import Permissions from './sections/Permissions.svelte';
       backdrop-filter: none;
     }
     .panel {
+      max-width: none;
+      max-height: none;
+      margin: 0;
       padding: var(--alloy-safe-area-top) var(--alloy-safe-area-right) 0 var(--alloy-safe-area-left);
       border: 0;
       border-radius: 0;

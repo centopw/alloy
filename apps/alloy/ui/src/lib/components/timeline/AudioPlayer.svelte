@@ -383,7 +383,8 @@
     display: flex;
     flex-direction: column;
     width: 100%;
-    max-width: 320px;
+    min-width: min(260px, 100%);
+    max-width: 360px;
     gap: var(--alloy-spacing-scale-1);
     user-select: none;
     box-sizing: border-box;
@@ -411,14 +412,16 @@
     width: 100%;
   }
 
+  /* The playing surface follows the bubble it sits in: the accent pair on a received bubble, and the
+     inverted bubble pair on the own bubble, where accent-on-accent would be invisible. */
   .play-btn {
-    width: 44px;
-    height: 44px;
-    min-width: 44px;
-    min-height: 44px;
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    min-height: 40px;
     border-radius: var(--alloy-radii-full);
-    background: var(--alloy-color-accent-primary);
-    color: var(--alloy-color-text-on-accent);
+    background: var(--audio-play-bg, var(--alloy-color-accent-primary));
+    color: var(--audio-play-fg, var(--alloy-color-text-on-accent));
     border: none;
     padding: 0;
     display: inline-flex;
@@ -426,11 +429,11 @@
     justify-content: center;
     cursor: pointer;
     flex-shrink: 0;
-    transition: background var(--alloy-motion-duration-fast) ease, transform var(--alloy-motion-duration-fast) ease;
+    transition: filter var(--alloy-motion-duration-fast) ease, transform var(--alloy-motion-duration-fast) ease;
   }
 
   .play-btn:hover {
-    background: var(--alloy-color-accent-hover);
+    filter: brightness(1.08);
   }
 
   .play-btn:focus-visible {
@@ -494,11 +497,11 @@
   }
 
   .waveform-svg rect.unfilled {
-    fill: var(--alloy-color-border-prominent);
+    fill: color-mix(in srgb, currentColor 22%, transparent);
   }
 
   .waveform-svg rect.filled {
-    fill: var(--alloy-color-accent-primary);
+    fill: var(--audio-wave-played, var(--alloy-color-accent-primary));
   }
 
   .meta-row {
@@ -537,12 +540,14 @@
     opacity: 0.8;
   }
 
+  /* A quiet chip instead of a filled plate: it reads on the grey received bubble and on the own
+     blue, where an accent pill disappeared into the surface. */
   .speed-btn {
     flex-shrink: 0;
     border-radius: var(--alloy-radii-full);
-    background: var(--alloy-color-surface-elevated);
-    border: 1px solid var(--alloy-color-border-subtle);
-    color: var(--alloy-color-text-primary);
+    background: color-mix(in srgb, currentColor 8%, transparent);
+    border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+    color: inherit;
     font-size: var(--alloy-typography-size-xs);
     font-weight: var(--alloy-typography-weight-semibold);
     cursor: pointer;
@@ -557,8 +562,8 @@
   }
 
   .speed-btn:hover {
-    background: var(--alloy-color-surface-hover);
-    border-color: var(--alloy-color-border-prominent);
+    background: color-mix(in srgb, currentColor 14%, transparent);
+    border-color: color-mix(in srgb, currentColor 24%, transparent);
   }
 
   .speed-btn:focus-visible {

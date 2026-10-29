@@ -51,7 +51,7 @@
 </script>
 
 {#snippet modernPreview()}
-  <span class="preview modern" aria-hidden="true">
+  <span class="pv pv-modern" aria-hidden="true">
     <span class="pv-avatar">A</span>
     <span class="pv-body">
       <span class="pv-meta">
@@ -64,13 +64,13 @@
 {/snippet}
 
 {#snippet bubblesPreview()}
-  <span class="preview bubbles" aria-hidden="true">
+  <span class="pv pv-bubbles" aria-hidden="true">
     <span class="pv-bubble">Hey you. You're the best!</span>
   </span>
 {/snippet}
 
 {#snippet ircPreview()}
-  <span class="preview irc" aria-hidden="true">
+  <span class="pv pv-irc" aria-hidden="true">
     <span class="pv-time">10:42</span>
     <span class="pv-nick">&lt;Alex&gt;</span>
     <span class="pv-text">Hey you. You're the best!</span>
@@ -177,20 +177,17 @@
     padding: var(--alloy-spacing-scale-3) var(--alloy-layout-row-pad-x);
   }
 
-  /* Previews: fixed frame so every layout card is the same width. */
-  .preview {
+  /* Previews fill the tile the parent control provides; they paint no background of their own,
+     so a layout card reads as one surface rather than a box inside a box. */
+  .pv {
     display: flex;
-    width: 15rem;
-    max-width: 100%;
-    padding: var(--alloy-spacing-scale-3);
-    background: var(--alloy-color-surface-canvas);
-    border-radius: var(--alloy-radii-md);
+    width: 100%;
+    min-width: 0;
     font-size: var(--alloy-typography-size-sm);
     color: var(--alloy-color-text-primary);
-    box-sizing: border-box;
   }
 
-  .modern {
+  .pv-modern {
     gap: var(--alloy-spacing-scale-2);
     align-items: flex-start;
   }
@@ -235,21 +232,24 @@
     overflow-wrap: anywhere;
   }
 
-  .bubbles {
+  .pv-bubbles {
     justify-content: flex-start;
   }
 
+  /* Same shape language as the timeline at preview scale: round on three corners, a small tail
+     on the sender side, so the choice previews the layout it actually applies. */
   .pv-bubble {
     max-width: 100%;
     padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
-    border-radius: var(--alloy-radii-lg);
+    border-radius: var(--alloy-radii-xl);
+    border-bottom-left-radius: var(--alloy-radii-sm);
     background: var(--alloy-color-bubble-other-background);
     color: var(--alloy-color-bubble-other-text);
   }
 
-  .irc {
+  .pv-irc {
     flex-wrap: wrap;
-    gap: var(--alloy-spacing-scale-2);
+    gap: var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-2);
     align-items: baseline;
     font-family: var(--alloy-typography-font-family-mono);
     font-size: var(--alloy-typography-size-xs);
@@ -257,9 +257,5 @@
 
   .pv-nick {
     color: var(--alloy-color-accent-primary);
-  }
-
-  .irc .pv-time {
-    color: var(--alloy-color-text-muted);
   }
 </style>

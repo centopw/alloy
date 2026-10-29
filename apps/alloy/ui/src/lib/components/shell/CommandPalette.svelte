@@ -3,7 +3,7 @@
   import { Avatar } from '../common';
   import { viewport } from '$lib/stores/viewport.svelte';
   import Icon from '$lib/icons/Icon.svelte';
-  import { ChevronLeft } from '$lib/icons';
+  import { ChevronLeft, Search } from '$lib/icons';
   import { roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
   import { pushBack } from '$lib/platform/backstack';
 
@@ -101,6 +101,7 @@
         <button type="button" class="back" aria-label="Close quick switcher" onclick={onclose}>
           <Icon icon={ChevronLeft} size={24} />
         </button>
+        <span class="search-icon" aria-hidden="true"><Icon icon={Search} size={20} /></span>
         <input
           bind:this={input}
           bind:value={query}
@@ -125,6 +126,11 @@
           <li class="none">No matching conversations</li>
         {/each}
       </ul>
+      <footer class="hints" aria-hidden="true">
+        <span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span>
+        <span><kbd>↵</kbd> Open</span>
+        <span><kbd>esc</kbd> Close</span>
+      </footer>
     </div>
   </div>
 {/if}
@@ -152,8 +158,21 @@
     box-shadow: var(--alloy-glass-shadow), var(--alloy-glass-highlight);
     overflow: hidden;
   }
+  .bar {
+    display: flex;
+    align-items: center;
+    gap: var(--alloy-spacing-scale-2);
+    padding-left: var(--alloy-layout-gutter);
+    border-bottom: 1px solid var(--alloy-glass-rim);
+  }
+  .search-icon {
+    display: inline-flex;
+    flex: none;
+    color: var(--alloy-color-text-muted);
+  }
   input {
-    width: 100%;
+    flex: 1;
+    min-width: 0;
     border: 0;
     outline: 0;
     background: transparent;
@@ -161,8 +180,7 @@
     font: inherit;
     font-size: var(--alloy-typography-size-lg);
     height: var(--alloy-layout-header-height);
-    padding: 0 var(--alloy-layout-gutter);
-    border-bottom: 1px solid var(--alloy-glass-rim);
+    padding: 0 var(--alloy-layout-gutter) 0 0;
   }
   ul {
     list-style: none;
@@ -192,8 +210,34 @@
     text-align: center;
     color: var(--alloy-color-text-secondary);
   }
-  .bar {
-    display: block;
+  /* Keyboard affordances belong to the palette, not to the input placeholder. */
+  .hints {
+    display: flex;
+    align-items: center;
+    gap: var(--alloy-spacing-scale-4);
+    padding: var(--alloy-spacing-scale-2) var(--alloy-layout-gutter);
+    border-top: 1px solid var(--alloy-glass-rim);
+    color: var(--alloy-color-text-muted);
+    font-size: var(--alloy-typography-size-xs);
+  }
+  .hints span {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--alloy-spacing-scale-1);
+  }
+  .hints kbd {
+    display: inline-grid;
+    place-items: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 var(--alloy-spacing-scale-1);
+    border: 1px solid var(--alloy-color-border-subtle);
+    border-radius: var(--alloy-radii-sm);
+    background: var(--alloy-color-surface-subtle);
+    color: var(--alloy-color-text-secondary);
+    font: inherit;
+    font-size: var(--alloy-typography-size-xs);
+    line-height: 1;
   }
   .back {
     display: none;
@@ -218,6 +262,9 @@
       align-items: center;
       flex-shrink: 0;
       padding-top: var(--alloy-safe-area-top);
+    }
+    .hints {
+      display: none;
     }
     .bar input {
       flex: 1;

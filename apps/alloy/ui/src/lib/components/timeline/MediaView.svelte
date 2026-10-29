@@ -189,13 +189,13 @@
 {:else}
   {#if openable}
     <button class="file" type="button" onclick={openViewer}>
-      <span class="file-name">{body || 'Attachment'}</span>
+      <span class="file-name" title={body || 'Attachment'}>{body || 'Attachment'}</span>
       <span class="file-meta">{formatBytes(sizeBytes)}</span>
     </button>
   {:else}
     <div class="file">
       <span class="file-copy">
-        <span class="file-name">{body || 'Attachment'}</span>
+        <span class="file-name" title={body || 'Attachment'}>{body || 'Attachment'}</span>
         <span class="file-meta">{formatBytes(sizeBytes)}</span>
       </span>
       {#if ondownload}
@@ -261,15 +261,21 @@
     object-fit: cover;
   }
 
+  /* A file tile carries a name, its size and the save control on one readable row, so it measures
+     from its content instead of collapsing to the width of the longest word in a file name. The
+     minimum yields to the bubble on a narrow screen rather than spilling out of it. */
   .file {
     display: flex;
     flex-direction: row;
-    gap: var(--alloy-spacing-scale-2);
+    gap: var(--alloy-spacing-scale-3);
     align-items: center;
-    padding: var(--alloy-spacing-scale-2);
-    border: 1px solid var(--alloy-color-border-subtle);
+    min-width: min(240px, 100%);
+    max-width: 100%;
+    padding: var(--alloy-spacing-bubble-y) var(--alloy-spacing-bubble-x);
+    border: 1px solid var(--file-border, var(--alloy-color-border-subtle));
     border-radius: var(--alloy-bubble-radius-nested);
-    background: var(--alloy-color-surface-elevated);
+    background: var(--file-surface, var(--alloy-color-surface-elevated));
+    color: inherit;
   }
 
   .file-copy {
@@ -292,13 +298,12 @@
     border: 0;
     border-radius: var(--alloy-radii-md);
     background: transparent;
-    color: var(--alloy-color-text-secondary);
+    color: inherit;
     cursor: pointer;
   }
 
   .file-download:hover {
-    background: var(--alloy-color-surface-hover);
-    color: var(--alloy-color-text-primary);
+    background: color-mix(in srgb, currentColor 10%, transparent);
   }
 
   .file-download:focus-visible {
@@ -312,7 +317,9 @@
   }
 
   button.file:hover {
-    background: var(--alloy-color-surface-hover);
+    /* A hover lifts the plate above its resting surface; on an own bubble the owner supplies a
+       brighter tint because the resting plate is already 12% of the bubble text. */
+    background: var(--file-surface-hover, color-mix(in srgb, currentColor 6%, var(--alloy-color-surface-elevated)));
   }
 
   button.file:focus-visible {
@@ -321,15 +328,19 @@
   }
 
   .file-name {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
     font-size: var(--alloy-typography-size-sm);
     font-weight: var(--alloy-typography-weight-semibold);
-    color: var(--alloy-color-text-primary);
-    word-break: break-word;
+    color: inherit;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .file-meta {
     font-size: var(--alloy-typography-size-xs);
-    color: var(--alloy-color-text-secondary);
+    color: color-mix(in srgb, currentColor 75%, transparent);
   }
 
   /* The thumbnail is still being fetched: a sweeping sheen, never a still grey block. */

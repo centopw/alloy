@@ -101,6 +101,10 @@
       !item.reply_to &&
       !(item.content.data.body && !isFileName(item.content.data.body)))
   );
+  /** A file attachment renders as a titled tile, which needs room for its name on one line. */
+  const fileMessage = $derived(
+    item.content.kind === 'Media' && (item.content.data.media_kind ?? 'file') === 'file'
+  );
   const stateSummary = $derived(item.content.kind === 'RoomState' ? stateEventSummary(item.content.data) : null);
   const senderName = $derived(item.sender_display_name ?? item.sender);
   const failed = $derived(item.send_state.status === 'Failed');
@@ -511,6 +515,7 @@
     class:replied={stackedReply}
     class:jumbo
     class:bare={bareMedia}
+    class:file-message={fileMessage}
     class:highlighted
     class:swiping
     class:selecting={timelineStore.selecting && canAct}
@@ -1367,6 +1372,17 @@
     background: var(--alloy-color-bubble-own-background);
     color: var(--alloy-color-bubble-own-text);
     box-shadow: none;
+    /* A voice note on the own bubble inverts its controls: an accent play button would vanish
+       against the accent surface, and the played waveform follows the own text instead. */
+    --audio-play-bg: var(--alloy-color-bubble-own-text);
+    --audio-play-fg: var(--alloy-color-bubble-own-background);
+    --audio-wave-played: var(--alloy-color-bubble-own-text);
+    /* A file card is a plate on the bubble, so it takes the bubble's own tint rather than the
+       grey elevated surface used on a received message. */
+    --file-surface: color-mix(in srgb, var(--alloy-color-bubble-own-text) 12%, transparent);
+    /* Hover has to add light to the plate: a tinted hover on top of a 12% plate would fade it. */
+    --file-surface-hover: color-mix(in srgb, var(--alloy-color-bubble-own-text) 18%, transparent);
+    --file-border: color-mix(in srgb, var(--alloy-color-bubble-own-text) 18%, transparent);
   }
   /* The anchor shrink-wraps the message's unwrapped text, so a bubble capped at 72% of the anchor
      is narrower than the anchor and would sit at the anchor's start: a ~190px gap to the message
@@ -1503,6 +1519,14 @@
   }
   .row.highlighted[data-layout='bubbles'] .bubble {
     box-shadow: 0 0 0 2px var(--alloy-color-accent-primary);
+  }
+  /* A file tile needs room for its name, and neither the anchor nor the bubble grows for a child's
+     minimum width, so the message box carries it: 240px for the tile plus the bubble's own inset. */
+  .row.file-message .message-anchor {
+    min-width: 240px;
+  }
+  .row.file-message[data-layout='bubbles'] .bubble {
+    min-width: calc(240px + 2 * var(--alloy-spacing-bubble-x));
   }
 
   /* Phone: full-width rows and 44px touch targets. */

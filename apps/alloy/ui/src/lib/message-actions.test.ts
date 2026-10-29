@@ -89,6 +89,12 @@ describe('file tiles', () => {
     expect(rowSource).toContain('function downloadMediaItem()');
   });
 
+  it('lifts the plate on hover instead of fading it', () => {
+    // On an own bubble the resting plate is already 12% of the bubble text, so a low-opacity
+    // currentColor hover would read as a dim instead of a lift.
+    expect(mediaSource).toContain('background: var(--file-surface-hover');
+    expect(rowSource).toContain('--file-surface-hover: color-mix');
+  });
 });
 
 describe('audio tiles', () => {
