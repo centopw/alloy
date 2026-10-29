@@ -7,11 +7,17 @@ use alloy_protocol::{
     TagColour, VectorDiffDto,
 };
 use alloy_storage::InMemorySecretStore;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 use tokio::sync::broadcast::Receiver;
 
 const PASSWORD: &str = "testpassword123!";
+
+/// The tag catalogue is a single global account-data event per user, so every test here reads or
+/// writes the same value. Tests in one binary run in parallel threads, and a `SaveTagCatalog` or
+/// `DeleteRoomTag` in one test replaces the whole catalogue — it can land between another test's
+/// write and its read and erase it. Serialize the file's tests so each sees the catalogue it wrote.
+static CATALOGUE: LazyLock<tokio::sync::Mutex<()>> = LazyLock::new(|| tokio::sync::Mutex::new(()));
 
 async fn login(hs: &str, user: &str) -> (tempfile::TempDir, EngineContext, AppEngine) {
     let dir = tempfile::tempdir().unwrap();
@@ -129,6 +135,7 @@ async fn tag_catalogue_round_trips_and_rejects_invalid_entries() {
         eprintln!("skipping: ALLOY_TEST_HS not set");
         return;
     };
+    let _guard = CATALOGUE.lock().await;
     let (_dir, _ctx, bob) = login(&hs, "bob").await;
 
     let work = unique_id("work");
@@ -211,6 +218,7 @@ async fn room_tags_are_assigned_per_room_and_deleted_everywhere() {
         eprintln!("skipping: ALLOY_TEST_HS not set");
         return;
     };
+    let _guard = CATALOGUE.lock().await;
     let (_dir, ctx, alice) = login(&hs, "alice").await;
     let room1 = create_room(&alice).await;
     let room2 = create_room(&alice).await;
@@ -366,6 +374,8 @@ async fn tags_reload_on_a_cold_client() {
         eprintln!("skipping: ALLOY_TEST_HS not set");
         return;
     };
+
+    let _guard = CATALOGUE.lock().await;
 
     // Device 1 defines a catalogue entry and assigns it to a new room.
     let (_dir1, ctx1, alice) = login(&hs, "alice").await;
