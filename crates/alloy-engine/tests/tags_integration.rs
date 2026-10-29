@@ -356,3 +356,90 @@ async fn room_tags_are_assigned_per_room_and_deleted_everywhere() {
     .await;
     assert!(catalogue(&alice).await.is_empty());
 }
+
+/// #116: the assignments are `u.<id>` room tags and the catalogue is the `chat.alloy.room_tags`
+/// account-data event, both stored on the server. A client with an empty local store — a reinstall
+/// or a second device — must rebuild the room's tags and the catalogue from a plain sync.
+#[tokio::test]
+async fn tags_reload_on_a_cold_client() {
+    let Ok(hs) = std::env::var("ALLOY_TEST_HS") else {
+        eprintln!("skipping: ALLOY_TEST_HS not set");
+        return;
+    };
+
+    // Device 1 defines a catalogue entry and assigns it to a new room.
+    let (_dir1, ctx1, alice) = login(&hs, "alice").await;
+    let room = create_room(&alice).await;
+    let tag = unique_id("cold");
+
+    let mut rx = ctx1.sink.subscribe();
+    let sub = match alice
+        .handle(EngineCommand::SubscribeRoomList { filter: None })
+        .await
+        .unwrap()
+    {
+        EngineResponse::RoomListSubscribed { subscription_id } => subscription_id,
+        other => panic!("unexpected {other:?}"),
+    };
+    let mut rooms: Vec<RoomSummary> = vec![];
+    pump_rooms_until(&mut rx, &sub, &mut rooms, "new room listed", |rooms| {
+        rooms.iter().any(|r| r.id == room)
+    })
+    .await;
+
+    unit(
+        &alice,
+        EngineCommand::SaveTagCatalog {
+            tags: vec![RoomTagDef {
+                id: tag.clone(),
+                name: "Cold".into(),
+                colour: TagColour::Violet,
+            }],
+        },
+    )
+    .await;
+    unit(
+        &alice,
+        EngineCommand::SetRoomTag {
+            room_id: room.clone(),
+            tag_id: tag.clone(),
+            enabled: true,
+        },
+    )
+    .await;
+    pump_rooms_until(
+        &mut rx,
+        &sub,
+        &mut rooms,
+        "tag visible to device 1",
+        |rooms| tags_of(rooms, &room).contains(&tag),
+    )
+    .await;
+
+    // Device 2 has no local state: only what the server holds can show up.
+    let (_dir2, ctx2, alice2) = login(&hs, "alice").await;
+    let mut rx2 = ctx2.sink.subscribe();
+    let sub2 = match alice2
+        .handle(EngineCommand::SubscribeRoomList { filter: None })
+        .await
+        .unwrap()
+    {
+        EngineResponse::RoomListSubscribed { subscription_id } => subscription_id,
+        other => panic!("unexpected {other:?}"),
+    };
+    let mut rooms2: Vec<RoomSummary> = vec![];
+    pump_rooms_until(
+        &mut rx2,
+        &sub2,
+        &mut rooms2,
+        "room with its persisted tag after a fresh login",
+        |rooms| tags_of(rooms, &room).contains(&tag),
+    )
+    .await;
+
+    let catalogue_ids: Vec<String> = catalogue(&alice2).await.into_iter().map(|t| t.id).collect();
+    assert!(
+        catalogue_ids.contains(&tag),
+        "the catalogue must come back from the server, got {catalogue_ids:?}"
+    );
+}
