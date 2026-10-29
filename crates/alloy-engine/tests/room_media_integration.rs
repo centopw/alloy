@@ -196,3 +196,100 @@ async fn room_media_lists_media_files_links_and_pages() {
     assert!(second[0].body.contains("pic-a"));
     assert_ne!(second[0].event_id, first[0].event_id);
 }
+
+/// #115: the Shared > Media grid asks for a server thumbnail for every tile. Servers refuse to
+/// thumbnail media they cannot decode (an HEIC or SVG picture, purged or oversized media), and
+/// the tile then stayed an empty placeholder although the item itself opens. The engine now
+/// serves the full file when the thumbnail request fails.
+#[tokio::test]
+async fn thumbnail_request_falls_back_to_the_full_file() {
+    let Ok(hs) = std::env::var("ALLOY_TEST_HS") else {
+        eprintln!("skipping: ALLOY_TEST_HS not set");
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = EngineContext::new(
+        dir.path().to_path_buf(),
+        Arc::new(InMemorySecretStore::new()),
+    );
+    let eng = AppEngine::new(ctx.clone());
+    eng.handle(EngineCommand::LoginPassword {
+        homeserver_url: hs,
+        username: "alice".into(),
+        password: "testpassword123!".into(),
+    })
+    .await
+    .unwrap();
+
+    let room_id: RoomId = match eng
+        .handle(EngineCommand::CreateRoom {
+            name: "thumb-fallback".into(),
+            encrypted: false,
+            invite: None,
+        })
+        .await
+        .unwrap()
+    {
+        EngineResponse::RoomCreated { room_id } => room_id,
+        other => panic!("unexpected {other:?}"),
+    };
+    // The freshly created room becomes known to the client after a short sync delay.
+    let mut tries = 0;
+    loop {
+        match eng
+            .handle(EngineCommand::SubscribeTimeline {
+                room_id: room_id.clone(),
+            })
+            .await
+        {
+            Ok(_) => break,
+            Err(e) if e.code == "not_found" && tries < 40 => {
+                tries += 1;
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+            Err(e) => panic!("unexpected {e:?}"),
+        }
+    }
+
+    // A text file is media no server can thumbnail; the thumbnail request must still yield bytes.
+    let contents = b"sprint notes";
+    let notes = dir.path().join("notes.txt");
+    std::fs::write(&notes, contents).unwrap();
+    ctx.allow_attachment_path(&notes).unwrap();
+    send_attachment(&eng, &room_id, &notes, "text/plain").await;
+
+    let uri = {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+        loop {
+            let (files, _) = listing(&eng, &room_id, RoomMediaKind::Files, None, 100).await;
+            if let Some(uri) = files.first().and_then(|item| item.uri.clone()) {
+                break uri;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the uploaded file never appeared in the files listing"
+            );
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+    };
+
+    let path = match eng
+        .handle(EngineCommand::GetMedia {
+            source: alloy_protocol::MediaSource::Remote { uri },
+            kind: "thumbnail".into(),
+            width: Some(480),
+            height: Some(360),
+            mime_type: Some("text/plain".into()),
+        })
+        .await
+        .unwrap()
+    {
+        EngineResponse::MediaRetrieved { local_path } => local_path,
+        other => panic!("unexpected {other:?}"),
+    };
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        contents,
+        "the fallback must serve the original file, not an empty placeholder"
+    );
+}

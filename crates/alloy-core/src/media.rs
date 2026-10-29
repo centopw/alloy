@@ -111,7 +111,10 @@ impl AlloyClient {
     /// Download media (or a server-side thumbnail) into `cache_dir` and return the local path.
     ///
     /// Encrypted sources are decrypted; thumbnails of encrypted media fall back to the full
-    /// file because servers cannot scale ciphertext. Results are cached by source + format.
+    /// file because servers cannot scale ciphertext. A plain-source thumbnail the server cannot
+    /// produce (unsupported image format such as HEIC or SVG, purged media, size limit) also
+    /// falls back to the full file, so a tile never stays empty while the original downloads.
+    /// Results are cached by source + format.
     pub async fn fetch_media(
         &self,
         uri: &str,
@@ -119,15 +122,47 @@ impl AlloyClient {
         thumbnail: Option<(u32, u32)>,
         cache_dir: &Path,
     ) -> AlloyResult<PathBuf> {
-        let source = parse_source(uri)?;
-        let encrypted = matches!(source, MediaSource::Encrypted(_));
-        let (format, format_key) = match thumbnail {
-            Some((w, h)) if !encrypted => (
-                MediaFormat::Thumbnail(MediaThumbnailSettings::new(UInt::from(w), UInt::from(h))),
-                format!("thumb-{w}x{h}"),
-            ),
-            _ => (MediaFormat::File, "file".to_owned()),
-        };
+        let encrypted = matches!(parse_source(uri)?, MediaSource::Encrypted(_));
+        if let Some((width, height)) = thumbnail
+            && !encrypted
+        {
+            let format = MediaFormat::Thumbnail(MediaThumbnailSettings::new(
+                UInt::from(width),
+                UInt::from(height),
+            ));
+            match self
+                .fetch_media_format(
+                    uri,
+                    mime_type,
+                    format,
+                    &format!("thumb-{width}x{height}"),
+                    cache_dir,
+                )
+                .await
+            {
+                Ok(path) => return Ok(path),
+                Err(error) => {
+                    tracing::debug!(
+                        %uri,
+                        %error,
+                        "thumbnail unavailable, falling back to the full file"
+                    );
+                }
+            }
+        }
+        self.fetch_media_format(uri, mime_type, MediaFormat::File, "file", cache_dir)
+            .await
+    }
+
+    /// Fetches one format of `uri` into the cache and returns the local path.
+    async fn fetch_media_format(
+        &self,
+        uri: &str,
+        mime_type: Option<&str>,
+        format: MediaFormat,
+        format_key: &str,
+        cache_dir: &Path,
+    ) -> AlloyResult<PathBuf> {
         let path = cache_dir.join(cache_name(
             &format!("{uri}|{format_key}"),
             extension_for(mime_type),
@@ -138,7 +173,13 @@ impl AlloyClient {
         let bytes = self
             .client
             .media()
-            .get_media_content(&MediaRequestParameters { source, format }, true)
+            .get_media_content(
+                &MediaRequestParameters {
+                    source: parse_source(uri)?,
+                    format,
+                },
+                true,
+            )
             .await
             .map_err(sdk)?;
         let tmp = path.with_extension("part");
