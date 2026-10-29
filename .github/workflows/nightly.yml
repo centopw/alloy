@@ -193,6 +193,13 @@ jobs:
 
       - name: Sign APK
         shell: bash
+        env:
+          # Same four secrets as the release workflow. Without them the script falls back to a
+          # throwaway key and the nightly cannot exercise the real signing path.
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           APK_RAW=$(find apps/alloy/src-tauri/gen/android/app/build/outputs -name '*-release-unsigned.apk' | head -n 1)
           [ -n "$APK_RAW" ] || { echo "Android build produced no release APK" >&2; exit 1; }
