@@ -130,8 +130,11 @@ returns to the pencil after keyboard edits. Open fields are never overwritten by
 closed fields follow the room. Sections are separated by hairlines and use the
 `--alloy-font-size-meta` uppercase heading; rows and cards are 44px-minimum with
 `--alloy-radii-lg` surfaces. The Shared media switch hugs its labels instead of stretching across the
-panel, and a thumbnail that fails to fetch or decode is pulled from the document so the neutral tile
-icon shows instead of the browser's broken-image placeholder. Save errors surface inline; a private
+panel. A thumbnail is best-effort: when the engine refuses one the tile requests the original file
+once and shows that, and when the webview rejects the picture too the retry falls back to the kind
+icon instead of the browser's broken-image placeholder. Only a served URL is cached, a refusal is
+retried on the next lookup, and the cache lives for one panel, so reopening Room info retries media
+that failed earlier. Save errors surface inline; a private
 note is the user's own room account
 data (synced to their account, never visible to other members).
 

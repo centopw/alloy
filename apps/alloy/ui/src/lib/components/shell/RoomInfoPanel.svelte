@@ -1,25 +1,21 @@
 <script module lang="ts">
   import { client } from '$lib/ipc';
-  import { localFileUrl } from '$lib/platform/files';
   import { expect } from '$lib/stores/errors';
+  import { MediaThumbCache } from '$lib/content/mediaThumbs';
 
-  /** Thumbnail URLs keyed by mxc source, shared by every panel instance. */
-  const thumbCache = new Map<string, Promise<string | null>>();
-
-  export function thumbFor(source: string | null | undefined, mimeType: string | null): Promise<string | null> {
-    if (!source) return Promise.resolve(null);
-    const cached = thumbCache.get(source);
-    if (cached) return cached;
-    const promise = client
-      .getMedia({ kind: 'Remote', data: { uri: source } }, 'thumbnail', {
-        width: 480,
-        height: 360,
+  /**
+   * One cache per panel instance: closing and reopening Room info drops it, which is how a media
+   * request that failed earlier (offline, engine restart) gets another chance.
+   */
+  export function createThumbCache(): MediaThumbCache {
+    return new MediaThumbCache(async (uri, kind, mimeType) => {
+      const res = await client.getMedia({ kind: 'Remote', data: { uri } }, kind, {
+        width: kind === 'thumbnail' ? 480 : null,
+        height: kind === 'thumbnail' ? 360 : null,
         mime_type: mimeType,
-      })
-      .then((res) => localFileUrl(expect(res, 'MediaRetrieved').payload.local_path))
-      .catch(() => null);
-    thumbCache.set(source, promise);
-    return promise;
+      });
+      return expect(res, 'MediaRetrieved').payload.local_path;
+    });
   }
 </script>
 
@@ -63,6 +59,43 @@
   }
 
   let { roomId, onclose, onsearch, initialTab = 'info' }: Props = $props();
+
+  const thumbs = createThumbCache();
+  /** Tiles that had to fall back to the original file, keyed by event id. */
+  let fileSrc = $state<Record<string, string>>({});
+  /** Tiles whose picture cannot be shown at all; they keep their kind icon instead of a broken image. */
+  let imageFailed = $state<Record<string, boolean>>({});
+  /** One retry per tile per panel; not reactive, so the retry itself does not rerender the grid. */
+  const retried = new Set<string>();
+
+  /** A video tile shows its poster; every other tile shows the item itself. */
+  function tileSource(item: RoomMediaItem): { uri: string; mimeType: string | null } | null {
+    const uri = item.kind === 'video' ? item.thumbnail_uri : item.uri;
+    if (!uri) return null;
+    return { uri, mimeType: item.kind === 'video' ? 'image/jpeg' : item.mime_type };
+  }
+
+  function thumbFor(item: RoomMediaItem): Promise<string | null> {
+    const source = tileSource(item);
+    return source ? thumbs.thumbnail(source.uri, source.mimeType) : Promise.resolve(null);
+  }
+
+  /** An <img> the webview rejected: try the original file once, then settle on the kind icon. */
+  async function imageRejected(item: RoomMediaItem, shown: string) {
+    if (retried.has(item.event_id)) {
+      imageFailed[item.event_id] = true;
+      return;
+    }
+    retried.add(item.event_id);
+    // A video's original file is not a picture, so a rejected poster simply stays missing.
+    const source = item.kind === 'video' || !item.uri ? null : { uri: item.uri, mimeType: item.mime_type };
+    const url = source ? await thumbs.fullFile(source.uri, source.mimeType) : null;
+    if (!url || url === shown) {
+      imageFailed[item.event_id] = true;
+      return;
+    }
+    fileSrc[item.event_id] = url;
+  }
 
   const MEDIA_KIND: Record<MediaView, RoomMediaKind> = {
     media: 'Media',
@@ -519,17 +552,20 @@
         title={item.body || item.kind}
         onclick={() => openMedia(item)}
       >
-        {#await thumbFor(item.kind === 'video' ? item.thumbnail_uri : item.uri, item.kind === 'video' ? 'image/jpeg' : item.mime_type)}
+        {#await thumbFor(item)}
           <span class="media-fallback"></span>
         {:then src}
-          <span class="media-fallback"><Icon icon={Image} size={20} /></span>
-          {#if src}
+          {@const url = fileSrc[item.event_id] ?? src}
+          <span class="media-fallback">
+            {#if imageFailed[item.event_id]}<Icon icon={File} size={20} />{:else}<Icon icon={Image} size={20} />{/if}
+          </span>
+          {#if url && !imageFailed[item.event_id]}
             <img
               class="media-img"
-              src={src}
+              src={url}
               alt=""
               loading="lazy"
-              onerror={(e) => e.currentTarget.remove()}
+              onerror={() => void imageRejected(item, url)}
             />
           {/if}
         {/await}
@@ -1230,7 +1266,7 @@
     margin: 0;
     padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
     border: 1px solid var(--alloy-color-border-subtle);
-    border-radius: var(--alloy-radii-md);
+    border-radius: var(--alloy-radii-lg);
     background: var(--alloy-color-surface-subtle);
     color: var(--alloy-color-status-error);
     font-size: var(--alloy-font-size-preview);
@@ -1247,7 +1283,7 @@
     aspect-ratio: 1;
     padding: 0;
     border: 0;
-    border-radius: var(--alloy-radii-md);
+    border-radius: var(--alloy-radii-lg);
     overflow: hidden;
     background: var(--alloy-color-surface-subtle);
     cursor: pointer;
@@ -1258,7 +1294,11 @@
     opacity: 0.85;
   }
 
+  /* Both layers fill the cell: in normal flow a 100%-height fallback pushes the picture out of the
+     clipped cell, so the tile showed only the placeholder even when the URL loaded. */
   .media-img {
+    position: absolute;
+    inset: 0;
     display: block;
     width: 100%;
     height: 100%;
@@ -1266,6 +1306,8 @@
   }
 
   .media-fallback {
+    position: absolute;
+    inset: 0;
     display: flex;
     align-items: center;
     justify-content: center;
