@@ -719,8 +719,29 @@ pub enum EngineCommand {
     /// Reads the account's room tag catalogue (display order preserved).
     GetTagCatalog,
     /// Replaces the room tag catalogue; entries are validated and normalised before storing.
+    ///
+    /// Superseded by [`EngineCommand::CreateRoomTag`], [`EngineCommand::RenameRoomTag`] and
+    /// [`EngineCommand::ReorderRoomTags`], which change the catalogue the server holds instead of
+    /// writing a whole list read from a possibly stale local copy.
     SaveTagCatalog {
         tags: Vec<RoomTagDef>,
+    },
+    /// Adds one tag to the catalogue; the engine assigns its id and returns the stored definition.
+    CreateRoomTag {
+        name: String,
+        colour: TagColour,
+    },
+    /// Renames and/or recolours one tag. At least one of `name`/`colour` must be set and `id` must
+    /// be in the catalogue.
+    RenameRoomTag {
+        id: String,
+        name: Option<String>,
+        colour: Option<TagColour>,
+    },
+    /// Sets the catalogue's display order. `ids` must list every tag in the catalogue exactly once;
+    /// a list built from a stale copy is refused rather than dropping the entries it omits.
+    ReorderRoomTags {
+        ids: Vec<String>,
     },
     /// Assigns (`enabled: true`) or removes the custom tag `tag_id` on a room.
     SetRoomTag {
@@ -816,6 +837,14 @@ pub enum EngineCommand {
     SubscribeThread {
         room_id: RoomId,
         thread_root_event_id: EventId,
+    },
+    /// Aborts every subscription for this room and drops its cached timelines — the room timeline
+    /// and each of its threads. Best-effort: any later command that needs the timeline rebuilds it,
+    /// and the next subscription replays a full `Reset`. Intended for evicting rooms the app no
+    /// longer shows; calling it for a room still on screen blanks that view until it subscribes
+    /// again.
+    CloseTimeline {
+        room_id: RoomId,
     },
     PaginateBackwards {
         room_id: RoomId,
@@ -1162,6 +1191,10 @@ pub enum EngineResponse {
     TagCatalog {
         tags: Vec<RoomTagDef>,
     },
+    /// The tag `CreateRoomTag` added, with the id the engine assigned.
+    RoomTagCreated {
+        tag: RoomTagDef,
+    },
     UserProfile {
         profile: UserProfileDto,
     },
@@ -1222,6 +1255,12 @@ pub enum EngineResponse {
     // Timeline
     TimelineSubscribed {
         subscription_id: SubscriptionId,
+    },
+    /// Whether `CloseTimeline` had anything to abort or drop; `false` means it was already closed
+    /// and the call changed nothing.
+    TimelineClosed {
+        room_id: RoomId,
+        closed: bool,
     },
     Paginated {
         room_id: RoomId,

@@ -2,7 +2,7 @@
 //! in global account data; each room's assignment is a standard Matrix room tag `u.<id>`.
 
 use crate::{AlloyClient, AlloyError, AlloyResult};
-use alloy_protocol::{RoomId, RoomTagDef};
+use alloy_protocol::{RoomId, RoomTagDef, TagColour};
 use matrix_sdk::ruma::events::tag::{TagInfo, TagName, UserTagName};
 use matrix_sdk::ruma::events::{AnyGlobalAccountDataEventContent, GlobalAccountDataEventType};
 use matrix_sdk::ruma::serde::Raw;
@@ -51,9 +51,89 @@ impl AlloyClient {
     }
 
     /// Replaces the room tag catalogue. Entries are validated and trimmed before storing.
+    ///
+    /// Kept for compatibility while the UI moves to the per-operation commands; those apply one
+    /// change to the catalogue the server holds, so a stale local copy cannot drop another
+    /// client's entry.
     pub async fn save_tag_catalog(&self, tags: Vec<RoomTagDef>) -> AlloyResult<()> {
         let tags = normalize_tag_catalog(tags)?;
         self.write_tag_catalog(&tags).await
+    }
+
+    /// Adds one tag to the catalogue, assigning its id and returning the stored definition. The
+    /// catalogue is read from the server first, so an entry another client added survives.
+    pub async fn create_room_tag(&self, name: &str, colour: TagColour) -> AlloyResult<RoomTagDef> {
+        let name = normalize_tag_name(name)?;
+        let mut catalogue = self.get_tag_catalog().await?;
+        let tag = RoomTagDef {
+            id: unique_tag_id(&name, &catalogue),
+            name,
+            colour,
+        };
+        catalogue.push(tag.clone());
+        self.write_tag_catalog(&catalogue).await?;
+        Ok(tag)
+    }
+
+    /// Renames and/or recolours one tag. At least one of `name`/`colour` must be given; the id is
+    /// stable, so room assignments are untouched. An id the catalogue does not hold is an error.
+    pub async fn rename_room_tag(
+        &self,
+        id: &str,
+        name: Option<&str>,
+        colour: Option<TagColour>,
+    ) -> AlloyResult<()> {
+        if name.is_none() && colour.is_none() {
+            return Err(AlloyError::InvalidRoomTag(
+                "a rename needs a new name, a new colour, or both".into(),
+            ));
+        }
+        validate_tag_id(id)?;
+        let name = name.map(normalize_tag_name).transpose()?;
+        let mut catalogue = self.get_tag_catalog().await?;
+        let tag = catalogue
+            .iter_mut()
+            .find(|tag| tag.id == id)
+            .ok_or_else(|| AlloyError::RoomTagNotFound(id.to_owned()))?;
+        if let Some(name) = name {
+            tag.name = name;
+        }
+        if let Some(colour) = colour {
+            tag.colour = colour;
+        }
+        self.write_tag_catalog(&catalogue).await
+    }
+
+    /// Sets the catalogue's display order. `ids` must be a permutation of the ids the catalogue
+    /// currently holds: every id exactly once. A list built from a stale copy is refused instead of
+    /// silently dropping the entries it does not know about.
+    pub async fn reorder_room_tags(&self, ids: &[String]) -> AlloyResult<()> {
+        let mut catalogue = self.get_tag_catalog().await?;
+        let mut ordered = Vec::with_capacity(ids.len());
+        let mut seen = HashSet::new();
+        for id in ids {
+            if !seen.insert(id.as_str()) {
+                return Err(AlloyError::InvalidRoomTag(format!(
+                    "the new order names {id:?} more than once"
+                )));
+            }
+            let index = catalogue
+                .iter()
+                .position(|tag| tag.id == *id)
+                .ok_or_else(|| {
+                    AlloyError::InvalidRoomTag(format!(
+                        "the new order names {id:?}, which is not in the catalogue"
+                    ))
+                })?;
+            ordered.push(catalogue.remove(index));
+        }
+        if let Some(left) = catalogue.first() {
+            return Err(AlloyError::InvalidRoomTag(format!(
+                "the new order leaves out {:?}; it must list every tag exactly once",
+                left.id
+            )));
+        }
+        self.write_tag_catalog(&ordered).await
     }
 
     /// Assigns (`enabled`) or removes the custom tag `tag_id` on a room. Idempotent. The tag
@@ -136,6 +216,53 @@ fn catalog_from_stored(
             Ok(content.tags)
         }
     }
+}
+
+/// Trimmed, non-empty name of at most [`MAX_TAG_LEN`] characters.
+fn normalize_tag_name(name: &str) -> AlloyResult<String> {
+    let name = name.trim();
+    if !(1..=MAX_TAG_LEN).contains(&name.chars().count()) {
+        return Err(AlloyError::InvalidRoomTag(format!(
+            "tag name must be 1-{MAX_TAG_LEN} characters: {name:?}"
+        )));
+    }
+    Ok(name.to_owned())
+}
+
+/// A tag id derived from the name: lowercase ASCII alphanumerics, single `-` between words.
+fn tag_slug(name: &str) -> String {
+    let mut slug = String::new();
+    for c in name.chars() {
+        if c.is_ascii_alphanumeric() {
+            slug.push(c.to_ascii_lowercase());
+        } else if !slug.is_empty() && !slug.ends_with('-') {
+            slug.push('-');
+        }
+    }
+    let slug = slug.trim_end_matches('-');
+    let slug = &slug[..slug.len().min(MAX_TAG_LEN)];
+    if slug.is_empty() {
+        "tag".to_owned()
+    } else {
+        slug.to_owned()
+    }
+}
+
+/// The slug of `name`, or the first `slug-2`, `slug-3`, … the catalogue does not hold yet.
+fn unique_tag_id(name: &str, catalogue: &[RoomTagDef]) -> String {
+    let base = tag_slug(name);
+    if !catalogue.iter().any(|tag| tag.id == base) {
+        return base;
+    }
+    for n in 2..10_000u32 {
+        let suffix = format!("-{n}");
+        let stem = &base[..base.len().min(MAX_TAG_LEN - suffix.len())];
+        let candidate = format!("{stem}{suffix}");
+        if !catalogue.iter().any(|tag| tag.id == candidate) {
+            return candidate;
+        }
+    }
+    format!("{}-overflow", &base[..base.len().min(MAX_TAG_LEN - 9)])
 }
 
 /// A tag id is 1..=32 characters of `[a-z0-9-]`; it is the suffix of the Matrix tag `u.<id>`.
@@ -234,6 +361,35 @@ mod tests {
             user_tag_name("work").unwrap(),
             TagName::User(ref name) if name.as_ref() == "u.work"
         ));
+    }
+
+    #[test]
+    fn created_ids_are_slugs_and_stay_unique() {
+        assert_eq!(tag_slug("Work"), "work");
+        assert_eq!(tag_slug("  Work & Travel  "), "work-travel");
+        assert_eq!(tag_slug("!!!"), "tag");
+        assert_eq!(tag_slug(&"a".repeat(40)).len(), MAX_TAG_LEN);
+
+        let def = |id: &str| RoomTagDef {
+            id: id.into(),
+            name: id.into(),
+            colour: TagColour::Blue,
+        };
+        let existing = vec![def("work"), def("work-2")];
+        assert_eq!(unique_tag_id("Work", &existing), "work-3");
+        assert_eq!(unique_tag_id("Home", &existing), "home");
+
+        let long = unique_tag_id(&"a".repeat(MAX_TAG_LEN), &[def(&"a".repeat(MAX_TAG_LEN))]);
+        assert_eq!(long.len(), MAX_TAG_LEN);
+        assert!(validate_tag_id(&long).is_ok());
+    }
+
+    #[test]
+    fn names_are_trimmed_and_bounded() {
+        assert_eq!(normalize_tag_name("  Work  ").unwrap(), "Work");
+        assert!(normalize_tag_name("   ").is_err());
+        assert!(normalize_tag_name(&"x".repeat(33)).is_err());
+        assert!(normalize_tag_name(&"x".repeat(32)).is_ok());
     }
 
     #[test]

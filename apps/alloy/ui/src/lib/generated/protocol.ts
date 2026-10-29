@@ -117,9 +117,36 @@ export type EngineCommand = { action: "DiscoverHomeserver"; params: {
 } } | 
 /**  Reads the account's room tag catalogue (display order preserved). */
 { action: "GetTagCatalog" } | 
-/**  Replaces the room tag catalogue; entries are validated and normalised before storing. */
+/**
+ *  Replaces the room tag catalogue; entries are validated and normalised before storing.
+ * 
+ *  Superseded by [`EngineCommand::CreateRoomTag`], [`EngineCommand::RenameRoomTag`] and
+ *  [`EngineCommand::ReorderRoomTags`], which change the catalogue the server holds instead of
+ *  writing a whole list read from a possibly stale local copy.
+ */
 { action: "SaveTagCatalog"; params: {
 	tags: RoomTagDef[],
+} } | 
+/**  Adds one tag to the catalogue; the engine assigns its id and returns the stored definition. */
+{ action: "CreateRoomTag"; params: {
+	name: string,
+	colour: TagColour,
+} } | 
+/**
+ *  Renames and/or recolours one tag. At least one of `name`/`colour` must be set and `id` must
+ *  be in the catalogue.
+ */
+{ action: "RenameRoomTag"; params: {
+	id: string,
+	name: string | null,
+	colour: TagColour | null,
+} } | 
+/**
+ *  Sets the catalogue's display order. `ids` must list every tag in the catalogue exactly once;
+ *  a list built from a stale copy is refused rather than dropping the entries it omits.
+ */
+{ action: "ReorderRoomTags"; params: {
+	ids: string[],
 } } | 
 /**  Assigns (`enabled: true`) or removes the custom tag `tag_id` on a room. */
 { action: "SetRoomTag"; params: {
@@ -218,6 +245,16 @@ export type EngineCommand = { action: "DiscoverHomeserver"; params: {
 { action: "SubscribeThread"; params: {
 	room_id: RoomId,
 	thread_root_event_id: EventId,
+} } | 
+/**
+ *  Aborts every subscription for this room and drops its cached timelines — the room timeline
+ *  and each of its threads. Best-effort: any later command that needs the timeline rebuilds it,
+ *  and the next subscription replays a full `Reset`. Intended for evicting rooms the app no
+ *  longer shows; calling it for a room still on screen blanks that view until it subscribes
+ *  again.
+ */
+{ action: "CloseTimeline"; params: {
+	room_id: RoomId,
 } } | { action: "PaginateBackwards"; params: {
 	room_id: RoomId,
 	count: number,
@@ -557,6 +594,10 @@ export type EngineResponse = { type: "HomeserverInfo"; payload: {
 /**  The account's room tag catalogue, in display order. */
 { type: "TagCatalog"; payload: {
 	tags: RoomTagDef[],
+} } | 
+/**  The tag `CreateRoomTag` added, with the id the engine assigned. */
+{ type: "RoomTagCreated"; payload: {
+	tag: RoomTagDef,
 } } | { type: "UserProfile"; payload: {
 	profile: UserProfileDto,
 } } | 
@@ -607,6 +648,14 @@ export type EngineResponse = { type: "HomeserverInfo"; payload: {
 	room_id: RoomId,
 } } | { type: "TimelineSubscribed"; payload: {
 	subscription_id: SubscriptionId,
+} } | 
+/**
+ *  Whether `CloseTimeline` had anything to abort or drop; `false` means it was already closed
+ *  and the call changed nothing.
+ */
+{ type: "TimelineClosed"; payload: {
+	room_id: RoomId,
+	closed: boolean,
 } } | { type: "Paginated"; payload: {
 	room_id: RoomId,
 	/**  True when the start of the room history was reached. */

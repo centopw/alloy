@@ -65,6 +65,8 @@ pub enum AlloyError {
     InvalidRoomId(String),
     #[error("Invalid room tag: {0}")]
     InvalidRoomTag(String),
+    #[error("Room tag not found: {0}")]
+    RoomTagNotFound(String),
     #[error("Invalid preferences: {0}")]
     InvalidPrefs(String),
     #[error("Invalid search: {0}")]

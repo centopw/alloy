@@ -300,6 +300,26 @@ impl AlloyClient {
         Ok(timeline)
     }
 
+    /// Drops the cached timeline for `room_id` and every thread timeline of that room. Returns how
+    /// many entries were removed. Call it only once no subscription still streams them: a live
+    /// stream holds the timeline's drop handle, so the entry alone does not free anything.
+    pub async fn drop_cached_timelines(&self, room_id: &RoomId) -> AlloyResult<usize> {
+        // Fail fast on an unknown room, so a typo is not reported as "already closed".
+        self.room(room_id)?;
+        let thread_prefix = format!("{}|thread|", room_id.0);
+        let mut map = self.timelines.lock().await;
+        let keys: Vec<String> = map
+            .keys()
+            .filter(|key| key.as_str() == room_id.0 || key.starts_with(&thread_prefix))
+            .cloned()
+            .collect();
+        let removed = keys.len();
+        for key in keys {
+            map.remove(&key);
+        }
+        Ok(removed)
+    }
+
     /// Drive a room timeline, calling `on_diffs` for every batch (first batch is a `Reset`
     /// with the current items). Runs until aborted; spawn and cancel to unsubscribe.
     pub async fn run_timeline(

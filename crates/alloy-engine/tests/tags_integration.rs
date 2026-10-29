@@ -53,6 +53,29 @@ async fn invalid(eng: &AppEngine, cmd: EngineCommand) {
     assert_eq!(err.code, "invalid_argument", "message: {}", err.message);
 }
 
+async fn not_found(eng: &AppEngine, cmd: EngineCommand) {
+    let err = eng.handle(cmd).await.unwrap_err();
+    assert_eq!(err.code, "not_found", "message: {}", err.message);
+}
+
+async fn create_tag(eng: &AppEngine, name: &str) -> RoomTagDef {
+    match eng
+        .handle(EngineCommand::CreateRoomTag {
+            name: name.to_owned(),
+            colour: TagColour::Violet,
+        })
+        .await
+        .unwrap()
+    {
+        EngineResponse::RoomTagCreated { tag } => tag,
+        other => panic!("unexpected {other:?}"),
+    }
+}
+
+fn tag_ids(tags: Vec<RoomTagDef>) -> Vec<String> {
+    tags.into_iter().map(|tag| tag.id).collect()
+}
+
 async fn catalogue(eng: &AppEngine) -> Vec<RoomTagDef> {
     match eng.handle(EngineCommand::GetTagCatalog).await.unwrap() {
         EngineResponse::TagCatalog { tags } => tags,
@@ -452,4 +475,96 @@ async fn tags_reload_on_a_cold_client() {
         catalogue_ids.contains(&tag),
         "the catalogue must come back from the server, got {catalogue_ids:?}"
     );
+}
+
+/// #T28: every command applies one change to the catalogue the server holds, so a device working
+/// from a copy that predates another device's tag cannot drop it — the class the whole-list
+/// `SaveTagCatalog` allowed.
+#[tokio::test]
+async fn per_operation_commands_keep_another_clients_tags() {
+    let Ok(hs) = std::env::var("ALLOY_TEST_HS") else {
+        eprintln!("skipping: ALLOY_TEST_HS not set");
+        return;
+    };
+    let _guard = CATALOGUE.lock().await;
+
+    let run = unique_id("perop");
+    let (_dir1, _ctx1, first) = login(&hs, "alice").await;
+    let (_dir2, _ctx2, second) = login(&hs, "alice").await;
+
+    // Start from a known catalogue, then give the first device two tags.
+    unit(&first, EngineCommand::SaveTagCatalog { tags: vec![] }).await;
+    let alpha = create_tag(&first, &format!("Alpha {run}")).await;
+    let beta = create_tag(&first, &format!("Beta {run}")).await;
+    assert_eq!(
+        alpha.id,
+        format!("alpha-{run}"),
+        "the id is a slug of the name"
+    );
+
+    // The second device adds a tag the first device has never seen.
+    let gamma = create_tag(&second, &format!("Gamma {run}")).await;
+
+    // A rename from the first device's stale view must not drop it.
+    unit(
+        &first,
+        EngineCommand::RenameRoomTag {
+            id: alpha.id.clone(),
+            name: Some(format!("Alpha renamed {run}")),
+            colour: Some(TagColour::Teal),
+        },
+    )
+    .await;
+    let ids = tag_ids(catalogue(&second).await);
+    assert!(
+        ids.contains(&gamma.id),
+        "the other device's tag must survive a rename, got {ids:?}"
+    );
+    assert!(ids.contains(&beta.id), "and every other entry, got {ids:?}");
+
+    // A reorder built from the stale copy is refused rather than dropping the unknown tag.
+    let err = first
+        .handle(EngineCommand::ReorderRoomTags {
+            ids: vec![beta.id.clone(), alpha.id.clone()],
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, "invalid_argument", "message: {}", err.message);
+
+    // With the current ids it succeeds, and the order is kept.
+    unit(
+        &first,
+        EngineCommand::ReorderRoomTags {
+            ids: vec![gamma.id.clone(), beta.id.clone(), alpha.id.clone()],
+        },
+    )
+    .await;
+    assert_eq!(
+        tag_ids(catalogue(&second).await),
+        vec![gamma.id.clone(), beta.id.clone(), alpha.id.clone()]
+    );
+
+    // Reusing a name gets a distinct id instead of overwriting the first tag.
+    let again = create_tag(&first, &format!("Alpha {run}")).await;
+    assert_ne!(again.id, alpha.id);
+
+    // Unknown id and a rename with nothing to change are both refused.
+    not_found(
+        &first,
+        EngineCommand::RenameRoomTag {
+            id: format!("missing-{run}"),
+            name: Some("x".into()),
+            colour: None,
+        },
+    )
+    .await;
+    invalid(
+        &first,
+        EngineCommand::RenameRoomTag {
+            id: alpha.id.clone(),
+            name: None,
+            colour: None,
+        },
+    )
+    .await;
 }

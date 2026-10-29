@@ -62,6 +62,9 @@ impl CommandGroup {
             | EngineCommand::SetRoomNotificationLevel { .. }
             | EngineCommand::GetTagCatalog
             | EngineCommand::SaveTagCatalog { .. }
+            | EngineCommand::CreateRoomTag { .. }
+            | EngineCommand::RenameRoomTag { .. }
+            | EngineCommand::ReorderRoomTags { .. }
             | EngineCommand::SetRoomTag { .. }
             | EngineCommand::DeleteRoomTag { .. }
             | EngineCommand::SearchRoomMessages { .. }
@@ -99,7 +102,8 @@ impl CommandGroup {
             | EngineCommand::StartLiveLocation { .. }
             | EngineCommand::SendLocationBeacon { .. }
             | EngineCommand::StopLiveLocation { .. }
-            | EngineCommand::SearchAllMessages { .. } => CommandGroup::Timeline,
+            | EngineCommand::SearchAllMessages { .. }
+            | EngineCommand::CloseTimeline { .. } => CommandGroup::Timeline,
 
             EngineCommand::RequestSelfVerification
             | EngineCommand::AcceptVerification { .. }

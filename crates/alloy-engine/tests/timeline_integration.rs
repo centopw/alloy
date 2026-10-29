@@ -288,3 +288,199 @@ async fn send_edit_react_redact_and_paginate() {
         .unwrap_err();
     assert_eq!(err.code, "not_found");
 }
+
+/// Create a room and return its id.
+async fn create_room(eng: &AppEngine, name: &str) -> RoomId {
+    match eng
+        .handle(EngineCommand::CreateRoom {
+            name: name.to_owned(),
+            encrypted: false,
+            invite: None,
+        })
+        .await
+        .unwrap()
+    {
+        EngineResponse::RoomCreated { room_id } => room_id,
+        other => panic!("unexpected {other:?}"),
+    }
+}
+
+/// Subscribe to a room's timeline, waiting for the room to be known to the client.
+async fn subscribe_room(eng: &AppEngine, room: &RoomId) -> SubscriptionId {
+    let mut attempts = 0;
+    loop {
+        match eng
+            .handle(EngineCommand::SubscribeTimeline {
+                room_id: room.clone(),
+            })
+            .await
+        {
+            Ok(EngineResponse::TimelineSubscribed { subscription_id }) => return subscription_id,
+            Err(e) if e.code == "not_found" && attempts < 30 => {
+                attempts += 1;
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+}
+
+/// Send with a bounded retry for the window where the client still reads the room as invited.
+async fn send_text(eng: &AppEngine, room: &RoomId, body: &str) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let result = eng
+            .handle(EngineCommand::SendText {
+                room_id: room.clone(),
+                body: body.to_owned(),
+                markdown: Some(false),
+                reply_to: None,
+                mentions: None,
+                mention_room: false,
+                txn_id: None,
+                in_thread_root: None,
+            })
+            .await;
+        match result {
+            Ok(_) => return,
+            Err(e)
+                if e.code == "network_error"
+                    && e.message == "the room isn't in the joined state"
+                    && tokio::time::Instant::now() < deadline =>
+            {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            Err(e) => panic!("send failed: {e:?}"),
+        }
+    }
+}
+
+/// #T10b: closing a timeline aborts that room's subscriptions, drops the cached timeline, and the
+/// second call is a no-op. Re-subscribing rebuilds the timeline and replays a full `Reset` that
+/// already holds what arrived while it was closed.
+#[tokio::test]
+async fn closing_a_timeline_stops_its_diffs_and_replays_a_fresh_reset() {
+    let Ok(hs) = std::env::var("ALLOY_TEST_HS") else {
+        eprintln!("skipping: ALLOY_TEST_HS not set");
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = EngineContext::new(
+        dir.path().to_path_buf(),
+        Arc::new(InMemorySecretStore::new()),
+    );
+    let eng = AppEngine::new(ctx.clone());
+    eng.handle(EngineCommand::LoginPassword {
+        homeserver_url: hs,
+        username: "alice".into(),
+        password: "testpassword123!".into(),
+    })
+    .await
+    .unwrap();
+
+    let room = create_room(&eng, "close-timeline").await;
+    let control = create_room(&eng, "close-contro").await;
+    eng.handle(EngineCommand::SubscribeRoomList { filter: None })
+        .await
+        .unwrap();
+
+    let mut rx = ctx.sink.subscribe();
+    let sub = subscribe_room(&eng, &room).await;
+    let sub_control = subscribe_room(&eng, &control).await;
+    let mut mirror: Vec<TimelineItemDto> = vec![];
+    send_text(&eng, &room, "before close").await;
+    until(
+        &mut rx,
+        &sub,
+        &mut mirror,
+        "the message before closing",
+        |m| find(m, "before close").is_some(),
+    )
+    .await;
+
+    // Close: everything for this room is aborted and dropped.
+    match eng
+        .handle(EngineCommand::CloseTimeline {
+            room_id: room.clone(),
+        })
+        .await
+        .unwrap()
+    {
+        EngineResponse::TimelineClosed { closed, .. } => assert!(closed, "there was a timeline"),
+        other => panic!("unexpected {other:?}"),
+    }
+    // A second close has nothing to do.
+    match eng
+        .handle(EngineCommand::CloseTimeline {
+            room_id: room.clone(),
+        })
+        .await
+        .unwrap()
+    {
+        EngineResponse::TimelineClosed { closed, .. } => assert!(!closed, "nothing left to close"),
+        other => panic!("unexpected {other:?}"),
+    }
+
+    // While the room is closed, a message arrives and the control room keeps streaming: the
+    // closed subscription must produce nothing, and the control proves the stream is alive.
+    // Cancellation is asynchronous, so let the aborted task finish tearing down and drop whatever
+    // it had already emitted; the check below is then about the closed subscription only.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    while rx.try_recv().is_ok() {}
+    send_text(&eng, &room, "while closed").await;
+    send_text(&eng, &control, "control message").await;
+    let mut control_mirror: Vec<TimelineItemDto> = vec![];
+    let mut closed_sub_diffs = 0;
+    let res = tokio::time::timeout(Duration::from_secs(60), async {
+        while find(&control_mirror, "control message").is_none() {
+            match rx.recv().await.unwrap() {
+                EngineEvent::TimelineDiff {
+                    subscription_id,
+                    diff,
+                    ..
+                } if subscription_id == sub => {
+                    closed_sub_diffs += 1;
+                    apply(&mut mirror, *diff);
+                }
+                EngineEvent::TimelineDiff {
+                    subscription_id,
+                    diff,
+                    ..
+                } if subscription_id == sub_control => apply(&mut control_mirror, *diff),
+                _ => {}
+            }
+        }
+    })
+    .await;
+    assert!(
+        res.is_ok(),
+        "the control room's timeline stopped streaming too"
+    );
+    assert_eq!(
+        closed_sub_diffs, 0,
+        "a closed timeline must not emit diffs; mirror={mirror:#?}"
+    );
+
+    // Re-subscribing rebuilds it: a new id and a full Reset that already holds the closed-window
+    // message.
+    let reopened = subscribe_room(&eng, &room).await;
+    assert_ne!(reopened, sub);
+    let mut rebuilt: Vec<TimelineItemDto> = vec![];
+    until(
+        &mut rx,
+        &reopened,
+        &mut rebuilt,
+        "the rebuilt timeline",
+        |m| find(m, "while closed").is_some() && find(m, "before close").is_some(),
+    )
+    .await;
+
+    // An unknown room is not "already closed", it is a bad request.
+    let err = eng
+        .handle(EngineCommand::CloseTimeline {
+            room_id: RoomId("!nope:localhost".into()),
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, "not_found");
+}

@@ -55,6 +55,20 @@ impl GroupHandler for TimelineHandler {
                     spawn_subscription(ctx, client, room_id, Some(thread_root_event_id)).await;
                 Ok(EngineResponse::TimelineSubscribed { subscription_id })
             }
+            EngineCommand::CloseTimeline { room_id } => {
+                let client = ctx.active_client().await?;
+                // Abort first: a live stream holds the timeline's drop handle, so dropping the
+                // cached entry while a subscription still streams would free nothing.
+                let aborted = ctx.subscriptions.cancel_room(&room_id).await;
+                let dropped = client
+                    .drop_cached_timelines(&room_id)
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::TimelineClosed {
+                    room_id,
+                    closed: aborted + dropped > 0,
+                })
+            }
             EngineCommand::PaginateBackwards { room_id, count } => {
                 let client = ctx.active_client().await?;
                 let count = u16::try_from(count).unwrap_or(u16::MAX).max(1);
@@ -362,7 +376,7 @@ async fn spawn_subscription(
         }
     });
     ctx.subscriptions
-        .register(subscription_id.clone(), task.abort_handle())
+        .register_for_room(subscription_id.clone(), room_id.clone(), task.abort_handle())
         .await;
     subscription_id
 }

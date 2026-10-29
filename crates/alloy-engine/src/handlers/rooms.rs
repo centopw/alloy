@@ -26,6 +26,7 @@ pub(crate) fn map_err(e: AlloyError) -> EngineError {
         AlloyError::RoomNotFound(r) => EngineError::not_found(format!("room {r}")),
         AlloyError::InvalidRoomId(m) => EngineError::invalid_argument(m),
         AlloyError::InvalidRoomTag(m) => EngineError::invalid_argument(m),
+        AlloyError::RoomTagNotFound(id) => EngineError::not_found(format!("tag {id}")),
         AlloyError::InvalidPrefs(m) => EngineError::invalid_argument(m),
         AlloyError::InvalidSearch(m) => EngineError::invalid_argument(m),
         AlloyError::MatrixSdk(m) => EngineError::network_error(m),
@@ -272,6 +273,27 @@ impl GroupHandler for RoomsHandler {
             EngineCommand::SaveTagCatalog { tags } => {
                 let client = ctx.active_client().await?;
                 client.save_tag_catalog(tags).await.map_err(map_err)?;
+                Ok(EngineResponse::Unit)
+            }
+            EngineCommand::CreateRoomTag { name, colour } => {
+                let client = ctx.active_client().await?;
+                let tag = client
+                    .create_room_tag(&name, colour)
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::RoomTagCreated { tag })
+            }
+            EngineCommand::RenameRoomTag { id, name, colour } => {
+                let client = ctx.active_client().await?;
+                client
+                    .rename_room_tag(&id, name.as_deref(), colour)
+                    .await
+                    .map_err(map_err)?;
+                Ok(EngineResponse::Unit)
+            }
+            EngineCommand::ReorderRoomTags { ids } => {
+                let client = ctx.active_client().await?;
+                client.reorder_room_tags(&ids).await.map_err(map_err)?;
                 Ok(EngineResponse::Unit)
             }
             EngineCommand::SetRoomTag {
