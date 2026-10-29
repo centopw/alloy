@@ -117,16 +117,6 @@ export type EngineCommand = { action: "DiscoverHomeserver"; params: {
 } } | 
 /**  Reads the account's room tag catalogue (display order preserved). */
 { action: "GetTagCatalog" } | 
-/**
- *  Replaces the room tag catalogue; entries are validated and normalised before storing.
- * 
- *  Superseded by [`EngineCommand::CreateRoomTag`], [`EngineCommand::RenameRoomTag`] and
- *  [`EngineCommand::ReorderRoomTags`], which change the catalogue the server holds instead of
- *  writing a whole list read from a possibly stale local copy.
- */
-{ action: "SaveTagCatalog"; params: {
-	tags: RoomTagDef[],
-} } | 
 /**  Adds one tag to the catalogue; the engine assigns its id and returns the stored definition. */
 { action: "CreateRoomTag"; params: {
 	name: string,

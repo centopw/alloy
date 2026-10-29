@@ -270,11 +270,6 @@ impl GroupHandler for RoomsHandler {
                 let tags = client.get_tag_catalog().await.map_err(map_err)?;
                 Ok(EngineResponse::TagCatalog { tags })
             }
-            EngineCommand::SaveTagCatalog { tags } => {
-                let client = ctx.active_client().await?;
-                client.save_tag_catalog(tags).await.map_err(map_err)?;
-                Ok(EngineResponse::Unit)
-            }
             EngineCommand::CreateRoomTag { name, colour } => {
                 let client = ctx.active_client().await?;
                 let tag = client

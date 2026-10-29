@@ -50,16 +50,6 @@ impl AlloyClient {
         catalog_from_stored(stored)
     }
 
-    /// Replaces the room tag catalogue. Entries are validated and trimmed before storing.
-    ///
-    /// Kept for compatibility while the UI moves to the per-operation commands; those apply one
-    /// change to the catalogue the server holds, so a stale local copy cannot drop another
-    /// client's entry.
-    pub async fn save_tag_catalog(&self, tags: Vec<RoomTagDef>) -> AlloyResult<()> {
-        let tags = normalize_tag_catalog(tags)?;
-        self.write_tag_catalog(&tags).await
-    }
-
     /// Adds one tag to the catalogue, assigning its id and returning the stored definition. The
     /// catalogue is read from the server first, so an entry another client added survives.
     pub async fn create_room_tag(&self, name: &str, colour: TagColour) -> AlloyResult<RoomTagDef> {
@@ -280,33 +270,6 @@ fn validate_tag_id(id: &str) -> AlloyResult<()> {
     }
 }
 
-/// Validates a whole catalogue and trims its names. Ids must be well formed and unique.
-fn normalize_tag_catalog(tags: Vec<RoomTagDef>) -> AlloyResult<Vec<RoomTagDef>> {
-    let mut seen = HashSet::new();
-    tags.into_iter()
-        .map(|tag| -> AlloyResult<RoomTagDef> {
-            validate_tag_id(&tag.id)?;
-            let name = tag.name.trim();
-            if !(1..=MAX_TAG_LEN).contains(&name.chars().count()) {
-                return Err(AlloyError::InvalidRoomTag(format!(
-                    "tag name must be 1-{MAX_TAG_LEN} characters: {:?}",
-                    tag.name
-                )));
-            }
-            if !seen.insert(tag.id.clone()) {
-                return Err(AlloyError::InvalidRoomTag(format!(
-                    "duplicate tag id {:?}",
-                    tag.id
-                )));
-            }
-            Ok(RoomTagDef {
-                name: name.to_owned(),
-                ..tag
-            })
-        })
-        .collect()
-}
-
 fn user_tag_name(tag_id: &str) -> AlloyResult<TagName> {
     let name = UserTagName::from_str(&format!("{USER_ROOM_TAG_PREFIX}{tag_id}"))
         .map_err(|e| AlloyError::InvalidRoomTag(e.to_string()))?;
@@ -340,19 +303,10 @@ mod tests {
 
     #[test]
     fn catalogue_names_are_trimmed_and_bounded() {
-        let saved = normalize_tag_catalog(vec![tag("work", "  Work  ")]).unwrap();
-        assert_eq!(saved[0].name, "Work");
-        assert!(normalize_tag_catalog(vec![tag("work", "   ")]).is_err());
-        assert!(normalize_tag_catalog(vec![tag("work", &"x".repeat(33))]).is_err());
-        assert!(normalize_tag_catalog(vec![tag("work", &"x".repeat(32))]).is_ok());
-    }
-
-    #[test]
-    fn catalogue_ids_are_unique_and_order_is_kept() {
-        assert!(normalize_tag_catalog(vec![tag("work", "Work"), tag("work", "Again")]).is_err());
-        let saved = normalize_tag_catalog(vec![tag("b", "B"), tag("a", "A")]).unwrap();
-        let ids: Vec<&str> = saved.iter().map(|t| t.id.as_str()).collect();
-        assert_eq!(ids, ["b", "a"]);
+        assert_eq!(normalize_tag_name("  Work  ").unwrap(), "Work");
+        assert!(normalize_tag_name("   ").is_err());
+        assert!(normalize_tag_name(&"x".repeat(33)).is_err());
+        assert!(normalize_tag_name(&"x".repeat(32)).is_ok());
     }
 
     #[test]

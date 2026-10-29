@@ -718,14 +718,6 @@ pub enum EngineCommand {
     },
     /// Reads the account's room tag catalogue (display order preserved).
     GetTagCatalog,
-    /// Replaces the room tag catalogue; entries are validated and normalised before storing.
-    ///
-    /// Superseded by [`EngineCommand::CreateRoomTag`], [`EngineCommand::RenameRoomTag`] and
-    /// [`EngineCommand::ReorderRoomTags`], which change the catalogue the server holds instead of
-    /// writing a whole list read from a possibly stale local copy.
-    SaveTagCatalog {
-        tags: Vec<RoomTagDef>,
-    },
     /// Adds one tag to the catalogue; the engine assigns its id and returns the stored definition.
     CreateRoomTag {
         name: String,

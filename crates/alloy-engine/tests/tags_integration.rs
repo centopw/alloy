@@ -14,9 +14,9 @@ use tokio::sync::broadcast::Receiver;
 const PASSWORD: &str = "testpassword123!";
 
 /// The tag catalogue is a single global account-data event per user, so every test here reads or
-/// writes the same value. Tests in one binary run in parallel threads, and a `SaveTagCatalog` or
-/// `DeleteRoomTag` in one test replaces the whole catalogue — it can land between another test's
-/// write and its read and erase it. Serialize the file's tests so each sees the catalogue it wrote.
+/// writes the same value. Tests in one binary run in parallel threads, and a create, rename,
+/// reorder or delete in one test changes the catalogue another test is asserting on. Serialize the
+/// file's tests so each sees the catalogue it wrote.
 static CATALOGUE: LazyLock<tokio::sync::Mutex<()>> = LazyLock::new(|| tokio::sync::Mutex::new(()));
 
 async fn login(hs: &str, user: &str) -> (tempfile::TempDir, EngineContext, AppEngine) {
@@ -58,17 +58,24 @@ async fn not_found(eng: &AppEngine, cmd: EngineCommand) {
     assert_eq!(err.code, "not_found", "message: {}", err.message);
 }
 
-async fn create_tag(eng: &AppEngine, name: &str) -> RoomTagDef {
+async fn create_tag(eng: &AppEngine, name: &str, colour: TagColour) -> RoomTagDef {
     match eng
         .handle(EngineCommand::CreateRoomTag {
             name: name.to_owned(),
-            colour: TagColour::Violet,
+            colour,
         })
         .await
         .unwrap()
     {
         EngineResponse::RoomTagCreated { tag } => tag,
         other => panic!("unexpected {other:?}"),
+    }
+}
+
+/// Remove every tag the account's catalogue holds, so a test starts from a known state.
+async fn clear_catalogue(eng: &AppEngine) {
+    for tag in catalogue(eng).await {
+        unit(eng, EngineCommand::DeleteRoomTag { tag_id: tag.id }).await;
     }
 }
 
@@ -160,59 +167,61 @@ async fn tag_catalogue_round_trips_and_rejects_invalid_entries() {
     };
     let _guard = CATALOGUE.lock().await;
     let (_dir, _ctx, bob) = login(&hs, "bob").await;
+    clear_catalogue(&bob).await;
 
-    let work = unique_id("work");
-    let home = unique_id("home");
-    unit(
+    let work_name = format!("  Work {}  ", unique_id("w"));
+    let work = create_tag(&bob, &work_name, TagColour::Blue).await;
+    // The name is trimmed and the id is a slug of it, assigned by the engine.
+    assert_eq!(work.name, work_name.trim());
+    assert!(
+        work.id.starts_with("work-") && !work.id.contains(' '),
+        "id: {}",
+        work.id
+    );
+    let home = create_tag(&bob, &format!("Home {}", unique_id("h")), TagColour::Teal).await;
+    assert_eq!(
+        tag_ids(catalogue(&bob).await),
+        vec![work.id.clone(), home.id.clone()],
+        "created tags come back in the order they were added"
+    );
+
+    for name in ["   ".to_owned(), "n".repeat(33)] {
+        invalid(
+            &bob,
+            EngineCommand::CreateRoomTag {
+                name,
+                colour: TagColour::Grey,
+            },
+        )
+        .await;
+    }
+    invalid(
         &bob,
-        EngineCommand::SaveTagCatalog {
-            tags: vec![
-                RoomTagDef {
-                    id: work.clone(),
-                    name: "  Work  ".into(),
-                    colour: TagColour::Blue,
-                },
-                RoomTagDef {
-                    id: home.clone(),
-                    name: "Home".into(),
-                    colour: TagColour::Teal,
-                },
-            ],
+        EngineCommand::RenameRoomTag {
+            id: "Bad Id".into(),
+            name: Some("Bad".into()),
+            colour: None,
         },
     )
     .await;
-    // Names are trimmed on save; order is kept.
-    assert_eq!(
-        catalogue(&bob).await,
-        vec![
-            RoomTagDef {
-                id: work.clone(),
-                name: "Work".into(),
-                colour: TagColour::Blue,
-            },
-            RoomTagDef {
-                id: home.clone(),
-                name: "Home".into(),
-                colour: TagColour::Teal,
-            },
-        ]
-    );
-
-    let def = |id: &str, name: &str| RoomTagDef {
-        id: id.into(),
-        name: name.into(),
-        colour: TagColour::Grey,
-    };
-    for tags in [
-        vec![def("Bad Id", "Bad")],
-        vec![def("", "Empty id")],
-        vec![def(&"x".repeat(33), "Too long")],
-        vec![def(&unique_id("blank"), "   ")],
-        vec![def(&unique_id("long"), &"n".repeat(33))],
-        vec![def(&work, "Work"), def(&work, "Work again")],
-    ] {
-        invalid(&bob, EngineCommand::SaveTagCatalog { tags }).await;
-    }
+    invalid(
+        &bob,
+        EngineCommand::RenameRoomTag {
+            id: work.id.clone(),
+            name: Some("   ".into()),
+            colour: None,
+        },
+    )
+    .await;
+    not_found(
+        &bob,
+        EngineCommand::RenameRoomTag {
+            id: unique_id("missing"),
+            name: Some("Nowhere".into()),
+            colour: None,
+        },
+    )
+    .await;
     invalid(
         &bob,
         EngineCommand::SetRoomTag {
@@ -230,9 +239,8 @@ async fn tag_catalogue_round_trips_and_rejects_invalid_entries() {
     )
     .await;
 
-    // Rejected saves leave the stored catalogue untouched.
-    assert_eq!(catalogue(&bob).await.len(), 2);
-    assert_eq!(catalogue(&bob).await[0].id, work);
+    // Rejected changes leave the stored catalogue untouched.
+    assert_eq!(tag_ids(catalogue(&bob).await), vec![work.id, home.id]);
 }
 
 #[tokio::test]
@@ -243,6 +251,7 @@ async fn room_tags_are_assigned_per_room_and_deleted_everywhere() {
     };
     let _guard = CATALOGUE.lock().await;
     let (_dir, ctx, alice) = login(&hs, "alice").await;
+    clear_catalogue(&alice).await;
     let room1 = create_room(&alice).await;
     let room2 = create_room(&alice).await;
 
@@ -262,19 +271,8 @@ async fn room_tags_are_assigned_per_room_and_deleted_everywhere() {
     })
     .await;
 
-    let tag = unique_id("project");
+    let tag = create_tag(&alice, "Project", TagColour::Violet).await.id;
     let orphan = unique_id("orphan");
-    unit(
-        &alice,
-        EngineCommand::SaveTagCatalog {
-            tags: vec![RoomTagDef {
-                id: tag.clone(),
-                name: "Project".into(),
-                colour: TagColour::Violet,
-            }],
-        },
-    )
-    .await;
 
     // Assign on room 1 only.
     unit(
@@ -402,8 +400,11 @@ async fn tags_reload_on_a_cold_client() {
 
     // Device 1 defines a catalogue entry and assigns it to a new room.
     let (_dir1, ctx1, alice) = login(&hs, "alice").await;
+    clear_catalogue(&alice).await;
     let room = create_room(&alice).await;
-    let tag = unique_id("cold");
+    let tag = create_tag(&alice, &unique_id("cold"), TagColour::Violet)
+        .await
+        .id;
 
     let mut rx = ctx1.sink.subscribe();
     let sub = match alice
@@ -420,17 +421,6 @@ async fn tags_reload_on_a_cold_client() {
     })
     .await;
 
-    unit(
-        &alice,
-        EngineCommand::SaveTagCatalog {
-            tags: vec![RoomTagDef {
-                id: tag.clone(),
-                name: "Cold".into(),
-                colour: TagColour::Violet,
-            }],
-        },
-    )
-    .await;
     unit(
         &alice,
         EngineCommand::SetRoomTag {
@@ -478,8 +468,8 @@ async fn tags_reload_on_a_cold_client() {
 }
 
 /// #T28: every command applies one change to the catalogue the server holds, so a device working
-/// from a copy that predates another device's tag cannot drop it — the class the whole-list
-/// `SaveTagCatalog` allowed.
+/// from a copy that predates another device's tag cannot drop it — the class a whole-list write
+/// allowed.
 #[tokio::test]
 async fn per_operation_commands_keep_another_clients_tags() {
     let Ok(hs) = std::env::var("ALLOY_TEST_HS") else {
@@ -493,9 +483,9 @@ async fn per_operation_commands_keep_another_clients_tags() {
     let (_dir2, _ctx2, second) = login(&hs, "alice").await;
 
     // Start from a known catalogue, then give the first device two tags.
-    unit(&first, EngineCommand::SaveTagCatalog { tags: vec![] }).await;
-    let alpha = create_tag(&first, &format!("Alpha {run}")).await;
-    let beta = create_tag(&first, &format!("Beta {run}")).await;
+    clear_catalogue(&first).await;
+    let alpha = create_tag(&first, &format!("Alpha {run}"), TagColour::Violet).await;
+    let beta = create_tag(&first, &format!("Beta {run}"), TagColour::Violet).await;
     assert_eq!(
         alpha.id,
         format!("alpha-{run}"),
@@ -503,7 +493,7 @@ async fn per_operation_commands_keep_another_clients_tags() {
     );
 
     // The second device adds a tag the first device has never seen.
-    let gamma = create_tag(&second, &format!("Gamma {run}")).await;
+    let gamma = create_tag(&second, &format!("Gamma {run}"), TagColour::Violet).await;
 
     // A rename from the first device's stale view must not drop it.
     unit(
@@ -545,7 +535,7 @@ async fn per_operation_commands_keep_another_clients_tags() {
     );
 
     // Reusing a name gets a distinct id instead of overwriting the first tag.
-    let again = create_tag(&first, &format!("Alpha {run}")).await;
+    let again = create_tag(&first, &format!("Alpha {run}"), TagColour::Violet).await;
     assert_ne!(again.id, alpha.id);
 
     // Unknown id and a rename with nothing to change are both refused.

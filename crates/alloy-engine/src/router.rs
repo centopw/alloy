@@ -61,7 +61,6 @@ impl CommandGroup {
             | EngineCommand::GetRoomNotificationLevel { .. }
             | EngineCommand::SetRoomNotificationLevel { .. }
             | EngineCommand::GetTagCatalog
-            | EngineCommand::SaveTagCatalog { .. }
             | EngineCommand::CreateRoomTag { .. }
             | EngineCommand::RenameRoomTag { .. }
             | EngineCommand::ReorderRoomTags { .. }
