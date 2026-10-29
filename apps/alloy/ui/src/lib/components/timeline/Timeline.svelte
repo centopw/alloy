@@ -99,8 +99,13 @@
         shift = true;
         void tick().then(() => requestAnimationFrame(() => (shift = false)));
       }
-      if (opening) sticky = true;
-      if (opening || ownSend || ((appended || change.replaced) && atBottom) || (sticky && (change.prepended || appended))) {
+      // A reopened room carries a scroll offset to restore; that is where the reader was, so the
+      // opening jump to the newest message must not fight it.
+      const restoring = opening && timelineStore.pendingScroll !== null;
+      if (opening && !restoring) sticky = true;
+      if (restoring) {
+        // the pending-scroll effect below applies the cached offset once the rows are mounted
+      } else if (opening || ownSend || ((appended || change.replaced) && atBottom) || (sticky && (change.prepended || appended))) {
         void tick().then(() => vlist?.scrollToIndex(len - 1, { align: 'end' }));
       }
       // Only rows after the old last row are new messages; history loaded above, or rows inserted in the
@@ -179,8 +184,23 @@
     void tick().then(() => list.scrollTo(offsetForBottomGap(list.getScrollSize(), height, bottomGap)));
   });
 
+  // Reopening a cached room puts the reader back where they were; the store holds the offset.
+  $effect(() => {
+    const target = timelineStore.pendingScroll;
+    if (target === null) return;
+    untrack(() => {
+      void tick().then(() =>
+        requestAnimationFrame(() => {
+          vlist?.scrollTo(target);
+          timelineStore.pendingScroll = null;
+        })
+      );
+    });
+  });
+
   function onScroll(offset: number) {
     if (!vlist) return;
+    timelineStore.rememberScroll(offset);
     const distance = vlist.getScrollSize() - (offset + vlist.getViewportSize());
     bottomGap = Math.max(0, distance);
     atBottom = distance < 80;

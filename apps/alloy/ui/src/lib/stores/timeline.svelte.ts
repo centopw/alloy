@@ -11,6 +11,41 @@ import type { VoiceClip } from '../platform/voiceRecorder.js';
 
 type TimelineDiffEvent = Extract<EngineEvent, { type: 'TimelineDiff' }>;
 
+/** Rooms kept for instant reopening; the least recently used is evicted with `CloseTimeline`. */
+export const TIMELINE_CACHE_LIMIT = 8;
+
+interface CachedTimeline {
+  items: TimelineItemDto[];
+  reachedStart: boolean;
+  scrollTop: number;
+}
+
+/**
+ * A `Reset` replaces the window the server sends, not necessarily everything the cache holds: the
+ * cache can carry older history the reset does not cover. Keep cached items older than the reset
+ * window, take the reset as authoritative for what it contains, and keep local echoes it has not
+ * seen yet. Deduplicated by internal id, so reopening never doubles a row.
+ */
+export function mergeTimelineReset(
+  cached: readonly TimelineItemDto[],
+  reset: readonly TimelineItemDto[]
+): TimelineItemDto[] {
+  const resetIds = new Set(reset.map((i) => i.event_id).filter((id): id is string => !!id));
+  const firstResetTs = reset[0]?.timestamp_millis ?? Number.POSITIVE_INFINITY;
+  const older = cached.filter(
+    (i) => i.event_id && !resetIds.has(i.event_id) && i.timestamp_millis < firstResetTs
+  );
+  const echoes = cached.filter((i) => !i.event_id);
+  const seen = new Set<string>();
+  const out: TimelineItemDto[] = [];
+  for (const item of [...older, ...reset, ...echoes]) {
+    if (seen.has(item.internal_id)) continue;
+    seen.add(item.internal_id);
+    out.push(item);
+  }
+  return out;
+}
+
 /** The open room's timeline plus message-level actions (reply/edit/react/redact/retry). */
 class TimelineStore {
   roomId = $state<string | null>(null);
@@ -49,6 +84,14 @@ class TimelineStore {
   private unlisten: (() => void) | null = null;
   /** The event whose receipt is in flight, so overlapping triggers share one request. */
   private receiptPending: string | null = null;
+  /** Where the last open room was scrolled to; plain state, it changes on every scroll frame. */
+  private scrollTop = 0;
+  /** Scroll offset to apply once the reopened room's rows are rendered. */
+  pendingScroll = $state<number | null>(null);
+  /** Cached timelines by room, least recently used first. */
+  private cache = new Map<string, CachedTimeline>();
+  /** The next diff for the open room is its first `Reset`, which merges rather than clears. */
+  private awaitingReset = false;
 
   /** Open a room (closing the previous one). Pass null to just close. */
   async open(roomId: string | null) {
@@ -56,10 +99,38 @@ class TimelineStore {
     if (!roomId) return closing;
     void closing;
     this.roomId = roomId;
-    this.loading = true;
     this.error = null;
+    const cached = this.cache.get(roomId);
+    if (cached) {
+      // Touch the entry so it is the last to be evicted, and start from what was on screen.
+      this.cache.delete(roomId);
+      this.cache.set(roomId, cached);
+      this.items = cached.items.slice();
+      this.reachedStart = cached.reachedStart;
+      this.scrollTop = cached.scrollTop;
+      this.pendingScroll = cached.scrollTop;
+      this.loading = false;
+    } else {
+      this.items = [];
+      this.reachedStart = false;
+      this.scrollTop = 0;
+      this.pendingScroll = null;
+      this.loading = true;
+    }
+    this.awaitingReset = true;
     const batcher = new FrameBatcher<TimelineDiffEvent>((events) => {
-      for (const e of events) if (e.payload.room_id === roomId) applyDiff(this.items, e.payload.diff);
+      for (const e of events) {
+        if (e.payload.room_id !== roomId) continue;
+        const diff = e.payload.diff;
+        if (diff.type === 'Reset') {
+          this.items = this.awaitingReset
+            ? mergeTimelineReset(this.items, diff.content.values)
+            : diff.content.values;
+          this.awaitingReset = false;
+        } else {
+          applyDiff(this.items, diff);
+        }
+      }
       this.loading = false;
     });
     this.batcher = batcher;
@@ -80,6 +151,7 @@ class TimelineStore {
   async close() {
     // Reset all state synchronously: a concurrent `open()` for another room must never see (or
     // be clobbered by) the previous room's teardown, which awaits the network.
+    if (this.roomId && this.items.length > 0) this.remember(this.roomId, this.scrollTop);
     this.unlisten?.();
     this.unlisten = null;
     const id = this.sub?.subscriptionId;
@@ -87,8 +159,10 @@ class TimelineStore {
     this.sub = null;
     this.batcher?.clear();
     this.batcher = null;
-    this.items.length = 0;
+    this.items = [];
     this.roomId = null;
+    this.awaitingReset = false;
+    this.scrollTop = 0;
     this.reachedStart = false;
     this.replyTo = null;
     this.editing = null;
@@ -106,6 +180,33 @@ class TimelineStore {
     this.pendingDelete = null;
     this.pendingReport = null;
     if (id) await client.unsubscribe(id).catch(() => {});
+  }
+
+  /** The timeline reports its scroll offset, so reopening the room can put the reader back. */
+  rememberScroll(offset: number) {
+    this.scrollTop = offset;
+  }
+
+  /** Drops every cached room (sign-out); their timelines are closed in the engine. */
+  clearCache() {
+    for (const roomId of this.cache.keys()) {
+      void client.invoke({ action: 'CloseTimeline', params: { room_id: roomId } }).catch(() => {});
+    }
+    this.cache.clear();
+    this.pendingScroll = null;
+    this.scrollTop = 0;
+  }
+
+  /** Keeps a room's timeline for reopening and evicts the least recently used past the limit. */
+  private remember(roomId: string, scrollTop: number) {
+    this.cache.delete(roomId);
+    this.cache.set(roomId, { items: this.items.slice(), reachedStart: this.reachedStart, scrollTop });
+    while (this.cache.size > TIMELINE_CACHE_LIMIT) {
+      const oldest = this.cache.keys().next().value as string;
+      this.cache.delete(oldest);
+      // Best effort: the engine drops that room's timeline; opening it again rebuilds from the server.
+      void client.invoke({ action: 'CloseTimeline', params: { room_id: oldest } }).catch(() => {});
+    }
   }
 
   /** Load older history. */

@@ -174,6 +174,8 @@
       stopUpdates();
       tags.reset();
       roomInfo.reset();
+      // Cached room timelines belong to the signed-in account, not to the install.
+      timelineStore.clearCache();
       roomsStore.clearReadMarks();
       void prefs.signOut();
       teardownPrefs();
