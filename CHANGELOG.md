@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.3.0 (pre-release)
+
+### Added
+- **Find people from the quick switcher.** Typing a name now offers a People group filled from your server's user directory; Enter opens the conversation you already have with that person, or starts a new one. It searches only what the server indexes, so a server with the directory turned off returns no people.
+- **A reopened room comes back where you left it.** The timeline and your scroll position are kept for the rooms you were just in, instead of reloading from the newest message.
+
+### Changed
+- **Message actions stay reachable on a long message.** The hover bar keeps the reactions that fit and collapses the rest behind an overflow that opens the full menu; it fades in rather than appearing instantly, and does not animate when reduced motion is asked for.
+- **The phone's Chats and Rooms tabs are centred**, and "browse public rooms" moved into the room list's "+" menu where the other add actions live.
+- **Light mode has layers.** The conversation pane and the chrome no longer read as a single sheet.
+
+### Fixed
+- **Closing a dialog while a tooltip is open no longer shakes the interface.** Tooltips hide from a microtask instead of writing state while the dialog is being torn down.
+- **Shared media appears while the panel is open.** A picture sent to the room shows up in Room info → Shared → Media without reopening the panel.
+- **Replies read as separate surfaces.** The header, the quote card and the reply bubble are distinct, and a grouped run keeps the same corner treatment as an ungrouped one.
+- **No notification permission error at startup.** The capability granted only the one notification command the app queries, so the console no longer logs a denial on launch.
+
+### API-level changes
+- **The tag catalogue is changed one command at a time.** `SaveTagCatalog` is gone: the engine can no longer clear or replace the whole catalogue in one call, and a future "reset my tags" has to be built deliberately from `CreateRoomTag` / `RenameRoomTag` / `ReorderRoomTags` / `DeleteRoomTag`. Nothing the user sees today changes.
+
 ## 0.2.11 (pre-release)
 
 ### Changed
