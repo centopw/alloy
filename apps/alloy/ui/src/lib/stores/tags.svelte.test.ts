@@ -161,8 +161,11 @@ describe('catalogue writes', () => {
     expect(await tags.move('home', -1)).toBe(true);
     expect(mocks.invoke).toHaveBeenLastCalledWith({ action: 'ReorderRoomTags', params: { ids: ['home', 'work'] } });
     expect(tags.defs.map((d) => d.id)).toEqual(['home', 'work']);
-    // A whole-list write is never sent.
-    expect(mocks.invoke.mock.calls.some(([c]) => c.action === 'SaveTagCatalog')).toBe(false);
+    // The invariant: only per-tag commands are ever sent, never a whole-list write.
+    const sent = new Set(mocks.invoke.mock.calls.map(([c]) => c.action));
+    for (const action of sent) {
+      expect(['CreateRoomTag', 'RenameRoomTag', 'ReorderRoomTags', 'DeleteRoomTag']).toContain(action);
+    }
   });
 
   it('leaves the order alone when the engine refuses a reorder', async () => {

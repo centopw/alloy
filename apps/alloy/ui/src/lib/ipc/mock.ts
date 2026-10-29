@@ -1105,10 +1105,6 @@ export class MockTransport implements Transport {
       case 'GetTagCatalog':
         return { type: 'TagCatalog', payload: { tags: this.tagCatalog.map((t) => ({ ...t })) } };
 
-      case 'SaveTagCatalog':
-        this.tagCatalog = command.params.tags.map((t) => ({ ...t }));
-        return { type: 'Unit' };
-
       case 'CloseTimeline': {
         const { room_id } = command.params;
         const closed = !this.closedTimelines.has(room_id);
