@@ -216,11 +216,12 @@
 
   /** Header add button: start a room, or discover public ones on desktop. */
   function createItems(): MenuItem[] {
-    const items: MenuItem[] = [{ id: 'new-room', label: 'New room...', icon: Plus, onselect: () => onnew?.() }];
-    if (!viewport.isPhone) {
-      items.push({ id: 'browse', label: 'Browse public rooms...', icon: Compass, onselect: () => onbrowse?.() });
-    }
-    return items;
+    // Public-room browsing lives here on every layout: the phone tab bar has no Discover tab, and
+    // the pane menu is where a phone user looks for "find a room" now.
+    return [
+      { id: 'new-room', label: 'New room...', icon: Plus, onselect: () => onnew?.() },
+      { id: 'browse', label: 'Browse public rooms...', icon: Compass, onselect: () => onbrowse?.() },
+    ];
   }
 
   /** Pane header and blank list area: room creation, discovery and read state. */

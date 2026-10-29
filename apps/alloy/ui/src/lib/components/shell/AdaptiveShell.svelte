@@ -104,9 +104,7 @@
   // Phones (<= 899px) swap the rail for a space strip and add a bottom tab bar.
   const phone = $derived(viewport.isPhone);
   const caps = $derived(capabilities(currentEnv(viewport.isPhone)));
-  const tabActive = $derived<'chats' | 'discover' | 'settings'>(
-    directoryOpen ? 'discover' : settingsOpen ? 'settings' : 'chats'
-  );
+  const tabActive = $derived<'chats' | 'settings'>(settingsOpen ? 'settings' : 'chats');
   const unreadTotal = $derived(
     roomsStore.rooms.reduce(
       (sum, r) => sum + (r.is_space ? 0 : roomsStore.unreadOf(r)),
@@ -302,7 +300,6 @@
       <MobileTabBar
         active={tabActive}
         onchats={showChats}
-        ondiscover={() => (directoryOpen = true)}
         onsettings={() => openSettings()}
         unread={unreadTotal}
       />

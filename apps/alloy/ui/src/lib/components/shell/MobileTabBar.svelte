@@ -1,18 +1,18 @@
 <script lang="ts">
-  import { Icon, MessageSquare, Compass, Settings } from '$lib/icons';
+  import { Icon, MessageSquare, Settings } from '$lib/icons';
 
-  type Tab = 'chats' | 'discover' | 'settings';
+  // Two destinations: public-room browsing lives in the room list's menu, so the bar is the two
+  // places a phone actually switches between.
+  type Tab = 'chats' | 'settings';
 
   let {
     active,
     onchats,
-    ondiscover,
     onsettings,
     unread = 0,
   }: {
     active: Tab;
     onchats?: () => void;
-    ondiscover?: () => void;
     onsettings?: () => void;
     unread?: number;
   } = $props();
@@ -41,17 +41,6 @@
   <button
     type="button"
     class="tab"
-    class:active={active === 'discover'}
-    aria-current={active === 'discover' ? 'page' : undefined}
-    aria-label="Discover"
-    onclick={() => ondiscover?.()}
-  >
-    <span class="glyph"><Icon icon={Compass} size={24} /></span>
-    <span class="label">Discover</span>
-  </button>
-  <button
-    type="button"
-    class="tab"
     class:active={active === 'settings'}
     aria-current={active === 'settings' ? 'page' : undefined}
     aria-label="Settings"
@@ -65,11 +54,14 @@
 <style>
   .tabbar {
     display: flex;
+    /* Two tabs hug their content and sit centred: stretched across the screen they read as a dot. */
     flex: 0 0 auto;
+    width: fit-content;
+    margin-inline: auto;
     box-sizing: border-box;
     height: 56px;
-    margin: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3)
-      calc(var(--alloy-spacing-scale-2) + var(--alloy-safe-area-bottom));
+    margin-top: var(--alloy-spacing-scale-2);
+    margin-bottom: calc(var(--alloy-spacing-scale-2) + var(--alloy-safe-area-bottom));
     padding: 0 var(--alloy-spacing-scale-1);
     border: 1px solid var(--alloy-glass-rim);
     border-radius: var(--alloy-glass-radius-shell);
@@ -80,15 +72,16 @@
   }
 
   .tab {
-    flex: 1 1 0;
-    min-width: 44px;
-    min-height: 44px;
+    /* 96px is the narrowest width where "Settings" clears the 40px glyph pill at size-xs. */
+    flex: 0 0 auto;
+    min-width: 96px;
+    height: 100%;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 2px;
-    padding: var(--alloy-spacing-scale-1) 0;
+    padding: var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-3);
     border: 0;
     background: transparent;
     color: var(--alloy-color-text-muted);
@@ -99,6 +92,16 @@
 
   .tab.active {
     color: var(--alloy-color-accent-primary);
+  }
+
+  /* Pressed state: the platform flash is off, so a tap needs its own acknowledgement. Transient
+     only — the accent colour is what says which page is current. */
+  .tab:active .glyph {
+    background: color-mix(in srgb, var(--alloy-color-accent-primary) 10%, transparent);
+    transition-duration: 90ms;
+  }
+  .tab:active .label {
+    color: var(--alloy-color-text-primary);
   }
 
   .tab:focus-visible {
