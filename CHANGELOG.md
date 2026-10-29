@@ -7,7 +7,7 @@
 
 ### Fixed
 - **Verification is not offered twice.** The Encryption panel reads the device's verification state the way Settings → Devices does, so a device that is already verified no longer shows a verify prompt.
-- **Opening a room does not empty the tag catalogue.** A catalogue read that comes back empty no longer replaces the tags you already have; the previous list is kept and the occurrence is logged so a repeat can be diagnosed.
+- **A tag catalogue is not emptied by a failed or empty read.** A catalogue read that comes back empty no longer replaces the tags you already have; the previous list is kept and the occurrence is logged. Renaming, recolouring or moving a tag is refused when the catalogue has not been read or when the tag is not in it, and an empty catalogue is never written back.
 
 ## 0.2.10 (pre-release)
 
