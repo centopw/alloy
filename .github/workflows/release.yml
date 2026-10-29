@@ -429,13 +429,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
+          # This job has no checkout, so gh cannot infer the repository from a git remote.
+          REPO: ${{ github.repository }}
         run: |
           mkdir dist
-          gh release download "$TAG" -D dist
+          gh release download "$TAG" --repo "$REPO" -D dist
           cd dist
           # Installables and SBOMs; the update manifest, signatures and the checksum file are not entries.
           find . -maxdepth 1 -type f \
             ! -name 'SHA256SUMS' ! -name 'latest.json' ! -name '*.sig' \
             -printf '%f\n' | sort | xargs sha256sum > SHA256SUMS
           cat SHA256SUMS
-          gh release upload "$TAG" SHA256SUMS --clobber
+          gh release upload "$TAG" SHA256SUMS --repo "$REPO" --clobber
