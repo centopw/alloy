@@ -275,5 +275,10 @@
       min-height: 44px;
       padding: var(--alloy-spacing-scale-2);
     }
+    /* The spine is inset inside the card, so the excerpt has to start after it. The tap-target
+       rule above must not put the text on top of the spine on a phone. */
+    .reply-quote.stacked.interactive {
+      padding-left: calc(var(--alloy-spacing-scale-3) + var(--alloy-spacing-scale-2));
+    }
   }
 </style>

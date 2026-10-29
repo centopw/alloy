@@ -37,6 +37,14 @@ describe('reply quote', () => {
     expect(quote).toMatch(/\.reply-quote\.stacked \.excerpt \{[^}]*-webkit-line-clamp: 3;/);
   });
 
+  it('keeps the spine clear of the excerpt at phone width', () => {
+    // The tap-target rule sets 8px padding at <=899px; with the spine at 8px the text started on
+    // top of it ("I tagged the rooms..." rendered as "tagged the rooms...").
+    const mobile = quote.slice(quote.indexOf('@media (max-width: 899px)'));
+    expect(mobile).toContain('.reply-quote.stacked.interactive {');
+    expect(mobile).toContain('padding-left: calc(var(--alloy-spacing-scale-3) + var(--alloy-spacing-scale-2));');
+  });
+
   it('stacks header, card and bubble as separate surfaces on the sender side', () => {
     expect(row).toContain('gap: var(--alloy-spacing-scale-1);');
     expect(row).toContain('.row.own.replied[data-layout=\'bubbles\'] .message-stack {\n    align-items: flex-end;');
