@@ -206,27 +206,48 @@ Because the certificate is self-signed and not issued by Apple:
 
 ## 5. Android Keystore Creation & Management
 
+No release keystore is checked in. Until the four secrets above exist, `scripts/sign-android-apk.sh` signs with a throwaway key (`CN=Alloy Test`) and warns; such an APK installs, but every build has a different signature, so Android refuses in-place updates. `v0.2.9` is the last release built that way — 0.2.9 testers have to uninstall it before installing a stably signed build, after which updates work normally.
+
 ### Creating a Production Keystore
-Generate a dedicated PKCS12 keystore using Java's `keytool`:
+Generate the key once, on a trusted machine, with Java 17+ (`keytool`). It must never be regenerated: a different key means Android treats the app as a new package.
 ```bash
-keytool -genkey -v \
-  -keystore alloy-release.keystore \
+keytool -genkeypair -v \
+  -keystore alloy-release.jks \
   -alias alloy \
-  -keyalg RSA \
-  -keysize 2048 \
+  -keyalg RSA -keysize 4096 \
   -validity 10000 \
-  -storetype PKCS12
+  -storetype PKCS12 \
+  -dname "CN=Alloy, O=Alloy, C=US"
 ```
+
+Back the file up offline (password manager or encrypted volume) together with both passwords. Losing it means every installed user has to uninstall before the next update.
 
 ### Encoding for GitHub Secrets
 Convert the keystore file to base64 for the `ANDROID_KEYSTORE_BASE64` secret:
 ```bash
 # macOS
-base64 -i alloy-release.keystore | tr -d '\n' | pbcopy
+base64 -i alloy-release.jks | tr -d '\n' > alloy-release.jks.b64
 
 # Linux
-base64 -w 0 alloy-release.keystore
+base64 -w 0 alloy-release.jks > alloy-release.jks.b64
 ```
+
+Set all four secrets with the `gh` CLI, so nothing passes through the shell history of a shared machine:
+```bash
+gh secret set ANDROID_KEYSTORE_BASE64 < alloy-release.jks.b64
+gh secret set ANDROID_KEYSTORE_PASSWORD   # prompts, or --body
+gh secret set ANDROID_KEY_ALIAS --body alloy
+gh secret set ANDROID_KEY_PASSWORD        # prompts, or --body
+```
+
+Then delete the base64 file and the plaintext keystore from the machine that is not the offline backup.
+
+### Verifying the next build
+Every release APK is signed by `scripts/sign-android-apk.sh`; the CI log no longer prints the throwaway warning, and this prints the release certificate:
+```bash
+apksigner verify --print-certs alloy-android.apk
+```
+Record the certificate SHA-256 in the release notes. Two consecutive releases signed with the same key are what make in-place Android updates possible.
 
 ---
 
