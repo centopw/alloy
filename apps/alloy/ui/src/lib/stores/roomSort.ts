@@ -80,3 +80,12 @@ export function groupRoomsByTag(rooms: readonly RoomSummary[], defs: readonly Ro
   const filled = groups.filter((g) => g.rooms.length > 0);
   return untagged.length > 0 ? [...filled, { tag: null, rooms: untagged }] : filled;
 }
+
+/**
+ * Grouping is a view over the list, not an ordering of it: toggling the Group control off returns
+ * to the sort that was active before it went on. A user who chose Name must not end up in Activity
+ * because they looked at their tags once. `null` (nothing remembered yet) falls back to the default.
+ */
+export function sortForGroupToggle(current: RoomSort, remembered: RoomSort | null): RoomSort {
+  return current === 'tag' ? (remembered ?? 'activity') : 'tag';
+}

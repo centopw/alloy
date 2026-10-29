@@ -21,7 +21,16 @@ describe('room-list tag grouping', () => {
   it('offers the grouping control beside the tag chips', () => {
     expect(toolbar).toContain('label="Group"');
     expect(toolbar).toContain("pressed={prefs.roomSort === 'tag'}");
-    expect(toolbar).toContain("prefs.set('roomSort', prefs.roomSort === 'tag' ? 'activity' : 'tag')");
+    expect(toolbar).toContain('setSort(sortForGroupToggle(prefs.roomSort, sortBeforeGroup))');
+  });
+
+  it('turning grouping off restores the sort instead of rewriting it', () => {
+    // A chip that wrote 'activity' unconditionally turned Name -> Group -> Group off into Activity
+    // and saved it, so the app forgot the setting the user chose.
+    expect(toolbar).not.toContain("prefs.set('roomSort', prefs.roomSort === 'tag' ? 'activity' : 'tag')");
+    expect(sidebar).toContain("if (prefs.roomSort !== 'tag') sortBeforeGroup = prefs.roomSort;");
+    // The sort menu has to feed the same memory, or entering grouping from the menu loses it.
+    expect(sidebar).toContain('onselect: () => setSort(value)');
   });
 
   it('keeps the chips and the control on the phone as well', () => {

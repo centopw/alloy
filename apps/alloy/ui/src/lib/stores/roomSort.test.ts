@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RoomSummary, RoomTagDef } from '../generated/index.js';
-import { groupRoomsByTag, sortRooms, type RoomSortContext } from './roomSort.js';
+import { groupRoomsByTag, sortForGroupToggle, sortRooms, type RoomSortContext } from './roomSort.js';
 
 function room(
   id: string,
@@ -88,5 +88,22 @@ describe('groupRoomsByTag', () => {
   it('omits the untagged group when every room is tagged', () => {
     const groups = groupRoomsByTag([room('w', { tags: ['work'] })], defs);
     expect(groups.map((g) => g.tag?.id ?? null)).toEqual(['work']);
+  });
+});
+
+describe('sortForGroupToggle', () => {
+  it('turns grouping on from whatever sort is active', () => {
+    expect(sortForGroupToggle('name', null)).toBe('tag');
+    expect(sortForGroupToggle('unread', 'name')).toBe('tag');
+  });
+
+  it('restores the sort that was active before grouping, never a hard-coded default', () => {
+    // Name -> Group -> Group off used to land in Activity and overwrite the saved preference.
+    expect(sortForGroupToggle('tag', 'name')).toBe('name');
+    expect(sortForGroupToggle('tag', 'unread')).toBe('unread');
+  });
+
+  it('falls back to the default only when nothing was remembered', () => {
+    expect(sortForGroupToggle('tag', null)).toBe('activity');
   });
 });

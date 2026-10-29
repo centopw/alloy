@@ -21,7 +21,7 @@
   import { connectivity } from '$lib/stores/connectivity.svelte';
   import { refreshStore } from '$lib/stores/refresh.svelte';
   import UpdateNotice from '../updates/UpdateNotice.svelte';
-  import { groupRoomsByTag, ROOM_SORTS, type RoomSort } from '$lib/stores/roomSort';
+  import { groupRoomsByTag, ROOM_SORTS, sortForGroupToggle, type RoomSort } from '$lib/stores/roomSort';
   import type { TagColour } from '$lib/generated';
   import { ui } from '$lib/stores/ui.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
@@ -183,12 +183,25 @@
     ];
   }
 
+  /** The sort to return to when grouping is turned off; `null` until grouping is first entered. */
+  let sortBeforeGroup = $state<RoomSort | null>(null);
+
+  /** Grouping is a view, not an ordering: remember the sort it covers so turning it off restores it. */
+  function setSort(value: RoomSort) {
+    if (value === 'tag') {
+      if (prefs.roomSort !== 'tag') sortBeforeGroup = prefs.roomSort;
+    } else {
+      sortBeforeGroup = value;
+    }
+    prefs.set('roomSort', value);
+  }
+
   function sortItems(): MenuItem[] {
     return ROOM_SORTS.map((value): MenuItem => ({
       id: `sort-${value}`,
       label: SORT_LABELS[value],
       selected: prefs.roomSort === value,
-      onselect: () => prefs.set('roomSort', value),
+      onselect: () => setSort(value),
     }));
   }
 
@@ -617,7 +630,7 @@
         label="Group"
         title={prefs.roomSort === 'tag' ? 'Show one list' : 'Group rooms by tag'}
         pressed={prefs.roomSort === 'tag'}
-        onclick={() => prefs.set('roomSort', prefs.roomSort === 'tag' ? 'activity' : 'tag')}
+        onclick={() => setSort(sortForGroupToggle(prefs.roomSort, sortBeforeGroup))}
       />
     </div>
   {/if}
