@@ -64,7 +64,11 @@ notch. The header reads `Reply to <Name>` above the cards; the quote card is `Re
 (the name is not repeated inside it), takes the full 20px radius and carries the quoted sender's
 colour as a 2px inset spine, clamped to three lines. In a group the quote card is the first surface,
 so it takes the 8px tail on the outer corner and the bubble below keeps its own radius. Inline
-quotes remain for `modern` and `irc`. The scroll engine (paging, anchoring, prepend) is untouched.
+quotes remain for `modern` and `irc`. **A touch rule may raise a card's tap target and add outer
+spacing; it must never re-declare shorthand `padding`.** At ≤899px the interactive rule makes the
+card 44px tall, and a shorthand there resets the quote card's asymmetric left inset, which paints
+the 2px spine over the first glyph of the excerpt — the defect the 390 walk caught. The scroll
+engine (paging, anchoring, prepend) is untouched.
 
 ### Room list
 
