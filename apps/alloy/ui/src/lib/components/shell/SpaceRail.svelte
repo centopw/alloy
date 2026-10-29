@@ -13,11 +13,12 @@
 
   interface Props {
     onsettings?: () => void;
-    /** True while the room list is hidden; the rail then offers the way back. */
+    /** True while the room list is hidden. */
     collapsed?: boolean;
     onexpand?: () => void;
+    oncollapse?: () => void;
   }
-  let { onsettings, collapsed = false, onexpand }: Props = $props();
+  let { onsettings, collapsed = false, onexpand, oncollapse }: Props = $props();
 
   const spaces = $derived(roomsStore.rooms.filter((r) => r.is_space && r.membership === 'Joined'));
   const homeActive = $derived(ui.scope === 'home');
@@ -133,17 +134,21 @@
   {#if account}
     <div class="foot">
       <span class="foot-rule" aria-hidden="true"></span>
-      {#if collapsed && onexpand}
-        <button
-          type="button"
-          class="foot-btn"
-          aria-label="Show room list"
-          title="Show room list"
-          onclick={() => onexpand?.()}
-        >
-          <Icon icon={PanelLeft} size={20} />
-        </button>
-      {/if}
+      <!-- One home for the room-list switch: the rail footer, in both states. It used to live in
+           the list header while open and here while closed, so the button moved whenever the panel
+           changed size. -->
+      <button
+        type="button"
+        class="foot-btn panel"
+        class:on={!collapsed}
+        aria-label={collapsed ? 'Show room list' : 'Hide room list'}
+        title={collapsed ? 'Show room list' : 'Hide room list'}
+        aria-expanded={!collapsed}
+        aria-controls="room-list"
+        onclick={() => (collapsed ? onexpand?.() : oncollapse?.())}
+      >
+        <Icon icon={PanelLeft} size={20} />
+      </button>
       <button
         type="button"
         class="foot-btn"
@@ -251,7 +256,7 @@
     height: 40px;
     padding: 0;
     border: 0;
-    border-radius: var(--alloy-radii-xl);
+    border-radius: var(--alloy-radii-lg);
     background: transparent;
     color: inherit;
     cursor: pointer;
@@ -269,8 +274,10 @@
     background: var(--alloy-glass-control);
     color: var(--alloy-color-text-secondary);
   }
-  /* The active space keeps the accent as a tint and a rail, never as a second heavy tile. */
-  .home.active {
+  /* The active space keeps the accent as a tint and a rail, never as a second heavy tile. The
+     room-list switch uses the same treatment while the list is open. */
+  .home.active,
+  .foot-btn.panel.on {
     background: color-mix(in srgb, var(--alloy-color-accent-primary) 14%, transparent);
     color: var(--alloy-color-accent-primary);
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--alloy-color-accent-primary) 28%, transparent);
@@ -338,6 +345,11 @@
   .foot-btn:hover {
     background: var(--alloy-glass-control-hover);
     color: var(--alloy-color-text-primary);
+  }
+  /* Hover on an open panel keeps the accent, so the toggle never reads as "off" under the pointer. */
+  .foot-btn.panel.on:hover {
+    background: color-mix(in srgb, var(--alloy-color-accent-primary) 20%, transparent);
+    color: var(--alloy-color-accent-primary);
   }
   /* The avatar keeps its own circle; the ring is the hover affordance. */
   .foot-btn.me:hover {

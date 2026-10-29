@@ -311,20 +311,22 @@
         onsettings={openSettings}
         collapsed={layout.sidebarCollapsed}
         onexpand={() => layout.setSidebarCollapsed(false)}
+        oncollapse={() => layout.setSidebarCollapsed(true)}
       />
-      <div class="list-body">
+      <div class="list-body" id="room-list">
         <Sidebar
           onselect={pick}
           onnew={() => (newRoomOpen = true)}
           onbrowse={() => (directoryOpen = true)}
           onsettings={openSettings}
-          oncollapse={() => layout.setSidebarCollapsed(true)}
         />
       </div>
     {/if}
   </div>
 
-  {#if breakpoint !== 'narrow' && !layout.sidebarCollapsed}
+  {#if breakpoint !== 'narrow'}
+    <!-- The handle stays mounted while the list is hidden: dragging the rail's edge opens the
+         list again, so collapsing is never a one-way door. -->
     <div class="split split-sidebar">
       <ResizeHandle
         value={layout.sidebarWidth}
@@ -334,7 +336,12 @@
         label="Resize sidebar"
         edge="end"
         collapseBelow={LAYOUT_LIMITS.sidebarWidth.min - 40}
-        onchange={(v) => layout.set('sidebarWidth', v)}
+        collapsed={layout.sidebarCollapsed}
+        onexpand={() => layout.setSidebarCollapsed(false)}
+        onchange={(v) => {
+          if (layout.sidebarCollapsed) layout.setSidebarCollapsed(false);
+          layout.set('sidebarWidth', v);
+        }}
         oncollapse={() => layout.setSidebarCollapsed(true)}
       />
     </div>
@@ -466,6 +473,12 @@
   }
   .split-sidebar {
     left: calc(var(--alloy-layout-rail-width) + var(--sidebar-width, 240px) - 5px);
+  }
+  /* Hidden list: the handle sits on the rail's edge, the boundary the drag collapsed to, so the
+     same edge that closed the list is the one that opens it. */
+  .shell[data-layout='wide'][data-sidebar='collapsed'] .split-sidebar,
+  .shell[data-layout='medium'][data-sidebar='collapsed'] .split-sidebar {
+    left: calc(var(--alloy-layout-rail-width) - 5px);
   }
   .split-details {
     right: calc(var(--details-width, 320px) - 5px);

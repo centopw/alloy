@@ -5,7 +5,7 @@
   import TagChip from '../tags/TagChip.svelte';
   import TagEditDialog from '../tags/TagEditDialog.svelte';
   import Icon from '$lib/icons/Icon.svelte';
-  import { Archive, ArchiveRestore, ArrowUpDown, Bell, BellOff, Check, CheckCheck, ChevronDown, ChevronUp, Compass, Copy, Ellipsis, Info, LogOut, Lock, Mail, Palette, PanelLeft, Pencil, Pin, PinOff, Plus, RefreshCw, Search, Settings, StickyNote, Tag, Trash2, X } from '$lib/icons';
+  import { Archive, ArchiveRestore, ArrowUpDown, Bell, BellOff, Check, CheckCheck, ChevronDown, ChevronUp, Compass, Copy, Ellipsis, Info, LogOut, Lock, Mail, Palette, Pencil, Pin, PinOff, Plus, RefreshCw, Search, Settings, StickyNote, Tag, Trash2, X } from '$lib/icons';
   import { client } from '$lib/ipc';
   import { contextmenu } from '$lib/platform/contextmenu';
   import { pullToRefresh } from '$lib/platform/pullToRefresh';
@@ -40,10 +40,8 @@
     onnew?: () => void;
     onbrowse?: () => void;
     onsettings?: (section?: 'tags') => void;
-    /** Hides the room list on desktop; phones have no room to collapse into. */
-    oncollapse?: () => void;
   }
-  let { onselect, onnew, onbrowse, onsettings, oncollapse }: Props = $props();
+  let { onselect, onnew, onbrowse, onsettings }: Props = $props();
 
   type RoomItem = (typeof roomsStore.rooms)[number];
 
@@ -548,17 +546,6 @@
       >
         <Icon icon={Plus} size={20} />
       </button>
-      {#if oncollapse}
-        <button
-          type="button"
-          class="icon"
-          aria-label="Hide room list"
-          data-tooltip="Hide room list"
-          onclick={() => oncollapse?.()}
-        >
-          <Icon icon={PanelLeft} size={20} />
-        </button>
-      {/if}
     </div>
   </header>
 

@@ -23,6 +23,13 @@
     ondone?: () => void;
     /** Called when the panel is dragged past `collapseBelow`. */
     oncollapse?: () => void;
+    /**
+     * True while the panel is hidden. The handle stays on the boundary it shares with the rail, so
+     * the same edge that collapsed the panel is the one that brings it back.
+     */
+    collapsed?: boolean;
+    /** Called when a drag, key press or double-click starts from the collapsed state. */
+    onexpand?: () => void;
   }
 
   let {
@@ -36,6 +43,8 @@
     onchange,
     ondone,
     oncollapse,
+    collapsed = false,
+    onexpand,
   }: Props = $props();
 
   const KEY_STEP = 16;
@@ -57,6 +66,9 @@
   function onPointerDown(e: PointerEvent) {
     if (e.button !== 0 || !handleEl) return;
     e.preventDefault();
+    // Grabbing the edge of a hidden panel opens it at its stored width, and the same drag keeps
+    // resizing from there: one gesture, no separate "open" step.
+    if (collapsed) onexpand?.();
     handleEl.setPointerCapture(e.pointerId);
     drag = { startX: e.clientX, startValue: value };
     collapsing = false;
@@ -89,6 +101,15 @@
   }
 
   function onKeyDown(e: KeyboardEvent) {
+    if (collapsed) {
+      // A hidden panel only has one useful direction; the other arrow is a no-op.
+      if (e.key === 'ArrowRight' || e.key === 'Home' || e.key === 'End') {
+        e.preventDefault();
+        onexpand?.();
+        commit(e.key === 'End' ? max : e.key === 'Home' ? min : value);
+      }
+      return;
+    }
     const step = e.shiftKey ? KEY_STEP_LARGE : KEY_STEP;
     const sign = edge === 'end' ? 1 : -1;
     switch (e.key) {
@@ -112,7 +133,9 @@
   }
 
   function onDoubleClick() {
-    if (defaultValue !== undefined) commit(defaultValue);
+    if (defaultValue === undefined) return;
+    if (collapsed) onexpand?.();
+    commit(defaultValue);
   }
 
   // Remove the body class if the handle is destroyed mid-drag, so the cursor and selection reset.
@@ -129,9 +152,10 @@
   role="separator"
   aria-orientation="vertical"
   aria-label={label}
-  aria-valuenow={Math.round(value)}
-  aria-valuemin={min}
+  aria-valuenow={collapsed ? 0 : Math.round(value)}
+  aria-valuemin={collapsed ? 0 : min}
   aria-valuemax={max}
+  aria-valuetext={collapsed ? 'Hidden' : undefined}
   tabindex="0"
   onpointerdown={onPointerDown}
   onpointermove={onPointerMove}
