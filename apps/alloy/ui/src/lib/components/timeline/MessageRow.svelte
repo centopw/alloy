@@ -723,7 +723,7 @@
           </div>
         </div>
       {#if canAct}
-        <div class="toolbar" role="toolbar" aria-label="Message actions">
+        <div class="toolbar" class:hidden={contextMenu.isOpen} role="toolbar" aria-label="Message actions">
           <!-- Reactions lead in both states. Compact narrows them to the three the user put first and
                keeps the picker chevron, so the full emoji set is never more than one click away. -->
           <span class="quick">
@@ -1258,6 +1258,11 @@
         opacity 1ms linear,
         visibility 0s;
     }
+  }
+  /* The open context menu already carries every action, and the bar would sit over its reaction
+     strip; an invisible-but-laid-out bar must not cover a menu either. */
+  .toolbar.hidden {
+    display: none;
   }
   .tool-sep {
     width: 1px;

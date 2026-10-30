@@ -94,6 +94,13 @@ describe('message actions', () => {
     expect(rowSource).toContain('.quick {\n    display: contents;');
   });
 
+  it('hides the bar while the context menu is open', () => {
+    // The bar is laid out while hidden so it can measure itself; a hovered row's bar then sat over
+    // the context menu's reaction strip and swallowed the click (E2E step at 0.3.0).
+    expect(rowSource).toContain('class:hidden={contextMenu.isOpen}');
+    expect(rowSource).toContain('.toolbar.hidden {');
+  });
+
   it('pins the bar inside the row when even the compact bar does not fit', () => {
     expect(rowSource).toContain('const pinned = compact && width > available;');
     expect(rowSource).toContain('rowContentLeft + pinnedGap - origin');

@@ -395,16 +395,27 @@ try {
   step('closing a dialog with a tooltip on screen does not write state during teardown');
   // Removing the focused control blurs it, and that focusout reaches the tooltip layer while Svelte
   // is still destroying the dialog's effect. The hide must not mutate state in that flush.
+  // Help & About has no tooltip-bearing control, so drive Preferences, which does.
   await page.click('button[aria-label="Settings"]');
   await page.waitForSelector('[role=dialog]', { visible: true, timeout: 15000 });
-  await page.evaluate(() => [...document.querySelectorAll('[role=dialog] button')].find((b) => b.textContent.trim() === 'Help & About')?.click());
-  await new Promise((r) => setTimeout(r, 500));
-  for (let i = 0; i < 14; i++) {
+  await page.evaluate(() => [...document.querySelectorAll('[role=dialog] button')].find((b) => b.textContent.trim() === 'Preferences')?.click());
+  await page.waitForSelector('button[aria-label="Add a reaction"]', { visible: true, timeout: 10000 });
+  // The layer waits FOCUS_DELAY_MS (200 ms); wait longer than that between Tabs rather than race it.
+  let tooltipShown = false;
+  for (let i = 0; i < 20 && !tooltipShown; i++) {
     await page.keyboard.press('Tab');
-    await new Promise((r) => setTimeout(r, 120));
-    if (await page.evaluate(() => !!document.querySelector('[data-alloy-tooltip]'))) break;
+    await new Promise((r) => setTimeout(r, 260));
+    tooltipShown = await page.evaluate(() => document.querySelector('[role=tooltip]')?.textContent?.includes('Add a reaction') ?? false);
   }
-  if (!(await page.evaluate(() => !!document.querySelector('[data-alloy-tooltip]')))) throw new Error('no tooltip was shown, so the teardown path was not exercised');
+  if (!tooltipShown) {
+    // Fallback: hover the same control and wait out the hover delay. Both paths hide on teardown.
+    await page.hover('button[aria-label="Add a reaction"]');
+    tooltipShown = await page.waitForFunction(
+      () => document.querySelector('[role=tooltip]')?.textContent?.includes('Add a reaction') ?? false,
+      { timeout: 5000 }
+    ).then(() => true).catch(() => false);
+  }
+  if (!tooltipShown) throw new Error('no tooltip was shown, so the teardown path was not exercised');
   await page.keyboard.press('Escape');
   await new Promise((r) => setTimeout(r, 400));
   if (pageErrors.some((m) => m.includes('state_unsafe_mutation'))) {
@@ -468,14 +479,39 @@ try {
   await page.waitForFunction(() => !document.querySelector('aside[aria-label=Thread]'), { timeout: 10000 });
 
   step('reply to a message: the quote shows the full sender name above the reply text');
-  await bobRow.asElement().hover();
-  await page.evaluate((row) => row.querySelector('button[aria-label="Reply"]').click(), bobRow);
+  // Re-query the row: closing the thread panel re-rendered the timeline, so the earlier handle is stale.
+  const quoteTarget = await page.evaluateHandle(() =>
+    [...document.querySelectorAll('.row[data-event-id]')].find((r) => !r.classList.contains('own') && r.textContent.includes('Hi from bob'))
+  );
+  if (!quoteTarget.asElement()) throw new Error('the message to quote is not in the timeline');
+  await quoteTarget.asElement().hover();
+  await page.evaluate((row) => row.querySelector('button[aria-label="Reply"]').click(), quoteTarget);
+  await page.waitForFunction(() => document.querySelector('.composer .banner')?.textContent.includes('Replying to'), { timeout: 5000 });
   await page.click('textarea[aria-label=Message]');
   await page.type('textarea[aria-label=Message]', 'a quoted reply');
   await page.keyboard.press('Enter');
-  await page.waitForFunction(() => !!document.querySelector('.reply-quote'), { timeout: 30000 });
-  const quoteText = await page.$eval('.reply-quote', (q) => q.innerText);
-  if (!quoteText.includes('e2ev') || quoteText.includes('…') && quoteText.split('\n')[0].length < 6) throw new Error(`reply quote is cramped or truncated: ${quoteText}`);
+  // Wait for the new reply itself, not any stacked quote: the thread reply above it is also one.
+  await page.waitForFunction(
+    () => [...document.querySelectorAll('.row[data-event-id]')].some((r) => r.querySelector('.reply-quote.stacked') && r.innerText.includes('a quoted reply')),
+    { timeout: 30000 }
+  );
+  // The bubbles layout names the quoted message in a header above the card; the card itself carries
+  // only the excerpt, and the reply body sits in its own bubble below.
+  const reply = await page.evaluate(() => {
+    const row = [...document.querySelectorAll('.row[data-event-id]')].find((r) => r.querySelector('.reply-quote.stacked') && r.innerText.includes('a quoted reply'));
+    if (!row) return null;
+    return {
+      header: row.querySelector('.reply-header')?.innerText.replace(/\s+/g, ' ').trim() ?? null,
+      quote: row.querySelector('.reply-quote.stacked')?.innerText.replace(/\s+/g, ' ').trim() ?? '',
+      nameInCard: !!row.querySelector('.reply-quote.stacked .sender'),
+      bubble: row.querySelector('.bubble')?.innerText.replace(/\s+/g, ' ').trim() ?? '',
+    };
+  });
+  if (!reply) throw new Error('no stacked reply rendered');
+  if (!reply.header?.startsWith('Reply to') || !reply.header.includes('e2ev')) throw new Error(`reply header is missing the sender: ${reply.header}`);
+  if (!reply.quote.includes('Hi from bob')) throw new Error(`reply quote lost its excerpt: ${reply.quote}`);
+  if (reply.nameInCard) throw new Error('the stacked quote still renders the sender inside the card');
+  if (!reply.bubble.includes('a quoted reply')) throw new Error(`the reply body is not in its own bubble: header=${reply.header} quote=${reply.quote} bubble=${reply.bubble}`);
   await uxShot(page, 'reply-quote');
 
   step('edit then delete own message');
@@ -883,10 +919,27 @@ try {
   await openRoom('From Bob');
   await page.waitForFunction(() => [...document.querySelectorAll('.row[data-event-id]')].some((e) => e.textContent.includes('live ping alloy-live')), { timeout: 30000 });
   const liveBox = await page.evaluate(() => { const r = [...document.querySelectorAll('.row[data-event-id]')].find((e) => e.textContent.includes('live ping alloy-live')).querySelector('.body').getBoundingClientRect(); return { x: r.x + 20, y: r.y + r.height / 2 }; });
-  await page.mouse.click(liveBox.x, liveBox.y, { button: 'right' });
-  await page.waitForSelector('.desktop-reaction-strip button[aria-label^="React with"]', { visible: true, timeout: 5000 });
-  await page.evaluate(() => [...document.querySelectorAll('.desktop-reaction-strip button[aria-label^="React with"]')].find((e) => e.textContent.includes('\u{1F62E}')).click());
-  await page.waitForFunction(() => [...document.querySelectorAll('.row[data-event-id]')].find((e) => e.textContent.includes('live ping alloy-live'))?.querySelector('button[aria-label^="\u{1F62E}"]'), { timeout: 20000 });
+  // The menu can close on its own (a row re-render, a scroll) between opening it and clicking the
+  // strip, so each attempt opens it, clicks the emoji where it is on screen, and checks the chip.
+  // A real pointer click also proves the strip is not covered by anything.
+  let reacted = false;
+  for (let attempt = 0; attempt < 3 && !reacted; attempt++) {
+    await page.mouse.click(liveBox.x, liveBox.y, { button: 'right' });
+    await page.waitForSelector('.desktop-reaction-strip button[aria-label^="React with"]', { visible: true, timeout: 5000 });
+    const emoji = await page.evaluate(() => {
+      const button = [...document.querySelectorAll('.desktop-reaction-strip button')].find((e) => (e.getAttribute('aria-label') ?? '').includes('\u{1F62E}'));
+      if (!button) return null;
+      const r = button.getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    });
+    if (!emoji) throw new Error('the reaction strip has no 😮 button');
+    await page.mouse.click(emoji.x, emoji.y);
+    reacted = await page
+      .waitForFunction(() => [...document.querySelectorAll('.row[data-event-id]')].find((e) => e.textContent.includes('live ping alloy-live'))?.querySelector('button[aria-label^="\u{1F62E}"]'), { timeout: 5000 })
+      .then(() => true)
+      .catch(() => false);
+  }
+  if (!reacted) throw new Error('the reaction strip did not apply the reaction');
   await assertReactionOverlay('.row[data-event-id]:has(button[aria-label^="\u{1F62E}"])');
 
   step('refresh: restart sync from the header button; the open chat stays open and later messages still arrive');
