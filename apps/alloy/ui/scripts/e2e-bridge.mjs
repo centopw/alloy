@@ -918,28 +918,48 @@ try {
   step('right-click a message: the reaction strip above the menu applies a reaction');
   await openRoom('From Bob');
   await page.waitForFunction(() => [...document.querySelectorAll('.row[data-event-id]')].some((e) => e.textContent.includes('live ping alloy-live')), { timeout: 30000 });
-  const liveBox = await page.evaluate(() => { const r = [...document.querySelectorAll('.row[data-event-id]')].find((e) => e.textContent.includes('live ping alloy-live')).querySelector('.body').getBoundingClientRect(); return { x: r.x + 20, y: r.y + r.height / 2 }; });
-  // The menu can close on its own (a row re-render, a scroll) between opening it and clicking the
-  // strip, so each attempt opens it, clicks the emoji where it is on screen, and checks the chip.
-  // A real pointer click also proves the strip is not covered by anything.
+  // Activate the emoji by keyboard rather than by pointer: the strip is inside a portalled menu and
+  // a pointer click depends on nothing covering it, which is exactly the class of failure this step
+  // was written after. Focus is hit-test-free and still exercises the menu's own action.
   let reacted = false;
+  let diagnostics = null;
   for (let attempt = 0; attempt < 3 && !reacted; attempt++) {
-    await page.mouse.click(liveBox.x, liveBox.y, { button: 'right' });
-    await page.waitForSelector('.desktop-reaction-strip button[aria-label^="React with"]', { visible: true, timeout: 5000 });
-    const emoji = await page.evaluate(() => {
-      const button = [...document.querySelectorAll('.desktop-reaction-strip button')].find((e) => (e.getAttribute('aria-label') ?? '').includes('\u{1F62E}'));
-      if (!button) return null;
-      const r = button.getBoundingClientRect();
-      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    // Open the menu on the row itself: a pointer click at stored coordinates lands on whatever the
+    // list has scrolled under that point, and the reaction then applies to the wrong message.
+    await page.evaluate(() => {
+      const row = [...document.querySelectorAll('.row[data-event-id]')].find((e) => e.textContent.includes('live ping alloy-live'));
+      const body = row?.querySelector('.body');
+      if (!body) throw new Error('the live ping message is not in the timeline');
+      const r = body.getBoundingClientRect();
+      body.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.x + 20, clientY: r.y + r.height / 2 }));
     });
-    if (!emoji) throw new Error('the reaction strip has no 😮 button');
-    await page.mouse.click(emoji.x, emoji.y);
+    await page.waitForSelector('.desktop-reaction-strip button[aria-label^="React with"]', { visible: true, timeout: 5000 });
+    const focused = await page.evaluate(() => {
+      const button = [...document.querySelectorAll('.desktop-reaction-strip button')].find((e) => (e.getAttribute('aria-label') ?? '').includes('\u{1F62E}'));
+      if (!button) return false;
+      button.focus();
+      return document.activeElement === button;
+    });
+    if (!focused) throw new Error('the reaction strip has no focusable 😮 button');
+    await page.keyboard.press('Enter');
     reacted = await page
       .waitForFunction(() => [...document.querySelectorAll('.row[data-event-id]')].find((e) => e.textContent.includes('live ping alloy-live'))?.querySelector('button[aria-label^="\u{1F62E}"]'), { timeout: 5000 })
       .then(() => true)
       .catch(() => false);
+    if (!reacted) {
+      diagnostics = await page.evaluate(() => ({
+        menuOpen: !!document.querySelector('.desktop-reaction-strip'),
+        chips: [...document.querySelectorAll('.row[data-event-id] .reactions button')].map((b) => b.getAttribute('aria-label')),
+        rows: [...document.querySelectorAll('.row[data-event-id]')].map((r) => r.innerText.replace(/\s+/g, ' ').trim().slice(0, 24)),
+        toast: document.querySelector('.toast')?.textContent ?? null,
+      }));
+      await page.keyboard.press('Escape');
+      await new Promise((r) => setTimeout(r, 300));
+    }
   }
-  if (!reacted) throw new Error('the reaction strip did not apply the reaction');
+  if (!reacted) throw new Error(`the reaction strip did not apply the reaction: ${JSON.stringify(diagnostics)}`);
+  await page.keyboard.press('Escape');
+  await new Promise((r) => setTimeout(r, 300));
   await assertReactionOverlay('.row[data-event-id]:has(button[aria-label^="\u{1F62E}"])');
 
   step('refresh: restart sync from the header button; the open chat stays open and later messages still arrive');
