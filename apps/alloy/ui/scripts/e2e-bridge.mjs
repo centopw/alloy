@@ -304,7 +304,10 @@ try {
     step('mobile: back to list, new room, directory, settings');
     await page.evaluate(() => document.querySelector('button[aria-label="Back to rooms"]')?.click()); await settle();
     await tapSel('button[aria-label="New room or browse"]'); await audit('6-new-room'); await page.keyboard.press('Escape'); await settle();
-    await page.evaluate(() => [...document.querySelectorAll('nav[aria-label=Primary] button')].find((b) => b.textContent.includes('Discover')).click()); await settle(); await audit('7-directory'); await page.keyboard.press('Escape'); await settle();
+    // Discovery lives in the room list's create menu now (the phone bar has Chats and Settings).
+    await tapSel('button[aria-label="New room or browse"]'); await settle();
+    await page.evaluate(() => [...document.querySelectorAll('[role=menuitem]')].find((b) => b.textContent.includes('Browse public rooms')).click()); await settle();
+    await audit('7-directory'); await page.keyboard.press('Escape'); await settle();
     await page.evaluate(() => [...document.querySelectorAll('nav[aria-label=Primary] button')].find((b) => b.textContent.includes('Settings')).click()); await settle(); await audit('8-settings-nav');
     await page.evaluate(() => [...document.querySelectorAll('[role=dialog] button')].find((b) => b.textContent.trim() === 'Appearance').click()); await settle();
     await audit('9-settings-appearance');
