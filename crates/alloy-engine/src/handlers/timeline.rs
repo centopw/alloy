@@ -376,7 +376,11 @@ async fn spawn_subscription(
         }
     });
     ctx.subscriptions
-        .register_for_room(subscription_id.clone(), room_id.clone(), task.abort_handle())
+        .register_for_room(
+            subscription_id.clone(),
+            room_id.clone(),
+            task.abort_handle(),
+        )
         .await;
     subscription_id
 }
