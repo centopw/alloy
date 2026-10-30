@@ -6,9 +6,23 @@ use alloy_protocol::{
     TimelineItemContent, TimelineItemDto, VectorDiffDto,
 };
 use alloy_storage::InMemorySecretStore;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 use tokio::sync::broadcast::Receiver;
+
+/// Both tests drive the same account and its sync service from parallel threads. When they start
+/// together the timeline of one can sit for minutes before its first event, so they run one at a
+/// time: this is about the fixture sharing an account, not about the product.
+static ACCOUNT: LazyLock<tokio::sync::Mutex<()>> = LazyLock::new(|| tokio::sync::Mutex::new(()));
+
+/// Upper bound for one event wait. The waits are event-driven; this only catches a hang, so it is
+/// well above the observed runtime instead of just above it.
+const WAIT_TIMEOUT: Duration = Duration::from_secs(180);
+
+/// Wall-clock bound for a whole test. The SDK client sets no request timeout, so a stalled HTTP
+/// call can await forever; this turns that into a named failure in minutes instead of a shard that
+/// sits until the job is cancelled with no log.
+const TEST_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Apply streamed diffs to a local mirror, as the UI does.
 fn apply(list: &mut Vec<TimelineItemDto>, diff: VectorDiffDto<TimelineItemDto>) {
@@ -41,7 +55,7 @@ async fn until(
     what: &str,
     done: impl Fn(&[TimelineItemDto]) -> bool,
 ) {
-    let res = tokio::time::timeout(Duration::from_secs(60), async {
+    let res = tokio::time::timeout(WAIT_TIMEOUT, async {
         while !done(mirror) {
             if let EngineEvent::TimelineDiff {
                 subscription_id,
@@ -78,6 +92,16 @@ async fn send_edit_react_redact_and_paginate() {
         eprintln!("skipping: ALLOY_TEST_HS not set");
         return;
     };
+    let _guard = ACCOUNT.lock().await;
+    let finished =
+        tokio::time::timeout(TEST_TIMEOUT, body_send_edit_react_redact_and_paginate(hs)).await;
+    assert!(
+        finished.is_ok(),
+        "the test did not finish within {TEST_TIMEOUT:?}"
+    );
+}
+
+async fn body_send_edit_react_redact_and_paginate(hs: String) {
     let dir = tempfile::tempdir().unwrap();
     let ctx = EngineContext::new(
         dir.path().to_path_buf(),
@@ -307,7 +331,7 @@ async fn create_room(eng: &AppEngine, name: &str) -> RoomId {
 
 /// Subscribe to a room's timeline, waiting for the room to be known to the client.
 async fn subscribe_room(eng: &AppEngine, room: &RoomId) -> SubscriptionId {
-    let mut attempts = 0;
+    let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
     loop {
         match eng
             .handle(EngineCommand::SubscribeTimeline {
@@ -316,8 +340,7 @@ async fn subscribe_room(eng: &AppEngine, room: &RoomId) -> SubscriptionId {
             .await
         {
             Ok(EngineResponse::TimelineSubscribed { subscription_id }) => return subscription_id,
-            Err(e) if e.code == "not_found" && attempts < 30 => {
-                attempts += 1;
+            Err(e) if e.code == "not_found" && tokio::time::Instant::now() < deadline => {
                 tokio::time::sleep(Duration::from_millis(500)).await;
             }
             other => panic!("unexpected {other:?}"),
@@ -327,7 +350,7 @@ async fn subscribe_room(eng: &AppEngine, room: &RoomId) -> SubscriptionId {
 
 /// Send with a bounded retry for the window where the client still reads the room as invited.
 async fn send_text(eng: &AppEngine, room: &RoomId, body: &str) {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
     loop {
         let result = eng
             .handle(EngineCommand::SendText {
@@ -364,6 +387,16 @@ async fn closing_a_timeline_stops_its_diffs_and_replays_a_fresh_reset() {
         eprintln!("skipping: ALLOY_TEST_HS not set");
         return;
     };
+    let _guard = ACCOUNT.lock().await;
+    let finished =
+        tokio::time::timeout(TEST_TIMEOUT, body_closing_a_timeline_stops_its_diffs(hs)).await;
+    assert!(
+        finished.is_ok(),
+        "the test did not finish within {TEST_TIMEOUT:?}"
+    );
+}
+
+async fn body_closing_a_timeline_stops_its_diffs(hs: String) {
     let dir = tempfile::tempdir().unwrap();
     let ctx = EngineContext::new(
         dir.path().to_path_buf(),
@@ -431,7 +464,7 @@ async fn closing_a_timeline_stops_its_diffs_and_replays_a_fresh_reset() {
     send_text(&eng, &control, "control message").await;
     let mut control_mirror: Vec<TimelineItemDto> = vec![];
     let mut closed_sub_diffs = 0;
-    let res = tokio::time::timeout(Duration::from_secs(60), async {
+    let res = tokio::time::timeout(WAIT_TIMEOUT, async {
         while find(&control_mirror, "control message").is_none() {
             match rx.recv().await.unwrap() {
                 EngineEvent::TimelineDiff {
