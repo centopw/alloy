@@ -45,12 +45,12 @@ Issue body (use the *Work item* form) must contain:
 Rules for agents:
 - Agents never write to the board or issues (rate limits, single writer): the orchestrator updates status in batches (`scripts/board.sh`, which caches field ids and uses one GraphQL query per item).
 - Read the issue (`gh issue view N`), `docs/PLAN.md`, and the relevant `docs/plan/*`.
-- Edit only owned paths. **Never run git write commands** (add/commit/reset/stash/checkout/rm) and never delete files you did not create - the orchestrator commits (`type(scope): ... + Refs #N`) after independent verification.
+- Edit only owned paths. Commit **only the explicit paths you changed** with `type(scope): summary` + `Refs #N`, then `git push origin main` (approved 2026-10-31; matches AGENTS.md rule 3). Never `git add -A`, never `reset`/`stash`/`checkout`/`restore`/`rebase`/`rm`, and never delete files you did not create; the coordinator keeps the board and never commits a sibling's paths.
 - Run formatters/linters only for your own crate/package; the orchestrator runs workspace gates once per wave.
 - Report: files changed, commands run with real output, anything not done and why. Unfinished work is reported, never hidden.
 - Findings that change scope: comment on the issue / open a new one via `scripts/board.sh new`; do not silently expand scope.
 
-Orchestrator checklist per wave: create/refresh issues -> mark `Ready` -> dispatch (set `In progress`) -> verify (gates) -> commit with `Refs #N` -> push -> `board.sh done` with sha -> post gate comment.
+Orchestrator checklist per wave: create/refresh issues -> mark `Ready` -> dispatch (set `In progress`) -> verify (gates) -> confirm the owner's commit/push carries `Refs #N` -> `board.sh done` with sha -> post gate comment.
 
 ## Parallelization map
 

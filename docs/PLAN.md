@@ -106,9 +106,26 @@ Parallel streams (after P0 contracts frozen: `alloy-protocol` v0, token schema v
 - **Mobile:** UI-05 safe areas/gestures, CORE-14/15 `alloy-ffi` UnifiedPush (+ optional FCM) service, UI-08 event wiring; signed APK via GitHub Releases. iOS not in scope (D10).
 - **Features:** CORE-10 reactions/polls, CORE-11 threads (UX-10), CORE-12 spaces, CORE-13 encrypted search, UX-09 QR login + SAS UX, UX-11 voice messages/polls UI, UX-12 Fluent i18n/RTL, a11y pass.
 - **Customization Tier A:** EXT-01/02/03 (theme packages, hot reload, keybindings, slash commands), UX-14 settings screen, local `.json` package loading, JSON Schemas published.
-- **Exit:** feature parity with Element X core flows; push works on both mobiles; users can load a custom theme/keybinding JSON.
+- **Exit (approved 2026-10-31):** every row below is checked or explicitly deferred by the maintainer. D10 applies: "push works on both mobiles" means Android plus desktop notifications (desktop shipped); there is no iOS target.
 
-**P2 status (2026-10-19): about half done.** Done: reactions and polls (#30), threads (#27), spaces and room directory (#28), mobile-first shell with back-button flow, safe areas and keyboard handling (ADR 0005, #25 partly), Android release APK of 36 MB with an update check (#73), Android sign-in fixed (system CA store), functional settings and notifications (ADR 0004). Not started: push delivery via UnifiedPush/FCM and `alloy-ffi` (#24, the biggest gap for real mobile use), content:// attachments (#72), encrypted search (#31), QR login (#32), voice messages (#33), Fluent i18n/RTL (#34), Tier-A package loading (#35: four themes ship, but compiled in, not loaded from user JSON), a11y audit (#36), Android keystore wrapping (#74).
+| P2 exit item | Issue | State (2026-10-31) |
+|---|---|---|
+| Reactions, polls, threads, spaces, room directory | #30, #27, #28 | shipped |
+| Mobile shell: back stack, safe areas, keyboard | #25 | shipped; swipe, pull-to-refresh and haptics open |
+| `content://` attachments | #72 | shipped |
+| Desktop notifications | — | shipped |
+| Voice messages | #33 | shipped |
+| Android push proven end-to-end (emulator + CI; real device pending) | #24 | in progress (wave 1) |
+| QR login | #32 | not started |
+| Encrypted local search | #31 | not started |
+| Fluent i18n + RTL | #34 | in progress (wave 1) |
+| Tier-A JSON packages | #35 | in progress (wave 1) |
+| a11y audit | #36 | in progress (wave 1) |
+| Keystore wrapping + secrecy types | #74 | not started |
+| Perf baseline measured, then the budget enforced | #69, #70 | #69 in progress (wave 1); #70 open |
+| Time-to-first-room-list instrumented | #70 | open (no instrumentation yet) |
+
+**P2 status (2026-10-19): about half done.** Done: reactions and polls (#30), threads (#27), spaces and room directory (#28), mobile-first shell with back-button flow, safe areas and keyboard handling (ADR 0005, #25 partly), Android release APK of 36 MB with an update check (#73), Android sign-in fixed (system CA store), functional settings and notifications (ADR 0004). Not started: push delivery via UnifiedPush/FCM and `alloy-ffi` (#24, the biggest gap for real mobile use), content:// attachments (#72), encrypted search (#31), QR login (#32), voice messages (#33), Fluent i18n/RTL (#34), Tier-A package loading (#35: four themes ship, but compiled in, not loaded from user JSON), a11y audit (#36), Android keystore wrapping (#74). **P2 status (2026-10-31):** that paragraph is partly stale; the exit checklist below is authoritative, and wave 1 of the closeout covers #24, #35, #34, #69 and #36.
 
 ### P3 — Tier-B plugins (v0.5)
 Serial first: EXT-04 WIT + `alloy-protocol` plugin events (needs stable core API). Then parallel: EXT-05 engine, EXT-06 Wasmi fallback, EXT-07 capabilities/prompts, EXT-08 limits, EXT-09 scoped KV, EXT-10 `alloy-pdk-rust`, EXT-11 `.alloy-pkg`, UX-13 + UI-06/07 slots & declarative renderer & sandboxed iframe widgets, EXT-16 TS PDK (optional/nonblocking).
