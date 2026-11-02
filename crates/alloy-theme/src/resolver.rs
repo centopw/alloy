@@ -201,7 +201,7 @@ impl ThemeResolver {
         Self::validate_required_tokens(&flat_tokens)?;
 
         // 6. WCAG contrast checking
-        let contrast_report = Self::check_contrast(&flat_tokens)?;
+        let contrast_report = Self::check_contrast(&flat_tokens, theme.mode)?;
 
         Ok(ResolvedTheme {
             id: theme.id.clone(),
@@ -592,53 +592,40 @@ impl ThemeResolver {
         Ok(())
     }
 
-    /// Check WCAG 2.1 contrast ratios on key foreground / background pairs.
-    pub fn check_contrast(flat_tokens: &BTreeMap<String, String>) -> Result<ContrastReport> {
-        let mut report = ContrastReport::new();
+    /// WCAG 2.1 contrast ratios on every foreground / background pair the UI spends.
+    ///
+    /// Thresholds are 4.5:1 for normal text and 3.0:1 only for non-text UI (the focus ring). The
+    /// pairs cover the surfaces each token is actually painted on (A11Y-01/09/10/11/12/13/14):
+    /// muted text on every surface, error text, link text, the avatar initials on every palette
+    /// entry, the unread badge, the derived own-bubble meta, the derived destructive fill and the
+    /// worst case of the translucent chrome/conversation material.
+    ///
+    /// `mode` selects the material recipe (light vs dark chrome/chat opacity and aurora strength,
+    /// see ADR 0015). Pairs whose tokens are absent (a theme that does not use a bubble or a
+    /// palette) are skipped, exactly as before.
+    pub fn check_contrast(
+        flat_tokens: &BTreeMap<String, String>,
+        mode: ThemeMode,
+    ) -> Result<ContrastReport> {
+        let mut c = ContrastCollector::new(flat_tokens);
+        let surfaces = ["canvas", "subtle", "panel", "elevated", "hover"];
 
-        // Check helper closure
-        let mut check_pair =
-            |name: &str, fg_path: &str, bg_path: &str, min_aa: f64, min_aaa: f64| {
-                if let (Some(fg_str), Some(bg_str)) =
-                    (flat_tokens.get(fg_path), flat_tokens.get(bg_path))
-                    && let (Ok(fg), Ok(bg)) = (Color::parse(fg_str), Color::parse(bg_str))
-                {
-                    let ratio = fg.contrast_ratio(&bg);
-                    report.add_check(ContrastCheck {
-                        name: name.to_string(),
-                        foreground_name: fg_path.to_string(),
-                        foreground_color: fg_str.clone(),
-                        background_name: bg_path.to_string(),
-                        background_color: bg_str.clone(),
-                        ratio,
-                        min_aa,
-                        min_aaa,
-                        passes_aa: ratio >= min_aa,
-                        passes_aaa: ratio >= min_aaa,
-                    });
-                }
-            };
-
-        // 1. Text primary on surface canvas (body text: AA >= 4.5, AAA >= 7.0)
-        check_pair(
+        // Body and secondary text on the main reading surfaces.
+        c.pair(
             "text_primary_on_canvas",
             "color.text.primary",
             "color.surface.canvas",
             4.5,
             7.0,
         );
-
-        // 2. Text secondary on surface canvas (secondary text: AA >= 4.5 or 3.0 large, min AA 4.5)
-        check_pair(
+        c.pair(
             "text_secondary_on_canvas",
             "color.text.secondary",
             "color.surface.canvas",
             4.5,
             7.0,
         );
-
-        // 3. Text primary on surface subtle
-        check_pair(
+        c.pair(
             "text_primary_on_subtle",
             "color.text.primary",
             "color.surface.subtle",
@@ -646,17 +633,51 @@ impl ThemeResolver {
             7.0,
         );
 
-        // 4. Text link on surface canvas (UI / link text: min AA >= 3.0)
-        check_pair(
-            "text_link_on_canvas",
-            "color.text.link",
-            "color.surface.canvas",
-            3.0,
+        // Muted text is normal-size text (timestamps, placeholders, hints): 4.5:1 on every surface
+        // it is painted on (A11Y-10).
+        for surface in surfaces {
+            c.pair(
+                &format!("muted_on_{}", surface),
+                "color.text.muted",
+                &format!("color.surface.{}", surface),
+                4.5,
+                7.0,
+            );
+        }
+        c.pair(
+            "muted_on_bubble_other",
+            "color.text.muted",
+            "color.bubble.other.background",
             4.5,
+            7.0,
         );
 
-        // 5. Accent primary on surface canvas (UI component: min AA >= 3.0)
-        check_pair(
+        // Inline error text is normal-size text on every surface a form, dialog or banner can use
+        // (A11Y-09).
+        for surface in surfaces {
+            c.pair(
+                &format!("error_on_{}", surface),
+                "color.status.error",
+                &format!("color.surface.{}", surface),
+                4.5,
+                7.0,
+            );
+        }
+
+        // Link text is normal-size text, so the old 3.0 "large text" threshold is not enough
+        // (A11Y-12).
+        for surface in surfaces {
+            c.pair(
+                &format!("text_link_on_{}", surface),
+                "color.text.link",
+                &format!("color.surface.{}", surface),
+                4.5,
+                7.0,
+            );
+        }
+
+        // Focus ring / accent used as a UI boundary is non-text: 3.0:1.
+        c.pair(
             "accent_primary_on_canvas",
             "color.accent.primary",
             "color.surface.canvas",
@@ -664,17 +685,15 @@ impl ThemeResolver {
             4.5,
         );
 
-        // 6. Own bubble text on own bubble background (AA >= 4.5)
-        check_pair(
+        // Bubble text on its own fill.
+        c.pair(
             "bubble_own_text_on_background",
             "color.bubble.own.text",
             "color.bubble.own.background",
             4.5,
             7.0,
         );
-
-        // 7. Other bubble text on other bubble background (AA >= 4.5)
-        check_pair(
+        c.pair(
             "bubble_other_text_on_background",
             "color.bubble.other.text",
             "color.bubble.other.background",
@@ -682,8 +701,8 @@ impl ThemeResolver {
             7.0,
         );
 
-        // 8. Text on accent fill (falls back to accent primary when unset) (AA >= 4.5)
-        check_pair(
+        // Text on the accent fill (primary buttons, filled badges).
+        c.pair(
             "text_on_accent",
             "color.text.on_accent",
             "color.accent.fill",
@@ -691,27 +710,272 @@ impl ThemeResolver {
             7.0,
         );
 
-        // 9-20. User colors on surface.canvas (AA >= 4.5)
-        for i in 1..=12 {
-            let user_path = format!("color.user.{}", i);
-            check_pair(
-                &format!("user_{}_on_canvas", i),
-                &user_path,
-                "color.surface.canvas",
-                4.5,
-                7.0,
-            );
-            // Also check on bubble.other.background
-            check_pair(
-                &format!("user_{}_on_bubble_other", i),
-                &user_path,
-                "color.bubble.other.background",
+        // The unread badge paints on-accent text on status.mention (A11Y-11).
+        c.pair(
+            "text_on_accent_mention_badge",
+            "color.text.on_accent",
+            "color.status.mention",
+            4.5,
+            7.0,
+        );
+
+        // The destructive button keeps on-accent text on the derived `--alloy-danger-fill`
+        // (status.error mixed 70% with black, A11Y-09). status.error itself is tuned for text, so
+        // it is too light to carry a white label on its own.
+        if let (Some(on_accent), Some(error)) = (
+            c.token("color.text.on_accent"),
+            c.token("color.status.error"),
+        ) {
+            let fill = ThemeResolver::danger_fill(&error.color);
+            c.add(
+                "text_on_accent_danger_fill",
+                on_accent,
+                ReportedColor::derived("derived:danger-fill", fill),
                 4.5,
                 7.0,
             );
         }
 
-        Ok(report)
+        // The derived own-bubble meta is 82% of the own text over the own bubble fill (A11Y-13).
+        if let (Some(text), Some(background)) = (
+            c.token("color.bubble.own.text"),
+            c.token("color.bubble.own.background"),
+        ) {
+            let meta = ThemeResolver::own_bubble_meta(&text.color, &background.color);
+            c.add(
+                "bubble_own_meta_on_background",
+                ReportedColor::derived("derived:bubble-own-meta", meta),
+                background,
+                4.5,
+                7.0,
+            );
+        }
+
+        // User identity colours: sender names on canvas and received bubbles, and the avatar
+        // initials that sit on the palette fill itself (A11Y-01). The initials colour is chosen
+        // from the fill's luminance exactly as `pickAvatarOnColor` does in the UI.
+        for i in 1..=12 {
+            let user_path = format!("color.user.{}", i);
+            if let Some(fill) = c.token(&user_path) {
+                let initials = ThemeResolver::avatar_initials_color(&fill.color);
+                c.add(
+                    &format!("avatar_initials_user_{}", i),
+                    ReportedColor::derived("derived:avatar-initials", initials),
+                    fill,
+                    4.5,
+                    7.0,
+                );
+                c.pair(
+                    &format!("user_{}_on_canvas", i),
+                    &user_path,
+                    "color.surface.canvas",
+                    4.5,
+                    7.0,
+                );
+                c.pair(
+                    &format!("user_{}_on_bubble_other", i),
+                    &user_path,
+                    "color.bubble.other.background",
+                    4.5,
+                    7.0,
+                );
+            }
+        }
+
+        // Worst case of the translucent material (A11Y-14): the pane fill over the strongest
+        // aurora bloom, which is the lowest-contrast backdrop the text can land on. See ADR 0015.
+        if let Some((chrome, chat)) = ThemeResolver::worst_case_materials(flat_tokens, mode) {
+            for (token, name) in [
+                ("primary", "text_primary"),
+                ("secondary", "text_secondary"),
+                ("muted", "text_muted"),
+                ("link", "text_link"),
+            ] {
+                if let Some(foreground) = c.token(&format!("color.text.{}", token)) {
+                    c.add(
+                        &format!("{}_on_chrome_worst", name),
+                        foreground.clone(),
+                        ReportedColor::derived("derived:chrome-worst", chrome),
+                        4.5,
+                        7.0,
+                    );
+                    c.add(
+                        &format!("{}_on_chat_worst", name),
+                        foreground,
+                        ReportedColor::derived("derived:chat-worst", chat),
+                        4.5,
+                        7.0,
+                    );
+                }
+            }
+        }
+
+        Ok(c.report)
+    }
+
+    /// Near-black or white, whichever leaves the better contrast on an avatar fill (A11Y-01).
+    ///
+    /// `#ffffff` and [`AVATAR_INK`] are placed so that one of them always clears 4.5:1 for any
+    /// possible fill (the worst case is ~4.51:1 at the crossover luminance).
+    pub fn avatar_initials_color(fill: &Color) -> Color {
+        let white = Color::new(1.0, 1.0, 1.0, 1.0);
+        let ink = Color::parse(AVATAR_INK).unwrap_or(white);
+        if white.contrast_ratio(fill) >= ink.contrast_ratio(fill) {
+            white
+        } else {
+            ink
+        }
+    }
+
+    /// The derived own-bubble meta colour: [`BUBBLE_OWN_META_ALPHA`] of the own text over the
+    /// bubble fill, matching `--alloy-bubble-own-meta` in `tokens.css` (A11Y-13).
+    pub fn own_bubble_meta(text: &Color, background: &Color) -> Color {
+        Color::new(text.r, text.g, text.b, BUBBLE_OWN_META_ALPHA).blend_over(background)
+    }
+
+    /// The derived destructive-button fill: `color.status.error` mixed
+    /// [`DANGER_FILL_ALPHA`] with black, matching `--alloy-danger-fill` in `tokens.css` (A11Y-09).
+    pub fn danger_fill(error: &Color) -> Color {
+        Color::new(
+            error.r * DANGER_FILL_ALPHA,
+            error.g * DANGER_FILL_ALPHA,
+            error.b * DANGER_FILL_ALPHA,
+            1.0,
+        )
+    }
+
+    /// Worst-case backdrop of the translucent chrome and conversation panes (A11Y-14).
+    ///
+    /// The recipe comes from ADR 0014 / `tokens.css`: a pane fill (86% light / 80% dark for the
+    /// chrome, 92% / 84% for the conversation) over the aurora's strongest bloom. The bloom is the
+    /// accent-primary radial at its peak alpha (82% light / 42% dark) composited over the canvas,
+    /// which is the point of the aurora that moves the backdrop furthest from the theme surface.
+    fn worst_case_materials(
+        flat_tokens: &BTreeMap<String, String>,
+        mode: ThemeMode,
+    ) -> Option<(Color, Color)> {
+        let canvas = token_color(flat_tokens, "color.surface.canvas")?;
+        let panel = token_color(flat_tokens, "color.surface.panel")?;
+        let accent = token_color(flat_tokens, "color.accent.primary")?;
+        let (chrome_fill, chat_fill, bloom_alpha) = match mode {
+            ThemeMode::Light => (LIGHT_CHROME_FILL, LIGHT_CHAT_FILL, LIGHT_BLOOM_ALPHA),
+            ThemeMode::Dark | ThemeMode::Amoled => {
+                (DARK_CHROME_FILL, DARK_CHAT_FILL, DARK_BLOOM_ALPHA)
+            }
+        };
+        let bloom = Color::new(accent.r, accent.g, accent.b, bloom_alpha).blend_over(&canvas);
+        let chrome = Color::new(panel.r, panel.g, panel.b, chrome_fill).blend_over(&bloom);
+        let chat = Color::new(canvas.r, canvas.g, canvas.b, chat_fill).blend_over(&bloom);
+        Some((chrome, chat))
+    }
+}
+
+/// Near-black initials on a light avatar fill (A11Y-01). Paired with `#ffffff`, one of the two
+/// always clears 4.5:1: the worst possible fill sits at the crossover luminance, ~4.51:1.
+pub const AVATAR_INK: &str = "#050505";
+
+/// `--alloy-bubble-own-meta` in `tokens.css`: 82% of the own bubble text over the own bubble fill.
+pub const BUBBLE_OWN_META_ALPHA: f64 = 0.82;
+
+/// `--alloy-danger-fill` in `tokens.css`: `color.status.error` mixed 70% with black, so a white
+/// label still clears 4.5:1 while the error colour itself is tuned for text (A11Y-09).
+pub const DANGER_FILL_ALPHA: f64 = 0.70;
+
+// Material recipe from ADR 0014 / `tokens.css`; the checker models the worst-case composite.
+const LIGHT_CHROME_FILL: f64 = 0.86;
+const DARK_CHROME_FILL: f64 = 0.80;
+const LIGHT_CHAT_FILL: f64 = 0.92;
+const DARK_CHAT_FILL: f64 = 0.84;
+const LIGHT_BLOOM_ALPHA: f64 = 0.82;
+const DARK_BLOOM_ALPHA: f64 = 0.42;
+
+/// Parse one colour token, keeping the original string for the report.
+fn token_color(tokens: &BTreeMap<String, String>, path: &str) -> Option<Color> {
+    tokens.get(path).and_then(|raw| Color::parse(raw).ok())
+}
+
+/// One side of a contrast check: the label shown in the report and the parsed colour.
+#[derive(Clone)]
+struct ReportedColor {
+    name: String,
+    raw: String,
+    color: Color,
+}
+
+impl ReportedColor {
+    /// A value the checker derived rather than read straight from a token.
+    fn derived(name: &str, color: Color) -> Self {
+        Self {
+            name: name.to_string(),
+            raw: color.to_hex(),
+            color,
+        }
+    }
+}
+
+/// Accumulates the contrast checks for one theme.
+struct ContrastCollector<'a> {
+    tokens: &'a BTreeMap<String, String>,
+    report: ContrastReport,
+}
+
+impl<'a> ContrastCollector<'a> {
+    fn new(tokens: &'a BTreeMap<String, String>) -> Self {
+        Self {
+            tokens,
+            report: ContrastReport::new(),
+        }
+    }
+
+    /// Resolve a token path to its label, raw string and parsed colour.
+    fn token(&self, path: &str) -> Option<ReportedColor> {
+        self.tokens.get(path).and_then(|raw| {
+            Color::parse(raw).ok().map(|color| ReportedColor {
+                name: path.to_string(),
+                raw: raw.clone(),
+                color,
+            })
+        })
+    }
+
+    /// Record one foreground/background pair.
+    fn add(
+        &mut self,
+        name: &str,
+        foreground: ReportedColor,
+        background: ReportedColor,
+        min_aa: f64,
+        min_aaa: f64,
+    ) {
+        let ratio = foreground.color.contrast_ratio(&background.color);
+        self.report.add_check(ContrastCheck {
+            name: name.to_string(),
+            foreground_name: foreground.name,
+            foreground_color: foreground.raw,
+            background_name: background.name,
+            background_color: background.raw,
+            ratio,
+            min_aa,
+            min_aaa,
+            passes_aa: ratio >= min_aa,
+            passes_aaa: ratio >= min_aaa,
+        });
+    }
+
+    /// Record a foreground/background pair from two token paths (skipped when either is absent).
+    fn pair(
+        &mut self,
+        name: &str,
+        foreground_path: &str,
+        background_path: &str,
+        min_aa: f64,
+        min_aaa: f64,
+    ) {
+        if let (Some(foreground), Some(background)) =
+            (self.token(foreground_path), self.token(background_path))
+        {
+            self.add(name, foreground, background, min_aa, min_aaa);
+        }
     }
 }
 

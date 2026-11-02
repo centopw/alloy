@@ -10,6 +10,7 @@
   import { expect } from '$lib/stores/errors';
   import { profileCard } from '$lib/stores/profileCard.svelte';
   import type { UserSearchResultDto } from '$lib/generated';
+  import { handleModalTabKey } from '$lib/platform/focusTrap';
 
   import { t } from '$lib/i18n';
   interface Props {
@@ -29,6 +30,32 @@
   let index = $state(0);
   let input: HTMLInputElement | undefined = $state();
   let paletteEl: HTMLDivElement | undefined = $state();
+  /** The element that opened the palette, so Escape/backdrop/back can return focus to it. */
+  let opener: HTMLElement | null = null;
+
+  /**
+   * Closes the palette and returns focus to the opener (A11Y-15). The run callback runs after the
+   * focus move so follow-up surfaces (the profile card) capture the opener as their own return
+   * target instead of the input that is about to be removed.
+   */
+  function closeAndRestore(then?: () => void) {
+    const target = opener;
+    opener = null;
+    onclose();
+    if (target?.isConnected) target.focus();
+    then?.();
+  }
+
+  /** After a room is chosen the row is the keyboard user's landing spot; phones show the chat
+   * instead and the shell moves focus there, so a hidden row is left alone. */
+  function focusChosenRow(roomId: string) {
+    void tick().then(() => {
+      const row = document.querySelector<HTMLElement>(
+        `.row[data-room-id="${CSS.escape(roomId)}"]`
+      );
+      if (row && row.getClientRects().length > 0) row.focus();
+    });
+  }
 
   const results = $derived(
     roomsStore.rooms
@@ -66,7 +93,7 @@
         } catch (e) {
           if (id !== peopleRequest) return;
           people = [];
-          peopleError = e instanceof Error ? e.message : 'User search failed';
+          peopleError = e instanceof Error ? e.message : t('command-palette-user-search-failed');
         } finally {
           if (id === peopleRequest) peopleBusy = false;
         }
@@ -83,6 +110,7 @@
 
   $effect(() => {
     if (open) {
+      opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       query = '';
       index = 0;
       void tick().then(() => input?.focus());
@@ -103,15 +131,20 @@
   function choose(option: (typeof options)[number]) {
     if (option.kind === 'room') {
       onpick(option.id);
+      focusChosenRow(option.id);
       return;
     }
     const anchor = input?.getBoundingClientRect();
-    onclose();
-    profileCard.open(option.user.user_id, null, { x: anchor?.left ?? 0, y: anchor?.bottom ?? 0 });
+    closeAndRestore(() =>
+      profileCard.open(option.user.user_id, null, {
+        x: anchor?.left ?? 0,
+        y: anchor?.bottom ?? 0
+      })
+    );
   }
 
   function onKey(e: KeyboardEvent) {
-    if (e.key === 'Escape') onclose();
+    if (e.key === 'Escape') closeAndRestore();
     else if (e.key === 'ArrowDown') {
       e.preventDefault();
       index = Math.min(index + 1, options.length - 1);
@@ -122,31 +155,17 @@
       e.preventDefault();
       choose(options[index]);
     } else if (e.key === 'Tab') {
-      // Trap Tab inside the modal. Options are not in the tab order (keyboard moves through the
-      // input), so the only focusable elements are the back button and the input.
-      // Filter to visible elements: the back button is display:none on desktop, so focusing it
-      // would silently fail and let focus escape the modal.
-      const focusables = Array.from(
-        paletteEl?.querySelectorAll<HTMLElement>('input, button:not([tabindex="-1"])') ?? []
-      ).filter((el) => el.getClientRects().length > 0);
-      if (focusables.length === 0) return;
-      const first = focusables[0];
-      const last = focusables[focusables.length - 1];
-      const active = document.activeElement;
-      if (e.shiftKey && active === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && active === last) {
-        e.preventDefault();
-        first.focus();
-      }
+      // Options are not in the tab order (the input moves through them with aria-activedescendant),
+      // so the only focusable elements are the back button and the input. The shared trap keeps
+      // focus inside this aria-modal dialog and skips the display:none desktop back button.
+      if (handleModalTabKey(e, paletteEl, document.activeElement)) e.preventDefault();
     }
   }
 </script>
 
 {#if open}
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div class="backdrop" onclick={onclose}>
+  <div class="backdrop" onclick={() => closeAndRestore()}>
     <div
       class="palette"
       role="dialog"
@@ -158,7 +177,7 @@
       onclick={(e) => e.stopPropagation()}
     >
       <div class="bar">
-        <button type="button" class="back" aria-label={t('command-palette-close-quick-switcher')} onclick={onclose}>
+        <button type="button" class="back" aria-label={t('command-palette-close-quick-switcher')} onclick={() => closeAndRestore()}>
           <Icon icon={ChevronLeft} size={24} />
         </button>
         <span class="search-icon" aria-hidden="true"><Icon icon={Search} size={20} /></span>
@@ -176,29 +195,36 @@
       </div>
       <ul id="palette-results" role="listbox">
         {#each results as r, i (r.id)}
-          <li id={`palette-option-${r.id}`} role="option" aria-selected={i === index}>
-            <button type="button" tabindex="-1" class:sel={i === index} onclick={() => choose(options[i])}>
-              <Avatar userId={r.id} displayName={roomTitle(r)} size={viewport.isPhone ? 48 : 'sm'} />
-              <span>{roomTitle(r)}</span>
-            </button>
+          <!-- svelte-ignore a11y_click_events_have_key_events -->
+          <li
+            id={`palette-option-${r.id}`}
+            role="option"
+            aria-selected={i === index}
+            class="option"
+            class:sel={i === index}
+            onclick={() => choose(options[i])}
+          >
+            <Avatar userId={r.id} displayName={roomTitle(r)} size={viewport.isPhone ? 48 : 'sm'} />
+            <span>{roomTitle(r)}</span>
           </li>
         {/each}
         {#if people.length > 0}
           <li class="group" role="presentation">{t('command-palette-people')}</li>
           {#each people as p, j (p.user_id)}
-            <li id={`palette-option-person-${p.user_id}`} role="option" aria-selected={results.length + j === index}>
-              <button
-                type="button"
-                tabindex="-1"
-                class:sel={results.length + j === index}
-                onclick={() => choose(options[results.length + j])}
-              >
-                <Avatar userId={p.user_id} displayName={p.display_name} src={p.avatar_url} size={viewport.isPhone ? 48 : 'sm'} />
-                <span class="who">
-                  <span class="name">{p.display_name ?? p.user_id}</span>
-                  <span class="id">{p.user_id}{p.already_in_room ? t('command-palette-in-a-room') : ''}</span>
-                </span>
-              </button>
+            <!-- svelte-ignore a11y_click_events_have_key_events -->
+            <li
+              id={`palette-option-person-${p.user_id}`}
+              role="option"
+              aria-selected={results.length + j === index}
+              class="option"
+              class:sel={results.length + j === index}
+              onclick={() => choose(options[results.length + j])}
+            >
+              <Avatar userId={p.user_id} displayName={p.display_name} src={p.avatar_url} size={viewport.isPhone ? 48 : 'sm'} />
+              <span class="who">
+                <span class="name">{p.display_name ?? p.user_id}</span>
+                <span class="id">{p.user_id}{p.already_in_room ? t('command-palette-in-a-room') : ''}</span>
+              </span>
             </li>
           {/each}
         {:else if results.length === 0 && !peopleBusy}
@@ -269,22 +295,20 @@
     margin: 0;
     padding: var(--alloy-layout-row-inset);
   }
-  button {
+  /* A listbox option is presentational content: ARIA options must not contain buttons (A11Y-21),
+     so the row itself is the click target and the input owns keyboard selection. */
+  .option {
     display: flex;
     gap: var(--alloy-spacing-scale-3);
     align-items: center;
     width: 100%;
-    border: 0;
-    background: transparent;
-    color: inherit;
-    font: inherit;
     padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x);
     border-radius: var(--alloy-radii-lg);
     cursor: pointer;
     text-align: left;
   }
-  button.sel,
-  button:hover {
+  .option.sel,
+  .option:hover {
     background: var(--alloy-glass-control-hover);
   }
   .group {
@@ -400,7 +424,7 @@
       -webkit-overflow-scrolling: touch;
       padding: var(--alloy-layout-row-inset) var(--alloy-layout-row-inset) calc(var(--alloy-safe-area-bottom) + var(--alloy-layout-row-inset));
     }
-    li button {
+    .option {
       min-height: 64px;
       box-sizing: border-box;
       padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x);

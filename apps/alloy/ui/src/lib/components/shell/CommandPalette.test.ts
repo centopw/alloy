@@ -161,7 +161,8 @@ describe('CommandPalette people search', () => {
       expect(person, 'the directory match is an option').toBeTruthy();
       expect(person!.textContent).toContain('in a room');
 
-      (person!.querySelector('button') as HTMLButtonElement).click();
+      // Options are presentational listbox options (A11Y-21): the row itself is the click target.
+      (person as HTMLElement).click();
       flushSync();
       expect(mocks.openProfile).toHaveBeenCalledWith('@bob:example.org', null, expect.any(Object));
       expect(mocks.onpick).not.toHaveBeenCalled();

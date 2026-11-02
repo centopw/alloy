@@ -20,8 +20,8 @@
       "text": {
         "primary": "#18181b",
         "secondary": "#52525b",
-        "muted": "#65656d",
-        "link": "#2563eb",
+        "muted": "#5c5c64",
+        "link": "#1d4ed8",
         "on_accent": "#ffffff"
       },
       "accent": {
@@ -36,11 +36,11 @@
         "away": "#d97706",
         "busy": "#dc2626",
         "offline": "#71717a",
-        "error": "#dc2626",
+        "error": "#b91c1c",
         "warning": "#d97706",
         "info": "#2563eb",
         "success": "#16a34a",
-        "mention": "#ea580c"
+        "mention": "#c2410c"
       },
       "bubble": {
         "own": {

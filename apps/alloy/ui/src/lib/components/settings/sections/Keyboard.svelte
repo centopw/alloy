@@ -44,6 +44,18 @@
       ],
     },
     {
+      title: t('keyboard-messages-group'),
+      rows: [
+        { action: t('keyboard-move-message-cursor'), chords: [['↑'], ['↓']] },
+        { action: t('keyboard-move-message-cursor-page'), chords: [['PgUp'], ['PgDn']] },
+        { action: t('keyboard-jump-oldest-newest-message'), chords: [['Home'], ['End']] },
+        {
+          action: t('keyboard-open-message-actions'),
+          chords: [['Enter'], ['Space'], ['Shift', 'F10']],
+        },
+      ],
+    },
+    {
       title: 'Dialogs and menus',
       rows: [
         { action: 'Close a dialog, menu, palette or popover', chords: [['Esc']] },

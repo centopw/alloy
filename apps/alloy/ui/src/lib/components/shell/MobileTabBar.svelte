@@ -141,7 +141,9 @@
     padding: 0 5px; /* token-audit: badge inset, set by the 18px badge height */
     box-sizing: border-box;
     border-radius: var(--alloy-radii-full);
-    background: var(--alloy-color-status-mention);
+    /* One source for the unread fill; every theme tunes it so the white count clears 4.5:1
+       (A11Y-11). */
+    background: var(--alloy-unread-badge);
     color: var(--alloy-color-text-on-accent);
     font-size: var(--alloy-typography-size-xs);
     font-weight: var(--alloy-typography-weight-bold);

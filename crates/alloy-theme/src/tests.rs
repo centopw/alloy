@@ -430,3 +430,265 @@ fn test_contrast_fails_if_user_palette_entry_drops_below_aa() {
         "Failures list must contain user color 1 failure"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Wave-2 accessibility contrast pairs (A11Y-01/09/10/11/12/13/14)
+// ---------------------------------------------------------------------------
+
+/// Resolve a builtin light theme after `mutate` has changed it, and return the failing pair names.
+fn light_failures(mutate: impl FnOnce(&mut Theme)) -> Vec<String> {
+    let resolver = ThemeResolver::new();
+    let mut theme = alloy_light();
+    theme.id = "regression".into();
+    mutate(&mut theme);
+    let resolved = resolver.resolve(&theme).expect("theme resolves");
+    resolved
+        .contrast_report
+        .failures()
+        .iter()
+        .map(|check| check.name.clone())
+        .collect()
+}
+
+#[test]
+fn test_extended_contrast_pairs_are_reported() {
+    let resolver = ThemeResolver::new();
+    let resolved = resolver.resolve(&alloy_light()).expect("light resolves");
+    let names: Vec<&str> = resolved
+        .contrast_report
+        .checks
+        .iter()
+        .map(|check| check.name.as_str())
+        .collect();
+
+    // The pairs A11Y-14 was missing. Losing one of these silently reopens the audit finding.
+    let expected = [
+        "muted_on_canvas",
+        "muted_on_subtle",
+        "muted_on_panel",
+        "muted_on_elevated",
+        "muted_on_hover",
+        "muted_on_bubble_other",
+        "error_on_canvas",
+        "error_on_subtle",
+        "error_on_panel",
+        "error_on_elevated",
+        "error_on_hover",
+        "text_link_on_canvas",
+        "text_link_on_subtle",
+        "text_link_on_panel",
+        "text_link_on_elevated",
+        "text_link_on_hover",
+        "text_on_accent_mention_badge",
+        "text_on_accent_danger_fill",
+        "bubble_own_meta_on_background",
+        "avatar_initials_user_1",
+        "avatar_initials_user_12",
+        "text_primary_on_chrome_worst",
+        "text_secondary_on_chrome_worst",
+        "text_muted_on_chrome_worst",
+        "text_link_on_chrome_worst",
+        "text_primary_on_chat_worst",
+        "text_secondary_on_chat_worst",
+        "text_muted_on_chat_worst",
+        "text_link_on_chat_worst",
+    ];
+    for name in expected {
+        assert!(
+            names.contains(&name),
+            "contrast report is missing the '{}' pair",
+            name
+        );
+    }
+    assert!(
+        resolved.contrast_report.checks.len() >= 70,
+        "the extended checker should report at least 70 pairs, got {}",
+        resolved.contrast_report.checks.len()
+    );
+}
+
+#[test]
+fn test_muted_text_regression_is_caught_on_every_surface() {
+    // A muted colour that stops clearing 4.5:1 somewhere in the light palette (the audited
+    // midnight-ocean value measured 3.17-3.86:1 on its own surfaces). The checker must notice on
+    // every surface, not just the canvas it happened to be spot-checked on.
+    let failures = light_failures(|theme| {
+        if let Some(color) = &mut theme.tokens.color
+            && let Some(text) = &mut color.text
+        {
+            text.muted = Some("#7c7c85".into());
+        }
+    });
+    for surface in ["canvas", "subtle", "panel", "elevated", "hover"] {
+        assert!(
+            failures.contains(&format!("muted_on_{}", surface)),
+            "muted on {} must fail for #7c7c85, got {:?}",
+            surface,
+            failures
+        );
+    }
+    assert!(
+        failures.contains(&"text_muted_on_chrome_worst".to_string()),
+        "the worst-case chrome pair must catch muted text too, got {:?}",
+        failures
+    );
+}
+
+#[test]
+fn test_error_text_regression_is_caught() {
+    let failures = light_failures(|theme| {
+        if let Some(color) = &mut theme.tokens.color
+            && let Some(status) = &mut color.status
+        {
+            // The audited light error colour: 4.38:1 on the light canvas.
+            status.error = Some("#dc2626".into());
+        }
+    });
+    assert!(
+        failures.contains(&"error_on_canvas".to_string()),
+        "error text below 4.5:1 must fail, got {:?}",
+        failures
+    );
+    assert!(
+        failures.contains(&"error_on_hover".to_string()),
+        "error text on the light hover surface must fail, got {:?}",
+        failures
+    );
+}
+
+#[test]
+fn test_link_text_regression_is_caught_at_aa() {
+    let failures = light_failures(|theme| {
+        if let Some(color) = &mut theme.tokens.color
+            && let Some(text) = &mut color.text
+        {
+            // The audited light link colour: 4.23:1 on surface-hover.
+            text.link = Some("#2563eb".into());
+        }
+    });
+    assert!(
+        failures.contains(&"text_link_on_hover".to_string()),
+        "link text below 4.5:1 must fail, got {:?}",
+        failures
+    );
+    assert!(
+        failures.contains(&"text_link_on_subtle".to_string()),
+        "link text on subtle must fail, got {:?}",
+        failures
+    );
+}
+
+#[test]
+fn test_unread_badge_regression_is_caught() {
+    let failures = light_failures(|theme| {
+        if let Some(color) = &mut theme.tokens.color
+            && let Some(status) = &mut color.status
+        {
+            // The audited mention fill: white on #ea580c was 3.68:1.
+            status.mention = Some("#ea580c".into());
+        }
+    });
+    assert!(
+        failures.contains(&"text_on_accent_mention_badge".to_string()),
+        "badge text below 4.5:1 must fail, got {:?}",
+        failures
+    );
+}
+
+#[test]
+fn test_destructive_fill_label_regression_is_caught() {
+    let failures = light_failures(|theme| {
+        if let Some(color) = &mut theme.tokens.color
+            && let Some(status) = &mut color.status
+        {
+            // Too light to carry on-accent text even after the 70% darkening.
+            status.error = Some("#fca5a5".into());
+        }
+    });
+    assert!(
+        failures.contains(&"text_on_accent_danger_fill".to_string()),
+        "danger button label below 4.5:1 must fail, got {:?}",
+        failures
+    );
+}
+
+#[test]
+fn test_own_bubble_meta_regression_is_caught() {
+    let failures = light_failures(|theme| {
+        if let Some(color) = &mut theme.tokens.color
+            && let Some(bubble) = &mut color.bubble
+            && let Some(own) = &mut bubble.own
+        {
+            // The audited midnight-ocean own bubble: the 82% meta measured 3.81:1.
+            own.background = Some("#0077b6".into());
+        }
+    });
+    assert!(
+        failures.contains(&"bubble_own_meta_on_background".to_string()),
+        "derived own-bubble meta below 4.5:1 must fail, got {:?}",
+        failures
+    );
+}
+
+#[test]
+fn test_avatar_initials_pick_the_readable_colour() {
+    // The audited dark-mode pastels: white initials measured 1.67-2.98:1.
+    for (fill_hex, white_ratio_limit) in [("#fbbf24", 2.0), ("#4ade80", 2.0), ("#22d3ee", 2.0)] {
+        let fill = Color::parse(fill_hex).unwrap();
+        let white = Color::parse("#ffffff").unwrap();
+        assert!(
+            white.contrast_ratio(&fill) < white_ratio_limit,
+            "white on {} should be the failing case",
+            fill_hex
+        );
+        let chosen = ThemeResolver::avatar_initials_color(&fill);
+        assert_eq!(
+            chosen.to_hex(),
+            crate::resolver::AVATAR_INK,
+            "light {} must get near-black initials",
+            fill_hex
+        );
+        assert!(
+            chosen.contrast_ratio(&fill) >= 4.5,
+            "chosen initials on {} must clear AA",
+            fill_hex
+        );
+    }
+
+    // The light palette is dark, so it keeps white initials.
+    let dark_fill = Color::parse("#b45309").unwrap();
+    assert_eq!(
+        ThemeResolver::avatar_initials_color(&dark_fill).to_hex(),
+        "#ffffff"
+    );
+
+    // The resolved dark theme reports a passing avatar pair for every palette entry.
+    let resolver = ThemeResolver::new();
+    let dark = resolver.resolve(&alloy_dark()).expect("dark resolves");
+    for i in 1..=12 {
+        let check = dark
+            .contrast_report
+            .checks
+            .iter()
+            .find(|check| check.name == format!("avatar_initials_user_{}", i))
+            .unwrap_or_else(|| panic!("missing avatar pair for user {}", i));
+        assert!(check.passes_aa, "avatar pair {} failed: {:?}", i, check);
+    }
+}
+
+#[test]
+fn test_avatar_initials_clear_aa_for_any_possible_fill() {
+    // The white/near-black pair is guaranteed to leave one candidate above 4.5:1; the worst case is
+    // the crossover luminance (~4.51:1).
+    for step in 0..=255u32 {
+        let value = step as f64 / 255.0;
+        let fill = Color::new(value, value, value, 1.0);
+        let chosen = ThemeResolver::avatar_initials_color(&fill);
+        assert!(
+            chosen.contrast_ratio(&fill) >= 4.5,
+            "grey #{} only got {:.3}:1",
+            step,
+            chosen.contrast_ratio(&fill)
+        );
+    }
+}

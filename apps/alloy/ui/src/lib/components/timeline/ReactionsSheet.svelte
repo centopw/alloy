@@ -5,6 +5,7 @@
   import { membersStore } from '$lib/stores/members.svelte';
   import { timelineStore } from '$lib/stores/timeline.svelte';
   import { session } from '$lib/stores/session.svelte';
+  import { nextRovingIndex, rovingTabindex } from '$lib/platform/roving';
 
   import { t } from '$lib/i18n';
   interface Props {
@@ -21,6 +22,17 @@
   const reactions = $derived(item.reactions ?? []);
   const tabs = $derived(reactionTabs(reactions));
   const rows = $derived(reactorRows(reactions, selected));
+  const activeTab = $derived(Math.max(0, tabs.findIndex((tab) => tab.key === selected)));
+  let tablistEl = $state<HTMLDivElement | null>(null);
+
+  /** Arrow/Home/End move selection in the tablist; Tab enters and leaves it once (A11Y-17). */
+  function onTabKey(e: KeyboardEvent, index: number) {
+    const next = nextRovingIndex(index, tabs.length, e.key, { orientation: 'horizontal' });
+    if (next === null) return;
+    e.preventDefault();
+    selected = tabs[next].key;
+    tablistEl?.querySelectorAll<HTMLElement>('[role="tab"]')[next]?.focus();
+  }
 
   $effect(() => {
     if (!open) return;
@@ -44,14 +56,16 @@
 </script>
 
 <Modal {open} title={t('reactions-sheet-reactions')} {onclose} width="420px">
-  <div class="tabs" role="tablist" aria-label={t('reactions-sheet-reactions-by-emoji')}>
-    {#each tabs as tab (tab.key ?? 'all')}
+  <div class="tabs" role="tablist" aria-label={t('reactions-sheet-reactions-by-emoji')} bind:this={tablistEl}>
+    {#each tabs as tab, i (tab.key ?? 'all')}
       <button
         type="button"
         role="tab"
         class="tab"
+        tabindex={rovingTabindex(i, activeTab)}
         aria-selected={selected === tab.key}
         onclick={() => (selected = tab.key)}
+        onkeydown={(e) => onTabKey(e, i)}
       >
         <span>{tab.key ?? t('reactions-sheet-all')}</span><span class="count">{tab.count}</span>
       </button>

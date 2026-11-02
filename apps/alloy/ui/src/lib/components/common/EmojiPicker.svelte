@@ -12,6 +12,7 @@
   } from '$lib/content/emoji';
   import { getSkinTone, recentEmoji, recordEmoji, setSkinTone } from '$lib/stores/emojiRecents';
   import { contextMenu, type MenuAction } from '$lib/stores/contextmenu.svelte';
+  import { nextRovingIndex, rovingTabindex } from '$lib/platform/roving';
   import { viewport } from '$lib/stores/viewport.svelte';
   import {
     Apple,
@@ -196,6 +197,24 @@
     });
   }
 
+  let tablistEl = $state<HTMLDivElement | null>(null);
+
+  /**
+   * The category row is a tablist, so it is one tab stop and Left/Right/Home/End move between
+   * tabs (A11Y-17). The arrow keys still belong to the emoji grid when focus is there; this
+   * handler only runs for a focused tab.
+   */
+  function onCategoryTabKey(e: KeyboardEvent, index: number) {
+    const next = nextRovingIndex(index, tabs.length, e.key, { orientation: 'horizontal' });
+    if (next === null) return;
+    e.preventDefault();
+    e.stopPropagation();
+    jumpTo(tabs[next].key);
+    void tick().then(() =>
+      tablistEl?.querySelectorAll<HTMLElement>('[role="tab"]')[next]?.focus()
+    );
+  }
+
   /** Scroll spy: the last section whose top has reached the scroller's top edge is active. */
   function onScroll() {
     const root = scroller;
@@ -338,7 +357,7 @@
     }));
     contextMenu.open(items, { x: rect.left, y: rect.top }, {
       anchor: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
-      ariaLabel: 'Skin tone'
+      ariaLabel: t('emoji-picker-skin-tone')
     });
   }
 
@@ -353,17 +372,26 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="emoji-picker" onkeydown={onRootKey} role="dialog" aria-label={t('emoji-picker-emoji-picker')} tabindex="-1">
   <div class="top">
-    <div class="tabs" role="tablist" aria-label={t('emoji-picker-emoji-categories')} class:hidden={hideTabs}>
-      {#each tabs as tab (tab.key)}
+    <div
+      class="tabs"
+      role="tablist"
+      aria-label={t('emoji-picker-emoji-categories')}
+      class:hidden={hideTabs}
+      bind:this={tablistEl}
+    >
+      {#each tabs as tab, i (tab.key)}
+        {@const tabActive = currentTab === tab.key && !searching}
         <button
           type="button"
           role="tab"
           class="tab"
-          class:active={currentTab === tab.key && !searching}
-          aria-selected={currentTab === tab.key && !searching}
+          class:active={tabActive}
+          tabindex={rovingTabindex(i, Math.max(0, tabs.findIndex((entry) => entry.key === currentTab)))}
+          aria-selected={tabActive}
           aria-label={tab.label}
           title={tab.label}
           onclick={() => jumpTo(tab.key)}
+          onkeydown={(e) => onCategoryTabKey(e, i)}
         >
           <Icon icon={tab.icon} size={20} />
         </button>

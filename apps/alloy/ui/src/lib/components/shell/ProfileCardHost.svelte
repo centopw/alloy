@@ -2,6 +2,7 @@
   import { profileCard } from '$lib/stores/profileCard.svelte';
   import { roomsStore } from '$lib/stores/rooms.svelte';
   import { pushBack } from '$lib/platform/backstack';
+  import { handleModalTabKey } from '$lib/platform/focusTrap';
   import UserProfileCard from './UserProfileCard.svelte';
 
   import { t } from '$lib/i18n';
@@ -99,6 +100,12 @@
     roomsStore.select(roomId);
     profileCard.close();
   }
+
+  /** The narrow bottom sheet declares aria-modal, so Tab must stay inside it (A11Y-16). */
+  function onHostKey(e: KeyboardEvent) {
+    if (!narrow) return;
+    if (handleModalTabKey(e, cardEl, document.activeElement)) e.preventDefault();
+  }
 </script>
 
 {#if profileCard.isOpen && profileCard.userId}
@@ -114,6 +121,7 @@
     aria-modal={narrow ? 'true' : 'false'}
     aria-label={t('profile-card-host-user-profile')}
     tabindex="-1"
+    onkeydown={onHostKey}
   >
     {#if narrow}
       <div class="grabber" aria-hidden="true"></div>

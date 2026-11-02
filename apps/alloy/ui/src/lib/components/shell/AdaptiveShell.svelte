@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, untrack } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
   import SpaceRail from './SpaceRail.svelte';
   import Sidebar from './Sidebar.svelte';
   import ChatHeader from './ChatHeader.svelte';
@@ -54,6 +54,8 @@
   import Icon from '$lib/icons/Icon.svelte';
   import { Search } from '$lib/icons';
   import { shortcutLabel } from '$lib/platform/shortcuts';
+  import { focusChatEntry, focusRoomList, focusRoomRow, focusSkipTarget } from '$lib/platform/shellFocus';
+  import { applyWindowTitle } from '$lib/platform/windowTitle';
 
   import { t } from '$lib/i18n';
   let paletteOpen = $state(false);
@@ -66,6 +68,11 @@
   let newRoomOpen = $state(false);
   let directoryOpen = $state(false);
   let pane = $state<'list' | 'chat'>('list');
+  // Focus bookkeeping for the phone's one-screen-at-a-time layout: the room the chat was opened
+  // from (so Back can return to its row) and whether the window is focused (the window title only
+  // carries the unread count while the app is in the background).
+  let chatOriginId = $state<string | null>(null);
+  let windowFocused = $state(typeof document === 'undefined' ? true : document.hasFocus());
   let hudVisible = $state(false);
   let innerWidth = $state(1280);
 
@@ -113,12 +120,38 @@
     )
   );
 
+  // Skip links: only offer a pane that is actually on screen. On phones the list and the
+  // conversation replace each other, so the link to the hidden pane is not rendered at all. The
+  // desktop conversation pane is always mounted (it carries the empty state when no room is open).
+  const roomListVisible = $derived(!phone ? !layout.sidebarCollapsed : pane === 'list');
+  const conversationVisible = $derived(phone ? pane === 'chat' : true);
+
+  // The window/task-switcher title names the open room and shows unread messages only while the
+  // app is in the background (a focused window already shows its badges).
+  $effect(() => {
+    if (typeof document === 'undefined') return;
+    applyWindowTitle({
+      roomName: active ? roomTitle(active) : null,
+      unreadCount: unreadTotal,
+      focused: windowFocused,
+      appName: t('brand-name'),
+    });
+  });
+
   function showChats() {
     directoryOpen = false;
     settingsOpen = false;
   }
 
   onMount(() => {
+    // The window title carries unread messages only while the window is in the background.
+    const syncWindowFocus = () => {
+      windowFocused = document.hasFocus() && !document.hidden;
+    };
+    syncWindowFocus();
+    window.addEventListener('focus', syncWindowFocus);
+    window.addEventListener('blur', syncWindowFocus);
+    document.addEventListener('visibilitychange', syncWindowFocus);
     const teardownPrefs = installPrefsEffects();
     void prefs.load();
     verification.listen();
@@ -165,6 +198,9 @@
       void notificationSettings.load();
     });
     return () => {
+      window.removeEventListener('focus', syncWindowFocus);
+      window.removeEventListener('blur', syncWindowFocus);
+      document.removeEventListener('visibilitychange', syncWindowFocus);
       window.removeEventListener('alloy-open-room', onOpenRoom);
       disposed = true;
       unlistenNativeRoom?.();
@@ -230,29 +266,48 @@
   // On phones the system Back button returns from a chat to the room list instead of leaving the app.
   let releaseChatBack: (() => void) | null = null;
 
-  function openChat() {
+  /**
+   * Opens the conversation. On a phone the list is hidden with `display: none`, which drops the
+   * focused room row out of the page, so focus moves to the room heading (or the composer when no
+   * heading is rendered). TalkBack announces the new screen when the heading takes focus.
+   */
+  async function openChat(roomId: string) {
     pane = 'chat';
+    chatOriginId = roomId;
     if (breakpoint === 'narrow' && !releaseChatBack) {
       releaseChatBack = pushBack(() => {
         releaseChatBack = null;
-        pane = 'list';
+        void backToList();
       });
     }
+    if (breakpoint !== 'narrow') return;
+    await tick();
+    focusChatEntry();
   }
 
-  function backToList() {
+  /** Returns from the conversation to the phone room list and puts focus back on its room row. */
+  async function backToList() {
+    const origin = chatOriginId;
     if (releaseChatBack) {
       releaseChatBack();
       releaseChatBack = null;
     }
     pane = 'list';
+    if (breakpoint !== 'narrow' || origin === null) return;
+    await tick();
+    focusRoomRow(origin);
   }
 
   function pick(roomId: string) {
     showChats();
     roomsStore.select(roomId);
     paletteOpen = false;
-    openChat();
+    void openChat(roomId);
+  }
+
+  /** Skip links: move focus to a landmark instead of relying on the hash-scroll behaviour. */
+  function skipTo(id: string) {
+    focusSkipTarget(id);
   }
 
   function onKeydown(e: KeyboardEvent) {
@@ -279,6 +334,31 @@
 <svelte:window onkeydown={onKeydown} bind:innerWidth />
 
 <div class="frame" class:offline={connectivity.offline}>
+{#if conversationVisible || roomListVisible}
+  <!-- First Tab stop: keyboard users jump over the navigation entirely (A11Y-06). Each link is
+       only rendered while the pane it targets is actually on screen; phones show one pane at a
+       time. The links are visually hidden until focused so they add no chrome to the shell. -->
+  <nav class="skip-links" aria-label={t('adaptive-shell-skip-links')}>
+    {#if conversationVisible}
+      <a
+        class="skip-link"
+        href="#conversation"
+        onclick={(e) => {
+          e.preventDefault();
+          skipTo('conversation');
+        }}>{t('adaptive-shell-skip-to-conversation')}</a>
+    {/if}
+    {#if roomListVisible}
+      <a
+        class="skip-link"
+        href="#room-list"
+        onclick={(e) => {
+          e.preventDefault();
+          focusRoomList();
+        }}>{t('adaptive-shell-skip-to-room-list')}</a>
+    {/if}
+  </nav>
+{/if}
 <ConnectionBanner />
 <ChangelogDialog />
 <ForwardDialog />
@@ -297,7 +377,7 @@
   <div class="nav">
     {#if phone}
       <SpaceChips onnew={() => (newRoomOpen = true)} />
-      <div class="list-body">
+      <div class="list-body" id="room-list" tabindex="-1">
         <Sidebar onselect={pick} onnew={() => (newRoomOpen = true)} onbrowse={() => (directoryOpen = true)} onsettings={openSettings} />
       </div>
       <MobileTabBar
@@ -313,7 +393,7 @@
         onexpand={() => layout.setSidebarCollapsed(false)}
         oncollapse={() => layout.setSidebarCollapsed(true)}
       />
-      <div class="list-body" id="room-list">
+      <div class="list-body" id="room-list" tabindex="-1">
         <Sidebar
           onselect={pick}
           onnew={() => (newRoomOpen = true)}
@@ -347,9 +427,11 @@
     </div>
   {/if}
 
-  <main class="chat">
+  <main class="chat" id="conversation" tabindex="-1">
     {#if active && activeId}
       {#if timelineStore.selecting}
+        <!-- Selection replaces the header; keep the view's h1 in the outline for the duration. -->
+        <h1 class="visually-hidden">{roomTitle(active)}</h1>
         <SelectionBar />
       {:else}
         <ChatHeader room={active} onback={backToList} />
@@ -361,7 +443,7 @@
       <Composer roomId={activeId} />
     {:else}
       <div class="empty">
-        <p class="eyebrow">{t('brand-name')}</p>
+        <h1 class="eyebrow">{t('brand-name')}</h1>
         <h2>{t('adaptive-shell-no-conversation-open')}</h2>
         <p>{t('adaptive-shell-search-every-room-and-person-or-pick-one-from-th')}</p>
         <button type="button" class="jump" onclick={() => (paletteOpen = true)}>
@@ -425,6 +507,70 @@
   /* The offline banner already clears the status bar, so the shell does not add the inset twice. */
   .frame.offline .shell {
     padding-top: 0;
+  }
+  /* First Tab stop (A11Y-06): off-screen until focused, so keyboard users can jump over the
+     navigation without the links adding chrome for pointer users. */
+  .skip-links {
+    position: fixed;
+    top: var(--alloy-spacing-scale-2);
+    left: var(--alloy-spacing-scale-2);
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    gap: var(--alloy-spacing-scale-1);
+    transform: translateY(calc(-100% - var(--alloy-spacing-scale-8)));
+    transition: transform var(--alloy-motion-duration-fast) var(--alloy-motion-easing-ease);
+  }
+  .skip-links:focus-within {
+    transform: none;
+  }
+  .skip-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--alloy-touch-target, 44px);
+    padding: 0 var(--alloy-spacing-scale-4);
+    border: 1px solid var(--alloy-glass-rim-strong);
+    border-radius: var(--alloy-radii-lg);
+    background: var(--alloy-glass-fill-strong);
+    -webkit-backdrop-filter: var(--alloy-glass-filter);
+    backdrop-filter: var(--alloy-glass-filter);
+    box-shadow: var(--alloy-glass-shadow), var(--alloy-glass-highlight);
+    color: var(--alloy-color-text-primary);
+    font-size: var(--alloy-font-size-row);
+    font-weight: var(--alloy-typography-weight-semibold);
+    text-decoration: none;
+  }
+  .skip-link:focus-visible {
+    outline: 2px solid var(--alloy-color-accent-primary);
+    outline-offset: 2px;
+  }
+  /* A heading that only the accessibility tree sees (selection mode keeps the view's h1). */
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  /* Skip-link targets are focused programmatically: no ring for pointer clicks, but a visible one
+     when the focus came from the keyboard. */
+  .chat:focus,
+  .list-body:focus {
+    outline: none;
+  }
+  .chat:focus-visible,
+  .list-body:focus-visible {
+    outline: 2px solid var(--alloy-color-accent-primary);
+    outline-offset: -2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .skip-links {
+      transition: none;
+    }
   }
   .shell {
     position: relative;

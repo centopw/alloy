@@ -6,6 +6,7 @@
   import { contextMenu } from '$lib/stores/contextmenu.svelte';
   import { emojiPicker } from '$lib/stores/emojiPicker.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
+  import { handleModalTabKey } from '$lib/platform/focusTrap';
 
   import { t } from '$lib/i18n';
   const POPOVER = { width: 360, height: 420 };
@@ -25,6 +26,12 @@
   let searching = $state(false);
 
   let returnFocus: HTMLElement | null = null;
+  let sheetEl: HTMLElement | null = $state(null);
+
+  /** The phone sheet declares aria-modal, so Tab must stay inside it (A11Y-16). */
+  function onSheetKey(e: KeyboardEvent) {
+    if (handleModalTabKey(e, sheetEl, document.activeElement)) e.preventDefault();
+  }
 
   const popoverPos = $derived.by(() => {
     const anchor = emojiPicker.anchor;
@@ -135,7 +142,10 @@
       role="dialog"
       aria-modal="true"
       aria-label={t('emoji-picker-host-emoji-picker')}
+      tabindex="-1"
       use:portal
+      bind:this={sheetEl}
+      onkeydown={onSheetKey}
       style:transform={dragOffset > 0 ? `translateY(${dragOffset}px)` : undefined}
     >
       <div

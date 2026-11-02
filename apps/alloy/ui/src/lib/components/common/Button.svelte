@@ -113,7 +113,9 @@
     background-color: var(--alloy-color-surface-hover);
   }
   .variant-danger {
-    background-color: var(--alloy-color-status-error);
+    /* The dedicated fill keeps the on-accent label at 4.5:1; status.error itself is tuned for
+       error TEXT on every surface (A11Y-09). */
+    background-color: var(--alloy-danger-fill, var(--alloy-color-status-error));
     color: var(--alloy-color-text-on-accent);
     border-color: transparent;
   }

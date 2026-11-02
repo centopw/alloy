@@ -1,7 +1,13 @@
 <script lang="ts">
   import { getInitials } from '$lib/identity/initials';
-  import { getUserColorValue } from '$lib/identity/userColor';
+  import {
+    AVATAR_WHITE,
+    getUserColorValue,
+    getUserColorVar,
+    pickAvatarOnColor
+  } from '$lib/identity/userColor';
   import { avatarUrl } from '$lib/stores/avatars.svelte';
+  import { themeStore } from '$lib/theme/theme.svelte';
 
   import { t } from '$lib/i18n';
   interface Props {
@@ -75,6 +81,35 @@
   const initials = $derived(getInitials(displayName, userId));
   const userColor = $derived(getUserColorValue(userId));
   const effectiveAlt = $derived(alt || displayName || userId || 'Avatar');
+  /**
+   * A11Y-20: `role="img"` makes descendants presentational, so presence has to live in the
+   * accessible name instead of a child label. The name is announced once: the inner <img> is
+   * decorative (`alt=""`) and the dot is `aria-hidden`.
+   */
+  const accessibleName = $derived(
+    presence ? `${effectiveAlt}, ${t('avatar-presence-status', { presence })}` : effectiveAlt
+  );
+
+  /** A11Y-01: initials colour comes from the resolved fill, not a fixed white. */
+  let rootEl = $state<HTMLElement | undefined>();
+  let onColor = $state<string>(AVATAR_WHITE);
+
+  /** Resolve the avatar fill from computed style (the inline background is `var(--alloy-color-user-N)`). */
+  function resolveAvatarFill(element: HTMLElement): string | null {
+    const computed = getComputedStyle(element).backgroundColor;
+    if (computed && computed !== 'transparent' && computed !== 'rgba(0, 0, 0, 0)') return computed;
+    if (typeof document === 'undefined') return null;
+    return getComputedStyle(document.documentElement).getPropertyValue(getUserColorVar(userId)).trim() || null;
+  }
+
+  $effect(() => {
+    // Re-run after a theme switch (the palette has changed by then) and when a reusable row hands
+    // this instance a different user. Both are reactive reads, not values the effect uses.
+    void themeStore.activeTheme;
+    void userId;
+    if (!rootEl) return;
+    onColor = pickAvatarOnColor(resolveAvatarFill(rootEl));
+  });
 
   const imageSrc = $derived(src?.startsWith('mxc://') ? mediaUrl : (src || null));
 
@@ -108,19 +143,20 @@
     min-height: {currentSize}px;
     border-radius: {radius};
     background-color: {userColor};
-    color: var(--alloy-color-text-on-accent);
+    color: {onColor};
     font-size: {currentFontSize}px;
     font-weight: var(--alloy-typography-weight-semibold);
     user-select: none;
     overflow: visible;
   "
+  bind:this={rootEl}
   role="img"
-  aria-label={effectiveAlt}
+  aria-label={accessibleName}
 >
   {#if imageSrc && imageSrc !== failedSrc}
     <img
       src={imageSrc}
-      alt={effectiveAlt}
+      alt=""
       onerror={() => (failedSrc = imageSrc)}
       style="
         width: 100%;
@@ -139,7 +175,7 @@
     <span
       class="alloy-avatar-presence"
       data-presence={presence}
-      aria-label={t('avatar-presence-status', { presence: presence })}
+      aria-hidden="true"
       style="
         position: absolute;
         bottom: 0;

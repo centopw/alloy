@@ -3,6 +3,9 @@
   import { Button } from '../common';
   import { timelineStore } from '$lib/stores/timeline.svelte';
   import { pollPercent } from './pollResults';
+  import { nextRovingIndex, rovingTabindex } from '$lib/platform/roving';
+
+  import { tick } from 'svelte';
 
   import { t } from '$lib/i18n';
   type PollData = Extract<TimelineItemContent, { kind: 'Poll' }>['data'];
@@ -18,6 +21,23 @@
   // The engine already hides counts while an undisclosed poll is open; this only decides presentation.
   const revealed = $derived(poll.disclosed || poll.has_ended);
   const atLimit = $derived(multiple && poll.my_votes.length >= poll.max_selections);
+  /** Index of the single-choice selection; -1 lets the first answer own the tab stop. */
+  const activeAnswer = $derived(
+    multiple ? -1 : Math.max(-1, poll.answers.findIndex((a) => poll.my_votes.includes(a.id)))
+  );
+  let answersEl = $state<HTMLDivElement | null>(null);
+
+  /** A radiogroup is one tab stop: arrows move and select, per the ARIA pattern (A11Y-17). */
+  function onAnswerKey(e: KeyboardEvent, index: number) {
+    if (multiple) return;
+    const next = nextRovingIndex(index, poll.answers.length, e.key, { orientation: 'vertical' });
+    if (next === null) return;
+    e.preventDefault();
+    choose(poll.answers[next].id);
+    void tick().then(() =>
+      answersEl?.querySelectorAll<HTMLElement>('.answer')[next]?.focus()
+    );
+  }
 
   function choose(answerId: string) {
     if (!open) return;
@@ -35,8 +55,8 @@
 
 <div class="poll">
   <p class="question">{poll.question}</p>
-  <div class="answers" role={multiple ? 'group' : 'radiogroup'} aria-label={poll.question}>
-    {#each poll.answers as answer (answer.id)}
+  <div class="answers" role={multiple ? 'group' : 'radiogroup'} aria-label={poll.question} bind:this={answersEl}>
+    {#each poll.answers as answer, i (answer.id)}
       {@const selected = poll.my_votes.includes(answer.id)}
       {@const pct = pollPercent(answer.votes, poll.total_votes)}
       <button
@@ -45,8 +65,10 @@
         class:selected
         role={multiple ? 'checkbox' : 'radio'}
         aria-checked={selected}
+        tabindex={multiple ? undefined : rovingTabindex(i, activeAnswer)}
         disabled={!open || (!selected && atLimit)}
         onclick={() => choose(answer.id)}
+        onkeydown={(e) => onAnswerKey(e, i)}
       >
         {#if revealed}<span class="bar" style="width: {pct}%"></span>{/if}
         <span class="label">{answer.text}</span>
@@ -56,7 +78,7 @@
   </div>
   <div class="meta">
     {#if revealed}
-      <span>{poll.total_votes} {poll.total_votes === 1 ? 'vote' : 'votes'}</span>
+      <span>{t('poll-view-vote-count', { count: poll.total_votes })}</span>
     {:else}
       <span>{t('poll-view-results-appear-when-the-poll-ends')}</span>
     {/if}

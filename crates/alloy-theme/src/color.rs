@@ -156,6 +156,19 @@ impl Color {
         Ok(Self::new(r / 255.0, g / 255.0, b / 255.0, a))
     }
 
+    /// Format the opaque part of this colour as a lowercase `#rrggbb` string.
+    ///
+    /// Used for derived colours that are emitted into the contrast report (A11Y-01/09/11/13).
+    pub fn to_hex(&self) -> String {
+        let channel = |c: f64| (c.clamp(0.0, 1.0) * 255.0).round() as u8;
+        format!(
+            "#{:02x}{:02x}{:02x}",
+            channel(self.r),
+            channel(self.g),
+            channel(self.b)
+        )
+    }
+
     /// Blend this color (as foreground) over a solid background color.
     pub fn blend_over(&self, bg: &Color) -> Color {
         if (self.a - 1.0).abs() < f64::EPSILON {
@@ -240,5 +253,16 @@ mod tests {
         assert!(Color::parse("not-a-color").is_err());
         assert!(Color::parse("#12").is_err());
         assert!(Color::parse("#12345").is_err());
+    }
+
+    #[test]
+    fn test_to_hex_round_trips() {
+        for hex in ["#000000", "#ffffff", "#1d4ed8", "#f87171", "#0b132b"] {
+            let color = Color::parse(hex).unwrap();
+            assert_eq!(color.to_hex(), hex);
+        }
+        // Derived colours drop alpha and clamp into the sRGB range.
+        let translucent = Color::new(0.5, 0.25, 1.5, 0.4);
+        assert_eq!(translucent.to_hex(), "#8040ff");
     }
 }

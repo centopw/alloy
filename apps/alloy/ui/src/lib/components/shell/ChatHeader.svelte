@@ -76,7 +76,7 @@
   <button type="button" class="icon back" aria-label={t('chat-header-back-to-rooms')} onclick={() => onback?.()} use:contextmenu={() => [{ id: 'back', label: 'Back to rooms', icon: ChevronLeft, onselect: () => onback?.() }]}>
     <Icon icon={ChevronLeft} size={20} />
   </button>
-  <h2 class="heading">
+  <h1 class="heading" tabindex="-1" data-chat-entry>
     <div class="identity">
       {#if canSetPicture}
         <button
@@ -114,7 +114,7 @@
         {/if}
       </button>
     </div>
-  </h2>
+  </h1>
   <div class="actions">
     <button
       type="button"
@@ -289,10 +289,13 @@
       display: grid;
     }
   }
-  /* Phones: 56px bar, 44px targets with 8px between them, a two-line identity. */
+  /* Phones: 56px minimum bar, 44px targets with 8px between them, a two-line identity. The bar
+     grows past 56px when the text scale is enlarged, so a 200% text/zoom check never clips the
+     room name into the fixed height (A11Y-03). */
   @media (max-width: 899px) {
     .head {
-      height: 56px;
+      height: auto;
+      min-height: 56px;
       padding: 0 var(--alloy-spacing-scale-2);
     }
     .actions {

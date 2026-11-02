@@ -28,6 +28,7 @@
   import LocationDialog from './LocationDialog.svelte';
   import VoiceRecorder from './VoiceRecorder.svelte';
   import { contextmenu } from '$lib/platform/contextmenu';
+  import { composerFieldAria } from '$lib/platform/composerA11y';
   import { viewport } from '$lib/stores/viewport.svelte';
   import { contextMenu, type MenuItem } from '$lib/stores/contextmenu.svelte';
   import { emojiPicker } from '$lib/stores/emojiPicker.svelte';
@@ -154,6 +155,15 @@
     mention !== null && candidates.length > 0 && mentionKey(mention) !== mentionDismissed
   );
   const highlighted = $derived(Math.min(mentionIndex, Math.max(candidates.length - 1, 0)));
+  // A plain multi-line text field until the mention listbox opens; then the full combobox contract.
+  // A permanently collapsed `role="combobox"` made the field announce as a combo box at all times.
+  const fieldAria = $derived(
+    composerFieldAria({
+      open: pickerOpen,
+      pickerId,
+      activeOptionId: pickerOpen ? mentionOptionId(pickerId, highlighted) : null
+    })
+  );
 
   // Entering edit mode prefills the field with the original text.
   $effect(() => {
@@ -783,11 +793,7 @@
       {placeholder}
       aria-label={viewport.isPhone ? phoneName : hintSend ? t('composer-message-press-ctrl-enter-or-cmd-enter-to-send') : t('composer-message')}
       data-shortcut="Enter"
-      role="combobox"
-      aria-autocomplete="list"
-      aria-expanded={pickerOpen}
-      aria-controls={pickerOpen ? pickerId : undefined}
-      aria-activedescendant={pickerOpen ? mentionOptionId(pickerId, highlighted) : undefined}
+      {...fieldAria}
       oninput={onFieldInput}
       onkeydown={onKeydown}
       onpaste={onPaste}

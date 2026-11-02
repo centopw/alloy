@@ -51,7 +51,9 @@
     padding: 0 var(--alloy-spacing-scale-3);
     border: 0;
     border-radius: var(--alloy-radii-md);
-    background: var(--alloy-color-status-error);
+    /* status.error is tuned for error TEXT (A11Y-09); filled controls use the darker derived
+       fill so the on-accent label keeps 4.5:1. */
+    background: var(--alloy-danger-fill, var(--alloy-color-status-error));
     color: var(--alloy-color-text-on-accent);
     font: inherit;
     cursor: pointer;

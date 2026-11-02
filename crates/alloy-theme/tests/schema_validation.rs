@@ -150,5 +150,36 @@ fn test_shipped_themes_load_resolve_and_pass_aa() {
             "Theme '{}' missing canvas css var",
             name
         );
+
+        // The wave-2 accessibility pairs (A11Y-14) must run for every shipped theme, not only the
+        // built-in ones: muted/error/link surfaces, the avatar palette, the unread badge, the
+        // derived own-bubble meta and the translucent material worst case.
+        assert!(
+            resolved.contrast_report.checks.len() >= 70,
+            "Theme '{}' has only {} contrast checks; the extended checker should report >= 70",
+            name,
+            resolved.contrast_report.checks.len()
+        );
+        for pair in [
+            "muted_on_hover",
+            "error_on_elevated",
+            "text_link_on_subtle",
+            "text_on_accent_mention_badge",
+            "bubble_own_meta_on_background",
+            "text_on_accent_danger_fill",
+            "avatar_initials_user_3",
+            "text_muted_on_chrome_worst",
+        ] {
+            assert!(
+                resolved
+                    .contrast_report
+                    .checks
+                    .iter()
+                    .any(|check| check.name == pair),
+                "Theme '{}' is missing the '{}' contrast pair",
+                name,
+                pair
+            );
+        }
     }
 }

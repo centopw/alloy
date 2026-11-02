@@ -32,6 +32,9 @@ function findFiles(dir: string): string[] {
 }
 
 function isAllowed(filePath: string): boolean {
+  // Tests are not UI chrome: they legitimately carry emoji as fixtures (messages, previews). The
+  // guard exists to keep decorative emoji out of the shipped interface.
+  if (filePath.endsWith('.test.ts') || filePath.endsWith('.test.mjs')) return true;
   return ALLOWED_PATHS.some(
     (allowed) => filePath === allowed || filePath.startsWith(allowed + path.sep)
   );

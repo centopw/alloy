@@ -119,6 +119,7 @@ describe('defaults', () => {
       homeShowAllRooms: true,
       showTyping: true,
       sendTyping: true,
+      announceMessages: true,
       showRemovedPlaceholder: true,
       showMembershipEvents: true,
       showProfileChanges: true,
@@ -154,9 +155,23 @@ describe('defaults', () => {
     expect(store.autoDownloadUpdates).toBe(false);
     expect(store.roomSort).toBe('activity');
     expect(store.enterToSend).toBe(true);
+    expect(store.announceMessages).toBe(true);
     expect(store.get('notifyDesktop')).toBe(true);
     expect(store.voiceSpeed).toBe('1');
     expect(store.ready).toBe(false);
+  });
+
+  it('keeps message announcements on by default and mutes them through the store', () => {
+    const storage = memoryStorage();
+    const store = new PrefsStore(storage);
+    expect(store.announceMessages).toBe(true);
+    expect(isValidPref('announceMessages', false)).toBe(true);
+    store.set('announceMessages', false);
+    expect(store.announceMessages).toBe(false);
+    // A screen-reader preference is per device, so it is stored in the local copy only.
+    expect(storedPrefs(storage)).toEqual({ ...DEFAULT_PREFS, announceMessages: false });
+    expect(DEVICE_PREF_KEYS).toContain('announceMessages');
+    expect(SYNCED_PREF_KEYS).not.toContain('announceMessages');
   });
 });
 

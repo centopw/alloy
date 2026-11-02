@@ -41,6 +41,8 @@ export interface Prefs {
   homeShowAllRooms: boolean;
   showTyping: boolean;
   sendTyping: boolean;
+  /** Announces incoming messages through the conversation's polite live region (mute for chatty rooms). */
+  announceMessages: boolean;
   showRemovedPlaceholder: boolean;
   showMembershipEvents: boolean;
   showProfileChanges: boolean;
@@ -83,6 +85,7 @@ export const DEFAULT_PREFS: Readonly<Prefs> = Object.freeze({
   homeShowAllRooms: true,
   showTyping: true,
   sendTyping: true,
+  announceMessages: true,
   showRemovedPlaceholder: true,
   showMembershipEvents: true,
   showProfileChanges: true,
@@ -140,6 +143,8 @@ const PREF_SCOPE: Record<PrefKey, PrefScope> = {
   homeShowAllRooms: 'synced',
   showTyping: 'synced',
   sendTyping: 'synced',
+  // Screen-reader announcements are a property of this device's assistive setup, not the account.
+  announceMessages: 'device',
   showRemovedPlaceholder: 'synced',
   showMembershipEvents: 'synced',
   showProfileChanges: 'synced',
@@ -357,6 +362,9 @@ export class PrefsStore {
   }
   get sendTyping(): boolean {
     return this.#values.sendTyping;
+  }
+  get announceMessages(): boolean {
+    return this.#values.announceMessages;
   }
   get showRemovedPlaceholder(): boolean {
     return this.#values.showRemovedPlaceholder;

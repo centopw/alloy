@@ -39,6 +39,7 @@
   import ReplyQuote, { quote } from './ReplyQuote.svelte';
   import LinkPreview from './LinkPreview.svelte';
   import ReactionsSheet from './ReactionsSheet.svelte';
+  import { timelineActionForKey, type CursorMove } from './a11y';
 
   import { t } from '$lib/i18n';
   interface Props {
@@ -50,8 +51,35 @@
     album?: readonly TimelineItemDto[] | null;
     /** The row is folded into the album of an earlier row and renders nothing. */
     albumHidden?: boolean;
+    /**
+     * A11Y-04 message cursor: the row becomes a focusable `article` inside the conversation feed.
+     * The timeline keeps it out of the tab order (`tabindex="-1"`) and moves focus between rows.
+     */
+    cursorable?: boolean;
+    /** This row's index in the timeline data, so the timeline can focus it after scrolling to it. */
+    cursorIndex?: number | null;
+    /** 1-based position among the cursor rows, for aria-posinset. */
+    cursorPosition?: number | null;
+    /** Total cursor rows, for aria-setsize. */
+    cursorCount?: number | null;
+    /** Accessible name of the row: sender, time and a short preview. */
+    cursorLabel?: string | null;
+    /** Asks the timeline to move the cursor; the timeline owns scrolling and focus. */
+    oncursormove?: (action: CursorMove, index: number) => void;
   }
-  let { item, prev, inThread = false, album = null, albumHidden = false }: Props = $props();
+  let {
+    item,
+    prev,
+    inThread = false,
+    album = null,
+    albumHidden = false,
+    cursorable = false,
+    cursorIndex = null,
+    cursorPosition = null,
+    cursorCount = null,
+    cursorLabel = null,
+    oncursormove = undefined,
+  }: Props = $props();
 
   // Same sender within this window continues the previous message as a compact row.
   const GROUP_MS = 7 * 60_000;
@@ -248,6 +276,44 @@
   function openMoreActions(button: HTMLElement) {
     const rect = button.getBoundingClientRect();
     contextMenu.open(menuItems(), { x: rect.left, y: rect.bottom }, menuOptions());
+  }
+
+  /** Opens this message's action menu anchored to the row (keyboard cursor: Enter/Space/Shift+F10). */
+  function openRowMenu() {
+    const items = menuItems();
+    const rect = rowEl?.getBoundingClientRect();
+    if (items.length === 0 || !rect) return;
+    const inset = 12;
+    contextMenu.open(items, { x: rect.left + inset, y: rect.bottom }, menuOptions());
+  }
+
+  /**
+   * A11Y-04: while the message cursor focuses the row itself, arrows/PageUp/PageDown request a
+   * cursor move from the timeline, and Enter/Space/Shift+F10 open the action menu. Escape is
+   * already handled by the open menu, which returns focus to this row when it dismisses.
+   */
+  function onRowKeyDown(event: KeyboardEvent) {
+    // Only the row is the cursor: keys pressed inside a chip, link or toolbar keep their meaning.
+    if (event.target !== rowEl) return;
+    const action = timelineActionForKey(event.key, {
+      shift: event.shiftKey,
+      alt: event.altKey,
+      ctrl: event.ctrlKey,
+      meta: event.metaKey,
+    });
+    if (!action) return;
+    event.preventDefault();
+    if (action === 'open-actions') {
+      // Shift+F10 reaches the context-menu action; open here so Enter and Space behave the same.
+      if (event.key !== 'F10') openRowMenu();
+      return;
+    }
+    if (action === 'dismiss-actions') {
+      if (contextMenu.isOpen) contextMenu.dismiss();
+      return;
+    }
+    if (cursorIndex === null) return;
+    oncursormove?.(action, cursorIndex);
   }
 
   /** Opens the shared emoji picker beside `anchor`; choosing an emoji toggles that reaction. */
@@ -566,6 +632,13 @@
     class:selected
     onclickcapture={onRowClickCapture}
     class:mention={item.mentions_me && !item.is_own}
+    role={cursorable ? 'article' : undefined}
+    tabindex="-1"
+    aria-label={cursorable ? (cursorLabel ?? undefined) : undefined}
+    aria-posinset={cursorable ? (cursorPosition ?? undefined) : undefined}
+    aria-setsize={cursorable ? (cursorCount ?? undefined) : undefined}
+    data-row-index={cursorable ? cursorIndex : undefined}
+    onkeydown={cursorable ? onRowKeyDown : undefined}
     style:--toolbar-left={toolbarLeft === null ? undefined : `${toolbarLeft}px`}
     style:--toolbar-right={toolbarLeft === null ? undefined : 'auto'}
     style:--toolbar-top={toolbarTop === null ? undefined : `${toolbarTop}px`}
@@ -1258,10 +1331,27 @@
         visibility 0s;
     }
   }
+  /* A11Y-04 message cursor: the focused row is the conversation's keyboard position, so it carries
+     a visible ring in every layout, and its action bar is reachable without a pointer even on a
+     viewport where the hover reveal does not apply. :focus-visible keeps a pointer click quiet. */
+  .row:focus-visible {
+    outline: 2px solid var(--alloy-color-accent-primary);
+    outline-offset: -2px;
+  }
+  .row:focus-visible .toolbar {
+    opacity: 1;
+    visibility: visible;
+    translate: 0 0;
+    transition:
+      opacity 120ms cubic-bezier(0.2, 0, 0, 1),
+      translate 120ms cubic-bezier(0.2, 0, 0, 1),
+      visibility 0s;
+  }
   @media (prefers-reduced-motion: reduce) {
     .toolbar,
     .row:hover .toolbar,
-    .row:focus-within .toolbar {
+    .row:focus-within .toolbar,
+    .row:focus-visible .toolbar {
       translate: none;
       transition:
         opacity 1ms linear,

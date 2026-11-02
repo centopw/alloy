@@ -3,7 +3,9 @@
   <head>
     <meta charset="utf-8" />
     <link rel="icon" href="%sveltekit.assets%/favicon.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
+    <!-- No maximum-scale / user-scalable restriction: pinch zoom is the user's own remedy for small
+         text (WCAG 1.4.4). The layout must stay usable when the page is zoomed (see A11Y-03). -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
     <title>Alloy</title>
     %sveltekit.head%
   <script>

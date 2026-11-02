@@ -27,8 +27,8 @@ pub fn alloy_light() -> Theme {
                 text: Some(TextColors {
                     primary: Some("#18181b".into()),
                     secondary: Some("#52525b".into()),
-                    muted: Some("#65656d".into()),
-                    link: Some("#2563eb".into()),
+                    muted: Some("#5c5c64".into()),
+                    link: Some("#1d4ed8".into()),
                     on_accent: Some("#ffffff".into()),
                 }),
                 accent: Some(AccentColors {
@@ -43,11 +43,11 @@ pub fn alloy_light() -> Theme {
                     away: Some("#d97706".into()),
                     busy: Some("#dc2626".into()),
                     offline: Some("#71717a".into()),
-                    error: Some("#dc2626".into()),
+                    error: Some("#b91c1c".into()),
                     warning: Some("#d97706".into()),
                     info: Some("#2563eb".into()),
                     success: Some("#16a34a".into()),
-                    mention: Some("#ea580c".into()),
+                    mention: Some("#c2410c".into()),
                 }),
                 bubble: Some(BubbleColors {
                     own: Some(BubbleEndpointColors {
@@ -214,7 +214,7 @@ pub fn alloy_dark() -> Theme {
                 text: Some(TextColors {
                     primary: Some("#f1f5f9".into()),
                     secondary: Some("#94a3b8".into()),
-                    muted: Some("#8491a6".into()),
+                    muted: Some("#8b98ac".into()),
                     link: Some("#60a5fa".into()),
                     on_accent: Some("#ffffff".into()),
                 }),
@@ -230,11 +230,11 @@ pub fn alloy_dark() -> Theme {
                     away: Some("#f59e0b".into()),
                     busy: Some("#ef4444".into()),
                     offline: Some("#64748b".into()),
-                    error: Some("#ef4444".into()),
+                    error: Some("#f87171".into()),
                     warning: Some("#f59e0b".into()),
                     info: Some("#3b82f6".into()),
                     success: Some("#10b981".into()),
-                    mention: Some("#3b82f6".into()),
+                    mention: Some("#2563eb".into()),
                 }),
                 bubble: Some(BubbleColors {
                     own: Some(BubbleEndpointColors {

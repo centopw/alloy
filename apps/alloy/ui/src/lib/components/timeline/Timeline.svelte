@@ -18,6 +18,20 @@
   import { anchorsOf, detectRowChange, type RowAnchors } from './rowChange';
   import type { MenuItem } from '$lib/stores/contextmenu.svelte';
   import { refreshStore } from '$lib/stores/refresh.svelte';
+  import { formatTime } from '$lib/content/format';
+  import {
+    AnnouncementBatcher,
+    describeRow,
+    isAnnounceableArrival,
+    isCursorRow,
+    messagePreview,
+    moveCursorPosition,
+    readReducedMotionSources,
+    smoothScrollAllowed,
+    timelineActionForKey,
+    type AnnouncementLabels,
+    type CursorMove,
+  } from './a11y';
 
   import { t } from '$lib/i18n';
   interface Props {
@@ -29,12 +43,18 @@
   let { roomId, title, isDirect, encrypted }: Props = $props();
 
   let vlist: VListHandle | undefined = $state();
+  let viewportEl = $state<HTMLElement | undefined>();
   let atBottom = $state(true);
   let viewportHeight = $state(0);
   let shift = $state(false);
   /** Messages from others that arrived while scrolled up, and which of them mention the user. */
   let unseen = $state(0);
   let mentionIds = $state<string[]>([]);
+  /** The one polite live region of the conversation; a settled arrival batch writes its text. */
+  let announcement = $state('');
+  /** Coalesces incoming messages, so a chatty room speaks once per burst instead of once per row. */
+  const announcer = new AnnouncementBatcher();
+  let announceTimer: ReturnType<typeof setTimeout> | undefined;
 
   // Virtual items (read marker, timeline start) carry no content worth a row. Hidden state events
   // and removed messages are dropped here, before virtualization, so VList indices match rows.
@@ -50,18 +70,135 @@
   /** Runs of captionless pictures fold into one grid row. */
   const albums = $derived(groupAlbums(rows));
 
+  /**
+   * Rows the message cursor can land on (A11Y-04). These are indices into `rows`, because the
+   * cursor is DOM focus: a folded album follower or a day divider has no focusable message.
+   */
+  const cursorTargets = $derived(
+    rows.flatMap((item, index) =>
+      isCursorRow(item) && !albums.hidden.has(item.internal_id) ? [index] : [],
+    ),
+  );
+  /** 1-based position of each cursor row among all cursor rows, for aria-posinset. */
+  const cursorPositions = $derived(
+    new Map(cursorTargets.map((rowIndex, position) => [rowIndex, position + 1])),
+  );
+
+  /** Localized short description of a non-text message, used in announcements and row names. */
+  function kindLabel(item: TimelineItemDto): string {
+    switch (item.content.kind) {
+      case 'Media': {
+        if (item.content.data.voice) return t('timeline-preview-voice-message');
+        switch (item.content.data.media_kind ?? 'file') {
+          case 'image':
+            return t('timeline-preview-photo');
+          case 'video':
+            return t('media-view-video');
+          case 'audio':
+            return t('timeline-preview-audio-message');
+          case 'sticker':
+            return t('timeline-preview-sticker');
+          default:
+            return t('timeline-preview-file');
+        }
+      }
+      case 'Poll':
+        return t('timeline-preview-poll');
+      case 'Location':
+        return t('location-card-location');
+      case 'Redacted':
+        return t('message-row-message-deleted');
+      case 'UnableToDecrypt':
+        return t('timeline-preview-unreadable-message');
+      default:
+        return t('timeline-preview-message');
+    }
+  }
+
+  function senderNameOf(item: TimelineItemDto): string {
+    return item.sender_display_name ?? item.sender;
+  }
+
+  function previewOf(item: TimelineItemDto): string {
+    return messagePreview(item, kindLabel);
+  }
+
+  /** Accessible name of a cursor row: sender, time and a short preview. */
+  function cursorRowLabel(item: TimelineItemDto): string {
+    return describeRow(item, {
+      senderName: senderNameOf,
+      time: (row) => formatTime(row.timestamp_millis, prefs.timeFormat),
+      preview: previewOf,
+      description: (sender, time, preview) => t('timeline-message-row-description', { sender, time, preview }),
+    });
+  }
+
+  function announcementLabels(): AnnouncementLabels {
+    return {
+      senderName: senderNameOf,
+      preview: previewOf,
+      single: (sender, preview) => t('timeline-announcement-single', { sender, preview }),
+      many: (count, sender, preview) => t('timeline-announcement-many', { count, sender, preview }),
+    };
+  }
+
+  /** Forgets the pending announcement and its coalescing timer (room switch, teardown). */
+  function cancelAnnouncements(): void {
+    clearTimeout(announceTimer);
+    announceTimer = undefined;
+    announcer.reset();
+    announcement = '';
+  }
+
+  /** Feeds arrivals into the coalescing batcher; one flush announces the whole settled burst. */
+  function queueAnnouncement(items: readonly TimelineItemDto[]): void {
+    const delay = announcer.push(items);
+    if (delay === null) return;
+    clearTimeout(announceTimer);
+    announceTimer = setTimeout(flushAnnouncement, delay);
+  }
+
+  function flushAnnouncement(): void {
+    announceTimer = undefined;
+    // The user can mute between the arrival and the flush; a muted batch is dropped, not spoken.
+    const text = announcer.flush({ muted: !prefs.announceMessages, labels: announcementLabels() });
+    if (text === null) return;
+    // A live region only announces a change: identical text is cleared and re-set on the next tick.
+    if (text === announcement) {
+      announcement = '';
+      void tick().then(() => (announcement = text));
+      return;
+    }
+    announcement = text;
+  }
+
+  /** Smooth scrolling is requested only when neither the OS nor the app asks for reduced motion. */
+  function allowSmoothScroll(): boolean {
+    return smoothScrollAllowed(
+      readReducedMotionSources(
+        typeof window === 'undefined' ? undefined : window,
+        typeof document === 'undefined' ? undefined : document.documentElement,
+      ),
+    );
+  }
+
   // Only `roomId` may retrigger this: the store reads/writes its own state while opening.
   $effect(() => {
     const id = roomId;
     untrack(() => {
       unseen = 0;
       mentionIds = [];
+      cancelAnnouncements();
       // One Timeline serves every room: forget the previous room's rows so the next rows count as an opening.
       anchors = null;
       sticky = false;
       void timelineStore.open(id);
     });
-    return () => untrack(() => void timelineStore.close());
+    return () =>
+      untrack(() => {
+        cancelAnnouncements();
+        void timelineStore.close();
+      });
   });
 
   // Sender names come from the member list; load it once per room so rows show names, not IDs.
@@ -115,6 +252,13 @@
         const arrived = countArrivals(change.arrived);
         unseen += arrived.count;
         mentionIds = [...mentionIds, ...arrived.mentions];
+      }
+      // A11Y-02: incoming messages are announced once per settled burst through the dedicated live
+      // region. They are announced even when the list is scrolled to the newest message, but never
+      // when the user's own echo arrives; rows themselves are not live.
+      if (appended) {
+        const incoming = change.arrived.filter(isAnnounceableArrival);
+        if (incoming.length > 0) queueAnnouncement(incoming);
       }
     });
   });
@@ -214,7 +358,8 @@
   }
 
   function toBottom() {
-    vlist?.scrollToIndex(rows.length - 1, { align: 'end', smooth: true });
+    // A11Y-22: no animation when the OS or the app asks for reduced motion.
+    vlist?.scrollToIndex(rows.length - 1, { align: 'end', smooth: allowSmoothScroll() });
   }
 
   /** Scroll to the oldest unseen message that mentions the user. */
@@ -233,9 +378,137 @@
     pressedOnRow = e.target instanceof Element && e.target.closest('.row') !== null;
   }
 
+  /**
+   * Keyboard focus entering the conversation starts a fresh interaction: a press recorded before the
+   * user tabbed in must not decide which context menu Shift+F10 opens.
+   */
+  function onViewportFocus() {
+    pressedOnRow = false;
+  }
+
   function scrollToTop() {
-    vlist?.scrollToIndex(0, { align: 'start', smooth: true });
+    vlist?.scrollToIndex(0, { align: 'start', smooth: allowSmoothScroll() });
     void timelineStore.loadOlder();
+  }
+
+  /** Runs `run` after the given number of animation frames (virtualized rows mount asynchronously). */
+  function afterFrames(frames: number, run: () => void): void {
+    if (frames <= 0) {
+      run();
+      return;
+    }
+    requestAnimationFrame(() => afterFrames(frames - 1, run));
+  }
+
+  /** Focuses the row at `index`; scrolls it into the virtualized window first when it is not mounted. */
+  function focusRowIndex(index: number, align: 'start' | 'center' | 'end' | 'nearest' = 'nearest'): void {
+    const viewport = viewportEl;
+    if (!viewport) return;
+    const selector = `.row[data-row-index="${index}"]`;
+    const mounted = viewport.querySelector<HTMLElement>(selector);
+    if (mounted) {
+      mounted.focus();
+      return;
+    }
+    vlist?.scrollToIndex(index, { align });
+    let attempts = 3;
+    const focusWhenMounted = () => {
+      const row = viewport.querySelector<HTMLElement>(selector);
+      if (row) {
+        row.focus();
+        return;
+      }
+      if (attempts-- <= 0) return;
+      requestAnimationFrame(focusWhenMounted);
+    };
+    void tick().then(() => requestAnimationFrame(focusWhenMounted));
+  }
+
+  /** Focuses the cursor row at `position` among `cursorTargets`, clamped to the loaded list. */
+  function focusCursorPosition(position: number, align: 'start' | 'center' | 'end' | 'nearest' = 'nearest'): void {
+    const targets = cursorTargets;
+    if (targets.length === 0) return;
+    focusRowIndex(targets[Math.max(0, Math.min(position, targets.length - 1))], align);
+  }
+
+  /** A message row has focus: move the cursor one row/page from the row that asked. */
+  function onCursorMove(action: CursorMove, rowIndex: number): void {
+    const targets = cursorTargets;
+    const position = targets.indexOf(rowIndex);
+    if (position < 0 || targets.length === 0) return;
+    // Home reaches the oldest loaded message and asks the existing load path for history; End lands
+    // on the newest message at the bottom, the other moves keep the view where it is.
+    if (action === 'first') void timelineStore.loadOlder();
+    const align = action === 'first' ? 'start' : action === 'last' ? 'end' : 'nearest';
+    focusCursorPosition(moveCursorPosition(position, targets.length, action), align);
+  }
+
+  /** Position of the cursor row nearest the visible top or bottom edge, used on entering the feed. */
+  function visibleCursorPosition(edge: 'top' | 'bottom'): number | null {
+    const targets = cursorTargets;
+    if (targets.length === 0) return null;
+    if (!vlist) return edge === 'bottom' ? targets.length - 1 : 0;
+    const offset = vlist.getScrollOffset();
+    const probe = edge === 'top' ? offset + 1 : offset + Math.max(0, vlist.getViewportSize() - 1);
+    const rowIndex = vlist.findItemIndex(probe);
+    // The probe can land on a day divider or a folded album follower; take the nearest message.
+    if (edge === 'top') {
+      const nearest = targets.find((target) => target >= rowIndex);
+      return targets.indexOf(nearest ?? targets[targets.length - 1]);
+    }
+    const nearest = targets.findLast((target) => target <= rowIndex);
+    return targets.indexOf(nearest ?? targets[0]);
+  }
+
+  function focusVisibleCursor(edge: 'top' | 'bottom'): void {
+    const position = visibleCursorPosition(edge);
+    if (position !== null) focusCursorPosition(position);
+  }
+
+  /**
+   * A11Y-05: the feed is the conversation's single tab stop. Its arrow/Page/Home/End keys move the
+   * virtualized window and hand focus to the nearest message, where the cursor keys take over.
+   * A focused row handles its own keys, so this only runs while the feed itself has focus.
+   */
+  function onFeedKeyDown(event: KeyboardEvent): void {
+    if (event.target !== event.currentTarget) return;
+    const action = timelineActionForKey(event.key, {
+      shift: event.shiftKey,
+      alt: event.altKey,
+      ctrl: event.ctrlKey,
+      meta: event.metaKey,
+    });
+    // Enter/Space on the region itself have no message to act on; leave them to the browser.
+    if (!action || action === 'open-actions' || action === 'dismiss-actions') return;
+    event.preventDefault();
+    switch (action) {
+      case 'previous':
+        focusVisibleCursor('top');
+        break;
+      case 'next':
+        focusVisibleCursor('bottom');
+        break;
+      case 'page-up': {
+        const size = vlist?.getViewportSize() ?? 0;
+        if (size > 0) vlist?.scrollBy(-size * 0.9);
+        afterFrames(2, () => focusVisibleCursor('top'));
+        break;
+      }
+      case 'page-down': {
+        const size = vlist?.getViewportSize() ?? 0;
+        if (size > 0) vlist?.scrollBy(size * 0.9);
+        afterFrames(2, () => focusVisibleCursor('bottom'));
+        break;
+      }
+      case 'first':
+        // Home walks to the oldest loaded message and asks the existing load path for history.
+        void timelineStore.loadOlder();
+        focusCursorPosition(0, 'start');
+        break;
+      case 'last':
+        focusCursorPosition(cursorTargets.length - 1, 'end');
+        break;
+    }
   }
 
   /** Background menu items. Empty when a message row owns the press, so the row menu wins. */
@@ -246,6 +519,13 @@
       { id: 'jump-latest', label: 'Jump to latest', disabled: empty, onselect: toBottom },
       { id: 'scroll-top', label: 'Scroll to top (load older)', disabled: empty, onselect: scrollToTop },
       { id: 'mark-read', label: 'Mark as read', onselect: () => void timelineStore.markRead() },
+      {
+        id: 'announce-messages',
+        label: t('timeline-announce-messages'),
+        selected: prefs.announceMessages,
+        // Closes on select so the check mark always matches the stored preference on the next open.
+        onselect: () => prefs.set('announceMessages', !prefs.announceMessages),
+      },
       { separator: true },
       { id: 'refresh', label: 'Refresh', onselect: () => void refreshStore.run() },
     ];
@@ -253,12 +533,15 @@
 </script>
 
 <section class="timeline" aria-label={t('timeline-conversation', { title: title, kind: isDirect ? 'direct' : 'room', privacy: encrypted ? 'encrypted' : 'plain' })}>
-  <div class="viewport" role="presentation" bind:clientHeight={viewportHeight} onpointerdown={onViewportPointerDown} onwheel={onUserScroll} ontouchstart={onUserScroll} use:contextmenu={backgroundItems}>
+  <!-- A layout and scroll-input wrapper only: the accessible structure lives on the `feed` inside. -->
+  <div class="viewport" role="presentation" bind:this={viewportEl} bind:clientHeight={viewportHeight} onpointerdown={onViewportPointerDown} onwheel={onUserScroll} ontouchstart={onUserScroll} onfocusin={onViewportFocus} use:contextmenu={backgroundItems}>
     {#if timelineStore.loading && rows.length === 0}
       <p class="status" aria-busy="true">{t('timeline-loading-messages')}</p>
     {:else if rows.length === 0}
       <p class="status">{t('timeline-no-messages-yet-say-hello')}</p>
     {:else}
+      <!-- A11Y-05: the virtualized scroll container is the conversation's named `feed` and its single
+           tab stop; the arrow keys move the message cursor inside it (see `onFeedKeyDown`). -->
       <VList
         bind:this={vlist}
         data={rows}
@@ -266,6 +549,12 @@
         {shift}
         bufferSize={400}
         onscroll={onScroll}
+        role="feed"
+        tabindex={0}
+        aria-label={t('timeline-messages-region')}
+        aria-busy={timelineStore.loading || timelineStore.paginating}
+        onkeydown={onFeedKeyDown}
+        data-conversation-feed
         style="height: 100%; width: 100%; overscroll-behavior: contain;"
       >
         {#snippet children(item: TimelineItemDto, index: number)}
@@ -275,6 +564,12 @@
               prev={index > 0 ? rows[index - 1] : null}
               album={albums.leads.get(item.internal_id) ?? null}
               albumHidden={albums.hidden.has(item.internal_id)}
+              cursorable
+              cursorIndex={index}
+              cursorPosition={cursorPositions.get(index) ?? null}
+              cursorCount={timelineStore.reachedStart ? cursorTargets.length : -1}
+              cursorLabel={cursorRowLabel(item)}
+              oncursormove={onCursorMove}
             />
           </div>
         {/snippet}
@@ -301,16 +596,38 @@
     {/if}
   </div>
   <TypingIndicator {roomId} />
+  <!-- A11Y-02: the conversation's only live region. A settled burst of incoming messages writes one
+       polite announcement; message rows are never live. -->
+  <div class="announcer" role="status" aria-live="polite" aria-atomic="true">{announcement}</div>
 </section>
 
 <style>
   .timeline {
+    position: relative;
     display: flex;
     flex-direction: column;
     min-height: 0;
     flex: 1;
     /* The chat pane is the glass card; the timeline stays clear so messages sit on it. */
     background: var(--alloy-chat-background, none), transparent;
+  }
+  /* The conversation's single tab stop: the focused feed gets a ring of its own before the cursor
+     moves into a message. */
+  .viewport :global([data-conversation-feed]:focus-visible) {
+    outline: 2px solid var(--alloy-color-accent-primary);
+    outline-offset: -2px;
+  }
+  /* Announced, never seen: the live region must stay in the DOM but out of the visual flow. */
+  .announcer {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
   }
   .viewport {
     position: relative;
@@ -381,7 +698,7 @@
     left: 50%;
     bottom: var(--alloy-spacing-scale-4);
     transform: translateX(-50%);
-    background: var(--alloy-color-status-error);
+    background: var(--alloy-danger-fill, var(--alloy-color-status-error));
     color: var(--alloy-color-text-on-accent);
     padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-4);
     border-radius: var(--alloy-radii-md);

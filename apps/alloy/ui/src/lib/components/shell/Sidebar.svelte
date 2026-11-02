@@ -22,6 +22,8 @@
   import { refreshStore } from '$lib/stores/refresh.svelte';
   import UpdateNotice from '../updates/UpdateNotice.svelte';
   import { groupRoomsByTag, ROOM_SORTS, sortForGroupToggle, type RoomSort } from '$lib/stores/roomSort';
+  import { rovingTabStop, rovingTargetIndex } from '$lib/platform/rovingFocus';
+  import { roomRowSelector } from '$lib/platform/shellFocus';
   import type { TagColour } from '$lib/generated';
   import { ui } from '$lib/stores/ui.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
@@ -369,6 +371,43 @@
   const tagById = $derived(new Map(tagDefs.map((d) => [d.id, d] as const)));
   const tagChips = $derived(tagDefs.map((def) => ({ def, count: roomsStore.rooms.filter((r) => r.tags.includes(def.id)).length })));
 
+  // Roving tabindex: the desktop room list is a single Tab stop and arrows move between rows. The
+  // ids are the `button.row` ids in visual order, so the model matches the markup in every grouping
+  // mode (flat, sections, tags). Phones keep every row a normal button (touch-first UI).
+  let rovingId = $state<string | null>(null);
+  function roomButtonIds(list: readonly RoomItem[]): string[] {
+    return list.filter((r) => r.membership !== 'Invited').map((r) => r.id);
+  }
+  const rovingIds = $derived.by(() => {
+    if (prefs.roomSort === 'tag') {
+      return roomButtonIds(groupRoomsByTag([...pinned, ...unpinned], tagDefs).flatMap((g) => g.rooms));
+    }
+    if (prefs.roomListSections) return roomButtonIds([...pinned, ...rooms, ...direct]);
+    return roomButtonIds(flat);
+  });
+  const rovingStopId = $derived(rovingTabStop(rovingIds, rovingId, roomsStore.activeRoomId));
+
+  /** Remembers the row the user last focused, so Tab returns there instead of the top of the list. */
+  function onRoomFocus(roomId: string) {
+    rovingId = roomId;
+  }
+
+  /**
+   * Arrow-key movement for the roving list. Enter/Space still activate the focused row natively;
+   * Shift+F10 is left to the row's `use:contextmenu` action, which opens the same menu as the
+   * per-row "more" button (one Tab stop per list instead of two per room).
+   */
+  function onRoomKeydown(e: KeyboardEvent, roomId: string) {
+    if (viewport.isPhone || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
+    const next = rovingTargetIndex(rovingIds.length, rovingIds.indexOf(roomId), e.key);
+    if (next === null) return;
+    const list = e.currentTarget instanceof Element ? e.currentTarget.closest('.groups') : null;
+    const row = list?.querySelector<HTMLElement>(roomRowSelector(rovingIds[next]));
+    if (!row) return;
+    e.preventDefault();
+    row.focus();
+  }
+
   // A filter on a tag that no longer exists (deleted here or elsewhere) would hide every room.
   $effect(() => {
     const filter = roomsStore.tagFilter;
@@ -415,8 +454,12 @@
       class:muted
       data-room-id={r.id}
       aria-current={active ? 'true' : undefined}
+      aria-keyshortcuts="Shift+F10"
+      tabindex={viewport.isPhone ? undefined : r.id === rovingStopId ? 0 : -1}
       use:contextmenu={() => roomItems(r)}
       onclick={() => openRoom(r.id)}
+      onfocus={() => onRoomFocus(r.id)}
+      onkeydown={(e) => onRoomKeydown(e, r.id)}
     >
       <span class="pinned">
         <Avatar userId={r.id} displayName={roomTitle(r)} src={r.avatar_url} size={36} shape={r.is_direct ? 'circle' : 'rounded'} />
@@ -466,6 +509,7 @@
       <button
         type="button"
         class="more"
+        tabindex="-1"
         aria-label={t('sidebar-room-actions', { room: roomTitle(r) })}
         data-tooltip={t('common-more')}
         onclick={(e) => openMenuFrom(e.currentTarget, roomItems(r), 'Room actions')}
@@ -535,7 +579,14 @@
 
 <section class="sidebar" aria-label={t('sidebar-rooms')}>
   <header class="head" use:contextmenu={paneItems}>
-    <h2 class="scope" title={scopeTitle}>{scopeTitle}</h2>
+    <!-- On phones the room list is a screen of its own, so its scope title is that view's h1; the
+         chat's h1 is `display: none` while the list shows. On desktop the conversation owns the h1
+         and this is a panel heading. -->
+    {#if viewport.isPhone}
+      <h1 class="scope" title={scopeTitle}>{scopeTitle}</h1>
+    {:else}
+      <h2 class="scope" title={scopeTitle}>{scopeTitle}</h2>
+    {/if}
     {#if unreadRoomsCount > 0}
       <span class="scope-meta">{unreadRoomsCount} {t('sidebar-unread')}</span>
     {/if}

@@ -46,7 +46,7 @@ html, body {
   --alloy-color-background: #141821;
   --alloy-color-text-primary: #f1f5f9;
   --alloy-color-text-secondary: #94a3b8;
-  --alloy-color-text-muted: #8491a6;
+  --alloy-color-text-muted: #8b98ac;
   --alloy-color-text-link: #60a5fa;
   --alloy-color-text-on-accent: #ffffff;
   --alloy-color-accent-primary: #3b82f6;
@@ -58,11 +58,11 @@ html, body {
   --alloy-color-status-away: #f59e0b;
   --alloy-color-status-busy: #ef4444;
   --alloy-color-status-offline: #64748b;
-  --alloy-color-status-error: #ef4444;
+  --alloy-color-status-error: #f87171;
   --alloy-color-status-warning: #f59e0b;
   --alloy-color-status-info: #3b82f6;
   --alloy-color-status-success: #10b981;
-  --alloy-color-status-mention: #3b82f6;
+  --alloy-color-status-mention: #2563eb;
   --alloy-color-bubble-own-background: #1d4ed8;
   --alloy-color-bubble-own-text: #ffffff;
   --alloy-color-bubble-other-background: #242a38;
@@ -143,6 +143,8 @@ html, body {
   --alloy-accent-hover: var(--alloy-color-accent-hover);
   --alloy-accent-subtle: var(--alloy-color-accent-subtle);
   --alloy-accent-text: var(--alloy-color-text-on-accent);
+  /* Unread count badge fill. status.mention is tuned per theme so on-accent text clears 4.5:1
+     (A11Y-11); the theme checker enforces the pair. Do not paint the badge with accent-primary. */
   --alloy-unread-badge: var(--alloy-color-status-mention);
   --alloy-online: var(--alloy-color-status-online);
   --alloy-code-bg: var(--alloy-color-surface-subtle);
@@ -172,12 +174,19 @@ html, body {
   /* Cards that live inside a bubble (pictures, files, link and location cards) step down one size,
      so a nested card never competes with the message surface around it. */
   --alloy-bubble-radius-nested: 12px;
-  /* Bubble meta has to clear 4.5:1 at 11px; 0.7 of the own text on the own blue measured 3.92:1. */
+  /* Bubble meta has to clear 4.5:1 at 11px; 0.7 of the own text on the own blue measured 3.92:1.
+     82% is derived from the own text over the own bubble fill and checked per theme by
+     alloy-theme (`bubble_own_meta_on_background`, A11Y-13). */
   --alloy-bubble-own-meta: color-mix(
     in srgb,
     var(--alloy-color-bubble-own-text) 82%,
     transparent
   );
+  /* Destructive button fill. color.status.error is tuned to be legible AS TEXT on every surface
+     (A11Y-09), which makes it too light to carry on-accent text at 4.5:1. Mixing it 70% with black
+     keeps the semantics and gives the white label its contrast back. The 70% and the derivation
+     are mirrored in the theme checker (`text_on_accent_danger_fill`); keep them in sync. */
+  --alloy-danger-fill: color-mix(in srgb, var(--alloy-color-status-error) 70%, black);
   /* UI type scale (ADR 0014). Four sizes with distinct jobs, so chrome stops reading as one
      flat weight: panel titles, row names, previews, and tracked meta. */
   --alloy-font-size-title: 15px;
