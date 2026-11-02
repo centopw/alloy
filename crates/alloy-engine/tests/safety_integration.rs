@@ -120,14 +120,20 @@ async fn test_ignore_unignore_list_ignored_users() {
         resp => panic!("unexpected: {resp:?}"),
     }
 
-    // List ignored users
-    tokio::time::sleep(Duration::from_millis(200)).await;
-    match eng.handle(EngineCommand::ListIgnoredUsers).await.unwrap() {
-        EngineResponse::IgnoredUsers { user_ids } => {
-            assert!(user_ids.contains(&bob_id));
+    // List ignored users. The list is applied by the sync task, so poll for it rather than guess how
+    // long it takes: a fixed sleep failed on a loaded CI runner.
+    let mut listed = Vec::new();
+    for _ in 0..40 {
+        match eng.handle(EngineCommand::ListIgnoredUsers).await.unwrap() {
+            EngineResponse::IgnoredUsers { user_ids } => listed = user_ids,
+            resp => panic!("unexpected: {resp:?}"),
         }
-        resp => panic!("unexpected: {resp:?}"),
+        if listed.contains(&bob_id) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
+    assert!(listed.contains(&bob_id));
 
     // Unignore bob
     match eng
@@ -141,14 +147,19 @@ async fn test_ignore_unignore_list_ignored_users() {
         resp => panic!("unexpected: {resp:?}"),
     }
 
-    // Verify removed from list
-    tokio::time::sleep(Duration::from_millis(200)).await;
-    match eng.handle(EngineCommand::ListIgnoredUsers).await.unwrap() {
-        EngineResponse::IgnoredUsers { user_ids } => {
-            assert!(!user_ids.contains(&bob_id));
+    // Verify removed from list, same poll as above.
+    let mut remaining = Vec::new();
+    for _ in 0..40 {
+        match eng.handle(EngineCommand::ListIgnoredUsers).await.unwrap() {
+            EngineResponse::IgnoredUsers { user_ids } => remaining = user_ids,
+            resp => panic!("unexpected: {resp:?}"),
         }
-        resp => panic!("unexpected: {resp:?}"),
+        if !remaining.contains(&bob_id) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
+    assert!(!remaining.contains(&bob_id));
 }
 
 #[tokio::test]
