@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.1 (pre-release)
+
+### Added
+- **A look before an attachment goes out.** Picking, dropping or pasting a file now opens a preview: the picture or video itself, or the file's name and size, with a caption field, an emoji button and send. A batch pages through one file at a time, a caption rides on the first file only so an album does not repeat it, and closing the preview leaves the files waiting in the composer instead of losing them.
+- **Mentions read as people.** A name in a message that stands for a person is drawn as a chip rather than an underlined link — in the message itself and inside a quoted one.
+
+### Fixed
+- **Files dropped into the composer never sent.** Dragging a file in and pressing Send failed with "not registered for sending" and nothing left the device. Attaching from the picker or by paste worked; drag-and-drop failed for every file type, pictures and videos included. Dropped files now send.
+- **A quoted message lost its formatting.** The reply card showed the plain text of the message it quoted, so a mention or a link appeared as bare words instead of as the chip the original message has.
+- **The reply card lost the quoted sender's colour.** Their colour stays on the card's spine and on the name in the header above it.
+
+### Security
+- **A dropped file is admitted because the drop really happened.** The engine reads an attachment only if the shell registered it first; drag-and-drop now registers from the operating system's own drop event, which Rust sees, instead of from a path the page names. A page cannot offer an arbitrary file on disk and have it sent.
+
 ## 0.3.0 (pre-release)
 
 ### Added
