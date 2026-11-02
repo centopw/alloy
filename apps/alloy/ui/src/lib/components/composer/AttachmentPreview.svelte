@@ -2,7 +2,7 @@
   import { tick } from 'svelte';
   import Icon from '$lib/icons/Icon.svelte';
   import { ChevronLeft, ChevronRight, Ellipsis, File, Image, Play, Send, Smile, X } from '$lib/icons';
-  import { Button, Modal } from '../common';
+  import { Button, Modal, TextArea } from '../common';
   import { contextMenu, type MenuItem } from '$lib/stores/contextmenu.svelte';
   import { emojiPicker } from '$lib/stores/emojiPicker.svelte';
   import { formatBytes } from '$lib/content/format';
@@ -182,15 +182,17 @@
   {/if}
 
   <div class="caption-row">
-    <textarea
-      bind:this={area}
-      bind:value={caption}
-      rows="1"
-      class="caption"
-      placeholder={t('attachment-preview-add-a-caption')}
-      aria-label={t('attachment-preview-add-a-caption')}
-      onkeydown={onKeydown}
-    ></textarea>
+    <div class="caption">
+      <TextArea
+        bind:el={area}
+        bind:value={caption}
+        rows={1}
+        maxRows={4}
+        placeholder={t('attachment-preview-add-a-caption')}
+        aria-label={t('attachment-preview-add-a-caption')}
+        onkeydown={onKeydown}
+      />
+    </div>
     <button
       type="button"
       class="round"
@@ -210,7 +212,7 @@
     display: grid;
     place-items: center;
     min-height: 180px;
-    border-radius: var(--alloy-radii-lg, 12px);
+    border-radius: var(--alloy-radii-xl);
     overflow: hidden;
     background: var(--alloy-glass-control);
   }
@@ -234,7 +236,7 @@
     align-items: center;
     justify-content: center;
     gap: var(--alloy-layout-gutter);
-    padding: 8px;
+    padding: var(--alloy-spacing-scale-2);
     background: linear-gradient(transparent, var(--alloy-color-scrim));
   }
   .counter {
@@ -253,21 +255,14 @@
   .caption-row {
     display: flex;
     align-items: flex-end;
-    gap: 8px;
+    gap: var(--alloy-spacing-scale-2);
     margin-top: var(--alloy-layout-gutter);
   }
+  /* The field is the shared TextArea; this wrapper only takes the row's remaining width. Scoped
+     styles do not reach inside a component, so the sizing lives here rather than on the field. */
   .caption {
     flex: 1 1 auto;
-    min-height: 40px;
-    max-height: 120px;
-    resize: none;
-    border: 1px solid var(--alloy-glass-rim);
-    border-radius: var(--alloy-radii-full);
-    padding: 10px 14px;
-    background: var(--alloy-glass-fill-strong);
-    color: var(--alloy-color-text-primary);
-    font: inherit;
-    outline: 0;
+    min-width: 0;
   }
   .round {
     flex: none;
