@@ -429,29 +429,29 @@
 
     const phoneBar: MenuItem[] = [];
     if (canAct && !inThread) {
-      phoneBar.push({ id: 'reply', label: 'Reply', icon: Reply, onselect: () => timelineStore.startReply(item) });
+      phoneBar.push({ id: 'reply', label: t('message-row-reply'), icon: Reply, onselect: () => timelineStore.startReply(item) });
     }
 
     if (canCopy) {
-      phoneBar.push({ id: 'copy', label: 'Copy', icon: Copy, onselect: () => void navigator.clipboard.writeText(quote(item)) });
+      phoneBar.push({ id: 'copy', label: t('common-copy'), icon: Copy, onselect: () => void navigator.clipboard.writeText(quote(item)) });
     } else if (canCopyPicture) {
-      phoneBar.push({ id: 'copy-picture', label: 'Copy', icon: Copy, onselect: () => void copyPictureItem() });
+      phoneBar.push({ id: 'copy-picture', label: t('common-copy'), icon: Copy, onselect: () => void copyPictureItem() });
     } else if (canPin && item.event_id && timelineStore.roomId) {
       const roomId = timelineStore.roomId;
       const eventId = item.event_id;
       phoneBar.push(
         pinned
-          ? { id: 'unpin', label: 'Unpin', icon: PinOff, onselect: () => void pinsStore.setPinned(roomId, eventId, false) }
-          : { id: 'pin', label: 'Pin', icon: Pin, onselect: () => void pinsStore.setPinned(roomId, eventId, true) },
+          ? { id: 'unpin', label: t('pinned-bar-unpin'), icon: PinOff, onselect: () => void pinsStore.setPinned(roomId, eventId, false) }
+          : { id: 'pin', label: t('common-pin'), icon: Pin, onselect: () => void pinsStore.setPinned(roomId, eventId, true) },
       );
     } else if (canDownload) {
-      phoneBar.push({ id: 'download', label: 'Download', icon: Download, onselect: downloadMediaItem });
+      phoneBar.push({ id: 'download', label: t('media-view-download'), icon: Download, onselect: downloadMediaItem });
     }
 
     if (canAct && !inThread) {
       phoneBar.push({
         id: 'forward',
-        label: 'Forward',
+        label: t('selection-bar-forward'),
         icon: Forward,
         onselect: () => item.event_id && timelineStore.roomId && forwardStore.begin(timelineStore.roomId, [item.event_id]),
       });
@@ -526,23 +526,23 @@
 
     // 1. Reply
     if (canAct && !inThread) {
-      actions.push({ id: 'reply', label: 'Reply', icon: Reply, onselect: () => timelineStore.startReply(item) });
-      actions.push({ id: 'thread', label: 'Reply in thread', icon: MessageSquare, onselect: openThread });
+      actions.push({ id: 'reply', label: t('message-row-reply'), icon: Reply, onselect: () => timelineStore.startReply(item) });
+      actions.push({ id: 'thread', label: t('message-row-reply-in-thread'), icon: MessageSquare, onselect: openThread });
     }
 
     // 2. Edit (own text)
     if (canEdit) {
-      actions.push({ id: 'edit', label: 'Edit', icon: Pencil, onselect: () => timelineStore.startEdit(item) });
+      actions.push({ id: 'edit', label: t('common-edit'), icon: Pencil, onselect: () => timelineStore.startEdit(item) });
     }
 
     // 3. Copy text / Copy picture
     if (canCopy) {
-      actions.push({ id: 'copy-text', label: 'Copy text', icon: Copy, onselect: () => void navigator.clipboard.writeText(quote(item)) });
+      actions.push({ id: 'copy-text', label: t('common-copy-text'), icon: Copy, onselect: () => void navigator.clipboard.writeText(quote(item)) });
     }
     if (canCopyPicture) {
-      actions.push({ id: 'copy-picture', label: 'Copy picture', icon: Copy, onselect: () => void copyPictureItem() });
+      actions.push({ id: 'copy-picture', label: t('message-row-copy-picture'), icon: Copy, onselect: () => void copyPictureItem() });
     }
-    actions.push({ id: 'copy-sender', label: 'Copy sender ID', icon: Copy, onselect: () => void navigator.clipboard.writeText(item.sender) });
+    actions.push({ id: 'copy-sender', label: t('message-row-copy-sender-id'), icon: Copy, onselect: () => void navigator.clipboard.writeText(item.sender) });
 
     // 4. Pin/Unpin
     if (canPin && item.event_id && timelineStore.roomId) {
@@ -550,21 +550,21 @@
       const eventId = item.event_id;
       actions.push(
         pinned
-          ? { id: 'unpin', label: 'Unpin', icon: PinOff, onselect: () => void pinsStore.setPinned(roomId, eventId, false) }
-          : { id: 'pin', label: 'Pin', icon: Pin, onselect: () => void pinsStore.setPinned(roomId, eventId, true) },
+          ? { id: 'unpin', label: t('pinned-bar-unpin'), icon: PinOff, onselect: () => void pinsStore.setPinned(roomId, eventId, false) }
+          : { id: 'pin', label: t('common-pin'), icon: Pin, onselect: () => void pinsStore.setPinned(roomId, eventId, true) },
       );
     }
 
     // 5. Download (media)
     if (canDownload) {
-      actions.push({ id: 'download', label: 'Download', icon: Download, onselect: downloadMediaItem });
+      actions.push({ id: 'download', label: t('media-view-download'), icon: Download, onselect: downloadMediaItem });
     }
 
     // 6. Forward
     if (canAct && !inThread) {
       actions.push({
         id: 'forward',
-        label: 'Forward',
+        label: t('selection-bar-forward'),
         icon: Forward,
         onselect: () => item.event_id && timelineStore.roomId && forwardStore.begin(timelineStore.roomId, [item.event_id]),
       });
@@ -573,16 +573,16 @@
     // 7. Select
     if (canAct && item.event_id) {
       const eventId = item.event_id;
-      actions.push({ id: 'select', label: 'Select', icon: Check, onselect: () => timelineStore.beginSelect(eventId) });
+      actions.push({ id: 'select', label: t('message-row-select'), icon: Check, onselect: () => timelineStore.beginSelect(eventId) });
     }
 
     // 8. Destructive (Delete, Report)
     const destructive: MenuItem[] = [];
     if (canDelete) {
-      destructive.push({ id: 'delete', label: 'Delete', icon: Trash2, danger: true, onselect: () => (timelineStore.pendingDelete = [item]) });
+      destructive.push({ id: 'delete', label: t('common-delete'), icon: Trash2, danger: true, onselect: () => (timelineStore.pendingDelete = [item]) });
     }
     if (!item.is_own && canAct) {
-      destructive.push({ id: 'report', label: 'Report', icon: Flag, danger: true, onselect: () => (timelineStore.pendingReport = item) });
+      destructive.push({ id: 'report', label: t('report-confirm-report'), icon: Flag, danger: true, onselect: () => (timelineStore.pendingReport = item) });
     }
 
     if (destructive.length > 0) {

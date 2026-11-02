@@ -57,7 +57,7 @@ describe('mobile tab bar', () => {
 
   it('offers public rooms from the room-list menu on every layout', () => {
     const create = sidebar.slice(sidebar.indexOf('function createItems()'), sidebar.indexOf('/** Pane header'));
-    expect(create).toContain("label: 'Browse public rooms...'");
+    expect(create).toContain("label: t('sidebar-browse-public-rooms')");
     expect(create).not.toContain('isPhone');
   });
 });

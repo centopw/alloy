@@ -56,9 +56,9 @@
   }
 
   const menu = (): MenuItem[] => [
-    { id: 'open', label: 'Open link', icon: ExternalLink, onselect: () => void openExternal(url) },
-    { id: 'copy', label: 'Copy link address', icon: Copy, onselect: () => void copyText(url) },
-    { id: 'hide', label: 'Hide preview', icon: X, onselect: () => (dismissed = true) },
+    { id: 'open', label: t('link-preview-open-link'), icon: ExternalLink, onselect: () => void openExternal(url) },
+    { id: 'copy', label: t('link-preview-copy-link-address'), icon: Copy, onselect: () => void copyText(url) },
+    { id: 'hide', label: t('link-preview-hide-preview'), icon: X, onselect: () => (dismissed = true) },
   ];
 </script>
 

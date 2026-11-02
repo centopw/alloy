@@ -46,7 +46,7 @@
   });
 
   const senderOptions = $derived<{ value: string; label: string }[]>([
-    { value: '', label: 'Anyone' },
+    { value: '', label: t('room-search-panel-anyone') },
     ...membersStore.membersOf(roomId).map((m) => ({
       value: m.user_id,
       label: displayNameFor(m.user_id, null, m.display_name ?? null)
@@ -73,9 +73,9 @@
 
   function hitMenu(hit: SearchResult) {
     return () => [
-      { id: 'jump', label: 'Jump to message', icon: CornerUpLeft, onselect: () => void jump(hit) },
-      { id: 'copy', label: 'Copy text', icon: Copy, onselect: () => void copyText(hit.body) },
-      { id: 'user', label: 'Copy user ID', icon: User, onselect: () => void copyText(hit.sender) }
+      { id: 'jump', label: t('room-search-panel-jump-to-message'), icon: CornerUpLeft, onselect: () => void jump(hit) },
+      { id: 'copy', label: t('common-copy-text'), icon: Copy, onselect: () => void copyText(hit.body) },
+      { id: 'user', label: t('user-profile-card-copy-user-id'), icon: User, onselect: () => void copyText(hit.sender) }
     ];
   }
 

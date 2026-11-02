@@ -12,9 +12,9 @@
   let autostartError = $state<string | null>(null);
 
   const LINK_PREVIEW_OPTIONS = [
-    { value: 'off', label: 'Off' },
-    { value: 'unencrypted', label: 'Unencrypted rooms' },
-    { value: 'always', label: 'All rooms' },
+    { value: 'off', label: t('preferences-off') },
+    { value: 'unencrypted', label: t('preferences-unencrypted-rooms') },
+    { value: 'always', label: t('preferences-all-rooms') },
   ];
 
   function describe(err: unknown): string {

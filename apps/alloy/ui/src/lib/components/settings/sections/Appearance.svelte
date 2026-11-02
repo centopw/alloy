@@ -23,9 +23,9 @@
   }
 
   const densityOptions: { value: Density; label: string }[] = [
-    { value: 'compact', label: 'Compact' },
-    { value: 'normal', label: 'Normal' },
-    { value: 'cozy', label: 'Cozy' },
+    { value: 'compact', label: t('appearance-compact') },
+    { value: 'normal', label: t('appearance-normal') },
+    { value: 'cozy', label: t('appearance-cozy') },
   ];
 
   const fontScaleOptions = [90, 100, 110, 120, 130].map((scale) => ({
@@ -34,16 +34,16 @@
   }));
 
   const timeFormatOptions: { value: TimeFormat; label: string }[] = [
-    { value: 'auto', label: 'Automatic' },
-    { value: '12h', label: '12-hour' },
-    { value: '24h', label: '24-hour' },
+    { value: 'auto', label: t('appearance-automatic') },
+    { value: '12h', label: t('appearance-12-hour') },
+    { value: '24h', label: t('appearance-24-hour') },
   ];
 
   // Previews are static markup; they are hoisted, so the option list can reference them.
   const layoutOptions: { value: MessageLayout; label: string; description: string; preview: Snippet }[] = [
-    { value: 'bubbles', label: 'Bubbles', description: 'Chat bubbles (default)', preview: bubblesPreview },
-    { value: 'modern', label: 'Modern', description: 'Flat rows with avatars', preview: modernPreview },
-    { value: 'irc', label: 'IRC', description: 'Compact, single line', preview: ircPreview },
+    { value: 'bubbles', label: t('appearance-bubbles'), description: t('appearance-chat-bubbles-default'), preview: bubblesPreview },
+    { value: 'modern', label: t('appearance-modern'), description: t('appearance-flat-rows-with-avatars'), preview: modernPreview },
+    { value: 'irc', label: 'IRC', description: t('appearance-compact-single-line'), preview: ircPreview },
   ];
 
   // Choosing a theme is an explicit answer, so the store drops follow-system for us. Pure black is

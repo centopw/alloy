@@ -31,7 +31,7 @@
   const NAV_SELECTOR = '[role^="menuitem"]:not([aria-disabled="true"])';
   const ROW_SELECTOR = '.row:not([aria-disabled="true"])';
 
-  const CANCEL: MenuAction = { id: 'cancel', label: 'Cancel' };
+  const CANCEL: MenuAction = { id: 'cancel', label: t('common-cancel') };
 
   /** Stand-in while the menu closes: its options are cleared before the blocks that read them are removed. */
   const NO_REACTIONS: NonNullable<MenuOptions['reactions']> = { emojis: [], active: [], onpick: () => {}, onmore: () => {} };

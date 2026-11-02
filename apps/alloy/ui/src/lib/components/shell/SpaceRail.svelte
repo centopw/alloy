@@ -48,7 +48,7 @@
     return [
       {
         id: 'mark-all',
-        label: 'Mark all as read',
+        label: t('common-mark-all-as-read'),
         icon: CheckCheck,
         disabled: unreadRooms(null).length === 0,
         onselect: () => markUnread(null),
@@ -60,7 +60,7 @@
     return [
       {
         id: 'mark-space',
-        label: 'Mark space as read',
+        label: t('space-rail-mark-space-as-read'),
         icon: CheckCheck,
         disabled: unreadRooms(space.id).length === 0,
         onselect: () => markUnread(space.id),
@@ -72,9 +72,9 @@
 
   function accountMenu(userId: string): MenuItem[] {
     return [
-      { id: 'settings', label: 'Settings', icon: Settings, onselect: () => onsettings?.() },
+      { id: 'settings', label: t('common-settings'), icon: Settings, onselect: () => onsettings?.() },
       { separator: true },
-      { id: 'copy-user-id', label: 'Copy user ID', icon: Copy, onselect: () => void navigator.clipboard?.writeText(userId).catch(() => undefined) },
+      { id: 'copy-user-id', label: t('user-profile-card-copy-user-id'), icon: Copy, onselect: () => void navigator.clipboard?.writeText(userId).catch(() => undefined) },
     ];
   }
 

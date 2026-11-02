@@ -19,20 +19,20 @@
     const version = updatesStore.info?.version;
     switch (updatesStore.phase) {
       case 'error':
-        return { title: 'Update failed', detail: 'You can keep using Alloy', action: 'Retry' };
+        return { title: t('update-notice-update-failed'), detail: 'You can keep using Alloy', action: 'Retry' };
       case 'installing':
-        return { title: 'Installing update', detail: 'Almost done', action: null };
+        return { title: t('update-notice-installing-update'), detail: 'Almost done', action: null };
       case 'downloading':
         return {
-          title: 'Downloading update',
+          title: t('update-notice-downloading-update'),
           detail: percent === null ? 'Working in the background' : `${percent}%`,
           action: null,
         };
       case 'ready':
-        return { title: 'Update ready', detail: 'Restart to apply', action: 'Restart' };
+        return { title: t('update-notice-update-ready'), detail: 'Restart to apply', action: 'Restart' };
       default:
         return {
-          title: 'Update available',
+          title: t('update-notice-update-available'),
           detail: version ? `Version ${version}` : "See what's new",
           action: updatesStore.info?.can_install === false ? 'Open' : 'Download',
         };
@@ -41,20 +41,20 @@
 
   function menuItems(): MenuItem[] {
     const items: MenuItem[] = [
-      { id: 'whats-new', label: "What's new", onselect: () => updatesStore.openChangelog() },
+      { id: 'whats-new', label: t('help-about-whats-new'), onselect: () => updatesStore.openChangelog() },
       {
         id: 'primary',
         label: updatesStore.primaryLabel,
         disabled: updatesStore.busy,
         onselect: () => void updatesStore.primary(),
       },
-      { id: 'remind-later', label: 'Remind me later', onselect: () => updatesStore.remindLater() },
+      { id: 'remind-later', label: t('update-notice-remind-me-later'), onselect: () => updatesStore.remindLater() },
     ];
     // Once the download has started, skipping would leave a downloaded update unused.
     if (!updatesStore.info?.downloaded && !updatesStore.busy) {
-      items.push({ id: 'skip-version', label: 'Skip this version', onselect: () => updatesStore.skipVersion() });
+      items.push({ id: 'skip-version', label: t('changelog-dialog-skip-this-version'), onselect: () => updatesStore.skipVersion() });
     }
-    items.push({ id: 'check', label: 'Check for updates', onselect: () => void updatesStore.check() });
+    items.push({ id: 'check', label: t('help-about-check-for-updates'), onselect: () => void updatesStore.check() });
     return items;
   }
 </script>

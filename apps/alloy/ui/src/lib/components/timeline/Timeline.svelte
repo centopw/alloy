@@ -516,9 +516,9 @@
     if (pressedOnRow) return [];
     const empty = rows.length === 0;
     return [
-      { id: 'jump-latest', label: 'Jump to latest', disabled: empty, onselect: toBottom },
-      { id: 'scroll-top', label: 'Scroll to top (load older)', disabled: empty, onselect: scrollToTop },
-      { id: 'mark-read', label: 'Mark as read', onselect: () => void timelineStore.markRead() },
+      { id: 'jump-latest', label: t('timeline-jump-to-latest'), disabled: empty, onselect: toBottom },
+      { id: 'scroll-top', label: t('timeline-scroll-to-top-load-older'), disabled: empty, onselect: scrollToTop },
+      { id: 'mark-read', label: t('common-mark-as-read'), onselect: () => void timelineStore.markRead() },
       {
         id: 'announce-messages',
         label: t('timeline-announce-messages'),
@@ -527,7 +527,7 @@
         onselect: () => prefs.set('announceMessages', !prefs.announceMessages),
       },
       { separator: true },
-      { id: 'refresh', label: 'Refresh', onselect: () => void refreshStore.run() },
+      { id: 'refresh', label: t('sidebar-refresh'), onselect: () => void refreshStore.run() },
     ];
   }
 </script>

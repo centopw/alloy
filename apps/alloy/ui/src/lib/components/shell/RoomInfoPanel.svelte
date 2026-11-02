@@ -116,9 +116,9 @@
 
   /** Shared-media tabs in display order. */
   const SHARED_TABS: { value: MediaView; label: string }[] = [
-    { value: 'media', label: 'Media' },
-    { value: 'links', label: 'Links' },
-    { value: 'files', label: 'Files' },
+    { value: 'media', label: t('room-info-panel-media') },
+    { value: 'links', label: t('room-info-panel-links') },
+    { value: 'files', label: t('room-info-panel-files') },
   ];
 
   const EMPTY_TEXT: Record<MediaView, string> = {
@@ -430,11 +430,11 @@
   const joined = $derived(members.filter((m) => m.membership === 'Joined'));
   const groups = $derived(
     [
-      { title: 'Admin', members: joined.filter((m) => m.power_level >= 100).sort(byName) },
-      { title: 'Moderator', members: joined.filter((m) => m.power_level >= 50 && m.power_level < 100).sort(byName) },
-      { title: 'Members', members: joined.filter((m) => m.power_level < 50).sort(byName) },
-      { title: 'Invited', members: members.filter((m) => m.membership === 'Invited').sort(byName) },
-      { title: 'Banned', members: members.filter((m) => m.membership === 'Banned').sort(byName) },
+      { title: t('room-info-panel-admin'), members: joined.filter((m) => m.power_level >= 100).sort(byName) },
+      { title: t('room-info-panel-moderator'), members: joined.filter((m) => m.power_level >= 50 && m.power_level < 100).sort(byName) },
+      { title: t('room-info-panel-members-2'), members: joined.filter((m) => m.power_level < 50).sort(byName) },
+      { title: t('mention-picker-invited'), members: members.filter((m) => m.membership === 'Invited').sort(byName) },
+      { title: t('room-info-panel-banned'), members: members.filter((m) => m.membership === 'Banned').sort(byName) },
     ].filter((g) => g.members.length > 0),
   );
   const ordered = $derived(groups.flatMap((g) => g.members));
@@ -497,10 +497,10 @@
   let pendingAction = $state<PendingAction | null>(null);
 
   const ACTION_COPY: Record<PendingAction['kind'], { title: string; confirm: string; message: (name: string) => string }> = {
-    kick: { title: 'Remove from room', confirm: 'Remove', message: (n) => `${n} will be removed from this room. They can join again if the room allows it.` },
-    ban: { title: 'Ban from room', confirm: 'Ban', message: (n) => `${n} will be removed and cannot rejoin until unbanned.` },
-    unban: { title: 'Unban', confirm: 'Unban', message: (n) => `${n} will be able to join this room again.` },
-    block: { title: 'Block user', confirm: 'Block', message: (n) => `You will no longer see messages from ${n} in any room. You can unblock them in Settings.` },
+    kick: { title: t('room-info-panel-remove-from-room'), confirm: 'Remove', message: (n) => `${n} will be removed from this room. They can join again if the room allows it.` },
+    ban: { title: t('room-info-panel-ban-from-room'), confirm: 'Ban', message: (n) => `${n} will be removed and cannot rejoin until unbanned.` },
+    unban: { title: t('room-info-panel-unban'), confirm: 'Unban', message: (n) => `${n} will be able to join this room again.` },
+    block: { title: t('room-info-panel-block-user'), confirm: 'Block', message: (n) => `You will no longer see messages from ${n} in any room. You can unblock them in Settings.` },
   };
 
   async function runAction() {
@@ -530,31 +530,31 @@
     if (mod.levels.length > 0) {
       moderation.push({
         id: 'power',
-        label: 'Change role',
+        label: t('room-info-panel-change-role'),
         icon: ShieldAlert,
         submenu: {
           items: mod.levels.map((l): MenuItem => ({ id: `role-${l.level}`, label: `Make ${l.label.toLowerCase()}`, onselect: () => void setLevel(m, l.level) })),
         },
       });
     }
-    if (mod.kick) moderation.push({ id: 'kick', label: 'Remove from room', icon: UserMinus, danger: true, onselect: () => (pendingAction = { kind: 'kick', member: m }) });
-    if (mod.ban) moderation.push({ id: 'ban', label: 'Ban from room', icon: Ban, danger: true, onselect: () => (pendingAction = { kind: 'ban', member: m }) });
-    if (mod.unban) moderation.push({ id: 'unban', label: 'Unban', icon: Ban, onselect: () => (pendingAction = { kind: 'unban', member: m }) });
+    if (mod.kick) moderation.push({ id: 'kick', label: t('room-info-panel-remove-from-room'), icon: UserMinus, danger: true, onselect: () => (pendingAction = { kind: 'kick', member: m }) });
+    if (mod.ban) moderation.push({ id: 'ban', label: t('room-info-panel-ban-from-room'), icon: Ban, danger: true, onselect: () => (pendingAction = { kind: 'ban', member: m }) });
+    if (mod.unban) moderation.push({ id: 'unban', label: t('room-info-panel-unban'), icon: Ban, onselect: () => (pendingAction = { kind: 'unban', member: m }) });
     const isSelf = m.user_id === session.account?.user_id;
     return [
       {
         id: 'view-profile',
-        label: 'View profile',
+        label: t('room-info-panel-view-profile'),
         icon: User,
         onselect: () => {
           const at = memberRowCentre(m.user_id);
           if (at) profileCard.open(m.user_id, roomId, at);
         },
       },
-      { id: 'message', label: 'Message', icon: MessageSquare, onselect: () => void messageMember(m.user_id) },
+      { id: 'message', label: t('user-profile-card-message'), icon: MessageSquare, onselect: () => void messageMember(m.user_id) },
       { separator: true },
-      { id: 'copy-user-id', label: 'Copy user ID', icon: Copy, onselect: () => void copyText(m.user_id).catch(() => undefined) },
-      ...(isSelf ? [] : [{ id: 'block', label: 'Block user', icon: Ban, danger: true, onselect: () => (pendingAction = { kind: 'block' as const, member: m }) }]),
+      { id: 'copy-user-id', label: t('user-profile-card-copy-user-id'), icon: Copy, onselect: () => void copyText(m.user_id).catch(() => undefined) },
+      ...(isSelf ? [] : [{ id: 'block', label: t('room-info-panel-block-user'), icon: Ban, danger: true, onselect: () => (pendingAction = { kind: 'block' as const, member: m }) }]),
       ...(moderation.length > 0 ? [{ separator: true } as MenuItem, ...moderation] : []),
     ];
   }

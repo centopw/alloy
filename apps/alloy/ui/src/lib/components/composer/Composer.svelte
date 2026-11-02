@@ -573,17 +573,17 @@
   function locationItems(): MenuItem[] {
     const live: MenuItem = {
       id: 'live-location',
-      label: 'Share live location',
+      label: t('composer-share-live-location'),
       icon: Navigation,
       submenu: {
         items: [
-          { id: 'live-15', label: 'For 15 minutes', onselect: () => void liveLocation.start(roomId, 15 * 60_000) },
-          { id: 'live-60', label: 'For 1 hour', onselect: () => void liveLocation.start(roomId, 60 * 60_000) },
-          { id: 'live-480', label: 'For 8 hours', onselect: () => void liveLocation.start(roomId, 8 * 60 * 60_000) },
+          { id: 'live-15', label: t('composer-for-15-minutes'), onselect: () => void liveLocation.start(roomId, 15 * 60_000) },
+          { id: 'live-60', label: t('composer-for-1-hour'), onselect: () => void liveLocation.start(roomId, 60 * 60_000) },
+          { id: 'live-480', label: t('composer-for-8-hours'), onselect: () => void liveLocation.start(roomId, 8 * 60 * 60_000) },
         ],
       },
     };
-    return [{ id: 'send-location', label: 'Send my location', icon: MapPin, onselect: () => (locationOpen = true) }, live];
+    return [{ id: 'send-location', label: t('composer-send-my-location'), icon: MapPin, onselect: () => (locationOpen = true) }, live];
   }
 
   // The attach menu leads with media: a picture or a video is the main thing to send, a plain file is
@@ -592,13 +592,13 @@
   function attachItems(): MenuItem[] {
     const items: MenuItem[] = [];
     if (canPickFiles()) {
-      items.push({ id: 'media', label: 'Photo or video', icon: ImagePlus, onselect: () => void attachMedia() });
-      items.push({ id: 'file', label: 'File', icon: File, onselect: () => void attach() });
+      items.push({ id: 'media', label: t('composer-photo-or-video'), icon: ImagePlus, onselect: () => void attachMedia() });
+      items.push({ id: 'file', label: t('timeline-preview-file'), icon: File, onselect: () => void attach() });
     }
     if (nativeClipboardHasImage()) {
       items.push({
         id: 'clipboard-image',
-        label: 'Picture from clipboard',
+        label: t('composer-picture-from-clipboard'),
         icon: Image,
         onselect: () => void stageFromClipboard(),
       });
@@ -611,11 +611,11 @@
   function moreItem(): MenuItem {
     return {
       id: 'more',
-      label: 'More',
+      label: t('common-more'),
       icon: Ellipsis,
       submenu: {
         items: [
-          { id: 'poll', label: 'Poll', icon: ChartBar, onselect: () => (pollOpen = true) },
+          { id: 'poll', label: t('timeline-preview-poll'), icon: ChartBar, onselect: () => (pollOpen = true) },
           ...(canLocate() ? locationItems() : []),
         ],
       },
@@ -626,7 +626,7 @@
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
     contextMenu.open(attachItems(), { x: r.left, y: r.top }, {
       anchor: { x: r.left, y: r.top, width: r.width, height: r.height },
-      ariaLabel: 'Add attachment',
+      ariaLabel: t('composer-add-attachment'),
     });
   }
 
@@ -654,7 +654,7 @@
   }
 
   function sendMenu(): MenuItem[] {
-    return [{ id: 'send', label: 'Send message', icon: Send, disabled: !canSend, onselect: () => void submit() }];
+    return [{ id: 'send', label: t('composer-send-message'), icon: Send, disabled: !canSend, onselect: () => void submit() }];
   }
 
   /** Insert at the caret (replacing a selection), then put the caret after the emoji. */

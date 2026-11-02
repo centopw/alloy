@@ -18,9 +18,9 @@
 
   function panelItems(userId: string): MenuItem[] {
     return [
-      { id: 'settings', label: 'Settings', icon: Settings, onselect: () => onsettings?.() },
+      { id: 'settings', label: t('common-settings'), icon: Settings, onselect: () => onsettings?.() },
       { separator: true },
-      { id: 'copy-user-id', label: 'Copy user ID', icon: Copy, onselect: () => void navigator.clipboard?.writeText(userId).catch(() => undefined) },
+      { id: 'copy-user-id', label: t('user-profile-card-copy-user-id'), icon: Copy, onselect: () => void navigator.clipboard?.writeText(userId).catch(() => undefined) },
     ];
   }
 </script>

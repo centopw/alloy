@@ -131,7 +131,7 @@
       { separator: true },
       {
         id: 'notifications',
-        label: 'Notifications',
+        label: t('sidebar-notifications'),
         icon: Bell,
         submenu: {
           items: () => notifyItems(r.id),
@@ -139,7 +139,7 @@
       },
       {
         id: 'tags',
-        label: 'Tags',
+        label: t('sidebar-tags'),
         icon: Tag,
         submenu: {
           items: () =>
@@ -154,7 +154,7 @@
               };
             }),
           search: {
-            placeholder: 'Search or create a tag',
+            placeholder: t('sidebar-search-or-create-a-tag'),
             create: { label: (q) => `Create tag "${q}"`, onCreate: (q) => void createTagFor(r.id, q) },
           },
           maxHeight: 320,
@@ -163,26 +163,26 @@
       { separator: true },
       {
         id: 'room-settings',
-        label: 'Room settings',
+        label: t('sidebar-room-settings'),
         icon: Settings,
         submenu: {
           items: [
-            { id: 'details', label: 'Room details', icon: Info, onselect: () => showRoomInfo(r.id) },
-            { id: 'rename', label: 'Rename room', icon: Pencil, disabled: d !== null && !d.can_set_name, onselect: () => (renameRoomId = r.id) },
-            { id: 'note', label: 'Edit note', icon: StickyNote, onselect: () => showRoomInfo(r.id) },
+            { id: 'details', label: t('common-room-details'), icon: Info, onselect: () => showRoomInfo(r.id) },
+            { id: 'rename', label: t('rename-room-dialog-rename-room'), icon: Pencil, disabled: d !== null && !d.can_set_name, onselect: () => (renameRoomId = r.id) },
+            { id: 'note', label: t('sidebar-edit-note'), icon: StickyNote, onselect: () => showRoomInfo(r.id) },
           ],
         },
       },
       {
         id: 'copy',
-        label: 'Copy',
+        label: t('common-copy'),
         icon: Copy,
         submenu: {
           items: copyItems(r),
         },
       },
       { separator: true },
-      { id: 'leave', label: 'Leave room', icon: LogOut, danger: true, onselect: () => (pendingLeave = { id: r.id, title: roomTitle(r) }) },
+      { id: 'leave', label: t('sidebar-leave-room'), icon: LogOut, danger: true, onselect: () => (pendingLeave = { id: r.id, title: roomTitle(r) }) },
     ];
   }
 
@@ -222,8 +222,8 @@
     // Public-room browsing lives here on every layout: the phone tab bar has no Discover tab, and
     // the pane menu is where a phone user looks for "find a room" now.
     return [
-      { id: 'new-room', label: 'New room...', icon: Plus, onselect: () => onnew?.() },
-      { id: 'browse', label: 'Browse public rooms...', icon: Compass, onselect: () => onbrowse?.() },
+      { id: 'new-room', label: t('sidebar-new-room'), icon: Plus, onselect: () => onnew?.() },
+      { id: 'browse', label: t('sidebar-browse-public-rooms'), icon: Compass, onselect: () => onbrowse?.() },
     ];
   }
 
@@ -234,7 +234,7 @@
       { separator: true },
       {
         id: 'mark-all',
-        label: 'Mark all as read',
+        label: t('common-mark-all-as-read'),
         icon: CheckCheck,
         disabled: !hasUnread(roomsStore.rooms),
         onselect: () => markAllRead(roomsStore.rooms),
@@ -256,7 +256,7 @@
       { separator: true },
       {
         id: 'sort',
-        label: 'Sort rooms',
+        label: t('sidebar-sort-rooms'),
         icon: ArrowUpDown,
         submenu: {
           items: () => sortItems(),
@@ -265,7 +265,7 @@
       { separator: true },
       {
         id: 'mark-view',
-        label: 'Mark all in view as read',
+        label: t('sidebar-mark-all-in-view-as-read'),
         icon: CheckCheck,
         disabled: !hasUnread(roomsStore.visible),
         onselect: () => markAllRead(roomsStore.visible),
@@ -281,22 +281,22 @@
   function tagItems(id: string): MenuItem[] {
     const def = tags.defs.find((d) => d.id === id);
     if (!def) {
-      return [{ id: 'add-tag', label: 'Add to my tags', icon: Plus, onselect: () => void tags.create(id, 'grey') }];
+      return [{ id: 'add-tag', label: t('sidebar-add-to-my-tags'), icon: Plus, onselect: () => void tags.create(id, 'grey') }];
     }
     const index = tags.defs.indexOf(def);
     const count = roomsStore.rooms.filter((r) => r.tags.includes(id)).length;
     return [
       {
         id: 'only',
-        label: 'Show only this tag',
+        label: t('sidebar-show-only-this-tag'),
         icon: Tag,
         selected: roomsStore.tagFilter === id,
         onselect: () => (roomsStore.tagFilter = roomsStore.tagFilter === id ? null : id),
       },
-      { id: 'rename', label: 'Rename tag...', icon: Pencil, onselect: () => (renameTagId = id) },
+      { id: 'rename', label: t('sidebar-rename-tag'), icon: Pencil, onselect: () => (renameTagId = id) },
       {
         id: 'colour',
-        label: 'Colour',
+        label: t('tag-edit-dialog-colour'),
         icon: Palette,
         submenu: {
           items: () =>
@@ -310,19 +310,19 @@
             ),
         },
       },
-      { id: 'up', label: 'Move up', icon: ChevronUp, disabled: index === 0, onselect: () => void tags.move(id, -1) },
+      { id: 'up', label: t('sidebar-move-up'), icon: ChevronUp, disabled: index === 0, onselect: () => void tags.move(id, -1) },
       {
         id: 'down',
-        label: 'Move down',
+        label: t('sidebar-move-down'),
         icon: ChevronDown,
         disabled: index === tags.defs.length - 1,
         onselect: () => void tags.move(id, 1),
       },
       { separator: true },
-      { id: 'manage', label: 'Manage tags...', icon: Settings, onselect: () => onsettings?.('tags') },
+      { id: 'manage', label: t('sidebar-manage-tags'), icon: Settings, onselect: () => onsettings?.('tags') },
       {
         id: 'delete',
-        label: 'Delete tag',
+        label: t('sidebar-delete-tag'),
         icon: Trash2,
         danger: true,
         onselect: () => (pendingTagDelete = { id, name: def.name, count }),
@@ -337,8 +337,8 @@
   function inviteItems(r: RoomItem): MenuItem[] {
     const busy = inviteBusy === r.id;
     return [
-      { id: 'accept', label: 'Accept invitation', icon: Check, disabled: busy, onselect: () => void answerInvite(r.id, true) },
-      { id: 'decline', label: 'Decline invitation', icon: X, disabled: busy, onselect: () => void answerInvite(r.id, false) },
+      { id: 'accept', label: t('sidebar-accept-invitation'), icon: Check, disabled: busy, onselect: () => void answerInvite(r.id, true) },
+      { id: 'decline', label: t('sidebar-decline-invitation'), icon: X, disabled: busy, onselect: () => void answerInvite(r.id, false) },
     ];
   }
 

@@ -158,7 +158,7 @@
 
   const tabs = $derived<Tab[]>([
     ...(recentCells.length > 0
-      ? [{ key: RECENT_KEY, label: 'Recently used', icon: Clock } satisfies Tab]
+      ? [{ key: RECENT_KEY, label: t('emoji-picker-recently-used'), icon: Clock } satisfies Tab]
       : []),
     ...sections.map((s) => ({
       key: s.key,

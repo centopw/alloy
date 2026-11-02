@@ -11,13 +11,13 @@
   let { onwrap }: Props = $props();
 
   const tools: { kind: WrapKind; label: string; icon: typeof Bold; keys?: string }[] = [
-    { kind: 'bold', label: 'Bold', icon: Bold, keys: 'B' },
-    { kind: 'italic', label: 'Italic', icon: Italic, keys: 'I' },
-    { kind: 'strike', label: 'Strikethrough', icon: Strikethrough, keys: 'Shift+X' },
-    { kind: 'code', label: 'Code', icon: Code, keys: 'Shift+M' },
-    { kind: 'spoiler', label: 'Spoiler', icon: EyeOff, keys: 'Shift+P' },
-    { kind: 'quote', label: 'Quote', icon: Quote, keys: 'Shift+Q' },
-    { kind: 'link', label: 'Link', icon: Link, keys: 'Shift+L' },
+    { kind: 'bold', label: t('format-toolbar-bold'), icon: Bold, keys: 'B' },
+    { kind: 'italic', label: t('format-toolbar-italic'), icon: Italic, keys: 'I' },
+    { kind: 'strike', label: t('format-toolbar-strikethrough'), icon: Strikethrough, keys: 'Shift+X' },
+    { kind: 'code', label: t('format-toolbar-code'), icon: Code, keys: 'Shift+M' },
+    { kind: 'spoiler', label: t('format-toolbar-spoiler'), icon: EyeOff, keys: 'Shift+P' },
+    { kind: 'quote', label: t('format-toolbar-quote'), icon: Quote, keys: 'Shift+Q' },
+    { kind: 'link', label: t('format-toolbar-link'), icon: Link, keys: 'Shift+L' },
   ];
 </script>
 

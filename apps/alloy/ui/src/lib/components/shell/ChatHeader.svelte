@@ -34,10 +34,10 @@
 
   function headerMenu(): MenuItem[] {
     return [
-      { id: 'details', label: 'Room details', icon: Info, onselect: () => ui.openRoomInfo('info') },
+      { id: 'details', label: t('common-room-details'), icon: Info, onselect: () => ui.openRoomInfo('info') },
       {
         id: 'search',
-        label: 'Search in room',
+        label: t('chat-header-search-in-room'),
         icon: Search,
         shortcut: searchShortcut,
         onselect: () => ui.openRoomSearch(),
@@ -47,7 +47,7 @@
       { separator: true },
       {
         id: 'mark-read',
-        label: 'Mark as read',
+        label: t('common-mark-as-read'),
         icon: CheckCheck,
         disabled: roomsStore.unreadOf(room) === 0,
         onselect: () => roomsStore.markRead(roomId),

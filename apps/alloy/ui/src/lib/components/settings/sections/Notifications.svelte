@@ -17,8 +17,8 @@
 
   import { t } from '$lib/i18n';
   const levelOptions: { value: DefaultLevel; label: string }[] = [
-    { value: 'All', label: 'All messages' },
-    { value: 'Mentions', label: 'Mentions and keywords' },
+    { value: 'All', label: t('notifications-all-messages') },
+    { value: 'Mentions', label: t('notifications-mentions-and-keywords') },
   ];
 
   let permissionError = $state<string | null>(null);

@@ -16,7 +16,7 @@
   const caps = $derived(capabilities(currentEnv(viewport.isPhone)));
   const groups: Group[] = $derived([
     {
-      title: 'Global',
+      title: t('keyboard-global'),
       rows: [
         { action: 'Jump to a conversation or command', chords: [[mod, 'K']] },
         { action: 'Open settings', chords: [[mod, ',']] },
@@ -25,7 +25,7 @@
       ],
     },
     {
-      title: 'Composer',
+      title: t('preferences-composer'),
       rows: [
         {
           action: 'Send message',
@@ -56,7 +56,7 @@
       ],
     },
     {
-      title: 'Dialogs and menus',
+      title: t('keyboard-dialogs-and-menus'),
       rows: [
         { action: 'Close a dialog, menu, palette or popover', chords: [['Esc']] },
         { action: 'Move focus within an open dialog', chords: [['Tab'], ['Shift', 'Tab']] },
@@ -69,7 +69,7 @@
     ...(caps.resizablePanels
       ? [
           {
-            title: 'Layout',
+            title: t('keyboard-layout'),
             rows: [
               { action: 'Resize a focused panel divider', chords: [['←'], ['→']] },
               { action: 'Resize a focused panel divider in larger steps', chords: [['Shift', '←'], ['Shift', '→']] },
