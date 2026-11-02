@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: '0 2 * * *'  # Daily at 2 AM UTC
   workflow_dispatch:
+    inputs:
+      perf_gate:
+        description: 'Fail the desktop perf measurement when a budget is breached (default: report-only)'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -92,7 +97,7 @@ jobs:
         if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev xvfb dbus-x11 xdotool
 
       - name: Install UI dependencies
         working-directory: apps/alloy/ui
@@ -122,6 +127,66 @@ jobs:
           includeDebug: false
           includeUpdaterJson: false
           args: ${{ matrix.tauri_args }}
+
+      # Measures the artifact this job just built (the release nightly bundle), never a dev build.
+      # Report-only unless the manual dispatch sets perf_gate=true: the recorded baseline (205 MB idle,
+      # 3.4 s cold start p95) is above budget and the fix is #70, so an enforced gate would be born red.
+      - name: Measure cold start and idle memory (#69)
+        shell: bash
+        continue-on-error: ${{ !(github.event_name == 'workflow_dispatch' && inputs.perf_gate == true) }}
+        env:
+          PERF_GATE: ${{ github.event_name == 'workflow_dispatch' && inputs.perf_gate == true }}
+          WEBKIT_DISABLE_COMPOSITING_MODE: '1'
+          WEBKIT_DISABLE_DMABUF_RENDERER: '1'
+          NO_AT_BRIDGE: '1'
+        run: |
+          set -euo pipefail
+          target_dir="apps/alloy/src-tauri/target"
+          if [ -n "${{ matrix.target }}" ]; then target_dir="$target_dir/${{ matrix.target }}"; fi
+          app=""
+          case "${{ matrix.platform }}" in
+            macos-*)
+              app=$(find "$target_dir/release/bundle/macos" -type f -perm -111 -path '*/Contents/MacOS/*' 2>/dev/null | head -n 1 || true)
+              if [ -z "$app" ] && [ -x "$target_dir/release/alloy-app" ]; then app="$target_dir/release/alloy-app"; fi
+              ;;
+            windows)
+              app="$target_dir/release/alloy-app.exe"
+              ;;
+            linux)
+              app="$target_dir/release/alloy-app"
+              ;;
+          esac
+          if [ -z "$app" ] || [ ! -f "$app" ]; then
+            echo "::error::release bundle binary not found under $target_dir/release (platform ${{ matrix.platform }})"
+            exit 1
+          fi
+          echo "Measuring $app"
+          gate_args=()
+          if [ "${PERF_GATE:-false}" != "true" ]; then gate_args+=(--report-only); fi
+          report="perf-${{ matrix.platform }}.json"
+          if [ "${{ matrix.platform }}" = "linux" ]; then
+            dbus-run-session -- xvfb-run -a --server-args="-screen 0 1280x800x24" \
+              node scripts/perf-desktop.mjs "$app" --runs 5 --json "$report" --label "nightly ${{ github.sha }}" "${gate_args[@]}"
+          else
+            node scripts/perf-desktop.mjs "$app" --runs 5 --json "$report" --label "nightly ${{ github.sha }}" "${gate_args[@]}"
+          fi
+
+      - name: Summarize perf report
+        if: always()
+        shell: bash
+        env:
+          REPORT: perf-${{ matrix.platform }}.json
+        run: |
+          [ -f "$REPORT" ] || exit 0
+          node scripts/perf-summary.mjs "$REPORT" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload perf report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-${{ matrix.platform }}
+          path: perf-${{ matrix.platform }}.json
+          if-no-files-found: warn
 
   build-nightly-android:
     name: Build Nightly Android APK
