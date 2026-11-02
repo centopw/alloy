@@ -30,12 +30,19 @@ export function mergeTimelineReset(
   cached: readonly TimelineItemDto[],
   reset: readonly TimelineItemDto[]
 ): TimelineItemDto[] {
+  // A day divider carries no event id either, so the kind is what tells it apart from an unsent
+  // message. Dividers belong to the window that generated them and the reset brings its own; an
+  // echo has to keep its place at the end.
+  const isVirtual = (i: TimelineItemDto) => i.content.kind === 'DayDivider' || i.content.kind === 'Virtual';
   const resetIds = new Set(reset.map((i) => i.event_id).filter((id): id is string => !!id));
-  const firstResetTs = reset[0]?.timestamp_millis ?? Number.POSITIVE_INFINITY;
+  // A reset normally opens with the day divider for its window, and virtual items carry no real
+  // timestamp. Measuring the window from that divider would make every cached message look newer
+  // than it and drop the history the cache exists to keep, so the window starts at the first event.
+  const firstResetTs = reset.find((i) => i.event_id)?.timestamp_millis ?? Number.POSITIVE_INFINITY;
   const older = cached.filter(
     (i) => i.event_id && !resetIds.has(i.event_id) && i.timestamp_millis < firstResetTs
   );
-  const echoes = cached.filter((i) => !i.event_id);
+  const echoes = cached.filter((i) => !i.event_id && !isVirtual(i));
   const seen = new Set<string>();
   const out: TimelineItemDto[] = [];
   for (const item of [...older, ...reset, ...echoes]) {

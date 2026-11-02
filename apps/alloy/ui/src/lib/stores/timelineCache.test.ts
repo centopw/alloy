@@ -69,6 +69,23 @@ function item(id: string, ts: number, eventId: string | null = `$e${id}`): Timel
   } as unknown as TimelineItemDto;
 }
 
+/** Day dividers and other virtual rows carry no event id and no real timestamp. */
+function divider(id: string): TimelineItemDto {
+  return {
+    internal_id: id,
+    event_id: null,
+    sender: '',
+    timestamp_millis: 0,
+    content: { kind: 'DayDivider', data: { timestamp_millis: 0 } },
+    send_state: { status: 'Sent', data: { event_id: '' } },
+    is_own: false,
+    reply_to: null,
+    thread_summary: null,
+    read_receipts: null,
+    mentions_me: false,
+  } as unknown as TimelineItemDto;
+}
+
 beforeEach(() => {
   mocks.invoke.mockReset().mockResolvedValue({ type: 'TimelineClosed', payload: { room_id: '!r', closed: true } });
   mocks.subscribeTimeline.mockReset().mockResolvedValue({
@@ -99,6 +116,30 @@ describe('mergeTimelineReset', () => {
     const reset = [item('a', 1)];
     // b is newer than the reset's first item, so it is not "older history" and must not come back.
     expect(mergeTimelineReset(cached, reset).map((i) => i.internal_id)).toEqual(['a']);
+  });
+
+  it('does not carry a cached day divider up as an unsent message', () => {
+    const cached = [divider('d1'), item('a', 1), divider('d2'), item('b', 2)];
+    const reset = [divider('d3'), item('b', 2)];
+    // d2 belongs to the window the reset replaces. Treating it as an echo re-emitted it after the
+    // newest message, which is the stack of empty day separators seen when a room is reopened.
+    expect(mergeTimelineReset(cached, reset).map((i) => i.internal_id)).toEqual(['a', 'd3', 'b']);
+  });
+
+  it('keeps older history when the reset opens with its day divider', () => {
+    const cached = [divider('d1'), item('a', 1), item('b', 2)];
+    const reset = [divider('d2'), item('b', 2)];
+    // The divider is first in the reset and timestamps as 0; measuring the window from it made every
+    // cached message look newer than the window and dropped the history. The cached divider itself is
+    // not carried over: only rows with an event id are, so older history arrives without its own
+    // header. Pre-existing, and separate from the trailing stack this fixes.
+    expect(mergeTimelineReset(cached, reset).map((i) => i.internal_id)).toEqual(['a', 'd2', 'b']);
+  });
+
+  it('keeps an unsent echo that sits among day dividers', () => {
+    const cached = [divider('d1'), item('a', 1), item('echo', 9, null)];
+    const reset = [divider('d2'), item('a', 1)];
+    expect(mergeTimelineReset(cached, reset).map((i) => i.internal_id)).toEqual(['d2', 'a', 'echo']);
   });
 });
 
