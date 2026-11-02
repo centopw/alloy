@@ -16,8 +16,14 @@ adaptive-shell-quick-switcher = Quick switcher
 adaptive-shell-resize-side-panel = Resize side panel
 adaptive-shell-resize-sidebar = Resize sidebar
 adaptive-shell-search-every-room-and-person-or-pick-one-from-th = Search every room and person, or pick one from the sidebar.
+adaptive-shell-skip-links = Skip links
+adaptive-shell-skip-to-conversation = Skip to conversation
+adaptive-shell-skip-to-room-list = Skip to room list
 album-grid-extra-more = { $count } more
 album-grid-picture-count = { $count ->
+    [one] { $count } picture
+   *[other] { $count } pictures
+  }
 appearance-alex = Alex
 appearance-dark-mode = Dark mode
 appearance-density = Density
@@ -34,6 +40,10 @@ appearance-theme = Theme
 appearance-time-format = Time format
 attachment-preview-add-a-caption = Add a caption...
 attachment-preview-file = Attachment
+attachment-preview-file-count = { $count ->
+    [one] { $count } file
+   *[other] { $count } files
+  }
 attachment-preview-more = Attachment options
 attachment-preview-next = Next attachment
 attachment-preview-picture-alt = Preview of { $name }
@@ -75,6 +85,7 @@ command-palette-open = Open
 command-palette-people = People
 command-palette-quick-switcher = Quick switcher
 command-palette-search-rooms = Search rooms
+command-palette-user-search-failed = User search failed
 common-add = Add
 common-back = Back
 common-cancel = Cancel
@@ -214,7 +225,12 @@ help-about-updates = Updates
 help-about-version = Version
 help-about-whats-new = What's new
 keyboard-action = Action
+keyboard-jump-oldest-newest-message = Jump to the oldest or newest message
 keyboard-keys = Keys
+keyboard-messages-group = Messages
+keyboard-move-message-cursor = Move the message cursor
+keyboard-move-message-cursor-page = Move the message cursor by a page
+keyboard-open-message-actions = Open the focused message's actions
 keyboard-or = or
 link-preview-hide-preview = Hide preview
 link-preview-link-preview = Link preview
@@ -261,10 +277,14 @@ message-row-message-actions = Message actions
 message-row-message-deleted = Message deleted
 message-row-more-actions = More actions
 message-row-open-thread = { $count ->
+    [one] Open thread, { $count } reply
+   *[other] Open thread, { $count } replies
+  }
 message-row-reaction-count = { $emoji } { $count }
 message-row-reply = Reply
 message-row-reply-in-thread = Reply in thread
 message-row-room-updated = Room updated
+message-row-seen-by = Seen by { $names }
 message-row-select-message = Select message
 message-row-sending = Sending
 message-row-sent = Sent
@@ -377,6 +397,10 @@ poll-view-choose-up-to = Choose up to
 poll-view-end-poll = End poll
 poll-view-poll-ended = Poll ended
 poll-view-results-appear-when-the-poll-ends = Results appear when the poll ends
+poll-view-vote-count = { $count ->
+    [one] { $count } vote
+   *[other] { $count } votes
+  }
 preferences-autoplay-gifs-and-videos = Autoplay GIFs and videos
 preferences-composer = Composer
 preferences-jump-to-the-newest-message-when-you-send = Jump to the newest message when you send
@@ -558,12 +582,31 @@ thread-panel-close-thread = Close thread
 thread-panel-loading-thread = Loading thread…
 thread-panel-no-replies-yet = No replies yet.
 thread-panel-thread = Thread
+timeline-announce-messages = Announce new messages
+timeline-announcement-many = { $count } new messages. Latest from { $sender }: { $preview }
+timeline-announcement-single = { $sender }: { $preview }
 timeline-conversation = Conversation with { $title }, { $kind ->
+    [direct] direct message
+   *[room] room
+  }, { $privacy ->
+    [encrypted] end-to-end encrypted
+   *[plain] not encrypted
+  }
 timeline-jump-to-latest-message = Jump to latest message
 timeline-jump-to-next-mention = Jump to next mention
 timeline-loading-messages = Loading messages
+timeline-message-row-description = { $sender }, { $time }: { $preview }
+timeline-messages-region = Messages
 timeline-next-mention = Next mention
 timeline-no-messages-yet-say-hello = No messages yet. Say hello.
+timeline-preview-audio-message = Audio message
+timeline-preview-file = File
+timeline-preview-message = Message
+timeline-preview-photo = Photo
+timeline-preview-poll = Poll
+timeline-preview-sticker = Sticker
+timeline-preview-unreadable-message = Unreadable message
+timeline-preview-voice-message = Voice message
 update-notice-downloading-update = Downloading update
 update-notice-remind-me-later = Remind me later
 update-notice-working-on-update = Working on update
@@ -597,23 +640,3 @@ voice-recorder-recording-a-voice-message = Recording a voice message
 voice-recorder-release-to-cancel = Release to cancel
 voice-recorder-send-voice-message = Send voice message
 voice-recorder-slide-left-to-cancel = Slide left to cancel
-message-row-seen-by = Seen by { $names }
-album-grid-picture-count = { $count ->
-    [one] { $count } picture
-   *[other] { $count } pictures
-  }
-message-row-open-thread = { $count ->
-    [one] Open thread, { $count } reply
-   *[other] Open thread, { $count } replies
-  }
-timeline-conversation = Conversation with { $title }, { $kind ->
-    [direct] direct message
-   *[room] room
-  }, { $privacy ->
-    [encrypted] end-to-end encrypted
-   *[plain] not encrypted
-  }
-attachment-preview-file-count = { $count ->
-    [one] { $count } file
-   *[other] { $count } files
-  }
