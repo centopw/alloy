@@ -3,6 +3,8 @@
 use std::path::Path;
 
 use alloy_protocol::{DeviceDto, OwnProfileDto, SessionInfoDto, UserId};
+use matrix_sdk::ruma::events::GlobalAccountDataEventType;
+use matrix_sdk::ruma::events::ignored_user_list::{IgnoredUser, IgnoredUserListEventContent};
 
 use crate::{AlloyClient, AlloyError, AlloyResult};
 
@@ -188,53 +190,70 @@ impl AlloyClient {
         }
     }
 
-    /// Add a user to the active account's block list.
-    pub async fn ignore_user(&self, user_id: &UserId) -> AlloyResult<()> {
-        let parsed_id = matrix_sdk::ruma::UserId::parse(&user_id.0)
-            .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
-        self.client
-            .account()
-            .ignore_user(&parsed_id)
-            .await
-            .map_err(sdk_err)
-    }
-
-    /// Remove a user from the active account's block list.
-    pub async fn unignore_user(&self, user_id: &UserId) -> AlloyResult<()> {
-        let parsed_id = matrix_sdk::ruma::UserId::parse(&user_id.0)
-            .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
-        self.client
-            .account()
-            .unignore_user(&parsed_id)
-            .await
-            .map_err(sdk_err)
-    }
-
-    /// List all users on the active account's block list.
-    pub async fn list_ignored_users(&self) -> AlloyResult<Vec<UserId>> {
-        use matrix_sdk::ruma::events::GlobalAccountDataEventType;
-        use matrix_sdk::ruma::events::ignored_user_list::IgnoredUserListEventContent;
-
-        let content = match self
+    /// The block list as the server holds it. The local store is read only when the server cannot
+    /// answer, because the store is filled by a sync echo that may not have arrived yet.
+    async fn server_ignored_users(&self) -> AlloyResult<IgnoredUserListEventContent> {
+        match self
             .client
             .account()
             .fetch_account_data(GlobalAccountDataEventType::IgnoredUserList)
             .await
         {
             Ok(Some(raw)) => serde_json::from_str::<IgnoredUserListEventContent>(raw.json().get())
-                .ok()
-                .unwrap_or_default(),
-            _ => self
+                .map_err(sdk_err),
+            Ok(None) => Ok(IgnoredUserListEventContent::default()),
+            Err(server_error) => self
                 .client
                 .account()
                 .account_data::<IgnoredUserListEventContent>()
                 .await
-                .map_err(sdk_err)?
-                .and_then(|raw| raw.deserialize().ok())
-                .unwrap_or_default(),
-        };
+                .map(|cached| {
+                    cached
+                        .and_then(|raw| raw.deserialize().ok())
+                        .unwrap_or_default()
+                })
+                .map_err(|e| {
+                    AlloyError::MatrixSdk(format!(
+                        "{server_error}; the cached list is unreadable too: {e}"
+                    ))
+                }),
+        }
+    }
 
-        let mut user_ids: Vec<UserId> = content
+    /// Replaces the whole block list. The write is unconditional, so a removal succeeds whether or
+    /// not this session's store has caught up with the addition it is undoing.
+    async fn put_ignored_users(&self, content: &IgnoredUserListEventContent) -> AlloyResult<()> {
+        self.client
+            .account()
+            .set_account_data(content.clone())
+            .await
+            .map(|_| ())
+            .map_err(sdk_err)
+    }
+
+    /// Add a user to the active account's block list.
+    pub async fn ignore_user(&self, user_id: &UserId) -> AlloyResult<()> {
+        let parsed_id = matrix_sdk::ruma::UserId::parse(&user_id.0)
+            .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
+        let mut content = self.server_ignored_users().await?;
+        content.ignored_users.insert(parsed_id, IgnoredUser::new());
+        self.put_ignored_users(&content).await
+    }
+
+    /// Remove a user from the active account's block list.
+    pub async fn unignore_user(&self, user_id: &UserId) -> AlloyResult<()> {
+        let parsed_id = matrix_sdk::ruma::UserId::parse(&user_id.0)
+            .map_err(|e| AlloyError::MatrixSdk(e.to_string()))?;
+        let mut content = self.server_ignored_users().await?;
+        content.ignored_users.remove(&parsed_id);
+        self.put_ignored_users(&content).await
+    }
+
+    /// List all users on the active account's block list.
+    pub async fn list_ignored_users(&self) -> AlloyResult<Vec<UserId>> {
+        let mut user_ids: Vec<UserId> = self
+            .server_ignored_users()
+            .await?
             .ignored_users
             .keys()
             .map(|u| UserId(u.to_string()))
