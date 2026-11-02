@@ -391,9 +391,7 @@ async fn fake_distributor_delivers_encrypted_push_decrypted_locally() {
 
     const PLAINTEXT: &str = "Encrypted push from Bob, decrypted on device";
     let send_resp = room
-        .send(
-            ruma::events::room::message::RoomMessageEventContent::text_plain(PLAINTEXT),
-        )
+        .send(ruma::events::room::message::RoomMessageEventContent::text_plain(PLAINTEXT))
         .await
         .expect("bob send message failed");
     let event_id = send_resp.response.event_id;
@@ -423,10 +421,7 @@ async fn fake_distributor_delivers_encrypted_push_decrypted_locally() {
         Some("event"),
         "expected a decrypted event notification, got: {notif}"
     );
-    assert_eq!(
-        notif.get("body").and_then(|s| s.as_str()),
-        Some(PLAINTEXT),
-    );
+    assert_eq!(notif.get("body").and_then(|s| s.as_str()), Some(PLAINTEXT),);
     assert_eq!(
         notif.get("room_id").and_then(|s| s.as_str()),
         Some(room_id.as_str()),
