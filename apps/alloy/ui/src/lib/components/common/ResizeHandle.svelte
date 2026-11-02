@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '$lib/i18n';
   interface Props {
     /** Current width of the panel this handle resizes. */
     value: number;
@@ -155,7 +156,7 @@
   aria-valuenow={collapsed ? 0 : Math.round(value)}
   aria-valuemin={collapsed ? 0 : min}
   aria-valuemax={max}
-  aria-valuetext={collapsed ? 'Hidden' : undefined}
+  aria-valuetext={collapsed ? t('resize-handle-hidden') : undefined}
   tabindex="0"
   onpointerdown={onPointerDown}
   onpointermove={onPointerMove}

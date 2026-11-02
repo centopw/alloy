@@ -6,6 +6,7 @@
   import { openExternal } from '$lib/platform/links';
   import { prefs } from '$lib/stores/prefs.svelte';
 
+  import { t } from '$lib/i18n';
   interface Props {
     geoUri: string;
     description: string | null;
@@ -23,17 +24,17 @@
 <div class="card">
   <span class="pin" class:live={sharing} aria-hidden="true"><Icon icon={MapPin} size={24} /></span>
   <div class="text">
-    <span class="title">{sharing ? 'Sharing live location' : live ? 'Live location ended' : (label ?? 'Location')}</span>
+    <span class="title">{sharing ? t('location-card-sharing-live-location') : live ? t('location-card-live-location-ended') : (label ?? t('location-card-location'))}</span>
     {#if point}
       <span class="coords">{formatCoordinates(point)}</span>
-      {#if point.accuracy !== null}<span class="muted">Accuracy {formatAccuracy(point.accuracy)}</span>{/if}
+      {#if point.accuracy !== null}<span class="muted">{t('location-card-accuracy')} {formatAccuracy(point.accuracy)}</span>{/if}
     {:else}
-      <span class="muted">This location could not be read.</span>
+      <span class="muted">{t('location-card-this-location-could-not-be-read')}</span>
     {/if}
-    {#if sharing && liveUntil}<span class="muted">Until {formatTime(liveUntil, prefs.timeFormat)}</span>{/if}
+    {#if sharing && liveUntil}<span class="muted">{t('location-card-until')} {formatTime(liveUntil, prefs.timeFormat)}</span>{/if}
   </div>
   {#if point}
-    <button type="button" class="open" aria-label="Open in maps" data-tooltip="Open in maps" onclick={() => void openExternal(mapUrl(point))}>
+    <button type="button" class="open" aria-label={t('location-card-open-in-maps')} data-tooltip={t('location-card-open-in-maps')} onclick={() => void openExternal(mapUrl(point))}>
       <Icon icon={ExternalLink} size={20} />
     </button>
   {/if}

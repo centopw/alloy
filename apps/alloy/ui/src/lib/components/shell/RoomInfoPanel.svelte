@@ -3,6 +3,7 @@
   import { expect } from '$lib/stores/errors';
   import { MediaThumbCache } from '$lib/content/mediaThumbs';
 
+  import { t } from '$lib/i18n';
   /**
    * One cache per panel instance: closing and reopening Room info drops it, which is how a media
    * request that failed earlier (offline, engine restart) gets another chance.
@@ -565,7 +566,7 @@
       <button
         type="button"
         class="media-cell"
-        aria-label="Open {item.body || item.kind}"
+        aria-label={t('room-info-panel-open-attachment', { name: item.body || item.kind })}
         title={item.body || item.kind}
         onclick={() => openMedia(item)}
       >
@@ -599,8 +600,8 @@
     <button
       type="button"
       class="row"
-      aria-label="Download {item.body}"
-      title="Download {item.body}"
+      aria-label={t('room-info-panel-download-attachment', { name: item.body })}
+      title={t('room-info-panel-download-attachment', { name: item.body })}
       disabled={fileBusy === item.event_id}
       onclick={() => openFile(item)}
     >
@@ -619,7 +620,7 @@
 {#snippet linkRow(item: RoomMediaItem)}
   {@const url = linkOf(item)}
   <li>
-    <button type="button" class="row" aria-label="Open link {url}" title={url} onclick={() => void openExternal(url)}>
+    <button type="button" class="row" aria-label={t('room-info-panel-open-link', { url: url })} title={url} onclick={() => void openExternal(url)}>
       <span class="row-icon"><Icon icon={Link} size={20} /></span>
       <span class="row-main">
         <span class="row-title link">{hostOf(url)}</span>
@@ -636,7 +637,7 @@
     <button
       type="button"
       class="row"
-      aria-label="Open profile for {memberLabel(m)}"
+      aria-label={t('room-info-panel-open-profile', { name: memberLabel(m) })}
       data-user-id={m.user_id}
       onclick={(e) => openMemberProfile(e, m.user_id)}
       use:contextmenu={() => memberMenu(m)}
@@ -665,16 +666,16 @@
   {/if}
 {/snippet}
 
-<section class="details" aria-label="Room info" bind:this={panel}>
+<section class="details" aria-label={t('room-info-panel-room-info')} bind:this={panel}>
   <header class="bar">
     {#if view !== 'overview'}
-      <button type="button" class="icon-btn" aria-label="Back to details" title="Back to details" onclick={() => (view = 'overview')}>
+      <button type="button" class="icon-btn" aria-label={t('room-info-panel-back-to-details')} title={t('room-info-panel-back-to-details')} onclick={() => (view = 'overview')}>
         <Icon icon={ChevronLeft} size={20} />
       </button>
     {/if}
     <h2 class="title">{title}</h2>
     {#if view === 'overview' || !viewport.isPhone}
-      <button type="button" class="icon-btn close" aria-label="Close room info" title="Close room info" onclick={onclose}>
+      <button type="button" class="icon-btn close" aria-label={t('room-info-panel-close-room-info')} title={t('room-info-panel-close-room-info')} onclick={onclose}>
         <Icon icon={viewport.isPhone ? ChevronLeft : X} size={20} />
       </button>
     {/if}
@@ -697,8 +698,8 @@
           <button
             type="button"
             class="picture-btn"
-            aria-label="Room picture options"
-            title="Room picture options"
+            aria-label={t('room-info-panel-room-picture-options')}
+            title={t('room-info-panel-room-picture-options')}
             onclick={(e) => openMenuFrom(e.currentTarget, roomPictureItems(roomId), 'Room picture')}
           >
             {@render avatarView()}
@@ -713,7 +714,7 @@
                 bind:value={nameDraft}
                 bind:el={nameInput}
                 maxlength={255}
-                aria-label="Room name"
+                aria-label={t('room-info-panel-room-name')}
                 onkeydown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault();
@@ -727,17 +728,17 @@
                 }}
                 onblur={() => void saveName()}
               />
-              <p class="hint">Enter to save · Esc to cancel</p>
+              <p class="hint">{t('room-info-panel-enter-to-save-esc-to-cancel')}</p>
             </div>
           {:else}
             <div class="editable">
-              <h3 class="name">{details?.name || 'Unnamed room'}</h3>
+              <h3 class="name">{details?.name || t('room-info-panel-unnamed-room')}</h3>
               {#if details?.can_set_name}
                 <button
                   type="button"
                   class="edit-btn"
-                  aria-label="Edit room name"
-                  title="Edit room name"
+                  aria-label={t('room-info-panel-edit-room-name')}
+                  title={t('room-info-panel-edit-room-name')}
                   bind:this={nameEditBtn}
                   onclick={editName}
                 >
@@ -750,7 +751,7 @@
           {#if details}
             <p class="meta">
               {#if details.encrypted}<Icon icon={Lock} size={16} />{/if}
-              {details.encrypted ? 'End-to-end encrypted' : 'Not encrypted'} · {details.joined_members} members
+              {details.encrypted ? t('room-info-panel-end-to-end-encrypted') : t('room-info-panel-not-encrypted')} · {details.joined_members} {t('room-info-panel-members')}
             </p>
           {/if}
         </div>
@@ -759,12 +760,12 @@
       <div class="actions">
         {#if onsearch}
           <Button variant="ghost" size="sm" icon={Search} onclick={onsearch}>
-            {#snippet children()}Search{/snippet}
+            {#snippet children()}{t('common-search')}{/snippet}
           </Button>
         {/if}
         {#if room}
           <Button variant="ghost" size="sm" icon={Copy} onclick={(e) => openMenuFrom(e.currentTarget, copyItems(room), 'Copy ID')}>
-            {#snippet children()}Copy ID{/snippet}
+            {#snippet children()}{t('room-info-panel-copy-id')}{/snippet}
           </Button>
         {/if}
         <button
@@ -779,14 +780,14 @@
       </div>
 
       <section class="section" aria-labelledby="room-info-about">
-        <h3 class="heading" id="room-info-about">About</h3>
+        <h3 class="heading" id="room-info-about">{t('room-info-panel-about')}</h3>
         {#if editingTopic}
           <div class="editor">
             <TextArea
               rows={3}
               bind:value={topicDraft}
               bind:el={topicInput}
-              aria-label="Room topic"
+              aria-label={t('room-info-panel-room-topic')}
               onkeydown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
@@ -800,21 +801,21 @@
               }}
               onblur={() => void saveTopic()}
             />
-            <p class="hint">Enter to save · Shift+Enter for a new line · Esc to cancel</p>
+            <p class="hint">{t('room-info-panel-enter-to-save-shift-enter-for-a-new-line-esc-to-')}</p>
           </div>
         {:else}
           <div class="editable" class:is-empty={!details?.topic}>
             {#if details?.topic}
               <p class="value">{details.topic}</p>
             {:else}
-              <p class="value empty-value">{details?.can_set_topic ? 'No topic yet' : 'No topic'}</p>
+              <p class="value empty-value">{details?.can_set_topic ? t('room-info-panel-no-topic-yet') : t('room-info-panel-no-topic')}</p>
             {/if}
             {#if details?.can_set_topic}
               <button
                 type="button"
                 class="edit-btn"
-                aria-label="Edit room topic"
-                title="Edit room topic"
+                aria-label={t('room-info-panel-edit-room-topic')}
+                title={t('room-info-panel-edit-room-topic')}
                 bind:this={topicEditBtn}
                 onclick={editTopic}
               >
@@ -824,14 +825,14 @@
           </div>
         {/if}
         {#if roomInfo.saving(roomId)}
-          <p class="status" role="status">Saving…</p>
+          <p class="status" role="status">{t('room-info-panel-saving')}</p>
         {/if}
       </section>
 
-      <section class="card" aria-label="Private note">
+      <section class="card" aria-label={t('room-info-panel-private-note')}>
         <div class="card-head">
-          <h3 class="heading">Private note</h3>
-          <span class="pill">Only you</span>
+          <h3 class="heading">{t('room-info-panel-private-note')}</h3>
+          <span class="pill">{t('room-info-panel-only-you')}</span>
         </div>
         {#if editingNote}
           <div class="editor">
@@ -839,7 +840,7 @@
               rows={3}
               bind:value={noteDraft}
               bind:el={noteInput}
-              aria-label="Private note"
+              aria-label={t('room-info-panel-private-note')}
               oninput={(e) => onNoteInput(e.currentTarget.value)}
               onkeydown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
@@ -854,20 +855,20 @@
               }}
               onblur={() => void saveNoteEdit()}
             />
-            <p class="hint">Enter to save · Shift+Enter for a new line · Esc to cancel</p>
+            <p class="hint">{t('room-info-panel-enter-to-save-shift-enter-for-a-new-line-esc-to-')}</p>
           </div>
         {:else}
           <div class="editable" class:is-empty={!roomInfo.note(roomId)}>
             {#if roomInfo.note(roomId)}
               <p class="value">{roomInfo.note(roomId)}</p>
             {:else}
-              <p class="value empty-value">A note only you can see</p>
+              <p class="value empty-value">{t('room-info-panel-a-note-only-you-can-see')}</p>
             {/if}
             <button
               type="button"
               class="edit-btn"
-              aria-label="Edit private note"
-              title="Edit private note"
+              aria-label={t('room-info-panel-edit-private-note')}
+              title={t('room-info-panel-edit-private-note')}
               bind:this={noteEditBtn}
               onclick={editNote}
             >
@@ -876,23 +877,23 @@
           </div>
         {/if}
         {#if noteSaving}
-          <p class="status" role="status">Saving…</p>
+          <p class="status" role="status">{t('room-info-panel-saving')}</p>
         {:else if noteSaved}
-          <p class="status" role="status">Saved</p>
+          <p class="status" role="status">{t('room-info-panel-saved')}</p>
         {/if}
       </section>
 
       {#if sharedHasItems}
         <section class="section" aria-labelledby="room-info-shared">
           <div class="section-head">
-            <h3 class="heading" id="room-info-shared">Shared</h3>
+            <h3 class="heading" id="room-info-shared">{t('room-info-panel-shared')}</h3>
             {#if sharedCurrent.items.length > 0}
               <Button variant="ghost" size="sm" onclick={() => (view = sharedTab)}>
                 {#snippet children()}{viewAll(sharedCurrent.items.length, sharedCurrent.done)}{/snippet}
               </Button>
             {/if}
           </div>
-          <SegmentedControl options={SHARED_TABS} value={sharedTab} label="Shared content" onchange={(v) => (sharedTab = v as MediaView)} />
+          <SegmentedControl options={SHARED_TABS} value={sharedTab} label={t('room-info-panel-shared-content')} onchange={(v) => (sharedTab = v as MediaView)} />
           {#if sharedCurrent.items.length > 0}
             {@render sharedItems(sharedTab, sharedCurrent.items.slice(0, PREVIEW[sharedTab]))}
           {:else}
@@ -904,7 +905,7 @@
       {#if ordered.length > 0}
         <section class="section">
           <div class="section-head">
-            <h3 class="heading">Members</h3>
+            <h3 class="heading">{t('room-info-panel-members-2')}</h3>
             <Button variant="ghost" size="sm" onclick={() => (view = 'members')}>
               {#snippet children()}{viewAll(ordered.length, true)}{/snippet}
             </Button>
@@ -929,19 +930,19 @@
       {/if}
 
       {#if current.loading}
-        <p class="status" role="status">Loading…</p>
+        <p class="status" role="status">{t('room-info-panel-loading')}</p>
       {:else if !current.done && current.items.length > 0}
         <Button variant="ghost" size="sm" onclick={() => roomMedia.loadMore(roomId, MEDIA_KIND[view as MediaView])}>
-          {#snippet children()}Load more{/snippet}
+          {#snippet children()}{t('room-info-panel-load-more')}{/snippet}
         </Button>
       {/if}
       <div class="sentinel" bind:this={sentinel} aria-hidden="true"></div>
     {:else}
       {#if membersError}
         <div class="notice" role="alert">
-          <p>Could not load members: {membersError}</p>
+          <p>{t('room-info-panel-could-not-load-members')} {membersError}</p>
           <Button variant="ghost" size="sm" onclick={() => (membersAttempt += 1)}>
-            {#snippet children()}Try again{/snippet}
+            {#snippet children()}{t('room-info-panel-try-again')}{/snippet}
           </Button>
         </div>
       {/if}
@@ -949,7 +950,7 @@
         <p class="notice" role="alert">{membersActionError}</p>
       {/if}
       {#if membersLoading && members.length === 0}
-        <p class="status" role="status">Loading members…</p>
+        <p class="status" role="status">{t('room-info-panel-loading-members')}</p>
       {:else}
         {#each groups as group (group.title)}
           <section class="section">

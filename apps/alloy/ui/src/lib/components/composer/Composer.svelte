@@ -16,7 +16,8 @@
     pastedImageName,
     pickFiles,
     pickMediaFiles,
-    savePastedImage
+    savePastedImage,
+    takeDroppedAttachments
   } from '$lib/platform/files';
   import { nativeClipboardHasImage, nativeClipboardImage } from '$lib/platform/clipboardImage';
   import { stageFile, stagePictureFromPath, type StagedPicture } from './stageHelper';
@@ -46,11 +47,13 @@
     type MentionRecord
   } from '$lib/stores/mentions';
   import MentionPicker from './MentionPicker.svelte';
+  import AttachmentPreview from './AttachmentPreview.svelte';
   import PollDialog from './PollDialog.svelte';
   import FormatToolbar from './FormatToolbar.svelte';
   import { wrapKindForKey, wrapSelection, type WrapKind } from '$lib/content/markdownWrap';
   import { Button, Modal, TextField } from '../common';
 
+  import { t } from '$lib/i18n';
   interface Props {
     roomId: string;
     /** Set inside a thread panel: sends go into that thread and room reply/edit state is ignored. */
@@ -79,6 +82,8 @@
   // Picked, dropped or pasted files wait here until the user sends them, and the composer text
   // becomes their caption. Nothing leaves the device without an explicit Send.
   let staged = $state<StagedPicture[]>([]);
+  // The preview modal is how a person looks over what they attached and writes a caption for it.
+  let previewOpen = $state(false);
   // Staged attachments are sendable on their own.
   const canSend = $derived(text.trim().length > 0 || staged.length > 0);
   /** The microphone stands in for Send while there is nothing to send (not while editing or in a thread). */
@@ -325,15 +330,16 @@
   }
 
   /**
-   * Sends the staged attachments. Text in the composer rides along as their caption, on the first one
-   * only so an album does not repeat it. The field is cleared once they are on their way.
+   * Sends the staged attachments. `captionOverride` is what the preview modal typed; without it the
+   * composer text rides along, which is what the strip and Enter have always done. The caption goes
+   * on the first file only so an album does not repeat it.
    */
-  async function sendStaged() {
+  async function sendStaged(captionOverride?: string) {
     const items = staged;
     if (items.length === 0) return;
-    const caption = text.trim();
+    const caption = (captionOverride ?? text).trim();
     staged = [];
-    if (caption) {
+    if (captionOverride === undefined && caption) {
       text = '';
       mention = null;
       mentionRecords = [];
@@ -351,9 +357,37 @@
       if (staged.some((item) => item.path === path)) continue;
       staged.push(await stageFile(path));
     }
+    // Attaching something is the moment to look at it. Even a file that was already staged opens the
+    // preview, because asking to attach it again is asking to look at it.
+    if (paths.length > 0) previewOpen = true;
+  }
+
+  /**
+   * Stages a desktop drop. The shell registers the files it saw in the real drag-and-drop event and
+   * hands their paths back, so a dropped file is sendable instead of failing the engine's allowlist
+   * when the user presses Send.
+   */
+  async function stageDropped(dropped: number) {
+    let paths: string[];
+    try {
+      paths = await takeDroppedAttachments();
+    } catch (err) {
+      timelineStore.error = errorMessage(err);
+      return;
+    }
+    if (paths.length === 0 && dropped > 0) {
+      timelineStore.error = t('composer-drop-was-not-accepted');
+      return;
+    }
+    await stagePaths(paths);
   }
 
   $effect(() => () => dropPreviews(staged));
+
+  // An emptied batch has nothing left to preview.
+  $effect(() => {
+    if (previewOpen && staged.length === 0) previewOpen = false;
+  });
 
   // Desktop drops come through Tauri's own event: the webview hides the dropped files' real paths from
   // the page. They join the same preview strip as picked files, so nothing is sent without a Send.
@@ -371,7 +405,7 @@
           else if (payload.type === 'leave') dropActive = false;
           else if (payload.type === 'drop') {
             dropActive = false;
-            void stagePaths(payload.paths ?? []);
+            void stageDropped(payload.paths?.length ?? 0);
           }
         });
         if (cancelled) off();
@@ -390,7 +424,10 @@
     if (!rawPath) return;
     try {
       const picture = await stagePictureFromPath(rawPath);
-      if (picture) staged.push(picture);
+      if (picture) {
+        staged.push(picture);
+        previewOpen = true;
+      }
     } catch (err) {
       timelineStore.error = errorMessage(err);
     }
@@ -404,7 +441,14 @@
       e.preventDefault();
       for (const file of pictures) {
         try {
-          staged.push({ path: await savePastedImage(file), name: pastedImageName(file), kind: 'image', preview: URL.createObjectURL(file) });
+          staged.push({
+            path: await savePastedImage(file),
+            name: pastedImageName(file),
+            kind: 'image',
+            preview: URL.createObjectURL(file),
+            size: file.size,
+          });
+          previewOpen = true;
         } catch (err) {
           timelineStore.error = errorMessage(err);
         }
@@ -431,6 +475,7 @@
     }
     if (path) {
       staged.push(await stageFile(path));
+      previewOpen = true;
     } else {
       field?.focus();
       document.execCommand('insertText', false, pasted);
@@ -636,13 +681,13 @@
   {#if composing}
     <div class="banner">
       <div class="banner-text">
-        <span class="label">{editing ? 'Editing message' : `Replying to ${replying?.sender_display_name ?? replying?.sender}`}</span>
+        <span class="label">{editing ? t('composer-editing-message') : `Replying to ${replying?.sender_display_name ?? replying?.sender}`}</span>
         <span class="preview">{banner()}</span>
       </div>
       <button
         type="button"
         class="round"
-        aria-label={editing ? 'Cancel edit' : 'Cancel reply'}
+        aria-label={editing ? t('composer-cancel-edit') : t('composer-cancel-reply')}
         data-shortcut="Esc"
         onclick={() => {
           const wasEditing = !!editing;
@@ -656,7 +701,7 @@
   {/if}
 
   {#if staged.length > 0}
-    <div class="staged" role="group" aria-label="Attachments ready to send">
+    <div class="staged" role="group" aria-label={t('composer-attachments-ready-to-send')}>
       {#each staged as item (item.path)}
         <div class="picture">
           {#if item.preview && item.kind === 'video'}
@@ -681,25 +726,45 @@
             </span>
           {/if}
           <span class="picture-name">{item.name}</span>
-          <button type="button" class="round" aria-label="Remove {item.name}" data-tooltip="Remove" onclick={() => unstage(item.path)}>
+          <button type="button" class="round" aria-label={t('composer-remove-attachment', { name: item.name })} data-tooltip={t('common-remove')} onclick={() => unstage(item.path)}>
             <Icon icon={X} size={16} />
           </button>
         </div>
       {/each}
-      <span class="staged-hint">{text.trim() ? 'Your text becomes the caption' : 'Press Enter to send'}</span>
+      <span class="staged-hint">{text.trim() ? t('composer-your-text-becomes-the-caption') : t('composer-press-enter-to-send')}</span>
       <Button size="sm" onclick={() => void sendStaged()}>
-        {staged.length === 1 ? 'Send attachment' : `Send ${staged.length} attachments`}
+        {staged.length === 1 ? t('composer-send-attachment') : `Send ${staged.length} attachments`}
       </Button>
     </div>
   {/if}
+
+  <AttachmentPreview
+    open={previewOpen}
+    items={staged}
+    initialCaption={text}
+    onclose={() => (previewOpen = false)}
+    onsend={(caption) => {
+      previewOpen = false;
+      // The caption box opened as the composer draft, so that draft is spent by this send rather
+      // than left behind to look like a second, unsent message.
+      if (text.trim()) {
+        text = '';
+        mention = null;
+        mentionRecords = [];
+        void tickResize();
+      }
+      void sendStaged(caption);
+    }}
+    onremove={(path) => unstage(path)}
+  />
 
   <div class="field" class:recording>
     {#if !threadRoot}
       <button
         type="button"
         class="round"
-        aria-label="Add attachment, poll or location"
-        data-tooltip="Add"
+        aria-label={t('composer-add-attachment-poll-or-location')}
+        data-tooltip={t('common-add')}
         aria-haspopup="menu"
         onclick={openAttachMenu}
         use:contextmenu={attachItems}
@@ -716,7 +781,7 @@
       rows="1"
       data-composer-field
       {placeholder}
-      aria-label={viewport.isPhone ? phoneName : hintSend ? 'Message. Press Ctrl+Enter or Cmd+Enter to send' : 'Message'}
+      aria-label={viewport.isPhone ? phoneName : hintSend ? t('composer-message-press-ctrl-enter-or-cmd-enter-to-send') : t('composer-message')}
       data-shortcut="Enter"
       role="combobox"
       aria-autocomplete="list"
@@ -740,9 +805,9 @@
       <button
         type="button"
         class="round"
-        aria-label="Text formatting"
+        aria-label={t('composer-text-formatting')}
         aria-pressed={formatOpen}
-        data-tooltip="Formatting"
+        data-tooltip={t('composer-formatting')}
         onpointerdown={(e) => e.preventDefault()}
         onclick={() => (formatOpen = !formatOpen)}
       >
@@ -753,9 +818,9 @@
       bind:this={emojiButton}
       type="button"
       class="round"
-      aria-label="Insert emoji"
+      aria-label={t('composer-insert-emoji')}
       aria-expanded={emojiPicker.isOpen}
-      title="Insert emoji"
+      title={t('composer-insert-emoji')}
       use:contextmenu={emojiMenu}
       onclick={toggleEmoji}
     >
@@ -765,8 +830,8 @@
       <button
         type="button"
         class="send"
-        aria-label="Send message"
-        title="Send"
+        aria-label={t('composer-send-message')}
+        title={t('common-send')}
         use:contextmenu={sendMenu}
         disabled={!canSend}
         onpointerdown={(e) => e.preventDefault()}
@@ -793,7 +858,7 @@
   </div>
 </div>
 
-<Modal open={linkOpen} title="Add link" onclose={() => (linkOpen = false)} width="420px">
+<Modal open={linkOpen} title={t('composer-add-link')} onclose={() => (linkOpen = false)} width="420px">
   <form
     class="link-form"
     onsubmit={(e) => {
@@ -801,10 +866,10 @@
       confirmLink();
     }}
   >
-    <TextField bind:value={linkUrl} type="url" aria-label="Link address" placeholder="https://" autocomplete="off" />
+    <TextField bind:value={linkUrl} type="url" aria-label={t('composer-link-address')} placeholder={t('composer-https')} autocomplete="off" />
     <div class="link-actions">
-      <Button variant="ghost" type="button" onclick={() => (linkOpen = false)}>Cancel</Button>
-      <Button type="submit">Add link</Button>
+      <Button variant="ghost" type="button" onclick={() => (linkOpen = false)}>{t('common-cancel')}</Button>
+      <Button type="submit">{t('composer-add-link')}</Button>
     </div>
   </form>
 </Modal>

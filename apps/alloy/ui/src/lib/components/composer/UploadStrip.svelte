@@ -2,6 +2,7 @@
   import { formatBytes } from '$lib/content/format';
   import { hasKnownSize, uploadPercent, uploadsStore } from '$lib/stores/uploads.svelte';
 
+  import { t } from '$lib/i18n';
   interface Props {
     roomId: string;
   }
@@ -17,7 +18,7 @@
 </script>
 
 {#if uploads.length > 0}
-  <ul class="uploads" aria-label="Uploads in progress">
+  <ul class="uploads" aria-label={t('upload-strip-uploads-in-progress')}>
     {#each uploads as upload (upload.txnId)}
       {@const progress = uploadsStore.progressFor(upload.txnId)}
       {@const hasSize = hasKnownSize(progress)}
@@ -28,15 +29,15 @@
           class="track"
           class:indeterminate={!hasSize}
           role="progressbar"
-          aria-label="Uploading {upload.name}"
+          aria-label={t('upload-strip-uploading-name', { name: upload.name })}
           aria-valuemin="0"
           aria-valuemax="100"
           aria-valuenow={hasSize ? percent : undefined}
-          aria-valuetext={hasSize ? `${formatBytes(progress.sent)} of ${formatBytes(progress.total)}` : 'Uploading'}
+          aria-valuetext={hasSize ? `${formatBytes(progress.sent)} of ${formatBytes(progress.total)}` : t('upload-strip-uploading')}
         >
           <div class="fill" style={hasSize ? `width: ${percent}%` : undefined}></div>
         </div>
-        <span class="meta">{hasSize ? `${percent}%` : 'Uploading…'}</span>
+        <span class="meta">{hasSize ? `${percent}%` : t('upload-strip-uploading-2')}</span>
       </li>
     {/each}
   </ul>

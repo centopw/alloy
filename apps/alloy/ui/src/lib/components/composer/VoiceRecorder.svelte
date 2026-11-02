@@ -5,6 +5,7 @@
   import { viewport } from '$lib/stores/viewport.svelte';
   import { ClipTooShort, VoiceRecorder, formatDuration, type VoiceClip } from '$lib/platform/voiceRecorder';
 
+  import { t } from '$lib/i18n';
   interface Props {
     /** Receives the finished clip. */
     onsend: (clip: VoiceClip) => void | Promise<void>;
@@ -152,12 +153,12 @@
 <svelte:window onkeydown={onKeyDown} onpointermove={onWindowMove} onpointerup={onWindowUp} onpointercancel={onWindowCancel} />
 
 {#if recording}
-  <div class="bar" role="group" aria-label="Recording a voice message">
+  <div class="bar" role="group" aria-label={t('voice-recorder-recording-a-voice-message')}>
     <span class="dot" class:locked aria-hidden="true"></span>
     <span class="time" aria-live="off">{formatDuration(elapsedMs)}</span>
     {#if holding}
       <span class="hint" class:warn={cancelling} role="status">
-        {cancelling ? 'Release to cancel' : 'Slide left to cancel'}
+        {cancelling ? t('voice-recorder-release-to-cancel') : t('voice-recorder-slide-left-to-cancel')}
       </span>
     {:else}
       <span class="wave" aria-hidden="true">
@@ -167,10 +168,10 @@
       </span>
     {/if}
     {#if !holding}
-      <button type="button" class="act danger" aria-label="Delete recording" data-tooltip="Delete" onclick={discard}>
+      <button type="button" class="act danger" aria-label={t('voice-recorder-delete-recording')} data-tooltip={t('common-delete')} onclick={discard}>
         <Icon icon={Trash2} size={20} />
       </button>
-      <button type="button" class="act send" aria-label="Send voice message" data-tooltip="Send" onclick={() => void finish()}>
+      <button type="button" class="act send" aria-label={t('voice-recorder-send-voice-message')} data-tooltip={t('common-send')} onclick={() => void finish()}>
         <Icon icon={Send} size={20} />
       </button>
     {/if}
@@ -187,8 +188,8 @@
     class:held={holding}
     style:transform={holding ? `translate(${dragX}px, ${dragY}px) scale(1.25)` : undefined}
     {disabled}
-    aria-label="Record voice message"
-    data-tooltip={phone ? 'Hold to record' : 'Record voice message'}
+    aria-label={t('voice-recorder-record-voice-message')}
+    data-tooltip={phone ? t('voice-recorder-hold-to-record') : t('voice-recorder-record-voice-message')}
     onpointerdown={onMicPointerDown}
     onclick={onMicClick}
   >

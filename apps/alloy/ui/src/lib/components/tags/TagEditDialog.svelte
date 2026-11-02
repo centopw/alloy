@@ -4,6 +4,7 @@
   import { tags } from '$lib/stores/tags.svelte.js';
   import { TAG_COLOUR_VARS, TAG_COLOURS } from '$lib/stores/tags.js';
 
+  import { t } from '$lib/i18n';
   interface Props {
     open: boolean;
     /** The tag being edited; null creates a new tag. */
@@ -53,10 +54,10 @@
   }
 </script>
 
-<Modal open={open} title={tag ? 'Edit tag' : 'New tag'} {onclose} width="420px">
+<Modal open={open} title={tag ? t('tag-edit-dialog-edit-tag') : t('tag-edit-dialog-new-tag')} {onclose} width="420px">
   <form onsubmit={save}>
     <label class="field">
-      <span>Name</span>
+      <span>{t('tag-edit-dialog-name')}</span>
       <TextField
         type="text"
         bind:value={name}
@@ -66,7 +67,7 @@
       />
     </label>
     <fieldset class="colours" disabled={busy}>
-      <legend>Colour</legend>
+      <legend>{t('tag-edit-dialog-colour')}</legend>
       {#each TAG_COLOURS as option (option)}
         <button
           type="button"
@@ -81,8 +82,8 @@
     </fieldset>
     {#if tags.error}<p class="error" role="alert">{tags.error}</p>{/if}
     <div class="actions">
-      <Button variant="ghost" onclick={onclose}>Cancel</Button>
-      <Button type="submit" disabled={!canSave}>{busy ? 'Saving...' : 'Save'}</Button>
+      <Button variant="ghost" onclick={onclose}>{t('common-cancel')}</Button>
+      <Button type="submit" disabled={!canSave}>{busy ? t('tag-edit-dialog-saving') : t('common-save')}</Button>
     </div>
   </form>
 </Modal>

@@ -30,6 +30,7 @@
   } from '$lib/icons';
   import TextField from './TextField.svelte';
 
+  import { t } from '$lib/i18n';
   type IconComponent = Component<{ size?: number; strokeWidth?: number; class?: string }>;
 
   interface Props {
@@ -350,9 +351,9 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="emoji-picker" onkeydown={onRootKey} role="dialog" aria-label="Emoji picker" tabindex="-1">
+<div class="emoji-picker" onkeydown={onRootKey} role="dialog" aria-label={t('emoji-picker-emoji-picker')} tabindex="-1">
   <div class="top">
-    <div class="tabs" role="tablist" aria-label="Emoji categories" class:hidden={hideTabs}>
+    <div class="tabs" role="tablist" aria-label={t('emoji-picker-emoji-categories')} class:hidden={hideTabs}>
       {#each tabs as tab (tab.key)}
         <button
           type="button"
@@ -374,8 +375,8 @@
         bind:el={searchEl}
         bind:value={query}
         icon={Search}
-        placeholder="Search Emoji"
-        aria-label="Search emoji"
+        placeholder={t('emoji-picker-search-emoji')}
+        aria-label={t('emoji-picker-search-emoji-2')}
         autocomplete="off"
         spellcheck={false}
         class="search-input"
@@ -386,8 +387,8 @@
         <button
           type="button"
           class="clear"
-          aria-label="Clear search"
-          title="Clear search"
+          aria-label={t('emoji-picker-clear-search')}
+          title={t('emoji-picker-clear-search')}
           onclick={clearSearch}
         >
           <Icon icon={X} size={16} />
@@ -414,13 +415,13 @@
     {/snippet}
 
     {#if data === null}
-      <p class="status">{loadFailed ? 'Emoji unavailable' : 'Loading emoji…'}</p>
+      <p class="status">{loadFailed ? t('emoji-picker-emoji-unavailable') : t('emoji-picker-loading-emoji')}</p>
     {:else if searching}
       {#if results.length === 0}
-        <p class="status">No emoji found</p>
+        <p class="status">{t('emoji-picker-no-emoji-found')}</p>
       {:else}
         <div class="section">
-          <h3 class="heading">Results</h3>
+          <h3 class="heading">{t('emoji-picker-results')}</h3>
           <div class="grid">
             {#each results as c (c.emoji)}
               {@render cellButton(c)}
@@ -431,7 +432,7 @@
     {:else}
       {#if recentCells.length > 0}
         <section class="section" bind:this={sectionEls[RECENT_KEY]} data-key={RECENT_KEY} aria-labelledby="emoji-h-{RECENT_KEY}">
-          <h3 class="heading" id="emoji-h-{RECENT_KEY}">Recently used</h3>
+          <h3 class="heading" id="emoji-h-{RECENT_KEY}">{t('emoji-picker-recently-used')}</h3>
           <div class="grid">
             {#each recentCells as c (c.emoji)}
               {@render cellButton(c)}
@@ -470,8 +471,8 @@
     <button
       type="button"
       class="tone"
-      title="Skin tone"
-      aria-label="Skin tone: {toneOption.label}"
+      title={t('emoji-picker-skin-tone')}
+      aria-label={t('emoji-picker-skin-tone-option', { tone: toneOption.label })}
       aria-haspopup="menu"
       onclick={openToneMenu}
     >

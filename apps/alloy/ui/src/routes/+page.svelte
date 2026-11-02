@@ -4,21 +4,21 @@
   import Onboarding from '$lib/components/onboarding/Onboarding.svelte';
   import { session } from '$lib/stores/session.svelte';
 
+  import { t } from '$lib/i18n';
   onMount(() => {
     void session.boot();
   });
 </script>
 
 {#if session.phase === 'booting'}
-  <main class="splash" aria-busy="true"><span>Alloy</span></main>
+  <main class="splash" aria-busy="true"><span>{t('brand-name')}</span></main>
 {:else if session.phase === 'no-engine'}
   <main class="splash no-engine">
     <section role="alert">
-      <h1>No local engine</h1>
+      <h1>{t('page-no-local-engine')}</h1>
       <p>
-        This page is not connected to Alloy's engine, so there is nothing to sign in to. Open the
-        packaged app instead; development builds can point at a bridge with
-        <code>?engine=ws://…</code>.
+        {t('page-this-page-is-not-connected-to-alloys-engine-so-t')}
+        <code>{t('page-engine-ws')}</code>.
       </p>
     </section>
   </main>

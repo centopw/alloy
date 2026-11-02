@@ -19,6 +19,7 @@
   import type { MenuItem } from '$lib/stores/contextmenu.svelte';
   import { refreshStore } from '$lib/stores/refresh.svelte';
 
+  import { t } from '$lib/i18n';
   interface Props {
     roomId: string;
     title: string;
@@ -251,12 +252,12 @@
   }
 </script>
 
-<section class="timeline" aria-label="Conversation with {title}, {isDirect ? 'direct message' : 'room'}, {encrypted ? 'end-to-end encrypted' : 'not encrypted'}">
+<section class="timeline" aria-label={t('timeline-conversation', { title: title, kind: isDirect ? 'direct' : 'room', privacy: encrypted ? 'encrypted' : 'plain' })}>
   <div class="viewport" role="presentation" bind:clientHeight={viewportHeight} onpointerdown={onViewportPointerDown} onwheel={onUserScroll} ontouchstart={onUserScroll} use:contextmenu={backgroundItems}>
     {#if timelineStore.loading && rows.length === 0}
-      <p class="status" aria-busy="true">Loading messages</p>
+      <p class="status" aria-busy="true">{t('timeline-loading-messages')}</p>
     {:else if rows.length === 0}
-      <p class="status">No messages yet. Say hello.</p>
+      <p class="status">{t('timeline-no-messages-yet-say-hello')}</p>
     {:else}
       <VList
         bind:this={vlist}
@@ -283,12 +284,12 @@
     {#if !atBottom && rows.length > 0}
       <div class="fabs">
         {#if mentionIds.length > 0}
-          <button class="fab" type="button" onclick={toMention} aria-label="Jump to next mention" data-tooltip="Next mention">
+          <button class="fab" type="button" onclick={toMention} aria-label={t('timeline-jump-to-next-mention')} data-tooltip={t('timeline-next-mention')}>
             <Icon icon={AtSign} size={20} />
             <span class="badge">{badgeLabel(mentionIds.length)}</span>
           </button>
         {/if}
-        <button class="fab" type="button" onclick={toBottom} aria-label={unseen > 0 ? `Jump to latest message, ${unseen} new` : 'Jump to latest message'}>
+        <button class="fab" type="button" onclick={toBottom} aria-label={unseen > 0 ? `Jump to latest message, ${unseen} new` : t('timeline-jump-to-latest-message')}>
           <Icon icon={ArrowDown} size={20} />
           {#if unseen > 0}<span class="badge">{badgeLabel(unseen)}</span>{/if}
         </button>

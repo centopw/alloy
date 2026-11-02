@@ -7,6 +7,7 @@
   import type { UserProfileDto } from '$lib/generated/protocol';
   import { Avatar, Button } from '../common';
 
+  import { t } from '$lib/i18n';
   interface Props {
     userId: string;
     roomId: string | null;
@@ -99,13 +100,13 @@
       size="xl"
       shape="circle"
     />
-    <button type="button" class="icon-btn" aria-label="Close profile" title="Close profile" onclick={onclose}>
+    <button type="button" class="icon-btn" aria-label={t('user-profile-card-close-profile')} title={t('user-profile-card-close-profile')} onclick={onclose}>
       <Icon icon={X} size={viewport.isPhone ? 20 : 16} />
     </button>
   </div>
 
   {#if loading}
-    <p class="status" role="status">Loading profile…</p>
+    <p class="status" role="status">{t('user-profile-card-loading-profile')}</p>
   {:else if error}
     <p class="notice" role="alert">{error}</p>
   {:else if profile}
@@ -116,8 +117,8 @@
         <button
           type="button"
           class="icon-btn"
-          aria-label="Copy user ID"
-          title={copied ? 'Copied' : 'Copy user ID'}
+          aria-label={t('user-profile-card-copy-user-id')}
+          title={copied ? t('user-profile-card-copied') : t('user-profile-card-copy-user-id')}
           onclick={copyUserId}
         >
           <Icon icon={copied ? Check : Copy} size={viewport.isPhone ? 20 : 16} />
@@ -127,11 +128,11 @@
 
     <dl class="facts">
       <div class="fact">
-        <dt>Role</dt>
+        <dt>{t('user-profile-card-role')}</dt>
         <dd>{roleLabel(profile.power_level)}</dd>
       </div>
       <div class="fact">
-        <dt>Membership</dt>
+        <dt>{t('user-profile-card-membership')}</dt>
         <dd>{membershipLabel(profile.membership)}</dd>
       </div>
     </dl>
@@ -144,11 +145,11 @@
   {#if profile && !profile.is_me}
     <div class="actions">
       <Button variant="primary" size="md" disabled={busy} onclick={message}>
-        {#snippet children()}Message{/snippet}
+        {#snippet children()}{t('user-profile-card-message')}{/snippet}
       </Button>
       {#if onmention}
         <Button variant="ghost" size="md" onclick={() => onmention(userId)}>
-          {#snippet children()}Mention{/snippet}
+          {#snippet children()}{t('user-profile-card-mention')}{/snippet}
         </Button>
       {/if}
     </div>

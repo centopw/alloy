@@ -6,6 +6,7 @@
   import { errorMessage, expect } from '$lib/stores/errors';
   import { prefs } from '$lib/stores/prefs.svelte';
 
+  import { t } from '$lib/i18n';
   let clearing = $state(false);
   let result = $state<string | null>(null);
   let error = $state<string | null>(null);
@@ -56,17 +57,17 @@
 </script>
 
 <section class="section">
-  <SettingGroup title="Privacy" description="Control what others can see about you.">
+  <SettingGroup title={t('security-privacy-privacy')} description="Control what others can see about you.">
     <SettingToggle
-      label="Send typing notifications"
+      label={t('security-privacy-send-typing-notifications')}
       description="Others in a room can see when you are typing"
       checked={prefs.sendTyping}
       onchange={(v) => prefs.set('sendTyping', v)}
     />
   </SettingGroup>
-  <SettingGroup title="Storage" description="Media is cached on this device so it opens faster.">
+  <SettingGroup title={t('security-privacy-storage')} description="Media is cached on this device so it opens faster.">
     <SettingButtonRow
-      label="Clear media cache"
+      label={t('security-privacy-clear-media-cache')}
       description="Removes cached images, video, audio and files. They download again when you open them."
       buttonLabel={clearing ? 'Clearing...' : 'Clear cache'}
       busy={clearing}
@@ -79,12 +80,12 @@
       <p class="error" role="alert">{error}</p>
     {/if}
   </SettingGroup>
-  <SettingGroup title="Blocked users" description="You do not see messages from people you block, in any room.">
+  <SettingGroup title={t('security-privacy-blocked-users')} description="You do not see messages from people you block, in any room.">
     {#if blockedError}
       <p class="error" role="alert">{blockedError}</p>
     {/if}
     {#if blocked.length === 0}
-      <p class="status">{blockedLoaded ? 'You have not blocked anyone.' : 'Loading'}</p>
+      <p class="status">{blockedLoaded ? t('security-privacy-you-have-not-blocked-anyone') : t('security-privacy-loading')}</p>
     {:else}
       {#each blocked as userId (userId)}
         <SettingButtonRow

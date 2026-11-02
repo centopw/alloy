@@ -6,6 +6,7 @@
   import { tags } from '$lib/stores/tags.svelte.js';
   import { TAG_COLOUR_VARS } from '$lib/stores/tags.js';
 
+  import { t } from '$lib/i18n';
   let editOpen = $state(false);
   let editing = $state<RoomTagDef | null>(null);
   let pendingDelete = $state<RoomTagDef | null>(null);
@@ -23,14 +24,13 @@
 
 <section class="tags">
   <p class="intro">
-    Tags group rooms in the sidebar. Assign them from a room's context menu. Deleting a tag removes it
-    from every room.
+    {t('tags-tags-group-rooms-in-the-sidebar-assign-them-from')}
   </p>
 
   {#if tags.error}<p class="error" role="alert">{tags.error}</p>{/if}
 
   {#if tags.defs.length === 0}
-    <p class="empty">No tags yet.</p>
+    <p class="empty">{t('tags-no-tags-yet')}</p>
   {:else}
     <ul class="list">
       {#each tags.defs as tag, index (tag.id)}
@@ -41,7 +41,7 @@
             <button
               type="button"
               class="icon-btn"
-              aria-label="Move {tag.name} up"
+              aria-label={t('tags-move-up', { name: tag.name })}
               disabled={index === 0}
               onclick={() => tags.move(tag.id, -1)}
             >
@@ -50,19 +50,19 @@
             <button
               type="button"
               class="icon-btn"
-              aria-label="Move {tag.name} down"
+              aria-label={t('tags-move-down', { name: tag.name })}
               disabled={index === tags.defs.length - 1}
               onclick={() => tags.move(tag.id, 1)}
             >
               <Icon icon={ChevronDown} size={20} />
             </button>
-            <button type="button" class="icon-btn" aria-label="Edit {tag.name}" onclick={() => openEdit(tag)}>
+            <button type="button" class="icon-btn" aria-label={t('tags-edit', { name: tag.name })} onclick={() => openEdit(tag)}>
               <Icon icon={Pencil} size={20} />
             </button>
             <button
               type="button"
               class="icon-btn danger"
-              aria-label="Delete {tag.name}"
+              aria-label={t('tags-delete', { name: tag.name })}
               onclick={() => (pendingDelete = tag)}
             >
               <Icon icon={Trash2} size={20} />
@@ -75,7 +75,7 @@
 
   <div class="footer">
     <Button onclick={openNew}>
-      {#snippet children()}<Icon icon={Plus} size={16} /> New tag{/snippet}
+      {#snippet children()}<Icon icon={Plus} size={16} /> {t('tags-new-tag')}{/snippet}
     </Button>
   </div>
 </section>
@@ -84,9 +84,9 @@
 
 <ConfirmDialog
   open={pendingDelete !== null}
-  title="Delete tag"
+  title={t('tags-delete-tag')}
   message={`Delete the tag "${pendingDelete?.name ?? ''}"? It is removed from every room.`}
-  confirmLabel="Delete"
+  confirmLabel={t('common-delete')}
   danger
   onconfirm={async () => {
     if (pendingDelete) await tags.remove(pendingDelete.id);

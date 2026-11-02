@@ -15,6 +15,7 @@
   } from '$lib/stores/notificationSettings.svelte';
   import { permissionsStore } from '$lib/stores/permissions.svelte';
 
+  import { t } from '$lib/i18n';
   const levelOptions: { value: DefaultLevel; label: string }[] = [
     { value: 'All', label: 'All messages' },
     { value: 'Mentions', label: 'Mentions and keywords' },
@@ -95,45 +96,45 @@
 </script>
 
 <div class="section">
-  <SettingGroup title="Default notification level" description="Used for rooms that do not have their own setting.">
+  <SettingGroup title={t('notifications-default-notification-level')} description="Used for rooms that do not have their own setting.">
     {#if settings}
       <SettingSelect
-        label="Direct chats"
+        label={t('notifications-direct-chats')}
         value={settings.one_to_one}
         options={levelOptions}
         disabled={busy}
         onchange={(v) => void notificationSettings.setDefault(true, v as DefaultLevel)}
       />
       <SettingSelect
-        label="Group chats"
+        label={t('notifications-group-chats')}
         value={settings.group}
         options={levelOptions}
         disabled={busy}
         onchange={(v) => void notificationSettings.setDefault(false, v as DefaultLevel)}
       />
     {:else if notificationSettings.loading}
-      <p class="muted">Loading notification settings…</p>
+      <p class="muted">{t('notifications-loading-notification-settings')}</p>
     {/if}
   </SettingGroup>
 
   {#if settings}
-    <SettingGroup title="Mentions and invitations">
+    <SettingGroup title={t('notifications-mentions-and-invitations')}>
       <SettingToggle
-        label="Room mentions"
+        label={t('notifications-room-mentions')}
         description="Notify when someone mentions the whole room with @room."
         checked={settings.room_mention}
         disabled={busy}
         onchange={(v) => changeMention('room_mention', v)}
       />
       <SettingToggle
-        label="Mentions of my name"
+        label={t('notifications-mentions-of-my-name')}
         description="Notify when someone mentions you by name."
         checked={settings.user_mention}
         disabled={busy}
         onchange={(v) => changeMention('user_mention', v)}
       />
       <SettingToggle
-        label="Invitations and calls"
+        label={t('notifications-invitations-and-calls')}
         description="Notify for room invitations and incoming calls."
         checked={settings.invite}
         disabled={busy}
@@ -151,12 +152,12 @@
     />
     {#if notificationsDenied}
       <div class="permission-notice">
-        <span>Review or change notification access in </span>
-        <button type="button" class="permissions-link" onclick={openPermissions}>Permissions</button>.
+        <span>{t('notifications-review-or-change-notification-access-in')} </span>
+        <button type="button" class="permissions-link" onclick={openPermissions}>{t('notifications-permissions')}</button>.
       </div>
     {/if}
     <SettingToggle
-      label="Play a sound"
+      label={t('notifications-play-a-sound')}
       description="Play the system notification sound."
       checked={prefs.notifySound}
       disabled={!prefs.notifyDesktop}
@@ -164,7 +165,7 @@
       onchange={(v) => prefs.set('notifySound', v)}
     />
     <SettingToggle
-      label="Show message preview"
+      label={t('notifications-show-message-preview')}
       description="Include the start of the message in the notification. When off, it only says there is a new message."
       checked={prefs.notifyPreview}
       disabled={!prefs.notifyDesktop}
@@ -173,7 +174,7 @@
     />
     {#if caps.windowFocusOptions}
       <SettingToggle
-        label="Only when the window is unfocused"
+        label={t('notifications-only-when-the-window-is-unfocused')}
         description="Skip notifications while Alloy is focused. A room you are viewing never notifies while Alloy is focused."
         checked={prefs.notifyOnlyWhenUnfocused}
         disabled={!prefs.notifyDesktop}
@@ -184,9 +185,9 @@
   </SettingGroup>
 
   {#if caps.backgroundPush || pushStore.supported}
-    <SettingGroup title="When Alloy is closed" description="Receive background notifications via UnifiedPush without Google services.">
+    <SettingGroup title={t('notifications-when-alloy-is-closed')} description="Receive background notifications via UnifiedPush without Google services.">
       <SettingToggle
-        label="Notifications when Alloy is closed"
+        label={t('notifications-notifications-when-alloy-is-closed')}
         description={pushToggleDescription}
         checked={pushStore.enabled}
         disabled={pushStore.busy}
@@ -194,7 +195,7 @@
       />
       {#if hasDistributors}
         <SettingButtonRow
-          label="Push app"
+          label={t('notifications-push-app')}
           description={pushStore.distributor ?? 'Default push app'}
           buttonLabel="Choose push app"
           onclick={() => pushStore.pick()}
@@ -202,7 +203,7 @@
       {:else}
         <div class="push-instructions">
           <p class="push-text">
-            Alloy uses UnifiedPush to deliver notifications while closed without relying on Google services. Install a distributor such as ntfy, NextPush, or Conversations.
+            {t('notifications-alloy-uses-unifiedpush-to-deliver-notifications-')}
           </p>
           <a
             href="https://unifiedpush.org/users/distributors/"
@@ -212,7 +213,7 @@
               void openExternal('https://unifiedpush.org/users/distributors/');
             }}
           >
-            <span>Find a UnifiedPush distributor</span>
+            <span>{t('notifications-find-a-unifiedpush-distributor')}</span>
             <Icon icon={ExternalLink} size={16} />
           </a>
         </div>
@@ -220,9 +221,9 @@
       {#if pushStore.enabled && pushStore.permission === 'denied'}
         <div class="push-alert">
           <p class="error" role="alert">
-            Notifications are blocked for Alloy. Open Android Settings &gt; Apps &gt; Alloy &gt; Notifications and turn on Allow notifications.
+            {t('notifications-notifications-are-blocked-for-alloy-open-android')}
           </p>
-          <button type="button" class="permissions-link" onclick={openPermissions}>Open Permissions</button>
+          <button type="button" class="permissions-link" onclick={openPermissions}>{t('notifications-open-permissions')}</button>
         </div>
       {/if}
       {#if pushStore.enabled && pushStore.error}
@@ -236,7 +237,7 @@
   {#if permissionError}
     <div class="permission-error-row">
       <p class="error" role="alert">{permissionError}</p>
-      <button type="button" class="permissions-link" onclick={openPermissions}>Open Permissions</button>
+      <button type="button" class="permissions-link" onclick={openPermissions}>{t('notifications-open-permissions')}</button>
     </div>
   {/if}
   {#if notificationSettings.error}

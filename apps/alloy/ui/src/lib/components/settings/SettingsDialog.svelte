@@ -44,6 +44,7 @@ import HelpAbout from './sections/HelpAbout.svelte';
 import Tags from './sections/Tags.svelte';
 import Permissions from './sections/Permissions.svelte';
 
+  import { t } from '$lib/i18n';
   interface Props {
     open: boolean;
     onclose: () => void;
@@ -198,8 +199,8 @@ import Permissions from './sections/Permissions.svelte';
     >
       <nav class="nav" aria-labelledby="settings-title">
         <header class="nav-header">
-          <h2 id="settings-title" class="nav-title">Settings</h2>
-          <button type="button" class="nav-close" aria-label="Close settings" onclick={onclose}>
+          <h2 id="settings-title" class="nav-title">{t('common-settings')}</h2>
+          <button type="button" class="nav-close" aria-label={t('settings-dialog-close-settings')} onclick={onclose}>
             <Icon icon={X} size={20} />
           </button>
         </header>
@@ -227,18 +228,18 @@ import Permissions from './sections/Permissions.svelte';
         <div class="nav-footer">
           <button type="button" class="nav-item danger" onclick={signOut}>
             <span class="nav-icon"><Icon icon={LogOut} size={20} /></span>
-            <span class="nav-label">Sign out</span>
+            <span class="nav-label">{t('settings-dialog-sign-out')}</span>
           </button>
         </div>
       </nav>
 
       <div class="content" role="region" aria-labelledby="settings-section-title">
         <header class="header">
-          <button type="button" class="back" aria-label="Back to settings" onclick={() => (mobileView = 'nav')}>
+          <button type="button" class="back" aria-label={t('settings-dialog-back-to-settings')} onclick={() => (mobileView = 'nav')}>
             <Icon icon={ChevronLeft} size={20} />
           </button>
           <h2 id="settings-section-title" class="header-title">{sectionLabel}</h2>
-          <button type="button" class="close" aria-label="Close settings" onclick={onclose}>
+          <button type="button" class="close" aria-label={t('settings-dialog-close-settings')} onclick={onclose}>
             <Icon icon={X} size={20} />
           </button>
         </header>

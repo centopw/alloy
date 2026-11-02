@@ -13,7 +13,14 @@ const row = readFileSync(resolve(process.cwd(), 'src/lib/components/timeline/Mes
 
 describe('reply quote', () => {
   it('names the quoted message in a header above the card, not inside it', () => {
-    expect(quote).toContain('Reply to <span class="reply-header-name">{senderName || \'user\'}</span>');
+    // Asserted structurally: the words themselves live in the translation catalog, and pinning them
+    // here breaks the test every time a string is extracted.
+    const header = quote.indexOf('class="reply-header"');
+    expect(header).toBeGreaterThan(-1);
+    expect(quote.indexOf('{@render quoteBubble()}')).toBeGreaterThan(header);
+    expect(quote).toContain('<span class="reply-header-name">{senderName || \'user\'}</span>');
+    // ADR 0014: the quoted sender keeps their colour on the header name as well as the card spine.
+    expect(quote).toContain('style="--quote-border-color: {userColor};"');
     // The name is rendered in the card only for the inline (flat layout) quote.
     expect(quote).toContain('{#if senderName && !stacked}');
     expect(quote.match(/\{#if senderName && !stacked\}/g)).toHaveLength(2);

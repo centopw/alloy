@@ -7,6 +7,7 @@
   import { errorMessage, expect } from '$lib/stores/errors';
   import { verification } from '$lib/stores/verification.svelte';
 
+  import { t } from '$lib/i18n';
   interface Props {
     onclose: () => void;
   }
@@ -95,7 +96,7 @@
 </script>
 
 {#snippet signOutDialog()}
-  <Modal open={pendingSignOut !== null} title="Sign out" onclose={() => (pendingSignOut = null)} width="420px">
+  <Modal open={pendingSignOut !== null} title={t('devices-sign-out')} onclose={() => (pendingSignOut = null)} width="420px">
     <form
       class="signout"
       onsubmit={(e) => {
@@ -104,11 +105,11 @@
       }}
     >
       <p>{pendingSignOut?.label}</p>
-      <TextField bind:value={password} type="password" aria-label="Account password" placeholder="Account password" autocomplete="current-password" />
+      <TextField bind:value={password} type="password" aria-label={t('devices-account-password')} placeholder={t('devices-account-password')} autocomplete="current-password" />
       {#if signOutError}<p class="error" role="alert">{signOutError}</p>{/if}
       <div class="actions">
-        <Button variant="ghost" type="button" onclick={() => (pendingSignOut = null)}>Cancel</Button>
-        <Button variant="danger" type="submit" disabled={signOutBusy || password === ''}>Sign out</Button>
+        <Button variant="ghost" type="button" onclick={() => (pendingSignOut = null)}>{t('common-cancel')}</Button>
+        <Button variant="danger" type="submit" disabled={signOutBusy || password === ''}>{t('devices-sign-out')}</Button>
       </div>
     </form>
   </Modal>
@@ -116,15 +117,15 @@
 
 {@render signOutDialog()}
 <section class="section">
-  <SettingGroup title="This session">
+  <SettingGroup title={t('devices-this-session')}>
     {#if current}
       <div class="row">
-        <span class="row-label">Status</span>
-        <span class="row-value">{current.verified ? 'Verified' : 'Not verified'}</span>
+        <span class="row-label">{t('devices-status')}</span>
+        <span class="row-value">{current.verified ? t('devices-verified') : t('devices-not-verified')}</span>
       </div>
       {#if !current.verified}
         <SettingButtonRow
-          label="Verify this session"
+          label={t('devices-verify-this-session')}
           description="Compare emojis with another signed-in device to trust this session."
           buttonLabel="Start verification"
           onclick={verifyThisSession}
@@ -133,16 +134,16 @@
     {/if}
   </SettingGroup>
 
-  <SettingGroup title="Signed-in devices" description="Sessions signed in to this account.">
+  <SettingGroup title={t('devices-signed-in-devices')} description="Sessions signed in to this account.">
     {#if loading}
-      <p class="muted">Loading devices...</p>
+      <p class="muted">{t('devices-loading-devices')}</p>
     {:else if error}
       <p class="error group-note" role="alert">{error}</p>
       <div class="group-note">
-        <Button variant="ghost" size="sm" onclick={() => void load()}>Try again</Button>
+        <Button variant="ghost" size="sm" onclick={() => void load()}>{t('devices-try-again')}</Button>
       </div>
     {:else if ordered.length === 0}
-      <p class="muted">No devices found.</p>
+      <p class="muted">{t('devices-no-devices-found')}</p>
     {:else}
       <ul class="list">
         {#each ordered as device (device.device_id)}
@@ -150,32 +151,32 @@
             <div class="device-head">
               <span class="device-name">{device.display_name ?? device.device_id}</span>
               {#if device.is_current}
-                <span class="tag">This device</span>
+                <span class="tag">{t('devices-this-device')}</span>
               {/if}
               <span class="tag" class:warn={!device.verified}>
-                {device.verified ? 'Verified' : 'Unverified'}
+                {device.verified ? t('devices-verified') : t('devices-unverified')}
               </span>
             </div>
             <div class="device-meta">
               <span class="mono">{device.device_id}</span>
-              <span>Last seen {lastSeen(device.last_seen_ts)}</span>
+              <span>{t('devices-last-seen')} {lastSeen(device.last_seen_ts)}</span>
               {#if device.last_seen_ip}
                 <span class="mono">{device.last_seen_ip}</span>
               {/if}
             </div>
             {#if !device.is_current}
               <Button variant="ghost" size="sm" onclick={() => askSignOut([device.device_id], `Sign ${device.display_name ?? device.device_id} out of this account.`)}>
-                Sign out
+                {t('devices-sign-out')}
               </Button>
             {/if}
           </li>
         {/each}
       </ul>
       <div class="footer-actions">
-        <Button variant="ghost" size="sm" onclick={() => void load()}>Refresh</Button>
+        <Button variant="ghost" size="sm" onclick={() => void load()}>{t('devices-refresh')}</Button>
         {#if others.length > 0}
           <Button variant="danger" size="sm" onclick={() => askSignOut(others.map((d) => d.device_id), `Sign ${others.length} other ${others.length === 1 ? 'session' : 'sessions'} out of this account.`)}>
-            Sign out all other sessions
+            {t('devices-sign-out-all-other-sessions')}
           </Button>
         {/if}
       </div>

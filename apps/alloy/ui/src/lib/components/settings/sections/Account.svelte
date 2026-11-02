@@ -8,6 +8,7 @@
   import { session } from '$lib/stores/session.svelte';
   import { Copy, ImagePlus, Trash2 } from '$lib/icons';
 
+  import { t } from '$lib/i18n';
   interface Props {
     onclose: () => void;
   }
@@ -122,7 +123,7 @@
         size="sm"
         icon={ImagePlus}
         disabled={busy}
-        onclick={() => void changeAvatar()}>Change photo</Button
+        onclick={() => void changeAvatar()}>{t('account-change-photo')}</Button
       >
       {#if session.account.avatar_url}
         <Button
@@ -130,15 +131,15 @@
           size="sm"
           icon={Trash2}
           disabled={busy}
-          onclick={() => void setAvatar(null)}>Remove photo</Button
+          onclick={() => void setAvatar(null)}>{t('account-remove-photo')}</Button
         >
       {/if}
     </div>
 
-    <SettingGroup title="Profile">
+    <SettingGroup title={t('account-profile')}>
       <form class="name-form" onsubmit={saveName}>
         <label class="field">
-          <span class="field-label">Display name</span>
+          <span class="field-label">{t('account-display-name')}</span>
           <TextField
             type="text"
             bind:value={draftName}
@@ -147,20 +148,20 @@
           />
         </label>
         <Button type="submit" disabled={!nameChanged || busy}>
-          {savingName ? 'Saving...' : 'Save'}
+          {savingName ? t('account-saving') : t('common-save')}
         </Button>
       </form>
     </SettingGroup>
 
-    <SettingGroup title="Identity">
+    <SettingGroup title={t('account-identity')}>
       <div class="row">
-        <span class="row-label">Username</span>
+        <span class="row-label">{t('account-username')}</span>
         <span class="row-value">
           {session.account.user_id}
           <button
             type="button"
             class="icon-button"
-            aria-label="Copy username"
+            aria-label={t('account-copy-username')}
             onclick={() => void copyUserId()}
           >
             <Copy size={16} />
@@ -168,17 +169,17 @@
         </span>
       </div>
       {#if copied}
-        <p class="row note" role="status">Username copied.</p>
+        <p class="row note" role="status">{t('account-username-copied')}</p>
       {/if}
       <div class="row">
-        <span class="row-label">Homeserver</span>
+        <span class="row-label">{t('account-homeserver')}</span>
         <span class="row-value">{session.account.homeserver_url}</span>
       </div>
     </SettingGroup>
 
-    <SettingGroup title="Session">
+    <SettingGroup title={t('account-session')}>
       <SettingButtonRow
-        label="Sign out"
+        label={t('account-sign-out')}
         description="Removes this account from Alloy on this device."
         buttonLabel={signingOut ? 'Signing out...' : 'Sign out'}
         danger
@@ -187,7 +188,7 @@
       />
     </SettingGroup>
   {:else}
-    <p class="muted">No account is signed in.</p>
+    <p class="muted">{t('account-no-account-is-signed-in')}</p>
   {/if}
 
   {#if error}<p class="error" role="alert">{error}</p>{/if}

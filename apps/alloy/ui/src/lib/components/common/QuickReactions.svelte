@@ -1,6 +1,7 @@
 <script lang="ts">
   import Icon from '$lib/icons/Icon.svelte';
   import { SmilePlus, ChevronDown, Plus } from '$lib/icons';
+  import { t } from '$lib/i18n';
   interface Props {
     /** Emoji to offer, in order (the user's quick-reaction list). */
     emojis: readonly string[];
@@ -19,20 +20,20 @@
   const shown = $derived(limit === undefined ? emojis : emojis.slice(0, limit));
 </script>
 
-<div class="bar" class:touch={size === 'touch'} role="group" aria-label="Quick reactions">
+<div class="bar" class:touch={size === 'touch'} role="group" aria-label={t('quick-reactions-quick-reactions')}>
   {#each shown as emoji (emoji)}
     <button
       type="button"
       class="emoji"
       class:on={active.includes(emoji)}
       aria-pressed={active.includes(emoji)}
-      aria-label="React with {emoji}"
+      aria-label={t('quick-reactions-react-with-emoji', { emoji: emoji })}
       onclick={() => onpick(emoji)}
     >
       {emoji}
     </button>
   {/each}
-  <button type="button" class="more" aria-label="More reactions" data-tooltip="More reactions" onclick={onmore}>
+  <button type="button" class="more" aria-label={t('quick-reactions-more-reactions')} data-tooltip={t('quick-reactions-more-reactions')} onclick={onmore}>
     <Icon icon={size === 'touch' ? Plus : ChevronDown} size={size === 'touch' ? 24 : 16} />
   </button>
 </div>

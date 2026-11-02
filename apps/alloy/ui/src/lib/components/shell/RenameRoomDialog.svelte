@@ -3,6 +3,7 @@
   import { roomInfo } from '$lib/stores/roomInfo.svelte';
   import { errorMessage } from '$lib/stores/errors';
 
+  import { t } from '$lib/i18n';
   interface Props {
     roomId: string;
     open: boolean;
@@ -55,10 +56,10 @@
   }
 </script>
 
-<Modal {open} title="Rename room" {onclose} width="420px">
+<Modal {open} title={t('rename-room-dialog-rename-room')} {onclose} width="420px">
   <form onsubmit={save}>
     <label class="field">
-      <span>Room name</span>
+      <span>{t('rename-room-dialog-room-name')}</span>
       <TextField
         type="text"
         bind:value={draft}
@@ -70,8 +71,8 @@
     </label>
     {#if shownError}<p class="error" role="alert">{shownError}</p>{/if}
     <div class="actions">
-      <Button variant="ghost" onclick={onclose}>Cancel</Button>
-      <Button type="submit" disabled={!canSave}>{busy ? 'Saving...' : 'Save'}</Button>
+      <Button variant="ghost" onclick={onclose}>{t('common-cancel')}</Button>
+      <Button type="submit" disabled={!canSave}>{busy ? t('rename-room-dialog-saving') : t('common-save')}</Button>
     </div>
   </form>
 </Modal>

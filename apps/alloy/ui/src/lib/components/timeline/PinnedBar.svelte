@@ -11,6 +11,7 @@
   import { nextPinIndex, pinPreview } from '$lib/content/pins';
   import { quote } from './ReplyQuote.svelte';
 
+  import { t } from '$lib/i18n';
   interface Props {
     roomId: string;
   }
@@ -55,21 +56,21 @@
 </script>
 
 {#if current}
-  <div class="bar" role="region" aria-label="Pinned messages">
-    <button type="button" class="main" onclick={openCurrent} aria-label="Jump to pinned message {Math.min(index, pins.length - 1) + 1} of {pins.length}">
+  <div class="bar" role="region" aria-label={t('pinned-bar-pinned-messages')}>
+    <button type="button" class="main" onclick={openCurrent} aria-label={t('pinned-bar-jump-to-pinned', { index: Math.min(index, pins.length - 1) + 1, total: pins.length })}>
       <span class="stripe" aria-hidden="true"></span>
       <span class="text">
-        <span class="label">{pins.length === 1 ? 'Pinned message' : `Pinned message ${Math.min(index, pins.length - 1) + 1} of ${pins.length}`}</span>
+        <span class="label">{pins.length === 1 ? t('pinned-bar-pinned-message') : `Pinned message ${Math.min(index, pins.length - 1) + 1} of ${pins.length}`}</span>
         <span class="preview">{pinPreview(quote(current))}</span>
       </span>
     </button>
-    <button type="button" class="more" aria-label="All pinned messages" data-tooltip="All pinned messages" onclick={() => (listOpen = true)}>
+    <button type="button" class="more" aria-label={t('pinned-bar-all-pinned-messages')} data-tooltip={t('pinned-bar-all-pinned-messages')} onclick={() => (listOpen = true)}>
       <Icon icon={Pin} size={20} />
     </button>
   </div>
 {/if}
 
-<Modal open={listOpen} title="Pinned messages" onclose={() => (listOpen = false)} width="460px">
+<Modal open={listOpen} title={t('pinned-bar-pinned-messages')} onclose={() => (listOpen = false)} width="460px">
   <ul class="list">
     {#each [...pins].reverse() as pin (pin.event_id)}
       <li class="entry">
@@ -89,8 +90,8 @@
           <button
             type="button"
             class="unpin"
-            aria-label="Unpin message"
-            data-tooltip="Unpin"
+            aria-label={t('pinned-bar-unpin-message')}
+            data-tooltip={t('pinned-bar-unpin')}
             onclick={() => pin.event_id && void pinsStore.setPinned(roomId, pin.event_id, false)}
           >
             <Icon icon={PinOff} size={16} />
@@ -98,7 +99,7 @@
         {/if}
       </li>
     {:else}
-      <li class="empty">No pinned messages.</li>
+      <li class="empty">{t('pinned-bar-no-pinned-messages')}</li>
     {/each}
   </ul>
 </Modal>

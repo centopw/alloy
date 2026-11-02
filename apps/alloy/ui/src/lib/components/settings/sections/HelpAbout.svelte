@@ -10,6 +10,7 @@
   import { viewport } from '$lib/stores/viewport.svelte';
   import { onMount } from 'svelte';
 
+  import { t } from '$lib/i18n';
   const REPOSITORY_URL = 'https://github.com/centopw/alloy';
 
   function openRepository(e: MouseEvent) {
@@ -38,40 +39,40 @@
 </script>
 
 <section class="section">
-  <SettingGroup title="Application">
+  <SettingGroup title={t('help-about-application')}>
     <div class="row">
-      <span class="label">Name</span>
-      <span class="value">Alloy</span>
+      <span class="label">{t('help-about-name')}</span>
+      <span class="value">{t('brand-name')}</span>
     </div>
     <div class="row">
-      <span class="label">Version</span>
+      <span class="label">{t('help-about-version')}</span>
       <span class="value">{version}</span>
     </div>
     <div class="row">
-      <span class="label">Licence</span>
-      <span class="value">Apache-2.0</span>
+      <span class="label">{t('help-about-licence')}</span>
+      <span class="value">{t('help-about-apache-2-0')}</span>
     </div>
     <div class="row">
-      <span class="label">Source</span>
+      <span class="label">{t('help-about-source')}</span>
       <a class="value link" href={REPOSITORY_URL} onclick={openRepository}>{REPOSITORY_URL}</a>
     </div>
     <div class="row">
-      <span class="label">Last checked</span>
+      <span class="label">{t('help-about-last-checked')}</span>
       <span class="value">{lastChecked}</span>
     </div>
   </SettingGroup>
 
-  <SettingGroup title="Updates" description="Alloy checks for a new release in the background.">
+  <SettingGroup title={t('help-about-updates')} description="Alloy checks for a new release in the background.">
     <div class="row updates">
-      <span class="label">Status</span>
+      <span class="label">{t('help-about-status')}</span>
       <div class="update">
         <span class="value" role="status">
           {#if updatesStore.checking}
-            Checking...
+            {t('help-about-checking')}
           {:else if available}
-            Version {available.version} is available
+            {t('help-about-version')} {available.version} {t('help-about-is-available')}
           {:else}
-            Alloy is up to date
+            {t('help-about-alloy-is-up-to-date')}
           {/if}
         </span>
         {#if updatesStore.error}
@@ -79,26 +80,26 @@
         {/if}
         <div class="update-actions">
           {#if available}
-            <Button variant="ghost" size="sm" onclick={() => updatesStore.openChangelog()}>What's new</Button>
+            <Button variant="ghost" size="sm" onclick={() => updatesStore.openChangelog()}>{t('help-about-whats-new')}</Button>
           {/if}
           <Button
             variant="ghost"
             size="sm"
             disabled={updatesStore.checking || updatesStore.busy}
-            onclick={() => void updatesStore.check()}>Check for updates</Button
+            onclick={() => void updatesStore.check()}>{t('help-about-check-for-updates')}</Button
           >
         </div>
       </div>
     </div>
     <SettingToggle
-      label="Automatically check for updates"
+      label={t('help-about-automatically-check-for-updates')}
       description="Looks for a new release every few hours."
       checked={prefs.autoCheckUpdates}
       onchange={(value) => updatesStore.setAutoCheck(value)}
     />
     {#if caps.autoDownloadUpdates}
       <SettingToggle
-        label="Download updates automatically"
+        label={t('help-about-download-updates-automatically')}
         description="Fetches new releases in the background so they are ready to install."
         checked={prefs.autoDownloadUpdates}
         disabled={!prefs.autoCheckUpdates}
@@ -108,23 +109,23 @@
     {/if}
   </SettingGroup>
 
-  <SettingGroup title="Diagnostics">
+  <SettingGroup title={t('help-about-diagnostics')}>
     <div class="row">
-      <span class="label">App version</span>
+      <span class="label">{t('help-about-app-version')}</span>
       <span class="value mono">{version}</span>
     </div>
     {#if import.meta.env.DEV}
       <div class="row">
-        <span class="label">Engine</span>
+        <span class="label">{t('help-about-engine')}</span>
         <span class="value mono">{engineLabel()}</span>
       </div>
     {/if}
   </SettingGroup>
 
   {#if import.meta.env.DEV}
-    <SettingGroup title="Developer">
+    <SettingGroup title={t('help-about-developer')}>
       <SettingToggle
-        label="Developer HUD"
+        label={t('help-about-developer-hud')}
         description="Shows engine and render diagnostics over the app."
         checked={ui.hudVisible}
         onchange={(v) => (ui.hudVisible = v)}

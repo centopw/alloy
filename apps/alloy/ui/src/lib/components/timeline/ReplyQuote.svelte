@@ -4,9 +4,11 @@
   import { membersStore } from '$lib/stores/members.svelte.js';
   import { displayNameFor } from '$lib/platform/names.js';
   import { getUserColorValue } from '$lib/identity/userColor.js';
+  import { sanitizeQuoteHtml } from '$lib/content/html';
   import Icon from '$lib/icons/Icon.svelte';
   import { Reply } from '$lib/icons';
 
+  import { t } from '$lib/i18n';
   interface Props {
     replyTo: TimelineItemDto | null | undefined;
     /** Whether the quote is rendered inside the user's own bubble in bubbles layout. */
@@ -49,6 +51,17 @@
     isUnavailable ? 'Original message unavailable' : quote(replyTo)
   );
 
+  /**
+   * A quoted text message shows its formatted body, so a mention or a link inside it reads the same
+   * way it does in the message itself. `quote()` above stays the plain-text form: it decides whether
+   * there is anything to show at all, and it is what the clipboard copies.
+   */
+  const excerptHtml = $derived.by(() => {
+    if (isUnavailable || !replyTo || replyTo.content.kind !== 'TextMessage') return null;
+    const formatted = replyTo.content.data.formatted_body;
+    return formatted ? sanitizeQuoteHtml(formatted) : null;
+  });
+
   const isInteractive = $derived(
     Boolean(replyTo?.event_id && timelineStore.hasEvent(replyTo.event_id))
   );
@@ -76,6 +89,14 @@
   }
 </script>
 
+{#snippet excerptBody()}
+  {#if excerptHtml}
+    {@html excerptHtml}
+  {:else}
+    {excerptText}
+  {/if}
+{/snippet}
+
 {#snippet quoteBubble()}
   {#if isInteractive}
     <button
@@ -85,12 +106,12 @@
       class:stacked
       style="--quote-border-color: {userColor};"
       onclick={jump}
-      aria-label="Jump to message from {senderName || 'user'}"
+      aria-label={t('reply-quote-jump-to-message', { name: senderName || t('common-user') })}
     >
       {#if senderName && !stacked}
         <span class="sender" style="color: {userColor};">{senderName}</span>
       {/if}
-      <span class="excerpt" class:unavailable={isUnavailable}>{excerptText}</span>
+      <span class="excerpt" class:unavailable={isUnavailable}>{@render excerptBody()}</span>
     </button>
   {:else}
     <div
@@ -102,17 +123,18 @@
       {#if senderName && !stacked}
         <span class="sender" style="color: {userColor};">{senderName}</span>
       {/if}
-      <span class="excerpt" class:unavailable={isUnavailable}>{excerptText}</span>
+      <span class="excerpt" class:unavailable={isUnavailable}>{@render excerptBody()}</span>
     </div>
   {/if}
 {/snippet}
 
 {#if stacked}
   <!-- The header names the quoted message and sits outside both cards: the pair is two separately
-       rounded surfaces with a small gap, never a glued column of different widths. -->
-  <span class="reply-header">
+       rounded surfaces with a small gap, never a glued column of different widths. ADR 0014 keeps the
+       quoted sender's colour on the card's spine and on their name here. -->
+  <span class="reply-header" style="--quote-border-color: {userColor};">
     <Icon icon={Reply} size={16} />
-    <span class="reply-header-text">Reply to <span class="reply-header-name">{senderName || 'user'}</span></span>
+    <span class="reply-header-text">{t('reply-quote-reply-to')} <span class="reply-header-name">{senderName || 'user'}</span></span>
   </span>
   {@render quoteBubble()}
 {:else}
@@ -162,8 +184,17 @@
     white-space: nowrap;
   }
   .reply-header-name {
-    color: var(--alloy-color-text-primary);
+    color: var(--quote-border-color, var(--alloy-color-text-primary));
     font-weight: var(--alloy-typography-weight-semibold);
+  }
+  /* A mention in the quoted text is a person, not a URL. The quote's anchor has already become a span
+     (a link inside this card would be an interactive inside an interactive), so only the chip is left. */
+  .excerpt :global(.alloy-pill) {
+    color: var(--alloy-color-accent-primary);
+    background: var(--alloy-color-accent-subtle);
+    border-radius: var(--alloy-radii-full);
+    padding: 0 var(--alloy-spacing-scale-2);
+    text-decoration: none;
   }
   .reply-quote.stacked {
     position: relative;

@@ -9,6 +9,7 @@
   import type { MenuItem } from '$lib/stores/contextmenu.svelte';
   import { linkPreviews } from '$lib/stores/linkPreviews.svelte';
 
+  import { t } from '$lib/i18n';
   interface Props {
     url: string;
     roomId: string;
@@ -62,7 +63,7 @@
 </script>
 
 {#if enabled && preview && !dismissed}
-  <aside class="link-preview" aria-label="Link preview" use:contextmenu={menu}>
+  <aside class="link-preview" aria-label={t('link-preview-link-preview')} use:contextmenu={menu}>
     <button type="button" class="open" title={url} onclick={() => void openExternal(url)}>
       {#if imageSrc}
         <img class="image" src={imageSrc} alt="" loading="lazy" />
@@ -79,7 +80,7 @@
         {/if}
       </span>
     </button>
-    <button type="button" class="dismiss" aria-label="Hide preview" title="Hide preview" onclick={() => (dismissed = true)}>
+    <button type="button" class="dismiss" aria-label={t('link-preview-hide-preview')} title={t('link-preview-hide-preview')} onclick={() => (dismissed = true)}>
       <Icon icon={X} size={16} />
     </button>
   </aside>

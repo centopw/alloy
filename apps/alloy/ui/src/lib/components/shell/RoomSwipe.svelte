@@ -8,6 +8,7 @@
   import Icon from '$lib/icons/Icon.svelte';
   import { Archive, ArchiveRestore, Bell, BellOff } from '$lib/icons';
   import { swipe } from '$lib/platform/swipe';
+  import { t } from '$lib/i18n';
 
   interface Props {
     id: string;
@@ -68,11 +69,11 @@
     <div class="actions" class:shown={shift > 0} aria-hidden={!open && dragX === null}>
       <button type="button" class="action mute" tabindex={open ? 0 : -1} onclick={() => run(onmute)}>
         <Icon icon={muted ? Bell : BellOff} size={20} />
-        <span>{muted ? 'Unmute' : 'Mute'}</span>
+        <span>{muted ? t('room-swipe-unmute') : t('room-swipe-mute')}</span>
       </button>
       <button type="button" class="action archive" tabindex={open ? 0 : -1} onclick={() => run(onarchive)}>
         <Icon icon={archived ? ArchiveRestore : Archive} size={20} />
-        <span>{archived ? 'Unarchive' : 'Archive'}</span>
+        <span>{archived ? t('room-swipe-unarchive') : t('room-swipe-archive')}</span>
       </button>
     </div>
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->

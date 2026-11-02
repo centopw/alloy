@@ -60,6 +60,19 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_notification::init())
+        // Tauri forwards a drop to the page and to Rust in the same event-loop turn, and this listener
+        // runs inside that turn: the page can only ask for a batch afterwards, so the queue is filled
+        // before any invoke is served. Recording here rather than trusting a path the page names is
+        // what keeps the engine allowlist no wider than the files the user actually dropped.
+        .on_webview_event(|webview, event| {
+            let tauri::WebviewEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) = event
+            else {
+                return;
+            };
+            if let Some(dropped) = webview.try_state::<pick::DroppedPaths>() {
+                dropped.record(paths);
+            }
+        })
         .setup(|app| {
             let data_dir = app
                 .path()
@@ -77,6 +90,7 @@ pub fn run() {
             let engine = Arc::new(AppEngine::new(ctx));
 
             app.manage(AppState { engine });
+            app.manage(pick::DroppedPaths::default());
             notify::register_click_handler(app.handle())?;
 
             Ok(())
@@ -89,6 +103,8 @@ pub fn run() {
             pick::pick_media_files,
             pick::save_pasted_image,
             pick::import_pasted_image_path,
+            pick::take_dropped_attachments,
+            pick::attachment_size,
             save::save_media,
             save::write_temp_file,
             update::check_update,

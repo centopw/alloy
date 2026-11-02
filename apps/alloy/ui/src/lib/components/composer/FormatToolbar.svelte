@@ -4,6 +4,7 @@
   import { shortcutLabel } from '$lib/platform/shortcuts';
   import type { WrapKind } from '$lib/content/markdownWrap';
 
+  import { t } from '$lib/i18n';
   interface Props {
     onwrap: (kind: WrapKind) => void;
   }
@@ -20,7 +21,7 @@
   ];
 </script>
 
-<div class="toolbar" role="toolbar" aria-label="Text formatting">
+<div class="toolbar" role="toolbar" aria-label={t('format-toolbar-text-formatting')}>
   {#each tools as tool (tool.kind)}
     <!-- The press must not take focus, or the textarea would lose its selection. -->
     <button

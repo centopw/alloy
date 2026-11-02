@@ -1,4 +1,5 @@
 <script module lang="ts">
+  import { t } from '$lib/i18n';
   let activePause: (() => void) | null = null;
 
   /**
@@ -292,8 +293,8 @@
     <button
       type="button"
       class="play-btn"
-      aria-label={error ? 'Retry loading audio' : isPlaying ? 'Pause audio' : 'Play audio'}
-      data-tooltip={error ? 'Retry' : isPlaying ? 'Pause' : 'Play'}
+      aria-label={error ? t('audio-player-retry-loading-audio') : isPlaying ? t('audio-player-pause-audio') : t('audio-player-play-audio')}
+      data-tooltip={error ? t('common-retry') : isPlaying ? t('audio-player-pause') : t('audio-player-play')}
       aria-busy={loading}
       onclick={togglePlay}
     >
@@ -309,11 +310,11 @@
         class="waveform-container"
         role="slider"
         tabindex="0"
-        aria-label="Audio scrubber"
+        aria-label={t('audio-player-audio-scrubber')}
         aria-valuemin="0"
         aria-valuemax={Math.round(effectiveDuration)}
         aria-valuenow={Math.round(currentTime)}
-        aria-valuetext="{formatTime(currentTime)} of {formatTime(effectiveDuration)}"
+        aria-valuetext={t('audio-player-position', { current: formatTime(currentTime), total: formatTime(effectiveDuration) })}
         onpointerdown={handlePointerDown}
         onpointermove={handlePointerMove}
         onpointerup={handlePointerUp}
@@ -341,9 +342,9 @@
 
       <div class="meta-row">
         {#if error}
-          <button type="button" class="error-notice" onclick={togglePlay} aria-label="Retry loading audio">
+          <button type="button" class="error-notice" onclick={togglePlay} aria-label={t('audio-player-retry-loading-audio')}>
             <span class="error-text">{error}</span>
-            <span class="retry-hint">Retry</span>
+            <span class="retry-hint">{t('common-retry')}</span>
           </button>
         {:else}
           <span class="time-text">
@@ -356,8 +357,8 @@
     <button
       type="button"
       class="speed-btn"
-      aria-label="Playback speed"
-      data-tooltip="Playback speed"
+      aria-label={t('audio-player-playback-speed')}
+      data-tooltip={t('audio-player-playback-speed')}
       onclick={cycleSpeed}
     >
       {prefs.voiceSpeed}x
@@ -368,8 +369,8 @@
       <button
         type="button"
         class="download-btn"
-        aria-label="Download {props.body || 'audio'}"
-        title="Download"
+        aria-label={t('audio-player-download', { name: props.body || t('media-audio') })}
+        title={t('audio-player-download-button')}
         onclick={props.ondownload}
       >
         <Icon icon={Download} size={16} />

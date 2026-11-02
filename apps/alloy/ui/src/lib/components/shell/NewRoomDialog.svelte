@@ -4,6 +4,7 @@
   import { roomsStore } from '$lib/stores/rooms.svelte';
   import { errorMessage } from '$lib/stores/errors';
 
+  import { t } from '$lib/i18n';
   interface Props {
     open: boolean;
     onclose: () => void;
@@ -53,10 +54,10 @@
   }
 </script>
 
-<Modal {open} title="New conversation" {onclose} width="440px">
+<Modal {open} title={t('new-room-dialog-new-conversation')} {onclose} width="440px">
     <div class="mode">
       <SegmentedControl
-        label="Create or join"
+        label={t('new-room-dialog-create-or-join')}
         value={mode}
         options={[{ value: 'create', label: 'Create room' }, { value: 'join', label: 'Join room' }]}
         onchange={(v) => (mode = v as 'create' | 'join')}
@@ -65,21 +66,21 @@
   <form onsubmit={submit}>
     {#if mode === 'create'}
       <label>
-        <span>Room name</span>
+        <span>{t('new-room-dialog-room-name')}</span>
         <TextField type="text" bind:value={name} required maxlength={100} autocomplete="off" />
       </label>
-      <div class="row"><span>End-to-end encrypted</span><Toggle label="End-to-end encrypted" checked={encrypted} onchange={(v) => (encrypted = v)} /></div>
+      <div class="row"><span>{t('new-room-dialog-end-to-end-encrypted')}</span><Toggle label={t('new-room-dialog-end-to-end-encrypted')} checked={encrypted} onchange={(v) => (encrypted = v)} /></div>
     {:else}
       <label>
-        <span>Room address or ID</span>
-        <TextField type="text" bind:value={target} placeholder="#room:server.org" required autocomplete="off" autocapitalize="off" spellcheck={false} />
+        <span>{t('new-room-dialog-room-address-or-id')}</span>
+        <TextField type="text" bind:value={target} placeholder={t('new-room-dialog-room-server-org')} required autocomplete="off" autocapitalize="off" spellcheck={false} />
       </label>
     {/if}
     {#if error}<p class="error" role="alert">{error}</p>{/if}
     <div class="actions">
-      <Button variant="ghost" onclick={onclose}>Cancel</Button>
+      <Button variant="ghost" onclick={onclose}>{t('common-cancel')}</Button>
       <Button type="submit" disabled={busy || (mode === 'create' ? !name.trim() : !target.trim())}>
-        {busy ? 'Working...' : mode === 'create' ? 'Create' : 'Join'}
+        {busy ? t('new-room-dialog-working') : mode === 'create' ? t('new-room-dialog-create') : t('new-room-dialog-join')}
       </Button>
     </div>
   </form>

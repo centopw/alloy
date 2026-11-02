@@ -86,10 +86,12 @@ describe('message actions', () => {
     // Compact used to drop the quick reactions — the most-used action — and keep thread/edit/delete.
     expect(rowSource).toContain('limit={compact ? COMPACT_REACTIONS : undefined}');
     expect(rowSource).toContain('const COMPACT_REACTIONS = 3;');
-    expect(rowSource).toContain("aria-label=\"More actions\"");
+    // Asserted by message id: the English words live in the catalog, and pinning them here breaks the
+    // test every time a string is extracted for translation.
+    expect(rowSource).toContain("aria-label={t('message-row-more-actions')}");
     // The overflow opens the same menu right-click offers, so thread/edit/delete stay reachable.
     expect(rowSource).toContain('contextMenu.open(menuItems(), { x: rect.left, y: rect.bottom }, menuOptions())');
-    expect(rowSource).toMatch(/\{:else\}[\s\S]*?aria-label="More actions"/);
+    expect(rowSource).toMatch(/\{:else\}[\s\S]*?aria-label=\{t\('message-row-more-actions'\)\}/);
     expect(rowSource).toContain('class="quick"');
     expect(rowSource).toContain('.quick {\n    display: contents;');
   });
@@ -130,7 +132,7 @@ describe('message actions', () => {
 
 describe('file tiles', () => {
   it('offers a labelled download control', () => {
-    expect(mediaSource).toContain('aria-label="Download {body || \'attachment\'}"');
+    expect(mediaSource).toContain("aria-label={t('media-download', { name: body || t('media-attachment') })}");
     expect(mediaSource).toContain('class="file-download"');
     expect(mediaSource).toContain('onclick={ondownload}');
   });
@@ -151,7 +153,7 @@ describe('file tiles', () => {
 describe('audio tiles', () => {
   it('offers a labelled download control like a file tile', () => {
     expect(audioSource).toContain('class="download-btn"');
-    expect(audioSource).toContain('aria-label="Download {props.body || \'audio\'}"');
+    expect(audioSource).toContain("aria-label={t('audio-player-download', { name: props.body || t('media-audio') })}");
     expect(audioSource).toContain('onclick={props.ondownload}');
   });
 

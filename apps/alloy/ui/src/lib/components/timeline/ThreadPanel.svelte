@@ -6,6 +6,7 @@
   import { threadStore, threadReplies, threadRootItem } from '$lib/stores/thread.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
 
+  import { t } from '$lib/i18n';
   interface Props {
     onclose: () => void;
   }
@@ -16,10 +17,10 @@
   const replies = $derived(threadReplies(threadStore.items, rootId));
 </script>
 
-<aside class="thread" aria-label="Thread">
+<aside class="thread" aria-label={t('thread-panel-thread')}>
   <header>
-    <h2>Thread</h2>
-    <button type="button" class="round" aria-label="Close thread" title="Close thread" onclick={onclose}>
+    <h2>{t('thread-panel-thread')}</h2>
+    <button type="button" class="round" aria-label={t('thread-panel-close-thread')} title={t('thread-panel-close-thread')} onclick={onclose}>
       <Icon icon={viewport.isPhone ? ChevronLeft : X} size={20} />
     </button>
   </header>
@@ -32,9 +33,9 @@
       <MessageRow {item} prev={i === 0 ? root : replies[i - 1]} inThread />
     {/each}
     {#if threadStore.loading && !root}
-      <p class="status">Loading thread…</p>
+      <p class="status">{t('thread-panel-loading-thread')}</p>
     {:else if root && replies.length === 0}
-      <p class="status">No replies yet.</p>
+      <p class="status">{t('thread-panel-no-replies-yet')}</p>
     {/if}
     {#if threadStore.error}
       <p class="status error" role="alert">{threadStore.error}</p>

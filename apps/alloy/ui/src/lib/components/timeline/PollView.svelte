@@ -4,6 +4,7 @@
   import { timelineStore } from '$lib/stores/timeline.svelte';
   import { pollPercent } from './pollResults';
 
+  import { t } from '$lib/i18n';
   type PollData = Extract<TimelineItemContent, { kind: 'Poll' }>['data'];
 
   interface Props {
@@ -57,12 +58,12 @@
     {#if revealed}
       <span>{poll.total_votes} {poll.total_votes === 1 ? 'vote' : 'votes'}</span>
     {:else}
-      <span>Results appear when the poll ends</span>
+      <span>{t('poll-view-results-appear-when-the-poll-ends')}</span>
     {/if}
-    {#if multiple && open}<span>Choose up to {poll.max_selections}</span>{/if}
-    {#if poll.has_ended}<span>Poll ended</span>{/if}
+    {#if multiple && open}<span>{t('poll-view-choose-up-to')} {poll.max_selections}</span>{/if}
+    {#if poll.has_ended}<span>{t('poll-view-poll-ended')}</span>{/if}
     {#if item.is_own && open}
-      <Button variant="ghost" size="sm" onclick={() => timelineStore.endPoll(item)}>End poll</Button>
+      <Button variant="ghost" size="sm" onclick={() => timelineStore.endPoll(item)}>{t('poll-view-end-poll')}</Button>
     {/if}
   </div>
 </div>

@@ -5,14 +5,30 @@
   import { X } from '$lib/icons';
   import { pushBack } from '$lib/platform/backstack';
 
+  import { t } from '$lib/i18n';
   interface Props {
     open: boolean;
     title: string;
     onclose: () => void;
     children: Snippet;
     width?: string;
+    /** Extra controls before the title, for dialogs whose own close button sits at the left. */
+    headerStart?: Snippet;
+    /** Extra controls at the far right of the header, next to the close button. */
+    headerEnd?: Snippet;
+    /** False when the dialog supplies its own close control, so the header shows exactly one. */
+    closable?: boolean;
   }
-  let { open, title, onclose, children, width = '520px' }: Props = $props();
+  let {
+    open,
+    title,
+    onclose,
+    children,
+    width = '520px',
+    headerStart,
+    headerEnd,
+    closable = true
+  }: Props = $props();
 
   let dialog: HTMLDivElement | undefined = $state();
   let opener: HTMLElement | null = null;
@@ -26,7 +42,11 @@
   $effect(() => {
     if (open) {
       opener = document.activeElement as HTMLElement | null;
-      void tick().then(() => dialog?.focus());
+      // A dialog that already put the keyboard somewhere inside itself keeps that focus; the generic
+      // landing spot is only for dialogs that do not choose one.
+      void tick().then(() => {
+        if (dialog && !dialog.contains(document.activeElement)) dialog.focus();
+      });
     } else {
       opener?.focus?.();
       opener = null;
@@ -111,8 +131,18 @@
         <span class="grab-bar"></span>
       </div>
       <header>
+        {#if headerStart}
+          <div class="header-side">{@render headerStart()}</div>
+        {/if}
         <h2>{title}</h2>
-        <button type="button" aria-label="Close" onclick={onclose}><Icon icon={X} size={20} /></button>
+        {#if headerEnd || closable}
+          <div class="header-side">
+            {#if headerEnd}{@render headerEnd()}{/if}
+            {#if closable}
+              <button type="button" aria-label={t('common-close')} onclick={onclose}><Icon icon={X} size={20} /></button>
+            {/if}
+          </div>
+        {/if}
       </header>
       <div class="content scroll-y">{@render children()}</div>
     </div>
@@ -170,6 +200,12 @@
   }
   header button:hover {
     background: var(--alloy-glass-control);
+  }
+  /* Controls a dialog adds to its own header; they inherit the round button styling above. */
+  .header-side {
+    display: flex;
+    align-items: center;
+    gap: var(--alloy-spacing-scale-1);
   }
   .content {
     padding: var(--alloy-layout-gutter);

@@ -119,6 +119,124 @@ pub async fn import_pasted_image_path(
     .map_err(|e| e.to_string())?
 }
 
+/// Longest drop remembered from one drag-and-drop. Nothing realistic is this big, and a bounded
+/// queue keeps a hostile or buggy source from growing the shell's memory.
+const MAX_DROPPED_PATHS: usize = 64;
+/// Drops kept at most. Two drops in the same event-loop turn are rare but real, and the older one
+/// must not be silently lost; an abandoned batch is dropped from the front instead.
+const MAX_DROPPED_BATCHES: usize = 4;
+
+/// The files the operating system delivered in real drag-and-drops onto the web view, oldest first.
+///
+/// Only Rust sees that event, so this is the one place a dropped path is trusted: the page asks for a
+/// batch instead of naming a file, and cannot admit something the user never dropped.
+#[derive(Default)]
+pub struct DroppedPaths(std::sync::Mutex<std::collections::VecDeque<Vec<std::path::PathBuf>>>);
+
+impl DroppedPaths {
+    /// Queues one drop's paths, capped so a page that never drains the queue cannot grow it.
+    pub fn record(&self, paths: &[std::path::PathBuf]) {
+        if paths.is_empty() {
+            return;
+        }
+        let mut queued = self.lock();
+        if queued.len() == MAX_DROPPED_BATCHES {
+            queued.pop_front();
+        }
+        queued.push_back(paths.iter().take(MAX_DROPPED_PATHS).cloned().collect());
+    }
+
+    /// The oldest drop not yet handed to the page, leaving it out of the queue.
+    pub fn take(&self) -> Vec<std::path::PathBuf> {
+        self.lock().pop_front().unwrap_or_default()
+    }
+
+    fn lock(
+        &self,
+    ) -> std::sync::MutexGuard<'_, std::collections::VecDeque<Vec<std::path::PathBuf>>> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+/// Registers the files from the last real drop so the engine may send them, and returns their paths.
+///
+/// Desktop drag-and-drop hands the web view paths only; the engine reads a file solely when it is on
+/// its allowlist, so a dropped file that is never registered fails at send time. Registering here
+/// rather than in the page keeps that decision in Rust, next to the event that proves the drop.
+#[tauri::command]
+pub async fn take_dropped_attachments(app: AppHandle) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || take_dropped_blocking(&app))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Byte size of a file the engine is already allowed to send, for the preview's file card.
+///
+/// Asking for a path that is not on the allowlist reports nothing, so the page cannot use this to
+/// probe the filesystem; it only ever describes a file the user has already attached.
+#[tauri::command]
+pub async fn attachment_size(app: AppHandle, path: String) -> Result<Option<u64>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let file = std::path::Path::new(&path);
+        let state = app.state::<AppState>();
+        if !state.engine.context().attachment_path_allowed(file) {
+            return Ok(None);
+        }
+        Ok(std::fs::metadata(file)
+            .ok()
+            .filter(|m| m.is_file())
+            .map(|m| m.len()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn take_dropped_blocking(app: &AppHandle) -> Result<Vec<String>, String> {
+    let Some(dropped_state) = app.try_state::<DroppedPaths>() else {
+        return Ok(Vec::new());
+    };
+    let dropped = dropped_state.take();
+    if dropped.is_empty() {
+        return Ok(Vec::new());
+    }
+    let state = app.state::<AppState>();
+    Ok(register_dropped(state.engine.context(), dropped))
+}
+
+/// Admits the dropped files to the engine allowlist and returns the paths the page may send.
+///
+/// Directories, unreadable paths and non-UTF-8 paths are skipped, and only the individual files are
+/// admitted — never their directory — so dropping a folder cannot widen what the engine may read.
+fn register_dropped(ctx: &EngineContext, dropped: Vec<std::path::PathBuf>) -> Vec<String> {
+    let mut sendable = Vec::new();
+    for path in dropped {
+        // Canonicalizing resolves symlinks, so the admitted file is the one the drop really pointed at
+        // — the same thing the picker does with a link it hands back (see `resolve_picked`).
+        let canonical = match path.canonicalize() {
+            Ok(file) if file.is_file() => file,
+            Ok(dir) => {
+                tracing::warn!(path = %dir.display(), "ignored a dropped directory");
+                continue;
+            }
+            Err(err) => {
+                tracing::warn!(path = %path.display(), %err, "dropped file is not readable");
+                continue;
+            }
+        };
+        if let Err(err) = ctx.allow_attachment_path(&canonical) {
+            tracing::warn!(path = %canonical.display(), %err, "failed to register dropped file");
+            continue;
+        }
+        match canonical.into_os_string().into_string() {
+            Ok(text) => sendable.push(text),
+            Err(_) => tracing::warn!("dropped file path is not valid UTF-8"),
+        }
+    }
+    sendable
+}
+
 /// Writes a pasted picture into a fresh directory under the pick cache and returns the file's path.
 fn store_pasted(
     app: &AppHandle,
@@ -527,6 +645,142 @@ mod tests {
         let out = sanitize_file_name(&long);
         assert!(out.len() <= MAX_NAME_BYTES);
         assert!(out.chars().all(|c| c == 'é'));
+    }
+
+    #[test]
+    fn a_drop_queue_hands_over_its_paths_once() {
+        let dropped = DroppedPaths::default();
+        dropped.record(&[std::path::PathBuf::from("/tmp/report.pdf")]);
+        assert_eq!(
+            dropped.take(),
+            vec![std::path::PathBuf::from("/tmp/report.pdf")]
+        );
+        assert!(
+            dropped.take().is_empty(),
+            "a consumed drop is not sendable twice"
+        );
+    }
+
+    #[test]
+    fn a_newer_drop_waits_its_turn_behind_one_the_page_has_not_taken() {
+        let dropped = DroppedPaths::default();
+        dropped.record(&[std::path::PathBuf::from("/tmp/first.txt")]);
+        dropped.record(&[std::path::PathBuf::from("/tmp/second.txt")]);
+        assert_eq!(
+            dropped.take(),
+            vec![std::path::PathBuf::from("/tmp/first.txt")]
+        );
+        assert_eq!(
+            dropped.take(),
+            vec![std::path::PathBuf::from("/tmp/second.txt")]
+        );
+    }
+
+    #[test]
+    fn an_empty_drop_is_not_queued() {
+        let dropped = DroppedPaths::default();
+        dropped.record(&[]);
+        dropped.record(&[std::path::PathBuf::from("/tmp/a.txt")]);
+        assert_eq!(dropped.take(), vec![std::path::PathBuf::from("/tmp/a.txt")]);
+        assert!(dropped.take().is_empty());
+    }
+
+    #[test]
+    fn a_page_that_never_drains_the_queue_keeps_only_the_newest_drops() {
+        let dropped = DroppedPaths::default();
+        // Seven drops recorded, four kept: the oldest three are abandoned, never admitted later.
+        for index in 0..MAX_DROPPED_BATCHES + 3 {
+            dropped.record(&[std::path::PathBuf::from(format!("/tmp/{index}.png"))]);
+        }
+        assert_eq!(dropped.take(), vec![std::path::PathBuf::from("/tmp/3.png")]);
+    }
+
+    #[test]
+    fn a_huge_drop_is_capped() {
+        let paths: Vec<std::path::PathBuf> = (0..MAX_DROPPED_PATHS + 10)
+            .map(|index| std::path::PathBuf::from(format!("/tmp/{index}.png")))
+            .collect();
+        let dropped = DroppedPaths::default();
+        dropped.record(&paths);
+        assert_eq!(dropped.take().len(), MAX_DROPPED_PATHS);
+    }
+
+    #[test]
+    fn a_dropped_file_becomes_sendable_and_nothing_else_does() {
+        let dir = scratch_dir();
+        let dropped = dir.join("report.pdf");
+        let ignored = dir.join("notes.txt");
+        std::fs::write(&dropped, b"%PDF-1.7").unwrap();
+        std::fs::write(&ignored, b"private").unwrap();
+
+        let ctx = test_context(&dir);
+        let sendable = register_dropped(&ctx, vec![dropped.clone()]);
+
+        assert_eq!(
+            sendable,
+            vec![dropped.canonicalize().unwrap().to_str().unwrap()]
+        );
+        assert!(ctx.attachment_path_allowed(&dropped));
+        assert!(
+            !ctx.attachment_path_allowed(&ignored),
+            "the directory a dropped file sits in must not come along with it"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_dropped_directory_admits_nothing() {
+        let dir = scratch_dir();
+        let inside = dir.join("secret.txt");
+        std::fs::write(&inside, b"private").unwrap();
+
+        let ctx = test_context(&dir);
+        let sendable = register_dropped(&ctx, vec![dir.clone()]);
+
+        assert!(sendable.is_empty());
+        assert!(
+            !ctx.attachment_path_allowed(&inside),
+            "dropping a folder must not make everything inside it sendable"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_dropped_path_that_is_not_there_admits_nothing() {
+        let dir = scratch_dir();
+        let ctx = test_context(&dir);
+        assert!(register_dropped(&ctx, vec![dir.join("gone.png")]).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_dropped_link_admits_the_file_it_points_at() {
+        // Pinning the intent: canonicalizing means the engine reads the real file, exactly as it does
+        // for a link the picker hands back. The link itself is never what gets admitted.
+        let dir = scratch_dir();
+        let target = dir.join("target.png");
+        std::fs::write(&target, [0x89, b'P', b'N', b'G']).unwrap();
+        let link = dir.join("link.png");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        let ctx = test_context(&dir);
+        let sendable = register_dropped(&ctx, vec![link.clone()]);
+
+        assert_eq!(
+            sendable,
+            vec![target.canonicalize().unwrap().to_str().unwrap()]
+        );
+        assert!(ctx.attachment_path_allowed(&link));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A real engine context over a throwaway data dir, so the allowlist under test is the production one.
+    fn test_context(dir: &Path) -> EngineContext {
+        let secrets = std::sync::Arc::new(alloy_storage::FileSecretStore::new(
+            dir.join("secrets.json"),
+        ));
+        EngineContext::new(dir.to_path_buf(), secrets)
     }
 
     #[cfg(unix)]

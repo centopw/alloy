@@ -2,12 +2,14 @@
 //! Set ALLOY_TEST_HS=http://localhost:8008.
 
 use std::path::Path;
+use std::time::Duration;
 
 use alloy_core::AlloyClient;
 use alloy_core::accounts::{AccountEntry, AccountIndex};
 use alloy_push::{fetch_notification, remove_pusher, set_pusher};
 use alloy_storage::FileSecretStore;
 use matrix_sdk::Client;
+use matrix_sdk::config::SyncSettings;
 
 fn hs() -> Option<String> {
     let v = std::env::var("ALLOY_TEST_HS").ok();
@@ -56,6 +58,53 @@ async fn setup_account(
         .unwrap();
 
     (client, entry)
+}
+
+/// The message content a UnifiedPush distributor delivers for an `event_id_only` pusher.
+///
+/// A Matrix push gateway sends this JSON to the distributor, which hands the bytes to the app's
+/// `PushService`; `PushNative.fetchNotification` then passes them to `alloy_push::fetch_notification`.
+/// The CI test feeds this shape into the same function, so it stands in for the distributor
+/// transport, not for the handler.
+fn distributor_message(room_id: &str, event_id: &str, unread: u64) -> String {
+    serde_json::json!({
+        "notification": {
+            "event_id": event_id,
+            "room_id": room_id,
+            "counts": { "unread": unread },
+            "devices": [{
+                "app_id": "vn.hce.alloy.android",
+                "pushkey": "fake-distributor",
+                "pushkey_ts": 0,
+                "data": { "format": "event_id_only" },
+            }],
+        }
+    })
+    .to_string()
+}
+
+/// Wait until a client has uploaded its device keys, so encrypted messages can be addressed to it.
+///
+/// The first sync of an account can be slow enough to hit the client timeout; it is safe to retry,
+/// the next sync resumes from the stored position.
+async fn sync_until_device_keys(client: &AlloyClient) {
+    for _ in 0..20 {
+        if let Err(e) = client.sync_once().await {
+            eprintln!("sync attempt failed, retrying: {e}");
+        } else {
+            let own_device = client
+                .inner_client()
+                .encryption()
+                .get_own_device()
+                .await
+                .expect("failed to read own device");
+            if own_device.is_some() {
+                return;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    panic!("client never uploaded device keys");
 }
 
 #[tokio::test]
@@ -285,6 +334,113 @@ async fn fetch_notification_encrypted_room_attempt() {
     assert!(
         status == "generic" || status == "event" || status == "error",
         "unexpected status for encrypted room: {status} ({notif})"
+    );
+}
+
+#[tokio::test]
+async fn fake_distributor_delivers_encrypted_push_decrypted_locally() {
+    // The full app-side path without the distributor transport: an `event_id_only` push for an
+    // E2EE event is handled by `fetch_notification` (behind `PushNative.fetchNotification`),
+    // which decrypts with the locally persisted room key and yields the message body.
+    let Some(hs) = hs() else { return };
+    let alice_dir = tempfile::tempdir().unwrap();
+    let (alice_client, alice_entry) =
+        setup_account(&hs, alice_dir.path(), "alice", "testpassword123!").await;
+
+    // Bob can only encrypt to devices Alice has published.
+    sync_until_device_keys(&alice_client).await;
+
+    let bob_raw = Client::new(hs.parse().unwrap()).await.unwrap();
+    bob_raw
+        .matrix_auth()
+        .login_username("bob", "testpassword123!")
+        .send()
+        .await
+        .expect("bob login failed");
+    bob_raw
+        .sync_once(SyncSettings::default())
+        .await
+        .expect("bob sync failed");
+
+    let room = bob_raw
+        .create_room(ruma::api::client::room::create_room::v3::Request::new())
+        .await
+        .expect("room creation failed");
+    let room_id = room.room_id().to_owned();
+    room.send_state_event(
+        ruma::events::room::encryption::RoomEncryptionEventContent::with_recommended_defaults(),
+    )
+    .await
+    .expect("enable encryption failed");
+
+    let alice_user_id: ruma::OwnedUserId = alice_entry.user_id.parse().unwrap();
+    room.invite_user_by_id(&alice_user_id)
+        .await
+        .expect("invite failed");
+    alice_client
+        .inner_client()
+        .join_room_by_id(&room_id)
+        .await
+        .expect("alice join failed");
+
+    // Bob must see Alice's membership before his client shares the Megolm session with her devices.
+    bob_raw
+        .sync_once(SyncSettings::default())
+        .await
+        .expect("bob sync failed");
+
+    const PLAINTEXT: &str = "Encrypted push from Bob, decrypted on device";
+    let send_resp = room
+        .send(
+            ruma::events::room::message::RoomMessageEventContent::text_plain(PLAINTEXT),
+        )
+        .await
+        .expect("bob send message failed");
+    let event_id = send_resp.response.event_id;
+
+    let payload = distributor_message(room_id.as_str(), event_id.as_str(), 1);
+
+    // The distributor and the gateway only ever see ids: event_id_only must not leak the body.
+    assert!(
+        !payload.contains(PLAINTEXT),
+        "distributor payload leaked the message body: {payload}"
+    );
+
+    // Alice's background process receives the to-device room key on its next sync; retry the
+    // handler until the key is in the local store rather than assuming sync timing.
+    let mut notif = serde_json::Value::Null;
+    for _ in 0..10 {
+        notif = fetch_notification(alice_dir.path(), &payload).await;
+        if notif.get("status").and_then(|s| s.as_str()) == Some("event") {
+            break;
+        }
+        alice_client.sync_once().await.expect("alice sync failed");
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+
+    assert_eq!(
+        notif.get("status").and_then(|s| s.as_str()),
+        Some("event"),
+        "expected a decrypted event notification, got: {notif}"
+    );
+    assert_eq!(
+        notif.get("body").and_then(|s| s.as_str()),
+        Some(PLAINTEXT),
+    );
+    assert_eq!(
+        notif.get("room_id").and_then(|s| s.as_str()),
+        Some(room_id.as_str()),
+    );
+    assert_eq!(
+        notif.get("event_id").and_then(|s| s.as_str()),
+        Some(event_id.as_str()),
+    );
+    assert!(
+        notif
+            .get("sender_name")
+            .and_then(|s| s.as_str())
+            .is_some_and(|s| !s.is_empty()),
+        "notification should name the sender: {notif}"
     );
 }
 

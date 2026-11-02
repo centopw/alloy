@@ -8,6 +8,7 @@
   import { indexOfEvent, viewerItemsFrom, type MediaItem } from '$lib/content/mediaItems';
   import MediaViewer from './MediaViewer.svelte';
 
+  import { t } from '$lib/i18n';
   interface Props {
     items: readonly TimelineItemDto[];
   }
@@ -67,7 +68,7 @@
   }
 </script>
 
-<div class="album" data-count={Math.min(items.length, SHOWN)} role="group" aria-label="{items.length} pictures">
+<div class="album" data-count={Math.min(items.length, SHOWN)} role="group" aria-label={t('album-grid-picture-count', { count: items.length })}>
   {#each shown as item, i (item.internal_id)}
     <button type="button" class="tile" aria-label={label(item)} onclick={() => open(item)}>
       {#if urls[item.internal_id]}
@@ -79,7 +80,7 @@
         <span class="play" aria-hidden="true"><Icon icon={Play} size={24} /></span>
       {/if}
       {#if extra > 0 && i === SHOWN - 1}
-        <span class="more" aria-label="{extra} more">+{extra}</span>
+        <span class="more" aria-label={t('album-grid-extra-more', { count: extra })}>+{extra}</span>
       {/if}
     </button>
   {/each}

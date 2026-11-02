@@ -11,6 +11,7 @@
   import { profileCard } from '$lib/stores/profileCard.svelte';
   import type { UserSearchResultDto } from '$lib/generated';
 
+  import { t } from '$lib/i18n';
   interface Props {
     open: boolean;
     onclose: () => void;
@@ -150,22 +151,22 @@
       class="palette"
       role="dialog"
       aria-modal="true"
-      aria-label="Quick switcher"
+      aria-label={t('command-palette-quick-switcher')}
       tabindex="-1"
       bind:this={paletteEl}
       onkeydown={onKey}
       onclick={(e) => e.stopPropagation()}
     >
       <div class="bar">
-        <button type="button" class="back" aria-label="Close quick switcher" onclick={onclose}>
+        <button type="button" class="back" aria-label={t('command-palette-close-quick-switcher')} onclick={onclose}>
           <Icon icon={ChevronLeft} size={24} />
         </button>
         <span class="search-icon" aria-hidden="true"><Icon icon={Search} size={20} /></span>
         <input
           bind:this={input}
           bind:value={query}
-          placeholder="Search rooms"
-          aria-label="Search rooms"
+          placeholder={t('command-palette-search-rooms')}
+          aria-label={t('command-palette-search-rooms')}
           role="combobox"
           aria-expanded="true"
           aria-controls="palette-results"
@@ -183,7 +184,7 @@
           </li>
         {/each}
         {#if people.length > 0}
-          <li class="group" role="presentation">People</li>
+          <li class="group" role="presentation">{t('command-palette-people')}</li>
           {#each people as p, j (p.user_id)}
             <li id={`palette-option-person-${p.user_id}`} role="option" aria-selected={results.length + j === index}>
               <button
@@ -195,22 +196,22 @@
                 <Avatar userId={p.user_id} displayName={p.display_name} src={p.avatar_url} size={viewport.isPhone ? 48 : 'sm'} />
                 <span class="who">
                   <span class="name">{p.display_name ?? p.user_id}</span>
-                  <span class="id">{p.user_id}{p.already_in_room ? ' · in a room' : ''}</span>
+                  <span class="id">{p.user_id}{p.already_in_room ? t('command-palette-in-a-room') : ''}</span>
                 </span>
               </button>
             </li>
           {/each}
         {:else if results.length === 0 && !peopleBusy}
-          <li class="none">No matching conversations or people</li>
+          <li class="none">{t('command-palette-no-matching-conversations-or-people')}</li>
         {/if}
         {#if peopleError}
           <li class="none" role="alert">{peopleError}</li>
         {/if}
       </ul>
       <footer class="hints" aria-hidden="true">
-        <span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span>
-        <span><kbd>↵</kbd> Open</span>
-        <span><kbd>esc</kbd> Close</span>
+        <span><kbd>↑</kbd><kbd>↓</kbd> {t('command-palette-navigate')}</span>
+        <span><kbd>↵</kbd> {t('command-palette-open')}</span>
+        <span><kbd>{t('command-palette-esc')}</kbd> {t('common-close')}</span>
       </footer>
     </div>
   </div>

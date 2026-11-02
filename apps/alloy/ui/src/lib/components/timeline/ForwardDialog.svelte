@@ -4,6 +4,7 @@
   import { forwardStore } from '$lib/stores/forward.svelte';
   import { roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
 
+  import { t } from '$lib/i18n';
   let query = $state('');
 
   $effect(() => {
@@ -26,12 +27,12 @@
 
 <Modal
   open={forwardStore.open}
-  title={count > 1 ? `Forward ${count} messages` : 'Forward message'}
+  title={count > 1 ? `Forward ${count} messages` : t('forward-dialog-forward-message')}
   onclose={() => forwardStore.close()}
   width="440px"
 >
-  <TextField bind:value={query} icon={Search} placeholder="Search rooms" aria-label="Search rooms" autocomplete="off" />
-  <ul class="rooms" aria-label="Rooms">
+  <TextField bind:value={query} icon={Search} placeholder={t('forward-dialog-search-rooms')} aria-label={t('forward-dialog-search-rooms')} autocomplete="off" />
+  <ul class="rooms" aria-label={t('forward-dialog-rooms')}>
     {#each targets as room (room.id)}
       {@const state = forwardStore.results[room.id]}
       <li class="room">
@@ -46,15 +47,15 @@
           disabled={state === 'sending' || state === 'sent'}
           onclick={() => void forwardStore.sendTo(room.id)}
         >
-          {state === 'sent' ? 'Sent' : state === 'sending' ? 'Sending' : typeof state === 'object' ? 'Retry' : 'Send'}
+          {state === 'sent' ? t('forward-dialog-sent') : state === 'sending' ? t('forward-dialog-sending') : typeof state === 'object' ? t('common-retry') : t('common-send')}
         </Button>
       </li>
     {:else}
-      <li class="empty">No matching rooms.</li>
+      <li class="empty">{t('forward-dialog-no-matching-rooms')}</li>
     {/each}
   </ul>
   <div class="footer">
-    <Button variant="ghost" onclick={() => forwardStore.close()}>Done</Button>
+    <Button variant="ghost" onclick={() => forwardStore.close()}>{t('common-done')}</Button>
   </div>
 </Modal>
 

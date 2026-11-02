@@ -3,6 +3,7 @@
   import { getUserColorValue } from '$lib/identity/userColor';
   import { avatarUrl } from '$lib/stores/avatars.svelte';
 
+  import { t } from '$lib/i18n';
   interface Props {
     userId?: string;
     displayName?: string | null;
@@ -138,7 +139,7 @@
     <span
       class="alloy-avatar-presence"
       data-presence={presence}
-      aria-label="Status: {presence}"
+      aria-label={t('avatar-presence-status', { presence: presence })}
       style="
         position: absolute;
         bottom: 0;

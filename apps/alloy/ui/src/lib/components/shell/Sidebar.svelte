@@ -35,6 +35,7 @@
   import { globalSearch, isSearchable } from '$lib/stores/globalSearch.svelte';
   import { muteEndLabel } from '$lib/content/mute';
 
+  import { t } from '$lib/i18n';
   interface Props {
     onselect?: (roomId: string) => void;
     onnew?: () => void;
@@ -423,7 +424,7 @@
       <span class="text">
         <span class="title">{roomTitle(r)}</span>
         {#if draft}
-          <span class="preview"><span class="draft">Draft:</span> {draft}</span>
+          <span class="preview"><span class="draft">{t('sidebar-draft')}</span> {draft}</span>
         {:else if prefs.roomListPreviews && r.latest_event}
           <span class="preview">{r.latest_event.body}</span>
         {/if}
@@ -441,13 +442,13 @@
             </span>
           {/if}
           {#if r.favourite}
-            <span class="pinned"><Icon icon={Pin} size={16} label="Pinned" /></span>
+            <span class="pinned"><Icon icon={Pin} size={16} label={t('sidebar-pinned')} /></span>
           {/if}
           {#if r.encrypted}
-            <span class="pinned"><Icon icon={Lock} size={16} label="Encrypted" /></span>
+            <span class="pinned"><Icon icon={Lock} size={16} label={t('sidebar-encrypted')} /></span>
           {/if}
           {#if muted}
-            <span class="pinned"><Icon icon={BellOff} size={16} label={until ?? 'Notifications muted'} /></span>
+            <span class="pinned"><Icon icon={BellOff} size={16} label={until ?? t('sidebar-notifications-muted')} /></span>
           {/if}
           {#if unread > 0}
             {#if muted}
@@ -456,7 +457,7 @@
               <span class="pinned"><Badge count={unread} /></span>
             {/if}
           {:else if markedUnread}
-            <span class="pinned"><span class="dot accent" role="img" aria-label="Marked as unread"></span></span>
+            <span class="pinned"><span class="dot accent" role="img" aria-label={t('sidebar-marked-as-unread')}></span></span>
           {/if}
         </span>
       </span>
@@ -465,8 +466,8 @@
       <button
         type="button"
         class="more"
-        aria-label="Actions for {roomTitle(r)}"
-        data-tooltip="More"
+        aria-label={t('sidebar-room-actions', { room: roomTitle(r) })}
+        data-tooltip={t('common-more')}
         onclick={(e) => openMenuFrom(e.currentTarget, roomItems(r), 'Room actions')}
       >
         <Icon icon={Ellipsis} size={16} />
@@ -482,10 +483,10 @@
     </span>
     <div class="text">
       <span class="title">{roomTitle(r)}</span>
-      <span class="sub">Invitation</span>
+      <span class="sub">{t('sidebar-invitation')}</span>
       <div class="invite-actions">
-        <button type="button" disabled={inviteBusy === r.id} onclick={() => answerInvite(r.id, true)}>Accept</button>
-        <button type="button" class="decline" disabled={inviteBusy === r.id} onclick={() => answerInvite(r.id, false)}>Decline</button>
+        <button type="button" disabled={inviteBusy === r.id} onclick={() => answerInvite(r.id, true)}>{t('sidebar-accept')}</button>
+        <button type="button" class="decline" disabled={inviteBusy === r.id} onclick={() => answerInvite(r.id, false)}>{t('sidebar-decline')}</button>
       </div>
     </div>
   </div>
@@ -511,9 +512,9 @@
 {#snippet roomList(list: RoomItem[])}
   {#if prefs.roomSort === 'tag'}
     {#each groupRoomsByTag(list, tagDefs) as group (group.tag?.id ?? '')}
-      <section class="tag-group" aria-label={group.tag?.name ?? 'Untagged'}>
+      <section class="tag-group" aria-label={group.tag?.name ?? t('sidebar-untagged')}>
         <h4>
-          <span>{group.tag?.name ?? 'Untagged'}</span>
+          <span>{group.tag?.name ?? t('sidebar-untagged')}</span>
           <span class="section-count">{group.rooms.length}</span>
         </h4>
         <ul>
@@ -532,18 +533,18 @@
   {/if}
 {/snippet}
 
-<section class="sidebar" aria-label="Rooms">
+<section class="sidebar" aria-label={t('sidebar-rooms')}>
   <header class="head" use:contextmenu={paneItems}>
     <h2 class="scope" title={scopeTitle}>{scopeTitle}</h2>
     {#if unreadRoomsCount > 0}
-      <span class="scope-meta">{unreadRoomsCount} unread</span>
+      <span class="scope-meta">{unreadRoomsCount} {t('sidebar-unread')}</span>
     {/if}
     <div class="actions">
       <button
         type="button"
         class="icon"
-        aria-label="Refresh"
-        data-tooltip={refreshStore.busy ? 'Refreshing' : `Refresh (${shortcutLabel('R')})`}
+        aria-label={t('sidebar-refresh')}
+        data-tooltip={refreshStore.busy ? t('sidebar-refreshing') : `Refresh (${shortcutLabel('R')})`}
         disabled={refreshStore.busy}
         onclick={() => void refreshStore.run()}
       >
@@ -552,9 +553,9 @@
       <button
         type="button"
         class="icon"
-        aria-label="New room or browse"
+        aria-label={t('sidebar-new-room-or-browse')}
         aria-haspopup="menu"
-        data-tooltip="New room or browse"
+        data-tooltip={t('sidebar-new-room-or-browse')}
         use:contextmenu={createItems}
         onclick={(e) => openMenuFrom(e.currentTarget as HTMLElement, createItems(), 'Create or browse')}
       >
@@ -564,7 +565,7 @@
   </header>
 
   {#if refreshStore.busy}
-    <p class="refreshing" role="status">Refreshing&hellip;</p>
+    <p class="refreshing" role="status">{t('sidebar-refreshing-hellip')}</p>
   {:else if refreshStore.error && !connectivity.offline}
     <p class="error" role="alert">{refreshStore.error}</p>
   {/if}
@@ -573,15 +574,15 @@
     <Icon icon={Search} size={16} />
     <input
       type="search"
-      placeholder="Search everything"
-      aria-label="Search rooms and messages"
+      placeholder={t('sidebar-search-everything')}
+      aria-label={t('sidebar-search-rooms-and-messages')}
       bind:value={roomsStore.query}
     />
     {#if !viewport.isPhone}<kbd>{shortcutLabel('K')}</kbd>{/if}
   </div>
 
   <div class="filters">
-    <div class="filter-tabs" role="group" aria-label="Filter rooms">
+    <div class="filter-tabs" role="group" aria-label={t('sidebar-filter-rooms')}>
       {#each PRIMARY_FILTERS as f (f.value)}
         <button
           type="button"
@@ -600,8 +601,8 @@
       class:on={moreFilterActive}
       aria-pressed={moreFilterActive}
       aria-haspopup="menu"
-      aria-label={moreFilterActive ? `Room list options, filter ${filterLabel}` : 'Room list options'}
-      data-tooltip="Filter and sort"
+      aria-label={moreFilterActive ? `Room list options, filter ${filterLabel}` : t('sidebar-room-list-options')}
+      data-tooltip={t('sidebar-filter-and-sort')}
       use:contextmenu={filterMenuItems}
       onclick={(e) => openMenuFrom(e.currentTarget as HTMLElement, filterMenuItems(), 'Room list options')}
     >
@@ -613,7 +614,7 @@
   </div>
 
   {#if tagChips.length > 0}
-    <div class="tag-filter" role="toolbar" aria-label="Filter rooms by tag">
+    <div class="tag-filter" role="toolbar" aria-label={t('sidebar-filter-rooms-by-tag')}>
       {#each tagChips as chip (chip.def.id)}
         <div class="tag-chip" use:contextmenu={() => tagItems(chip.def.id)}>
           <TagChip
@@ -628,8 +629,8 @@
       <!-- Grouping lives beside the tags rather than only in the sort submenu: on a phone the list
            showed the chips but never the sections, because nothing in the header said they existed. -->
       <TagChip
-        label="Group"
-        title={prefs.roomSort === 'tag' ? 'Show one list' : 'Group rooms by tag'}
+        label={t('sidebar-group')}
+        title={prefs.roomSort === 'tag' ? t('sidebar-show-one-list') : t('sidebar-group-rooms-by-tag')}
         pressed={prefs.roomSort === 'tag'}
         onclick={() => setSort(sortForGroupToggle(prefs.roomSort, sortBeforeGroup))}
       />
@@ -646,8 +647,8 @@
            repeated every tag heading once per outer section (a room tagged Work showed up under
            "Work" twice), so grouping replaces those sections instead of nesting inside them. -->
       {#if invites.length > 0}
-        <section class="group" aria-label="Invites">
-          <h3><span>Invites</span><span class="section-count">{invites.length}</span></h3>
+        <section class="group" aria-label={t('sidebar-invites')}>
+          <h3><span>{t('sidebar-invites')}</span><span class="section-count">{invites.length}</span></h3>
           <ul>
             {#each invites as r (r.id)}
               <li>{@render inviteRow(r)}</li>
@@ -656,14 +657,14 @@
         </section>
       {/if}
       {#if pinned.length + unpinned.length > 0}
-        <section class="group" aria-label="Rooms by tag">
+        <section class="group" aria-label={t('sidebar-rooms-by-tag')}>
           {@render roomList([...pinned, ...unpinned])}
         </section>
       {/if}
     {:else if prefs.roomListSections}
       {#if invites.length > 0}
-        <section class="group" aria-label="Invites">
-          <h3><span>Invites</span><span class="section-count">{invites.length}</span></h3>
+        <section class="group" aria-label={t('sidebar-invites')}>
+          <h3><span>{t('sidebar-invites')}</span><span class="section-count">{invites.length}</span></h3>
           <ul>
             {#each invites as r (r.id)}
               <li>{@render inviteRow(r)}</li>
@@ -673,40 +674,40 @@
       {/if}
 
       {#if pinned.length > 0}
-        <section class="group" aria-label="Pinned">
-          <h3><span>Pinned</span><span class="section-count">{pinned.length}</span></h3>
+        <section class="group" aria-label={t('sidebar-pinned')}>
+          <h3><span>{t('sidebar-pinned')}</span><span class="section-count">{pinned.length}</span></h3>
           {@render roomList(pinned)}
         </section>
       {/if}
 
       {#if rooms.length > 0}
-        <section class="group" aria-label="Rooms">
-          <h3><span>Rooms</span><span class="section-count">{rooms.length}</span></h3>
+        <section class="group" aria-label={t('sidebar-rooms')}>
+          <h3><span>{t('sidebar-rooms')}</span><span class="section-count">{rooms.length}</span></h3>
           {@render roomList(rooms)}
         </section>
       {/if}
 
       {#if direct.length > 0}
-        <section class="group" aria-label="People">
-          <h3><span>People</span><span class="section-count">{direct.length}</span></h3>
+        <section class="group" aria-label={t('sidebar-people')}>
+          <h3><span>{t('sidebar-people')}</span><span class="section-count">{direct.length}</span></h3>
           {@render roomList(direct)}
         </section>
       {/if}
     {:else if flat.length > 0}
-      <section class="group" aria-label="Room list">
+      <section class="group" aria-label={t('sidebar-room-list')}>
         {@render roomList(flat)}
       </section>
     {/if}
 
     {#if searching}
-      <section class="group" aria-label="Messages">
-        <h3><span>Messages</span><span class="section-count">{globalSearch.hits.length}</span></h3>
+      <section class="group" aria-label={t('sidebar-messages')}>
+        <h3><span>{t('sidebar-messages')}</span><span class="section-count">{globalSearch.hits.length}</span></h3>
         {#if globalSearch.error}
           <p class="error" role="alert">{globalSearch.error}</p>
         {:else if globalSearch.loading && globalSearch.hits.length === 0}
-          <p class="note" role="status">Searching</p>
+          <p class="note" role="status">{t('sidebar-searching')}</p>
         {:else if globalSearch.hits.length === 0}
-          <p class="note">No messages found.</p>
+          <p class="note">{t('sidebar-no-messages-found')}</p>
         {:else}
           <ul>
             {#each globalSearch.hits as hit (hit.room_id + hit.event_id)}
@@ -714,7 +715,7 @@
                 <button type="button" class="hit" onclick={() => void globalSearch.open(hit, openRoom)}>
                   <span class="hit-meta">
                     <Avatar userId={hit.sender} displayName={hit.sender_display_name} size="sm" />
-                    <span class="hit-room">{hit.room_name ?? 'Room'}<time datetime={new Date(hit.timestamp_millis).toISOString()}>{formatListTime(hit.timestamp_millis)}</time></span>
+                    <span class="hit-room">{hit.room_name ?? t('sidebar-room')}<time datetime={new Date(hit.timestamp_millis).toISOString()}>{formatListTime(hit.timestamp_millis)}</time></span>
                   </span>
                   <span class="hit-body">
                     <span class="hit-sender">{hit.sender_display_name ?? hit.sender}:</span>
@@ -725,16 +726,16 @@
             {/each}
           </ul>
           {#if globalSearch.nextBatch}
-            <button type="button" class="more-hits" disabled={globalSearch.loading} onclick={() => void globalSearch.more()}>Show more</button>
+            <button type="button" class="more-hits" disabled={globalSearch.loading} onclick={() => void globalSearch.more()}>{t('sidebar-show-more')}</button>
           {/if}
         {/if}
-        <p class="note">Encrypted rooms are not included.</p>
+        <p class="note">{t('sidebar-encrypted-rooms-are-not-included')}</p>
       </section>
     {/if}
 
     {#if nothing}
       <p class="empty">
-        {#if !roomsStore.loaded}Loading conversations{:else if roomsStore.query}No matches{:else}Nothing here yet{/if}
+        {#if !roomsStore.loaded}{t('sidebar-loading-conversations')}{:else if roomsStore.query}{t('sidebar-no-matches')}{:else}{t('sidebar-nothing-here-yet')}{/if}
       </p>
     {/if}
   </div>
@@ -748,9 +749,9 @@
 
 <ConfirmDialog
   open={pendingLeave !== null}
-  title="Leave room"
+  title={t('sidebar-leave-room')}
   message={leaveMessage}
-  confirmLabel="Leave"
+  confirmLabel={t('sidebar-leave')}
   danger
   onconfirm={confirmLeave}
   onclose={() => (pendingLeave = null)}
@@ -762,9 +763,9 @@
 
 <ConfirmDialog
   open={pendingTagDelete !== null}
-  title="Delete tag"
+  title={t('sidebar-delete-tag')}
   message={tagDeleteMessage}
-  confirmLabel="Delete tag"
+  confirmLabel={t('sidebar-delete-tag')}
   danger
   onconfirm={confirmDeleteTag}
   onclose={() => (pendingTagDelete = null)}

@@ -7,6 +7,7 @@
   import { emojiPicker } from '$lib/stores/emojiPicker.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
 
+  import { t } from '$lib/i18n';
   const POPOVER = { width: 360, height: 420 };
   /** Distance a phone sheet must be dragged down before it closes. */
   const DISMISS_DISTANCE = 80;
@@ -133,7 +134,7 @@
       class:expanded={isExpanded}
       role="dialog"
       aria-modal="true"
-      aria-label="Emoji picker"
+      aria-label={t('emoji-picker-host-emoji-picker')}
       use:portal
       style:transform={dragOffset > 0 ? `translateY(${dragOffset}px)` : undefined}
     >
@@ -161,7 +162,7 @@
     <div
       class="popover"
       role="dialog"
-      aria-label="Emoji picker"
+      aria-label={t('emoji-picker-host-emoji-picker')}
       use:portal
       style:left="{popoverPos.x}px"
       style:top="{popoverPos.y}px"

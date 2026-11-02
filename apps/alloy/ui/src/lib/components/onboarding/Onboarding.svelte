@@ -13,6 +13,7 @@
   import { session } from '$lib/stores/session.svelte';
   import { errorMessage, oidcErrorMessage } from '$lib/stores/errors';
 
+  import { t } from '$lib/i18n';
   type Step = 'welcome' | 'server' | 'login';
 
   /** The host a server URL names, as the copy shows it. */
@@ -105,46 +106,45 @@
     <div class="story">
       <div class="lockup">
         <span class="brand-mark" aria-hidden="true">A</span>
-        <span class="wordmark">Alloy</span>
+        <span class="wordmark">{t('brand-name')}</span>
       </div>
       <div class="pitch">
-        <h1>Your conversations,<br />without the noise.</h1>
+        <h1>{t('onboarding-your-conversations')}<br />{t('onboarding-without-the-noise')}</h1>
         <p class="lede">
-          Alloy is a calm, private chat client for Matrix. No algorithms, no ads — just your rooms,
-          on a server you choose.
+          {t('onboarding-alloy-is-a-calm-private-chat-client-for-matrix-n')}
         </p>
       </div>
       <ul class="points">
         <li>
           <Icon icon={ShieldCheck} size={20} strokeWidth={1.5} />
-          <span><strong>End-to-end encrypted</strong> by default, with device verification built in.</span>
+          <span><strong>{t('onboarding-end-to-end-encrypted')}</strong> {t('onboarding-by-default-with-device-verification-built-in')}</span>
         </li>
         <li>
           <Icon icon={MessageSquare} size={20} strokeWidth={1.5} />
-          <span><strong>Rooms, threads and spaces</strong> that stay in order and out of your way.</span>
+          <span><strong>{t('onboarding-rooms-threads-and-spaces')}</strong> {t('onboarding-that-stay-in-order-and-out-of-your-way')}</span>
         </li>
         <li>
           <Icon icon={Smartphone} size={20} strokeWidth={1.5} />
-          <span><strong>Your account, anywhere</strong> — sign in on desktop or phone, synced live.</span>
+          <span><strong>{t('onboarding-your-account-anywhere')}</strong> {t('onboarding-sign-in-on-desktop-or-phone-synced-live')}</span>
         </li>
       </ul>
-      <p class="footnote">Open source · Apache-2.0</p>
+      <p class="footnote">{t('onboarding-open-source-apache-2-0')}</p>
     </div>
 
     <div class="step">
       {#if step === 'welcome'}
         <div class="intro">
-          <p class="eyebrow">Welcome to Alloy</p>
-          <h2>Sign in to Matrix</h2>
+          <p class="eyebrow">{t('onboarding-welcome-to-alloy')}</p>
+          <h2>{t('onboarding-sign-in-to-matrix')}</h2>
           {#if session.restoreNotice}
             <p class="notice" role="status">{session.restoreNotice}</p>
           {/if}
           <p class="hint">
-            You’ll pick your homeserver, then your account. It takes about a minute.
+            {t('onboarding-youll-pick-your-homeserver-then-your-account-it-')}
           </p>
         </div>
         <div class="cta">
-          <Button size="lg" onclick={() => go('server')}>Get started</Button>
+          <Button size="lg" onclick={() => go('server')}>{t('onboarding-get-started')}</Button>
         </div>
       {:else}
         <div class="progress" aria-hidden="true">
@@ -154,17 +154,17 @@
 
         {#if step === 'server'}
           <div class="step-head">
-            <p class="eyebrow">Step 1 of 2</p>
-            <h2>Where is your account?</h2>
-            <p class="hint">Your homeserver hosts your rooms and messages. You’ll sign in there.</p>
+            <p class="eyebrow">{t('onboarding-step-1-of-2')}</p>
+            <h2>{t('onboarding-where-is-your-account')}</h2>
+            <p class="hint">{t('onboarding-your-homeserver-hosts-your-rooms-and-messages-yo')}</p>
           </div>
           <form onsubmit={continueServer}>
             <label>
-              <span>Homeserver</span>
+              <span>{t('onboarding-homeserver')}</span>
               <TextField
                 type="text"
                 bind:value={serverInput}
-                placeholder="matrix.org"
+                placeholder={t('onboarding-matrix-org')}
                 autocomplete="off"
                 autocapitalize="off"
                 spellcheck={false}
@@ -176,44 +176,43 @@
             <div class="actions">
               <Button variant="ghost" type="button" onclick={() => go('welcome')}>
                 <Icon icon={ChevronLeft} size={16} strokeWidth={1.5} />
-                Back
+                {t('common-back')}
               </Button>
               <Button type="submit" disabled={checking || !serverInput.trim()}>
-                {checking ? 'Checking…' : 'Continue'}
+                {checking ? t('onboarding-checking') : t('common-continue')}
               </Button>
             </div>
           </form>
         {:else}
           {#if session.oidcWaiting}
             <div class="step-head">
-              <p class="eyebrow">Step 2 of 2 · {homeserverName}</p>
+              <p class="eyebrow">{t('onboarding-step-2-of-2')} {homeserverName}</p>
               <h2 class="waiting-title" tabindex="-1" bind:this={waitingTitle}>
-                Waiting for your browser
+                {t('onboarding-waiting-for-your-browser')}
               </h2>
               <p class="hint">
-                We opened a browser window. Approve the sign-in for {serverHost}, then come back
-                here.
+                {t('onboarding-we-opened-a-browser-window-approve-the-sign-in-f')} {serverHost}{t('onboarding-then-come-back-here')}
               </p>
             </div>
             <p class="waiting" role="status">
               <span class="pulse" aria-hidden="true"></span>
-              Waiting for approval…
+              {t('onboarding-waiting-for-approval')}
             </p>
             <div class="actions waiting-actions">
               <Button variant="ghost" type="button" onclick={startOidc} disabled={session.busy}>
                 <Icon icon={ExternalLink} size={16} strokeWidth={1.5} />
-                {session.busy ? 'Opening…' : 'Open browser again'}
+                {session.busy ? t('onboarding-opening') : t('onboarding-open-browser-again')}
               </Button>
-              <Button variant="ghost" type="button" onclick={cancelOidc}>Cancel</Button>
+              <Button variant="ghost" type="button" onclick={cancelOidc}>{t('common-cancel')}</Button>
             </div>
             <p class="footnote-inline">
-              Nothing happened? You can close the browser tab and try again.
+              {t('onboarding-nothing-happened-you-can-close-the-browser-tab-a')}
             </p>
           {:else if supportsOidc}
             <div class="step-head">
-              <p class="eyebrow">Step 2 of 2 · {homeserverName}</p>
-              <h2>Sign in</h2>
-              <p class="hint">You’ll approve sign-in on {serverHost} and come back here.</p>
+              <p class="eyebrow">{t('onboarding-step-2-of-2')} {homeserverName}</p>
+              <h2>{t('onboarding-sign-in')}</h2>
+              <p class="hint">{t('onboarding-youll-approve-sign-in-on')} {serverHost} {t('onboarding-and-come-back-here')}</p>
             </div>
             {#if session.oidcFailure}
               <p class="error" role="alert">
@@ -221,10 +220,10 @@
               </p>
               <div class="actions">
                 <Button variant="ghost" type="button" onclick={differentServer}>
-                  Use a different server
+                  {t('onboarding-use-a-different-server')}
                 </Button>
                 <Button type="button" onclick={startOidc} disabled={session.busy}>
-                  {session.busy ? 'Opening…' : 'Try again'}
+                  {session.busy ? t('onboarding-opening') : t('onboarding-try-again')}
                 </Button>
               </div>
             {:else}
@@ -232,12 +231,12 @@
                 <div class="browser-cta">
                   <Button size="lg" type="button" onclick={startOidc} disabled={session.busy}>
                     <Icon icon={ExternalLink} size={16} strokeWidth={1.5} />
-                    {session.busy ? 'Opening browser…' : 'Continue in browser'}
+                    {session.busy ? t('onboarding-opening-browser') : t('onboarding-continue-in-browser')}
                   </Button>
                 </div>
                 <p class="trust">
                   <Icon icon={ShieldCheck} size={16} strokeWidth={1.5} />
-                  Your password stays on {serverHost}, never in Alloy.
+                  {t('onboarding-your-password-stays-on')} {serverHost}{t('onboarding-never-in-alloy')}
                 </p>
               </div>
               <div class="divider" aria-hidden="true"></div>
@@ -247,17 +246,17 @@
                 aria-expanded={passwordOpen}
                 onclick={() => (passwordOpen = !passwordOpen)}
               >
-                Use a password instead
+                {t('onboarding-use-a-password-instead')}
                 <Icon icon={passwordOpen ? ChevronUp : ChevronDown} size={16} strokeWidth={1.5} />
               </button>
               {#if passwordOpen}
                 <form onsubmit={signIn}>
                   <label>
-                    <span>Username</span>
+                    <span>{t('onboarding-username')}</span>
                     <TextField
                       type="text"
                       bind:value={username}
-                      placeholder="alice"
+                      placeholder={t('onboarding-alice')}
                       autocomplete="username"
                       autocapitalize="off"
                       spellcheck={false}
@@ -265,7 +264,7 @@
                     />
                   </label>
                   <label>
-                    <span>Password</span>
+                    <span>{t('onboarding-password')}</span>
                     <TextField
                       type="password"
                       bind:value={password}
@@ -277,10 +276,10 @@
                   <div class="actions">
                     <Button variant="ghost" type="button" onclick={() => go('server')}>
                       <Icon icon={ChevronLeft} size={16} strokeWidth={1.5} />
-                      Back
+                      {t('common-back')}
                     </Button>
                     <Button type="submit" disabled={session.busy || !username || !password}>
-                      {session.busy ? 'Signing in…' : 'Sign in'}
+                      {session.busy ? t('onboarding-signing-in') : t('onboarding-sign-in')}
                     </Button>
                   </div>
                 </form>
@@ -290,26 +289,25 @@
               <div class="back-row">
                 <Button variant="ghost" type="button" onclick={() => go('server')}>
                   <Icon icon={ChevronLeft} size={16} strokeWidth={1.5} />
-                  Back
+                  {t('common-back')}
                 </Button>
               </div>
             {/if}
           {:else}
             <div class="step-head">
-              <p class="eyebrow">Step 2 of 2 · {homeserverName}</p>
-              <h2>Sign in</h2>
+              <p class="eyebrow">{t('onboarding-step-2-of-2')} {homeserverName}</p>
+              <h2>{t('onboarding-sign-in')}</h2>
               <p class="hint">
-                This server doesn’t support browser sign-in. Use your Matrix ID and password for
-                this homeserver.
+                {t('onboarding-this-server-doesnt-support-browser-sign-in-use-y')}
               </p>
             </div>
             <form onsubmit={signIn}>
               <label>
-                <span>Username</span>
+                <span>{t('onboarding-username')}</span>
                 <TextField
                   type="text"
                   bind:value={username}
-                  placeholder="alice"
+                  placeholder={t('onboarding-alice')}
                   autocomplete="username"
                   autocapitalize="off"
                   spellcheck={false}
@@ -318,7 +316,7 @@
                 />
               </label>
               <label>
-                <span>Password</span>
+                <span>{t('onboarding-password')}</span>
                 <TextField
                   type="password"
                   bind:value={password}
@@ -330,10 +328,10 @@
               <div class="actions">
                 <Button variant="ghost" type="button" onclick={() => go('server')}>
                   <Icon icon={ChevronLeft} size={16} strokeWidth={1.5} />
-                  Back
+                  {t('common-back')}
                 </Button>
                 <Button type="submit" disabled={session.busy || !username || !password}>
-                  {session.busy ? 'Signing in…' : 'Sign in'}
+                  {session.busy ? t('onboarding-signing-in') : t('onboarding-sign-in')}
                 </Button>
               </div>
             </form>

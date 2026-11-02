@@ -4,6 +4,7 @@
   import Button from './Button.svelte';
   import { errorMessage } from '$lib/stores/errors';
 
+  import { t } from '$lib/i18n';
   interface Props {
     open: boolean;
     title: string;
@@ -52,9 +53,9 @@
     <p class="message">{message}</p>
     {#if error}<p class="error" role="alert">{error}</p>{/if}
     <div class="actions" bind:this={actions}>
-      <Button variant="ghost" onclick={onclose}>Cancel</Button>
+      <Button variant="ghost" onclick={onclose}>{t('common-cancel')}</Button>
       <Button type="submit" variant={danger ? 'danger' : 'primary'} disabled={busy}>
-        {busy ? 'Working...' : confirmLabel}
+        {busy ? t('confirm-dialog-working') : confirmLabel}
       </Button>
     </div>
   </form>

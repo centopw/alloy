@@ -40,6 +40,7 @@
   import LinkPreview from './LinkPreview.svelte';
   import ReactionsSheet from './ReactionsSheet.svelte';
 
+  import { t } from '$lib/i18n';
   interface Props {
     item: TimelineItemDto;
     prev: TimelineItemDto | null;
@@ -533,8 +534,8 @@
       class="tick"
       class:read={readByOthers}
       role="img"
-      aria-label={readByOthers ? `Seen by ${joinNames(readerNames)}` : 'Sent'}
-      data-tooltip={readByOthers ? `Seen by ${joinNames(readerNames)}` : 'Sent'}
+      aria-label={readByOthers ? `Seen by ${joinNames(readerNames)}` : t('message-row-sent')}
+      data-tooltip={readByOthers ? `Seen by ${joinNames(readerNames)}` : t('message-row-sent')}
     >
       <Icon icon={readByOthers ? CheckCheck : Check} size={16} />
     </span>
@@ -546,7 +547,7 @@
   <div class="divider"><span>{formatDay(item.content.data.timestamp_millis)}</span></div>
 {:else if item.content.kind === 'RoomState'}
   <div class="system">
-    {stateSummary ?? (item.content.data.state_type === 'membership' ? 'Membership changed' : 'Room updated')}
+    {stateSummary ?? (item.content.data.state_type === 'membership' ? t('message-row-membership-changed') : t('message-row-room-updated'))}
   </div>
 {:else if item.content.kind === 'Virtual'}
   <div class="spacer"></div>
@@ -582,7 +583,7 @@
       </span>
     {/if}
     {#if timelineStore.selecting && canAct}
-      <button type="button" class="select-mark" aria-label={selected ? 'Deselect message' : 'Select message'} aria-pressed={selected}>
+      <button type="button" class="select-mark" aria-label={selected ? t('message-row-deselect-message') : t('message-row-select-message')} aria-pressed={selected}>
         <span class="select-dot"><Icon icon={Check} size={16} /></span>
       </button>
     {/if}
@@ -590,7 +591,7 @@
       {#if layout === 'irc' || (layout === 'modern' && grouped)}
         <span class="gutter-time">{time}{@render readTicks()}</span>
       {:else if layout === 'modern' || (!grouped && !item.is_own)}
-        <button type="button" class="avatar-btn" aria-label="Show profile of {senderName}" onclick={openSenderProfile}>
+        <button type="button" class="avatar-btn" aria-label={t('message-row-show-profile', { name: senderName })} onclick={openSenderProfile}>
           <Avatar
             userId={item.sender}
             displayName={senderName}
@@ -625,9 +626,9 @@
           {#if item.content.kind === 'TextMessage'}
             {#if html}
               <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-              <div class="body html" onclick={onBodyClick} onauxclick={interceptLinks}>{@html html}{#if item.edited}<span class="edited">(edited)</span>{/if}</div>
+              <div class="body html" onclick={onBodyClick} onauxclick={interceptLinks}>{@html html}{#if item.edited}<span class="edited">{t('message-row-edited')}</span>{/if}</div>
             {:else}
-              <div class="body">{item.content.data.body}{#if item.edited}<span class="edited">(edited)</span>{/if}</div>
+              <div class="body">{item.content.data.body}{#if item.edited}<span class="edited">{t('message-row-edited')}</span>{/if}</div>
             {/if}
             {#if previewUrl && timelineStore.roomId}
               <LinkPreview url={previewUrl} roomId={timelineStore.roomId} />
@@ -662,13 +663,13 @@
                 />
               {/if}
               {#if item.content.data.media_kind === 'image' && item.content.data.body && !isFileName(item.content.data.body)}
-                <div class="body caption">{item.content.data.body}{#if item.edited}<span class="edited">(edited)</span>{/if}</div>
+                <div class="body caption">{item.content.data.body}{#if item.edited}<span class="edited">{t('message-row-edited')}</span>{/if}</div>
               {/if}
             </div>
           {:else if item.content.kind === 'Redacted'}
-            <div class="body muted">Message deleted</div>
+            <div class="body muted">{t('message-row-message-deleted')}</div>
           {:else if item.content.kind === 'UnableToDecrypt'}
-            <div class="body muted">Waiting for this message. Verify this device to read it.</div>
+            <div class="body muted">{t('message-row-waiting-for-this-message-verify-this-device-to-r')}</div>
           {:else if item.content.kind === 'Poll'}
             <div class="block"><PollView {item} poll={item.content.data} /></div>
           {:else if item.content.kind === 'Location'}
@@ -681,21 +682,21 @@
               />
             </div>
           {:else}
-            <div class="body muted">This message type is not supported yet.</div>
+            <div class="body muted">{t('message-row-this-message-type-is-not-supported-yet')}</div>
           {/if}
 
           {#if item.is_own && sending}
-            <div class="state sending" role="status" aria-label="Sending">Sending</div>
+            <div class="state sending" role="status" aria-label={t('message-row-sending')}>{t('message-row-sending')}</div>
           {:else if failed}
             <div class="failed-actions">
-              <span class="err">Failed to send</span>
-              <button type="button" onclick={() => timelineStore.retry(item)}>Retry</button>
-              <button type="button" onclick={() => timelineStore.cancel(item)}>Discard</button>
+              <span class="err">{t('message-row-failed-to-send')}</span>
+              <button type="button" onclick={() => timelineStore.retry(item)}>{t('common-retry')}</button>
+              <button type="button" onclick={() => timelineStore.cancel(item)}>{t('message-row-discard')}</button>
             </div>
           {/if}
 
           {#if item.thread_summary && !inThread}
-            <button type="button" class="thread-chip" onclick={openThread} aria-label="Open thread, {item.thread_summary.reply_count} {item.thread_summary.reply_count === 1 ? 'reply' : 'replies'}">
+            <button type="button" class="thread-chip" onclick={openThread} aria-label={t('message-row-open-thread', { count: item.thread_summary.reply_count })}>
               <Icon icon={MessageSquare} size={16} />
               <span>{item.thread_summary.reply_count} {item.thread_summary.reply_count === 1 ? 'reply' : 'replies'}</span>
             </button>
@@ -709,7 +710,7 @@
                   class:mine={r.by_me}
                   onclick={() => void timelineStore.toggleReaction(item, r.key)}
                   aria-pressed={r.by_me}
-                  aria-label="{r.key} {r.count}"
+                  aria-label={t('message-row-reaction-count', { emoji: r.key, count: r.count })}
                   data-tooltip={joinNames(r.senders.map(nameOf))}
                   use:contextmenu={() => [{ id: 'who', label: 'See who reacted', icon: Users, onselect: () => openWho(r.key) }]}
                 >
@@ -723,7 +724,7 @@
           </div>
         </div>
       {#if canAct}
-        <div class="toolbar" class:hidden={contextMenu.isOpen} role="toolbar" aria-label="Message actions">
+        <div class="toolbar" class:hidden={contextMenu.isOpen} role="toolbar" aria-label={t('message-row-message-actions')}>
           <!-- Reactions lead in both states. Compact narrows them to the three the user put first and
                keeps the picker chevron, so the full emoji set is never more than one click away. -->
           <span class="quick">
@@ -737,23 +738,23 @@
             <span class="tool-sep" aria-hidden="true"></span>
           </span>
           {#if !inThread}
-            <button type="button" aria-label="Reply" title="Reply" onclick={() => timelineStore.startReply(item)}>
+            <button type="button" aria-label={t('message-row-reply')} title={t('message-row-reply')} onclick={() => timelineStore.startReply(item)}>
               <Icon icon={Reply} size={16} />
             </button>
           {/if}
           {#if !compact}
             {#if item.event_id && !inThread}
-              <button type="button" aria-label="Reply in thread" title="Reply in thread" onclick={openThread}>
+              <button type="button" aria-label={t('message-row-reply-in-thread')} title={t('message-row-reply-in-thread')} onclick={openThread}>
                 <Icon icon={MessageSquare} size={16} />
               </button>
             {/if}
             {#if canEdit}
-              <button type="button" aria-label="Edit" title="Edit" onclick={() => timelineStore.startEdit(item)}>
+              <button type="button" aria-label={t('common-edit')} title={t('common-edit')} onclick={() => timelineStore.startEdit(item)}>
                 <Icon icon={Pencil} size={16} />
               </button>
             {/if}
             {#if canDelete}
-              <button type="button" aria-label="Delete" title="Delete" onclick={() => (timelineStore.pendingDelete = [item])}>
+              <button type="button" aria-label={t('common-delete')} title={t('common-delete')} onclick={() => (timelineStore.pendingDelete = [item])}>
                 <Icon icon={Trash2} size={16} />
               </button>
             {/if}
@@ -761,8 +762,8 @@
             <!-- Compact folds thread, edit and delete into the menu right-click already offers. -->
             <button
               type="button"
-              aria-label="More actions"
-              title="More actions"
+              aria-label={t('message-row-more-actions')}
+              title={t('message-row-more-actions')}
               aria-haspopup="menu"
               onclick={(e) => openMoreActions(e.currentTarget as HTMLElement)}
             >
@@ -774,7 +775,7 @@
       {/if}
       </div>
       {#if seenAvatars}
-        <div class="seen" data-tooltip="Seen by {joinNames(readerNames)}">
+        <div class="seen" data-tooltip={t('message-row-seen-by', { names: joinNames(readerNames) })}>
           {#each readers.slice(0, 3) as userId (userId)}
             {@const m = membersStore.membersOf(timelineStore.roomId).find((x) => x.user_id === userId)}
             <Avatar {userId} displayName={m?.display_name ?? null} src={m?.avatar_url ?? null} size={16} />
@@ -1012,9 +1013,17 @@
     background: var(--alloy-color-surface-subtle);
     border-radius: var(--alloy-radii-sm);
   }
-  .body.html :global(a) {
+  .body.html :global(a:not(.alloy-pill)) {
     color: var(--alloy-color-accent-primary);
     text-decoration: underline;
+  }
+  /* A Matrix mention is a person, not a URL: the sanitizer marks the link and this draws the chip. */
+  .body.html :global(a.alloy-pill) {
+    color: var(--alloy-color-accent-primary);
+    text-decoration: none;
+    background: var(--alloy-color-accent-subtle);
+    border-radius: var(--alloy-radii-full);
+    padding: 0 var(--alloy-spacing-scale-2);
   }
   .body.html :global(span[data-mx-spoiler]:not([data-revealed])) {
     border-radius: var(--alloy-radii-sm);
@@ -1503,8 +1512,14 @@
   .row[data-layout='bubbles'] .bubble .muted {
     opacity: 0.82;
   }
-  .row.own[data-layout='bubbles'] .body.html :global(a) {
+  .row.own[data-layout='bubbles'] .body.html :global(a:not(.alloy-pill)) {
     color: inherit;
+  }
+  /* On the sender's own blue bubble a chip cut from the canvas reads as a mistake, so the plate is
+     made from the bubble's own text colour instead. */
+  .row.own[data-layout='bubbles'] .body.html :global(a.alloy-pill) {
+    color: var(--alloy-color-bubble-own-text);
+    background: color-mix(in srgb, var(--alloy-color-bubble-own-text) 18%, transparent);
   }
   /* Reactions sit on the bottom edge of the bubble, half over it, as in Messenger. */
   .row[data-layout='bubbles'] .bubble.has-reactions {

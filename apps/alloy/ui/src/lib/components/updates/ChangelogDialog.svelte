@@ -5,6 +5,7 @@
   import { openExternal } from '$lib/platform/links';
   import { updatesStore } from '$lib/stores/updates.svelte';
 
+  import { t } from '$lib/i18n';
   const info = $derived(updatesStore.info);
   const blocks = $derived(parseReleaseNotes(info?.notes ?? ''));
   const title = $derived(info ? `What's new in Alloy ${info.version}` : "What's new");
@@ -64,7 +65,7 @@
   <div class="changelog">
     <header class="summary">
       <div class="summary-text">
-        <p class="version">{info?.version ? `Version ${info.version}` : 'Update'}</p>
+        <p class="version">{info?.version ? `Version ${info.version}` : t('changelog-dialog-update')}</p>
         <p class="status" role="status">{status}</p>
       </div>
       {#if updatesStore.phase === 'downloading'}
@@ -72,7 +73,7 @@
           class="bar"
           class:indeterminate={percent === null}
           role="progressbar"
-          aria-label="Download progress"
+          aria-label={t('changelog-dialog-download-progress')}
           aria-valuemin="0"
           aria-valuemax="100"
           aria-valuenow={percent ?? undefined}
@@ -84,7 +85,7 @@
 
     <div class="notes">
       {#if blocks.length === 0}
-        <p class="empty">No release notes were published for this version.</p>
+        <p class="empty">{t('changelog-dialog-no-release-notes-were-published-for-this-version')}</p>
       {:else}
         {#each blocks as block, i (i)}
           {#if block.kind === 'heading'}
@@ -110,13 +111,13 @@
 
     <footer class="actions">
       {#if canSkip}
-        <Button variant="ghost" onclick={skip}>Skip this version</Button>
+        <Button variant="ghost" onclick={skip}>{t('changelog-dialog-skip-this-version')}</Button>
       {/if}
       <span class="spacer"></span>
       {#if info?.can_install !== false}
-        <Button variant="ghost" onclick={() => void updatesStore.openReleasePage()}>Release page</Button>
+        <Button variant="ghost" onclick={() => void updatesStore.openReleasePage()}>{t('changelog-dialog-release-page')}</Button>
       {/if}
-      <Button variant="ghost" onclick={close}>Later</Button>
+      <Button variant="ghost" onclick={close}>{t('changelog-dialog-later')}</Button>
       <Button disabled={updatesStore.busy} onclick={() => void updatesStore.primary()}>
         {updatesStore.primaryLabel}
       </Button>

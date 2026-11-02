@@ -15,6 +15,7 @@
   import { timelineStore } from '$lib/stores/timeline.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
 
+  import { t } from '$lib/i18n';
   interface Props {
     roomId: string;
     title: string;
@@ -112,14 +113,14 @@
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<aside class="panel" aria-label="Search in room" onkeydown={onpanelKeydown}>
+<aside class="panel" aria-label={t('room-search-panel-search-in-room')} onkeydown={onpanelKeydown}>
   <header class="bar">
-    <h2 class="title">Search in {title}</h2>
+    <h2 class="title">{t('room-search-panel-search-in')} {title}</h2>
     <button
       type="button"
       class="icon-btn"
-      aria-label={viewport.isPhone ? 'Back' : 'Close search'}
-      title={viewport.isPhone ? 'Back' : 'Close search'}
+      aria-label={viewport.isPhone ? t('common-back') : t('room-search-panel-close-search')}
+      title={viewport.isPhone ? t('common-back') : t('room-search-panel-close-search')}
       onclick={onclose}
     >
       <Icon icon={viewport.isPhone ? ChevronLeft : X} size={20} />
@@ -131,15 +132,15 @@
       bind:el={inputEl}
       class="query"
       type="search"
-      placeholder="Search messages"
-      aria-label="Search messages"
+      placeholder={t('room-search-panel-search-messages')}
+      aria-label={t('room-search-panel-search-messages')}
       icon={Search}
       value={roomSearch.query}
       oninput={(e) => roomSearch.setQuery(e.currentTarget.value)}
       onkeydown={onInputKeydown}
     />
     <Select
-      label="From"
+      label={t('room-search-panel-from')}
       value={roomSearch.sender ?? ''}
       options={senderOptions}
       onchange={(v) => roomSearch.setSender(v || null)}
@@ -148,37 +149,37 @@
 
   <div class="body">
     {#if showIdle}
-      <p class="hint">Type to search messages in this room, or choose a sender.</p>
+      <p class="hint">{t('room-search-panel-type-to-search-messages-in-this-room-or-choose-a')}</p>
     {/if}
 
     {#if roomSearch.mode === 'local' && !showIdle}
-      <p class="hint" role="note">Searching messages loaded on this device.</p>
+      <p class="hint" role="note">{t('room-search-panel-searching-messages-loaded-on-this-device')}</p>
     {/if}
 
     {#if roomSearch.loading}
-      <p class="hint" role="status">Searching...</p>
+      <p class="hint" role="status">{t('room-search-panel-searching')}</p>
     {/if}
 
     {#if roomSearch.error}
       <div class="notice" role="alert">
         <p>{roomSearch.error}</p>
         <button type="button" class="action" onclick={() => roomSearch.setQuery(roomSearch.query)}>
-          Try again
+          {t('room-search-panel-try-again')}
         </button>
       </div>
     {/if}
 
     {#if missing}
-      <p class="notice" role="alert">That message is no longer available.</p>
+      <p class="notice" role="alert">{t('room-search-panel-that-message-is-no-longer-available')}</p>
     {/if}
 
     {#if showEmpty}
-      <p class="hint">No messages found.</p>
+      <p class="hint">{t('room-search-panel-no-messages-found')}</p>
     {/if}
 
     {#if roomSearch.results.length > 0}
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-      <ul class="results" bind:this={listEl} onkeydown={onListKeydown} aria-label="Search results">
+      <ul class="results" bind:this={listEl} onkeydown={onListKeydown} aria-label={t('room-search-panel-search-results')}>
         {#each roomSearch.results as hit (hit.event_id)}
           <li>
             <button
@@ -204,19 +205,19 @@
       </ul>
 
       {#if roomSearch.capped}
-        <p class="hint">Showing the first 200 matches.</p>
+        <p class="hint">{t('room-search-panel-showing-the-first-200-matches')}</p>
       {/if}
 
       {#if roomSearch.canLoadMore}
         <button type="button" class="action wide" disabled={roomSearch.loading} onclick={() => roomSearch.loadMore()}>
-          Load more results
+          {t('room-search-panel-load-more-results')}
         </button>
       {/if}
     {/if}
 
     {#if roomSearch.canSearchOlder}
       <button type="button" class="action wide" disabled={roomSearch.loading} onclick={() => roomSearch.searchOlder()}>
-        Search older messages
+        {t('room-search-panel-search-older-messages')}
       </button>
     {/if}
   </div>

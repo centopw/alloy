@@ -11,6 +11,7 @@
   import { session } from '$lib/stores/session.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
 
+  import { t } from '$lib/i18n';
   interface Props {
     open: boolean;
     onclose: () => void;
@@ -70,14 +71,14 @@
   }
 </script>
 
-<Modal {open} title="Browse public rooms" {onclose} width="480px">
+<Modal {open} title={t('directory-dialog-browse-public-rooms')} {onclose} width="480px">
   <div class="body">
     <div class="search-wrap">
       <TextField
         type="search"
         icon={Search}
-        aria-label="Search public rooms"
-        placeholder="Search public rooms"
+        aria-label={t('directory-dialog-search-public-rooms')}
+        placeholder={t('directory-dialog-search-public-rooms')}
         autocomplete="off"
         value={query}
         oninput={(e) => onInput(e.currentTarget.value)}
@@ -92,9 +93,9 @@
     {/if}
 
     {#if directoryStore.loading && directoryStore.rooms.length === 0}
-      <p class="status" role="status">Searching...</p>
+      <p class="status" role="status">{t('directory-dialog-searching')}</p>
     {:else if !directoryStore.loading && directoryStore.rooms.length === 0 && !directoryStore.error}
-      <p class="status">No public rooms match.</p>
+      <p class="status">{t('directory-dialog-no-public-rooms-match')}</p>
     {/if}
 
     <ul class="results">
@@ -113,14 +114,14 @@
           </div>
           <div class="action">
             {#if room.joined}
-              <Button variant="ghost" disabled ariaLabel="Joined {title}">Joined</Button>
+              <Button variant="ghost" disabled ariaLabel="Joined {title}">{t('directory-dialog-joined')}</Button>
             {:else}
               <Button
                 disabled={joining !== null}
                 ariaLabel="Join {title}"
                 onclick={() => join(room)}
               >
-                {joining === room.room_id ? 'Joining...' : 'Join'}
+                {joining === room.room_id ? t('directory-dialog-joining') : t('directory-dialog-join')}
               </Button>
             {/if}
           </div>
@@ -131,7 +132,7 @@
     {#if directoryStore.hasMore}
       <div class="more">
         <Button variant="ghost" disabled={directoryStore.loading} onclick={loadMore}>
-          {directoryStore.loading ? 'Loading...' : 'Load more'}
+          {directoryStore.loading ? t('directory-dialog-loading') : t('directory-dialog-load-more')}
         </Button>
       </div>
     {/if}

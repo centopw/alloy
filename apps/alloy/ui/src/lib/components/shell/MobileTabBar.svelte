@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Icon, MessageSquare, Settings } from '$lib/icons';
 
+  import { t } from '$lib/i18n';
   // Two destinations: public-room browsing lives in the room list's menu, so the bar is the two
   // places a phone actually switches between.
   type Tab = 'chats' | 'settings';
@@ -21,7 +22,7 @@
   const chatsLabel = $derived(unread > 0 ? `Chats, ${unread} unread` : 'Chats');
 </script>
 
-<nav class="tabbar" aria-label="Primary">
+<nav class="tabbar" aria-label={t('mobile-tab-bar-primary')}>
   <button
     type="button"
     class="tab"
@@ -36,18 +37,18 @@
         <span class="badge" aria-hidden="true">{badge}</span>
       {/if}
     </span>
-    <span class="label">Chats</span>
+    <span class="label">{t('mobile-tab-bar-chats')}</span>
   </button>
   <button
     type="button"
     class="tab"
     class:active={active === 'settings'}
     aria-current={active === 'settings' ? 'page' : undefined}
-    aria-label="Settings"
+    aria-label={t('common-settings')}
     onclick={() => onsettings?.()}
   >
     <span class="glyph"><Icon icon={Settings} size={24} /></span>
-    <span class="label">Settings</span>
+    <span class="label">{t('common-settings')}</span>
   </button>
 </nav>
 

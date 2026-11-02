@@ -4,6 +4,7 @@
   import { memberLabel } from '$lib/stores/members.svelte';
   import { mentionOptionId } from '$lib/stores/mentions';
 
+  import { t } from '$lib/i18n';
   interface Props {
     /** DOM id of the listbox; option ids derive from it. */
     id: string;
@@ -22,7 +23,7 @@
   {id}
   class="picker"
   role="listbox"
-  aria-label="Members"
+  aria-label={t('mention-picker-members')}
   tabindex="-1"
   onmousedown={(e) => e.preventDefault()}
 >
@@ -50,7 +51,7 @@
       </span>
       <span class="meta id">{member.user_id}</span>
       {#if member.membership === 'Invited'}
-        <span class="meta">Invited</span>
+        <span class="meta">{t('mention-picker-invited')}</span>
       {/if}
     </div>
   {/each}

@@ -1,4 +1,5 @@
 <script module lang="ts">
+  import { t } from '$lib/i18n';
   export { fetchMediaFile } from '$lib/content/mediaFetch';
 </script>
 
@@ -395,15 +396,15 @@
         <button
           type="button"
           class="tool"
-          aria-label="Download"
-          data-tooltip="Download"
+          aria-label={t('media-viewer-download')}
+          data-tooltip={t('media-viewer-download')}
           onclick={download}
           disabled={saving || src === null}
         >
           <Icon icon={Download} size={20} />
         </button>
       {/if}
-      <button type="button" class="tool" aria-label="Close" data-tooltip="Close" onclick={onclose}>
+      <button type="button" class="tool" aria-label={t('common-close')} data-tooltip={t('common-close')} onclick={onclose}>
         <Icon icon={X} size={20} />
       </button>
     </header>
@@ -422,9 +423,9 @@
       onwheel={onWheel}
     >
       {#if failed}
-        <p class="note" role="alert">This {currentItem.mediaKind} could not be loaded.</p>
+        <p class="note" role="alert">{t('media-viewer-this')} {currentItem.mediaKind} {t('media-viewer-could-not-be-loaded')}</p>
       {:else if src === null}
-        <p class="note" aria-live="polite">Loading</p>
+        <p class="note" aria-live="polite">{t('media-viewer-loading')}</p>
       {:else if isVideo}
         <!-- svelte-ignore a11y_media_has_caption -->
         <video
@@ -458,8 +459,8 @@
         <button
           type="button"
           class="nav prev"
-          aria-label="Previous"
-          data-tooltip="Previous"
+          aria-label={t('media-viewer-previous')}
+          data-tooltip={t('media-viewer-previous')}
           onclick={goToPrev}
         >
           <Icon icon={ChevronLeft} size={24} />
@@ -470,8 +471,8 @@
         <button
           type="button"
           class="nav next"
-          aria-label="Next"
-          data-tooltip="Next"
+          aria-label={t('common-next')}
+          data-tooltip={t('common-next')}
           onclick={goToNext}
         >
           <Icon icon={ChevronRight} size={24} />

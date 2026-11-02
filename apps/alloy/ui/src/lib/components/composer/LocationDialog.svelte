@@ -7,6 +7,7 @@
   import { currentFix, type Fix } from '$lib/platform/geolocation';
   import { errorMessage, expect } from '$lib/stores/errors';
 
+  import { t } from '$lib/i18n';
   interface Props {
     open: boolean;
     roomId: string;
@@ -52,22 +53,22 @@
   }
 </script>
 
-<Modal {open} title="Send your location" {onclose} width="400px">
+<Modal {open} title={t('location-dialog-send-your-location')} {onclose} width="400px">
   <div class="body">
     <span class="pin" aria-hidden="true"><Icon icon={MapPin} size={24} /></span>
     {#if loading}
-      <p role="status">Finding your position</p>
+      <p role="status">{t('location-dialog-finding-your-position')}</p>
     {:else if fix}
       <p class="coords">{formatCoordinates(fix)}</p>
-      <p class="muted">Accuracy {formatAccuracy(fix.accuracy)}. Everyone in this room will see where you are.</p>
+      <p class="muted">{t('location-dialog-accuracy')} {formatAccuracy(fix.accuracy)}{t('location-dialog-everyone-in-this-room-will-see-where-you-are')}</p>
     {/if}
     {#if error}<p class="error" role="alert">{error}</p>{/if}
     <div class="actions">
-      <Button variant="ghost" onclick={onclose}>Cancel</Button>
+      <Button variant="ghost" onclick={onclose}>{t('common-cancel')}</Button>
       {#if error && !fix}
-        <Button variant="ghost" onclick={() => void locate()}>Try again</Button>
+        <Button variant="ghost" onclick={() => void locate()}>{t('location-dialog-try-again')}</Button>
       {/if}
-      <Button disabled={!fix || sending} onclick={() => void send()}>{sending ? 'Sending' : 'Send location'}</Button>
+      <Button disabled={!fix || sending} onclick={() => void send()}>{sending ? t('location-dialog-sending') : t('location-dialog-send-location')}</Button>
     </div>
   </div>
 </Modal>

@@ -4,6 +4,7 @@
   import { pushBack } from '$lib/platform/backstack';
   import UserProfileCard from './UserProfileCard.svelte';
 
+  import { t } from '$lib/i18n';
   const CARD_WIDTH = 320;
   const MARGIN = 8;
   const NARROW_QUERY = '(max-width: 899px)';
@@ -102,7 +103,7 @@
 
 {#if profileCard.isOpen && profileCard.userId}
   {#if narrow}
-    <button type="button" class="scrim" aria-label="Dismiss profile" onclick={() => profileCard.close()}></button>
+    <button type="button" class="scrim" aria-label={t('profile-card-host-dismiss-profile')} onclick={() => profileCard.close()}></button>
   {/if}
   <div
     bind:this={cardEl}
@@ -111,7 +112,7 @@
     style={narrow ? undefined : `left: ${position.left}px; top: ${position.top}px; width: ${CARD_WIDTH}px;`}
     role="dialog"
     aria-modal={narrow ? 'true' : 'false'}
-    aria-label="User profile"
+    aria-label={t('profile-card-host-user-profile')}
     tabindex="-1"
   >
     {#if narrow}

@@ -5,6 +5,7 @@
   import { roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
   import { ui } from '$lib/stores/ui.svelte';
 
+  import { t } from '$lib/i18n';
   interface Props {
     onnew?: () => void;
   }
@@ -15,17 +16,17 @@
 </script>
 
 {#if spaces.length > 0}
-<div class="strip" role="toolbar" aria-label="Spaces">
+<div class="strip" role="toolbar" aria-label={t('space-chips-spaces')}>
   <button
     type="button"
     class="chip"
     class:active={homeActive}
-    aria-label="Home"
+    aria-label={t('space-chips-home')}
     aria-current={homeActive ? 'true' : undefined}
     onclick={() => (ui.scope = 'home')}
   >
     <Icon icon={House} size={20} />
-    <span class="text">Home</span>
+    <span class="text">{t('space-chips-home')}</span>
   </button>
   {#each spaces as space (space.id)}
     {@const title = roomTitle(space)}
@@ -42,7 +43,7 @@
       <span class="text">{title}</span>
     </button>
   {/each}
-  <button type="button" class="add" aria-label="Create or join" onclick={() => onnew?.()}>
+  <button type="button" class="add" aria-label={t('space-chips-create-or-join')} onclick={() => onnew?.()}>
     <Icon icon={Plus} size={20} />
   </button>
 </div>

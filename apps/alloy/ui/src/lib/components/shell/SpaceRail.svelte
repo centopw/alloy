@@ -11,6 +11,7 @@
   import { profileCard } from '$lib/stores/profileCard.svelte';
   import { ui } from '$lib/stores/ui.svelte';
 
+  import { t } from '$lib/i18n';
   interface Props {
     onsettings?: () => void;
     /** True while the room list is hidden. */
@@ -85,7 +86,7 @@
   }
 </script>
 
-<nav class="rail" aria-label="Spaces">
+<nav class="rail" aria-label={t('space-rail-spaces')}>
   <div class="brand" aria-hidden="true"><span class="brand-mark">A</span></div>
 
   <ul class="entries">
@@ -96,8 +97,8 @@
         class="home"
         class:active={homeActive}
         use:contextmenu={homeMenu}
-        aria-label={homeUnread > 0 ? `Home, ${homeUnread} unread` : 'Home'}
-        title="Home"
+        aria-label={homeUnread > 0 ? `Home, ${homeUnread} unread` : t('space-rail-home')}
+        title={t('space-rail-home')}
         aria-current={homeActive ? 'true' : undefined}
         onclick={() => (ui.scope = 'home')}
       >
@@ -141,8 +142,8 @@
         type="button"
         class="foot-btn panel"
         class:on={!collapsed}
-        aria-label={collapsed ? 'Show room list' : 'Hide room list'}
-        title={collapsed ? 'Show room list' : 'Hide room list'}
+        aria-label={collapsed ? t('space-rail-show-room-list') : t('space-rail-hide-room-list')}
+        title={collapsed ? t('space-rail-show-room-list') : t('space-rail-hide-room-list')}
         aria-expanded={!collapsed}
         aria-controls="room-list"
         onclick={() => (collapsed ? onexpand?.() : oncollapse?.())}
@@ -152,8 +153,8 @@
       <button
         type="button"
         class="foot-btn"
-        aria-label="Settings"
-        title="Settings"
+        aria-label={t('common-settings')}
+        title={t('common-settings')}
         onclick={() => onsettings?.()}
       >
         <Icon icon={Settings} size={20} />
@@ -161,7 +162,7 @@
       <button
         type="button"
         class="foot-btn me"
-        aria-label="Your account"
+        aria-label={t('space-rail-your-account')}
         title={accountName}
         use:contextmenu={() => accountMenu(account.user_id)}
         onclick={openAccount}

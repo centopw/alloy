@@ -24,6 +24,7 @@
   import TextField from './TextField.svelte';
   import QuickReactions from './QuickReactions.svelte';
 
+  import { t } from '$lib/i18n';
   const TYPEAHEAD_RESET_MS = 600;
   const HOVER_OPEN_MS = 150;
   const FLYOUT_MAX_HEIGHT = 320;
@@ -601,7 +602,7 @@
         class:flyout={!viewport.isPhone && depth > 0}
         role="menu"
         tabindex="-1"
-        aria-label={f ? f.label : (contextMenu.options?.ariaLabel ?? 'Actions')}
+        aria-label={f ? f.label : (contextMenu.options?.ariaLabel ?? t('context-menu-actions'))}
         data-context-menu
         style:max-height={!viewport.isPhone && f
           ? `min(${f.sub.maxHeight ?? FLYOUT_MAX_HEIGHT}px, calc(100dvh - 16px))`
@@ -639,7 +640,7 @@
         {/if}
 
         {#if view.rows.length === 0}
-          <div class="empty" role="none">{view.query ? 'No matches' : 'Nothing to show'}</div>
+          <div class="empty" role="none">{view.query ? t('context-menu-no-matches') : t('context-menu-nothing-to-show')}</div>
         {/if}
 
         {#each view.rows as item, i (i)}
@@ -690,7 +691,7 @@
             onpointermove={focusOnMove}
             onkeydown={(e) => onChromeKeydown(e, depth, () => selectByPointer(CANCEL))}
           >
-            <span class="label">Cancel</span>
+            <span class="label">{t('common-cancel')}</span>
           </div>
         {/if}
       </div>
@@ -702,7 +703,7 @@
       class="phone-action-bar"
       bind:this={bottomBarEl}
       role="group"
-      aria-label="Message actions"
+      aria-label={t('context-menu-message-actions')}
       data-context-menu
       use:portal
     >
@@ -725,13 +726,13 @@
       <button
         type="button"
         class="bar-button"
-        aria-label="More"
+        aria-label={t('common-more')}
         onclick={() => {
           showFullSheet = true;
         }}
       >
         <span class="icon"><Icon icon={Ellipsis} size={24} /></span>
-        <span class="label">More</span>
+        <span class="label">{t('common-more')}</span>
       </button>
     </div>
   {/if}
@@ -763,7 +764,7 @@
     <div
       class="desktop-reaction-strip"
       role="toolbar"
-      aria-label="Quick reactions"
+      aria-label={t('context-menu-quick-reactions')}
       data-context-menu
       use:portal
       use:placeDesktopStrip

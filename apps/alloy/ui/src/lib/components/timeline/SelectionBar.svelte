@@ -7,6 +7,7 @@
   import { timelineStore } from '$lib/stores/timeline.svelte';
   import { quote } from './ReplyQuote.svelte';
 
+  import { t } from '$lib/i18n';
   const items = $derived(timelineStore.selectedItems);
   const count = $derived(timelineStore.selectedIds.length);
   const canRedactOthers = $derived(membersStore.detailsOf(timelineStore.roomId)?.can_redact_others ?? false);
@@ -42,18 +43,18 @@
 
 <svelte:window onkeydown={onKey} />
 
-<header class="bar" aria-label="Selected messages">
-  <button type="button" class="tool" aria-label="Cancel selection" data-tooltip="Cancel" onclick={() => timelineStore.endSelect()}>
+<header class="bar" aria-label={t('selection-bar-selected-messages')}>
+  <button type="button" class="tool" aria-label={t('selection-bar-cancel-selection')} data-tooltip={t('common-cancel')} onclick={() => timelineStore.endSelect()}>
     <Icon icon={X} size={20} />
   </button>
-  <h2 class="count" aria-live="polite">{count} selected</h2>
-  <button type="button" class="tool" aria-label="Copy selected messages" data-tooltip="Copy" disabled={!copyable} onclick={copy}>
+  <h2 class="count" aria-live="polite">{count} {t('selection-bar-selected')}</h2>
+  <button type="button" class="tool" aria-label={t('selection-bar-copy-selected-messages')} data-tooltip={t('common-copy')} disabled={!copyable} onclick={copy}>
     <Icon icon={Copy} size={20} />
   </button>
-  <button type="button" class="tool" aria-label="Forward selected messages" data-tooltip="Forward" onclick={forward}>
+  <button type="button" class="tool" aria-label={t('selection-bar-forward-selected-messages')} data-tooltip={t('selection-bar-forward')} onclick={forward}>
     <Icon icon={Forward} size={20} />
   </button>
-  <button type="button" class="tool danger" aria-label="Delete selected messages" data-tooltip="Delete" disabled={!canDelete} onclick={remove}>
+  <button type="button" class="tool danger" aria-label={t('selection-bar-delete-selected-messages')} data-tooltip={t('common-delete')} disabled={!canDelete} onclick={remove}>
     <Icon icon={Trash2} size={20} />
   </button>
 </header>

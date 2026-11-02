@@ -85,6 +85,27 @@ export async function importPastedImagePath(text: string): Promise<string | null
   return invoke<string | null>('import_pasted_image_path', { text });
 }
 
+/**
+ * The files the user just dropped onto the window, as paths the shell has registered as sendable.
+ *
+ * The page does not name the files: the shell saw them in the operating system's own drop event, so
+ * a dropped file can be sent instead of failing the engine's allowlist when Send is pressed. Empty
+ * when nothing is queued, which is also the answer in a shell without drag-and-drop.
+ */
+export async function takeDroppedAttachments(): Promise<string[]> {
+  if (!isTauriRuntime()) return [];
+  return invoke<string[]>('take_dropped_attachments');
+}
+
+/**
+ * Size in bytes of an attachment the shell already accepted, or null when it has no such file.
+ * The shell only answers for files the user attached, so this cannot probe the filesystem.
+ */
+export async function attachmentSize(path: string): Promise<number | null> {
+  if (!isTauriRuntime()) return null;
+  return invoke<number | null>('attachment_size', { path });
+}
+
 /** Whether attaching files is possible in this runtime. */
 export const canPickFiles = () => isTauriRuntime();
 

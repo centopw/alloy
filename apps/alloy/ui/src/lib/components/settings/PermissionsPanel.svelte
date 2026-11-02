@@ -6,6 +6,7 @@
   import type { PermissionId } from '$lib/platform/permissions';
   import { permissionsStore, type PermissionRow } from '$lib/stores/permissions.svelte';
 
+  import { t } from '$lib/i18n';
   const ICONS = {
     notifications: Bell,
     microphone: Mic,
@@ -41,7 +42,7 @@
 
 <div class="panel">
   <p class="summary" role="status" aria-live="polite" data-testid="permissions-summary">
-    {permissionsStore.loaded ? summary.text : 'Checking what is allowed…'}
+    {permissionsStore.loaded ? summary.text : t('permissions-panel-checking-what-is-allowed')}
   </p>
   <ul class="list">
     {#each permissionsStore.rows as row (row.id)}
@@ -51,7 +52,7 @@
         <div class="text">
           <div class="head">
             <span class="label">{row.label}</span>
-            <span class="tag" class:required={row.required}>{row.required ? 'Required' : 'Optional'}</span>
+            <span class="tag" class:required={row.required}>{row.required ? t('permissions-panel-required') : t('permissions-panel-optional')}</span>
           </div>
           <span class="why">{row.why}</span>
         </div>
@@ -62,10 +63,10 @@
           </span>
           {#if action === 'allow'}
             <Button variant="primary" size="sm" disabled={busy === row.id} onclick={() => allow(row)}>
-              {row.id === 'push-app' ? 'Choose app' : row.id === 'battery' ? 'Open settings' : 'Allow'}
+              {row.id === 'push-app' ? t('permissions-panel-choose-app') : row.id === 'battery' ? t('permissions-panel-open-settings') : t('permissions-panel-allow')}
             </Button>
           {:else if action === 'open-settings'}
-            <Button variant="ghost" size="sm" disabled={busy === row.id} onclick={() => openSettings(row)}>Open settings</Button>
+            <Button variant="ghost" size="sm" disabled={busy === row.id} onclick={() => openSettings(row)}>{t('permissions-panel-open-settings')}</Button>
           {/if}
         </div>
       </li>

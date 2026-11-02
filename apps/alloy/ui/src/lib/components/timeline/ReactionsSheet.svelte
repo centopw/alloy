@@ -6,6 +6,7 @@
   import { timelineStore } from '$lib/stores/timeline.svelte';
   import { session } from '$lib/stores/session.svelte';
 
+  import { t } from '$lib/i18n';
   interface Props {
     item: TimelineItemDto;
     open: boolean;
@@ -42,8 +43,8 @@
   }
 </script>
 
-<Modal {open} title="Reactions" {onclose} width="420px">
-  <div class="tabs" role="tablist" aria-label="Reactions by emoji">
+<Modal {open} title={t('reactions-sheet-reactions')} {onclose} width="420px">
+  <div class="tabs" role="tablist" aria-label={t('reactions-sheet-reactions-by-emoji')}>
     {#each tabs as tab (tab.key ?? 'all')}
       <button
         type="button"
@@ -52,7 +53,7 @@
         aria-selected={selected === tab.key}
         onclick={() => (selected = tab.key)}
       >
-        <span>{tab.key ?? 'All'}</span><span class="count">{tab.count}</span>
+        <span>{tab.key ?? t('reactions-sheet-all')}</span><span class="count">{tab.count}</span>
       </button>
     {/each}
   </div>
@@ -65,7 +66,7 @@
         <span class="name"><UserName userId={row.userId} displayName={m?.display_name ?? null} {roomId} /></span>
         <span class="emoji">{row.key}</span>
         {#if row.userId === session.account?.user_id}
-          <button type="button" class="remove" onclick={() => void timelineStore.toggleReaction(item, row.key)}>Remove</button>
+          <button type="button" class="remove" onclick={() => void timelineStore.toggleReaction(item, row.key)}>{t('common-remove')}</button>
         {/if}
       </li>
     {/each}

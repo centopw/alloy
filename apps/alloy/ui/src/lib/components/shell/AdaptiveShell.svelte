@@ -55,6 +55,7 @@
   import { Search } from '$lib/icons';
   import { shortcutLabel } from '$lib/platform/shortcuts';
 
+  import { t } from '$lib/i18n';
   let paletteOpen = $state(false);
   let settingsOpen = $state(false);
   let settingsSection = $state<'tags' | 'permissions' | undefined>();
@@ -332,7 +333,7 @@
         min={LAYOUT_LIMITS.sidebarWidth.min}
         max={LAYOUT_LIMITS.sidebarWidth.max}
         defaultValue={LAYOUT_LIMITS.sidebarWidth.default}
-        label="Resize sidebar"
+        label={t('adaptive-shell-resize-sidebar')}
         edge="end"
         collapseBelow={LAYOUT_LIMITS.sidebarWidth.min - 40}
         collapsed={layout.sidebarCollapsed}
@@ -360,12 +361,12 @@
       <Composer roomId={activeId} />
     {:else}
       <div class="empty">
-        <p class="eyebrow">Alloy</p>
-        <h2>No conversation open</h2>
-        <p>Search every room and person, or pick one from the sidebar.</p>
+        <p class="eyebrow">{t('brand-name')}</p>
+        <h2>{t('adaptive-shell-no-conversation-open')}</h2>
+        <p>{t('adaptive-shell-search-every-room-and-person-or-pick-one-from-th')}</p>
         <button type="button" class="jump" onclick={() => (paletteOpen = true)}>
           <Icon icon={Search} size={16} />
-          <span>Quick switcher</span>
+          <span>{t('adaptive-shell-quick-switcher')}</span>
           <kbd>{shortcutLabel('K')}</kbd>
         </button>
       </div>
@@ -379,7 +380,7 @@
         min={LAYOUT_LIMITS.detailsWidth.min}
         max={LAYOUT_LIMITS.detailsWidth.max}
         defaultValue={LAYOUT_LIMITS.detailsWidth.default}
-        label="Resize side panel"
+        label={t('adaptive-shell-resize-side-panel')}
         edge="start"
         onchange={(v) => layout.set('detailsWidth', v)}
       />

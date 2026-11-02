@@ -7,6 +7,7 @@
   import { session } from '$lib/stores/session.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
 
+  import { t } from '$lib/i18n';
   interface Props {
     onsettings?: () => void;
   }
@@ -33,7 +34,7 @@
       <UserName userId={account.user_id} displayName={name} class="name" />
       <span class="id" title={account.user_id}>{account.user_id}</span>
     </div>
-    <button type="button" class="gear" aria-label="Settings" onclick={() => onsettings?.()}>
+    <button type="button" class="gear" aria-label={t('common-settings')} onclick={() => onsettings?.()}>
       <Icon icon={Settings} size={20} />
     </button>
   </div>

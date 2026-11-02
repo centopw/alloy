@@ -2,6 +2,7 @@
   import { Modal, Button, Toggle, TextField } from '../common';
   import { timelineStore } from '$lib/stores/timeline.svelte';
 
+  import { t } from '$lib/i18n';
   const MIN_ANSWERS = 2;
   const MAX_ANSWERS = 10;
 
@@ -64,20 +65,20 @@
   }
 </script>
 
-<Modal {open} title="Create poll" {onclose} width="440px">
+<Modal {open} title={t('poll-dialog-create-poll')} {onclose} width="440px">
   <form class="form" onsubmit={submit}>
     <label class="field">
-      <span>Question</span>
+      <span>{t('poll-dialog-question')}</span>
       <TextField type="text" bind:value={question} maxlength={300} autocomplete="off" />
     </label>
 
     <fieldset class="answers">
-      <legend>Answers</legend>
+      <legend>{t('poll-dialog-answers')}</legend>
       {#each answers as _, i (i)}
         <div class="answer-row">
           <TextField
             type="text"
-            aria-label="Answer {i + 1}"
+            aria-label={t('poll-dialog-answer-number', { number: i + 1 })}
             bind:value={answers[i]}
             maxlength={200}
             autocomplete="off"
@@ -89,31 +90,31 @@
             disabled={answers.length <= MIN_ANSWERS}
             onclick={() => removeAnswer(i)}
           >
-            Remove
+            {t('common-remove')}
           </Button>
         </div>
       {/each}
       <div>
         <Button variant="ghost" size="sm" disabled={answers.length >= MAX_ANSWERS} onclick={addAnswer}>
-          Add answer
+          {t('poll-dialog-add-answer')}
         </Button>
       </div>
     </fieldset>
 
     <div class="row">
-      <span>Allow multiple answers</span>
-      <Toggle label="Allow multiple answers" checked={multiple} onchange={(v) => (multiple = v)} />
+      <span>{t('poll-dialog-allow-multiple-answers')}</span>
+      <Toggle label={t('poll-dialog-allow-multiple-answers')} checked={multiple} onchange={(v) => (multiple = v)} />
     </div>
     <div class="row">
-      <span>Show results while voting</span>
-      <Toggle label="Show results while voting" checked={disclosed} onchange={(v) => (disclosed = v)} />
+      <span>{t('poll-dialog-show-results-while-voting')}</span>
+      <Toggle label={t('poll-dialog-show-results-while-voting')} checked={disclosed} onchange={(v) => (disclosed = v)} />
     </div>
 
     {#if error}<p class="error" role="alert">{error}</p>{/if}
 
     <div class="actions">
-      <Button variant="ghost" onclick={onclose}>Cancel</Button>
-      <Button type="submit" disabled={busy || !valid}>{busy ? 'Creating...' : 'Create poll'}</Button>
+      <Button variant="ghost" onclick={onclose}>{t('common-cancel')}</Button>
+      <Button type="submit" disabled={busy || !valid}>{busy ? t('poll-dialog-creating') : t('poll-dialog-create-poll')}</Button>
     </div>
   </form>
 </Modal>

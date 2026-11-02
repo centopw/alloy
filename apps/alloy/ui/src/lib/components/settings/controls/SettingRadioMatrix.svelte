@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '$lib/i18n';
   interface Column {
     value: string;
     label: string;
@@ -27,7 +28,7 @@
   <table>
     <thead>
       <tr>
-        <th scope="col" class="row-head"><span class="sr-only">Item</span></th>
+        <th scope="col" class="row-head"><span class="sr-only">{t('setting-radio-matrix-item')}</span></th>
         {#each columns as column (column.value)}
           <th scope="col" class="col-head">{column.label}</th>
         {/each}

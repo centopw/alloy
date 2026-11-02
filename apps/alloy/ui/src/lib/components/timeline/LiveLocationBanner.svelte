@@ -6,6 +6,7 @@
   import { prefs } from '$lib/stores/prefs.svelte';
   import { roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
 
+  import { t } from '$lib/i18n';
   const active = $derived(liveLocation.active);
   const room = $derived(active ? roomsStore.rooms.find((r) => r.id === active.roomId) : null);
 </script>
@@ -14,9 +15,9 @@
   <div class="banner" role="status">
     <span class="icon" aria-hidden="true"><Icon icon={Navigation} size={16} /></span>
     <span class="text">
-      Sharing live location{room ? ` in ${roomTitle(room)}` : ''} until {formatTime(active.until, prefs.timeFormat)}
+      {t('live-location-banner-sharing-live-location')}{room ? ` in ${roomTitle(room)}` : ''} {t('live-location-banner-until')} {formatTime(active.until, prefs.timeFormat)}
     </span>
-    <button type="button" class="stop" onclick={() => void liveLocation.stop()}>Stop</button>
+    <button type="button" class="stop" onclick={() => void liveLocation.stop()}>{t('live-location-banner-stop')}</button>
   </div>
 {/if}
 

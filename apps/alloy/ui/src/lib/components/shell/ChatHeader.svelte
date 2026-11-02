@@ -13,6 +13,7 @@
   import { ui } from '$lib/stores/ui.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
 
+  import { t } from '$lib/i18n';
   interface Props {
     room: RoomSummary;
     onback?: () => void;
@@ -72,7 +73,7 @@
 {/snippet}
 
 <header class="head" use:contextmenu={headerMenu}>
-  <button type="button" class="icon back" aria-label="Back to rooms" onclick={() => onback?.()} use:contextmenu={() => [{ id: 'back', label: 'Back to rooms', icon: ChevronLeft, onselect: () => onback?.() }]}>
+  <button type="button" class="icon back" aria-label={t('chat-header-back-to-rooms')} onclick={() => onback?.()} use:contextmenu={() => [{ id: 'back', label: 'Back to rooms', icon: ChevronLeft, onselect: () => onback?.() }]}>
     <Icon icon={ChevronLeft} size={20} />
   </button>
   <h2 class="heading">
@@ -81,14 +82,14 @@
         <button
           type="button"
           class="picture-btn"
-          aria-label="Room picture options"
-          title="Room picture options"
+          aria-label={t('chat-header-room-picture-options')}
+          title={t('chat-header-room-picture-options')}
           onclick={(e) => openMenuFrom(e.currentTarget, roomPictureItems(roomId), 'Room picture')}
         >
           {@render avatarEl()}
         </button>
       {/if}
-      <button type="button" class="info-btn" aria-label="Room info for {title}" data-tooltip="Room info" onclick={() => ui.toggleRoomInfo()}>
+      <button type="button" class="info-btn" aria-label={t('chat-header-room-info', { room: title })} data-tooltip={t('chat-header-room-info-2')} onclick={() => ui.toggleRoomInfo()}>
         {#if !canSetPicture}
           <span class="avatar-slot">{@render avatarEl()}</span>
         {/if}
@@ -102,7 +103,7 @@
         {:else}
           <span class="title">{title}</span>
           {#if room.encrypted}
-            <span class="lock" role="img" aria-label="End-to-end encrypted" title="End-to-end encrypted">
+            <span class="lock" role="img" aria-label={t('chat-header-end-to-end-encrypted')} title={t('chat-header-end-to-end-encrypted')}>
               <Icon icon={Lock} size={16} />
             </span>
           {/if}
@@ -119,7 +120,7 @@
       type="button"
       class="icon"
       use:contextmenu={() => [{ id: 'details', label: 'Room details', icon: Info, onselect: () => ui.toggleRoomInfo('info') }]}
-      aria-label="Room info"
+      aria-label={t('chat-header-room-info-button')}
       aria-pressed={ui.roomInfoOpen && ui.roomInfoTab === 'info'}
       onclick={() => ui.toggleRoomInfo('info')}
     >
@@ -130,7 +131,7 @@
       type="button"
       class="icon"
       use:contextmenu={() => [{ id: 'members', label: 'Show members', icon: Users, onselect: () => ui.toggleRoomInfo('members') }]}
-      aria-label="Member list"
+      aria-label={t('chat-header-member-list')}
       aria-pressed={ui.roomInfoOpen && ui.roomInfoTab === 'members'}
       onclick={() => ui.toggleRoomInfo('members')}
     >
@@ -141,8 +142,8 @@
       type="button"
       class="icon"
       use:contextmenu={() => [{ id: 'search', label: 'Search in room', icon: Search, onselect: () => ui.openRoomSearch() }]}
-      aria-label="Search in room"
-      data-tooltip="Search in room"
+      aria-label={t('chat-header-search-in-room')}
+      data-tooltip={t('chat-header-search-in-room')}
       data-shortcut={searchShortcut}
       onclick={() => ui.openRoomSearch()}
     >

@@ -8,6 +8,7 @@
   import { verification } from '$lib/stores/verification.svelte';
   import { Copy } from '$lib/icons';
 
+  import { t } from '$lib/i18n';
   interface Props {
     onclose: () => void;
   }
@@ -67,49 +68,49 @@
 </script>
 
 <section class="section">
-  <SettingGroup title="This session" description="Keys and backup state for this device.">
+  <SettingGroup title={t('encryption-this-session')} description="Keys and backup state for this device.">
     {#if infoError}
       <p class="error" role="alert">{infoError}</p>
     {:else if info}
       <div class="row">
-        <span class="row-label">Session ID</span>
+        <span class="row-label">{t('encryption-session-id')}</span>
         <span class="row-value mono">{info.device_id}</span>
       </div>
       <div class="row">
-        <span class="row-label">Status</span>
-        <span class="row-value">{info.verified ? 'Verified' : 'Not verified'}</span>
+        <span class="row-label">{t('encryption-status')}</span>
+        <span class="row-value">{info.verified ? t('encryption-verified') : t('encryption-not-verified')}</span>
       </div>
       <div class="row">
-        <span class="row-label">Session key</span>
+        <span class="row-label">{t('encryption-session-key')}</span>
         <span class="row-value">
           {#if info.ed25519_key}
             <span class="mono key">{groupKey(info.ed25519_key)}</span>
             <button
               type="button"
               class="icon-button"
-              aria-label="Copy session key"
+              aria-label={t('encryption-copy-session-key')}
               onclick={() => void copyKey()}
             >
               <Copy size={16} />
             </button>
           {:else}
-            Unavailable
+            {t('encryption-unavailable')}
           {/if}
         </span>
       </div>
       {#if copied}
-        <p class="row note" role="status">Session key copied.</p>
+        <p class="row note" role="status">{t('encryption-session-key-copied')}</p>
       {/if}
       <div class="row">
-        <span class="row-label">Cross-signing</span>
-        <span class="row-value">{info.cross_signing_ready ? 'Set up' : 'Not set up'}</span>
+        <span class="row-label">{t('encryption-cross-signing')}</span>
+        <span class="row-value">{info.cross_signing_ready ? t('encryption-set-up') : t('encryption-not-set-up')}</span>
       </div>
       <div class="row">
-        <span class="row-label">Key backup</span>
-        <span class="row-value">{info.backup_enabled ? 'Enabled' : 'Disabled'}</span>
+        <span class="row-label">{t('encryption-key-backup')}</span>
+        <span class="row-value">{info.backup_enabled ? t('encryption-enabled') : t('encryption-disabled')}</span>
       </div>
     {:else}
-      <p class="muted">Loading session details...</p>
+      <p class="muted">{t('encryption-loading-session-details')}</p>
     {/if}
   </SettingGroup>
 
@@ -117,9 +118,9 @@
        that is already verified tells the user their trust state is still in doubt. Devices.svelte
        gates the same control on the same flag. Nothing renders while the state is unknown. -->
   {#if info && !info.verified}
-    <SettingGroup title="Verify this device">
+    <SettingGroup title={t('encryption-verify-this-device')}>
       <SettingButtonRow
-        label="This device"
+        label={t('encryption-this-device')}
         description="Confirm it is you by comparing emojis with another signed-in device."
         buttonLabel="Start verification"
         onclick={() => {
@@ -130,26 +131,25 @@
     </SettingGroup>
   {/if}
 
-  <SettingGroup title="Recovery key">
+  <SettingGroup title={t('encryption-recovery-key')}>
     <div class="recovery">
       {#if verification.recoveryKey}
         <p class="muted">
-          Save this key somewhere safe. It is the only way to restore your encrypted messages, and
-          it will not be shown again.
+          {t('encryption-save-this-key-somewhere-safe-it-is-the-only-way-')}
         </p>
         <code class="key">{verification.recoveryKey}</code>
         <label class="check">
           <input type="checkbox" bind:checked={confirmedKey} />
-          I have saved my recovery key
+          {t('encryption-i-have-saved-my-recovery-key')}
         </label>
         <div>
-          <Button disabled={!confirmedKey} onclick={() => verification.clearKey()}>Done</Button>
+          <Button disabled={!confirmedKey} onclick={() => verification.clearKey()}>{t('common-done')}</Button>
         </div>
       {:else if verification.recovery === 'Enabled'}
-        <p class="muted">Recovery is set up. This device has your keys.</p>
+        <p class="muted">{t('encryption-recovery-is-set-up-this-device-has-your-keys')}</p>
       {:else if verification.recovery === 'Lost'}
         <p class="muted">
-          Enter your recovery key to unlock your encrypted history on this device.
+          {t('encryption-enter-your-recovery-key-to-unlock-your-encrypted')}
         </p>
         <form
           class="form"
@@ -161,14 +161,14 @@
           <TextField
             type="password"
             bind:value={recoveryInput}
-            placeholder="Recovery key"
-            aria-label="Recovery key"
+            placeholder={t('encryption-recovery-key')}
+            aria-label={t('encryption-recovery-key')}
             autocomplete="off"
           />
-          <Button type="submit" disabled={!recoveryInput.trim() || verification.busy}>Unlock</Button>
+          <Button type="submit" disabled={!recoveryInput.trim() || verification.busy}>{t('encryption-unlock')}</Button>
         </form>
       {:else}
-        <p class="muted">Set up a recovery key so you never lose your encrypted messages.</p>
+        <p class="muted">{t('encryption-set-up-a-recovery-key-so-you-never-lose-your-enc')}</p>
         <form
           class="form"
           onsubmit={(e) => {
@@ -179,11 +179,11 @@
           <TextField
             type="password"
             bind:value={password}
-            placeholder="Account password"
-            aria-label="Account password"
+            placeholder={t('encryption-account-password')}
+            aria-label={t('encryption-account-password')}
             autocomplete="current-password"
           />
-          <Button type="submit" disabled={verification.busy}>Set up recovery</Button>
+          <Button type="submit" disabled={verification.busy}>{t('encryption-set-up-recovery')}</Button>
         </form>
       {/if}
       {#if verification.error}<p class="error" role="alert">{verification.error}</p>{/if}

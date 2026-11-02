@@ -13,6 +13,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@fluent/bundle": "^0.19.1",
     "@internationalized/date": "^3.12.4",
     "@lucide/svelte": "^1.58.0",
     "@tauri-apps/api": "^2.2.0",

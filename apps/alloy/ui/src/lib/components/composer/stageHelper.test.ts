@@ -9,6 +9,7 @@ vi.mock('$lib/platform/files', () => ({
     return null;
   }),
   localFileUrl: vi.fn(async (path: string) => `asset://localhost${path}`),
+  attachmentSize: vi.fn(async (path: string) => (path.endsWith('.pdf') ? 100654 : 4096)),
 }));
 
 describe('stagePictureFromPath', () => {
@@ -19,6 +20,7 @@ describe('stagePictureFromPath', () => {
       name: 'valid-image.png',
       kind: 'image',
       preview: 'asset://localhost/app/cache/picks/uuid/valid-image.png',
+      size: 4096,
     });
   });
 
@@ -56,6 +58,7 @@ describe('stageFile', () => {
       name: 'clip.mp4',
       kind: 'video',
       preview: 'asset://localhost/tmp/clip.mp4',
+      size: 4096,
     });
   });
 
@@ -63,5 +66,10 @@ describe('stageFile', () => {
     const result = await stageFile('/tmp/report.pdf');
     expect(result.kind).toBe('file');
     expect(result.preview).toBeNull();
+  });
+
+  it('carries the byte size the preview card shows', async () => {
+    const result = await stageFile('/tmp/report.pdf');
+    expect(result.size).toBe(100654);
   });
 });

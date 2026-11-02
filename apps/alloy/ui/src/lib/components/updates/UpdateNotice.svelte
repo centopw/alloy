@@ -8,6 +8,7 @@
   import type { MenuItem } from '$lib/stores/contextmenu.svelte';
   import { updatesStore } from '$lib/stores/updates.svelte';
 
+  import { t } from '$lib/i18n';
   const visible = $derived(updatesStore.pending !== null || updatesStore.busy);
   const percent = $derived(
     updatesStore.progress === null ? null : Math.round(updatesStore.progress * 100),
@@ -74,8 +75,8 @@
       <button
         type="button"
         class="dismiss"
-        aria-label="Remind me later"
-        data-tooltip="Remind me later"
+        aria-label={t('update-notice-remind-me-later')}
+        data-tooltip={t('update-notice-remind-me-later')}
         onclick={() => updatesStore.remindLater()}
       >
         <Icon icon={X} size={16} />
@@ -89,7 +90,7 @@
       -->
       <Progress
         value={percent}
-        aria-label={percent === null ? 'Working on update' : 'Downloading update'}
+        aria-label={percent === null ? t('update-notice-working-on-update') : t('update-notice-downloading-update')}
         class="absolute inset-x-0 bottom-0 h-[2px] w-full overflow-hidden rounded-none
           bg-[var(--alloy-color-border-subtle)]
           [&_[data-slot=progress-indicator]]:bg-[var(--alloy-color-accent-primary)]

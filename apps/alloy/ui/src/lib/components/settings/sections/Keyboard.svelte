@@ -5,6 +5,7 @@
   import { viewport } from '$lib/stores/viewport.svelte';
   import { capabilities, currentEnv } from '$lib/platform/capabilities';
 
+  import { t } from '$lib/i18n';
   // A chord is a list of keys pressed together. Each row lists alternative chords.
   type Chord = string[];
   type Row = { action: string; chords: Chord[] };
@@ -73,7 +74,7 @@
     <!-- "or" belongs to the chord that follows it, so a wrapped row keeps the pair together. -->
     <span class="alt">
       {#if i > 0}
-        <span class="or">or</span>
+        <span class="or">{t('keyboard-or')}</span>
       {/if}
       <span class="chord">
         {#each chord as key, j (j)}
@@ -93,8 +94,8 @@
       <table class="shortcuts">
         <thead class="visually-hidden">
           <tr>
-            <th scope="col">Action</th>
-            <th scope="col">Keys</th>
+            <th scope="col">{t('keyboard-action')}</th>
+            <th scope="col">{t('keyboard-keys')}</th>
           </tr>
         </thead>
         <tbody>

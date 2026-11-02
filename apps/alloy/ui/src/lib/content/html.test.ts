@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { sanitizeHtml } from "./html";
+import { sanitizeHtml, sanitizeQuoteHtml } from "./html";
 
 /** Parses sanitized output into an inert document so nothing executes or loads. */
 function render(input: string): HTMLElement {
@@ -76,5 +76,56 @@ describe("sanitizeHtml", () => {
     const body = render('<span data-evil="1">x</span>');
 
     expect(body.querySelector("span")?.hasAttribute("data-evil")).toBe(false);
+  });
+});
+
+describe("mentions", () => {
+  it("marks a matrix.to mention so it can be drawn as a pill", () => {
+    const body = render('<a href="https://matrix.to/#/@alice:example.org">Alice</a>');
+
+    expect(body.querySelector("a")?.getAttribute("class")).toBe("alloy-pill");
+    expect(body.querySelector("a")?.getAttribute("href")).toBe(
+      "https://matrix.to/#/@alice:example.org",
+    );
+  });
+
+  it("marks an encoded room mention as well", () => {
+    const body = render('<a href="https://matrix.to/#/%23general%3Aexample.org">#general</a>');
+
+    expect(body.querySelector("a")?.getAttribute("class")).toContain("alloy-pill");
+  });
+
+  it("leaves an ordinary link a link", () => {
+    const body = render('<a href="https://example.org/docs">docs</a>');
+
+    expect(body.querySelector("a")?.hasAttribute("class")).toBe(false);
+  });
+});
+
+describe("sanitizeQuoteHtml", () => {
+  function renderQuote(input: string): HTMLElement {
+    return new DOMParser().parseFromString(sanitizeQuoteHtml(input), "text/html").body;
+  }
+
+  it("keeps a mention looking like one, but not clickable, inside the card", () => {
+    const body = renderQuote('<a href="https://matrix.to/#/@bob:example.org">Bob</a> said hi');
+
+    expect(body.querySelector("a")).toBeNull();
+    expect(body.querySelector("span.alloy-pill")?.textContent).toBe("Bob");
+  });
+
+  it("drops block markup so an excerpt stays one run of text", () => {
+    const body = renderQuote("<ul><li>a</li></ul><p>b</p>");
+
+    expect(body.querySelector("ul")).toBeNull();
+    expect(body.querySelector("p")).toBeNull();
+    expect(body.textContent).toBe("ab");
+  });
+
+  it("still refuses scripts and javascript: targets", () => {
+    const body = renderQuote('<script>x()</script><a href="javascript:alert(1)">y</a>');
+
+    expect(body.querySelector("script")).toBeNull();
+    expect(body.textContent).not.toContain("x()");
   });
 });

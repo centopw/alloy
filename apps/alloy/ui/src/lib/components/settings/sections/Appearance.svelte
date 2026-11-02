@@ -11,6 +11,7 @@
   import { themeStore } from '$lib/theme/theme.svelte';
   import type { Density } from '$lib/theme/theme.svelte';
 
+  import { t } from '$lib/i18n';
   const dark = $derived(themeStore.activeTheme !== 'alloy-light');
   const amoled = $derived(themeStore.activeTheme === 'alloy-amoled');
 
@@ -55,41 +56,41 @@
     <span class="pv-avatar">A</span>
     <span class="pv-body">
       <span class="pv-meta">
-        <span class="pv-name">Alex</span>
+        <span class="pv-name">{t('appearance-alex')}</span>
         <span class="pv-time">10:42</span>
       </span>
-      <span class="pv-text">Hey you. You're the best!</span>
+      <span class="pv-text">{t('appearance-hey-you-youre-the-best')}</span>
     </span>
   </span>
 {/snippet}
 
 {#snippet bubblesPreview()}
   <span class="pv pv-bubbles" aria-hidden="true">
-    <span class="pv-bubble">Hey you. You're the best!</span>
+    <span class="pv-bubble">{t('appearance-hey-you-youre-the-best')}</span>
   </span>
 {/snippet}
 
 {#snippet ircPreview()}
   <span class="pv pv-irc" aria-hidden="true">
     <span class="pv-time">10:42</span>
-    <span class="pv-nick">&lt;Alex&gt;</span>
-    <span class="pv-text">Hey you. You're the best!</span>
+    <span class="pv-nick">{t('appearance-lt-alex-gt')}</span>
+    <span class="pv-text">{t('appearance-hey-you-youre-the-best')}</span>
   </span>
 {/snippet}
 
 <div class="section">
-  <SettingGroup title="Theme">
+  <SettingGroup title={t('appearance-theme')}>
     <SettingToggle
-      label="Follow system appearance"
+      label={t('appearance-follow-system-appearance')}
       checked={themeStore.followSystem}
       onchange={(v) => themeStore.setFollowSystem(v)}
     />
     <!-- Indented under follow-system: they refine the same choice, and touching either one makes it
          an explicit choice of its own. -->
     <div class="theme-children">
-      <SettingToggle label="Dark mode" checked={dark} onchange={setDark} />
+      <SettingToggle label={t('appearance-dark-mode')} checked={dark} onchange={setDark} />
       <SettingToggle
-        label="Pure black background"
+        label={t('appearance-pure-black-background')}
         checked={amoled}
         disabled={!dark}
         disabledReason={amoledReason}
@@ -97,9 +98,9 @@
       />
     </div>
     <div class="row">
-      <span class="row-label">Density</span>
+      <span class="row-label">{t('appearance-density')}</span>
       <SegmentedControl
-        label="Density"
+        label={t('appearance-density')}
         options={densityOptions}
         value={themeStore.density}
         onchange={(v) => themeStore.setDensity(v as Density)}
@@ -107,7 +108,7 @@
     </div>
   </SettingGroup>
 
-  <SettingGroup title="Messages">
+  <SettingGroup title={t('appearance-messages')}>
     <div class="padded">
       <SettingRadioCards
         legend="Message layout"
@@ -117,26 +118,26 @@
       />
     </div>
     <SettingToggle
-      label="Enable big emoji in chat"
+      label={t('appearance-enable-big-emoji-in-chat')}
       checked={prefs.bigEmoji}
       onchange={(v) => prefs.set('bigEmoji', v)}
     />
     <SettingToggle
-      label="Send and show read receipts"
+      label={t('appearance-send-and-show-read-receipts')}
       checked={prefs.showReadReceipts}
       onchange={(v) => prefs.set('showReadReceipts', v)}
     />
   </SettingGroup>
 
-  <SettingGroup title="Text and time">
+  <SettingGroup title={t('appearance-text-and-time')}>
     <SettingSelect
-      label="Font size"
+      label={t('appearance-font-size')}
       value={String(prefs.fontScale)}
       options={fontScaleOptions}
       onchange={(v) => prefs.set('fontScale', Number(v) as FontScale)}
     />
     <SettingSelect
-      label="Time format"
+      label={t('appearance-time-format')}
       value={prefs.timeFormat}
       options={timeFormatOptions}
       onchange={(v) => prefs.set('timeFormat', v as TimeFormat)}

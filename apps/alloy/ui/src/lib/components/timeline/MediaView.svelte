@@ -10,6 +10,7 @@
   import Icon from '$lib/icons/Icon.svelte';
   import { Download } from '$lib/icons';
 
+  import { t } from '$lib/i18n';
   interface Props {
     uri: string;
     mimeType: string;
@@ -155,9 +156,9 @@
 {#snippet frameContent()}
   {#if inlineVideo}
     <!-- svelte-ignore a11y_media_has_caption -->
-    <video src={playUrl} autoplay muted loop playsinline aria-label={body || 'Video'}></video>
+    <video src={playUrl} autoplay muted loop playsinline aria-label={body || t('media-view-video')}></video>
   {:else if src && still}
-    <canvas bind:this={canvasEl} aria-label={body || 'Animated image, paused'}></canvas>
+    <canvas bind:this={canvasEl} aria-label={body || t('media-view-animated-image-paused')}></canvas>
   {:else if src}
     <img {src} alt={body} loading="lazy" onerror={() => (failed = true)} />
   {:else}
@@ -166,9 +167,9 @@
 {/snippet}
 
 {#if loadFailed}
-  <div class="frame frame-error" style="min-height: 120px;" role="group" aria-label="Media did not load">
-    <span class="error-text">Couldn't load this {mediaKind}.</span>
-    <button type="button" class="retry" onclick={retryLoad}>Retry</button>
+  <div class="frame frame-error" style="min-height: 120px;" role="group" aria-label={t('media-view-media-did-not-load')}>
+    <span class="error-text">{t('media-view-couldnt-load-this')} {mediaKind}.</span>
+    <button type="button" class="retry" onclick={retryLoad}>{t('common-retry')}</button>
   </div>
 {:else if hasThumb || inlineVideo}
   {#if openable}
@@ -176,7 +177,7 @@
       class="frame frame-open"
       type="button"
       style="aspect-ratio: {aspect};"
-      aria-label="Open {body || mediaKind}"
+      aria-label={t('media-open', { name: body || mediaKind })}
       onclick={openViewer}
     >
       {@render frameContent()}
@@ -189,21 +190,21 @@
 {:else}
   {#if openable}
     <button class="file" type="button" onclick={openViewer}>
-      <span class="file-name" title={body || 'Attachment'}>{body || 'Attachment'}</span>
+      <span class="file-name" title={body || t('media-view-attachment')}>{body || t('media-view-attachment')}</span>
       <span class="file-meta">{formatBytes(sizeBytes)}</span>
     </button>
   {:else}
     <div class="file">
       <span class="file-copy">
-        <span class="file-name" title={body || 'Attachment'}>{body || 'Attachment'}</span>
+        <span class="file-name" title={body || t('media-view-attachment')}>{body || t('media-view-attachment')}</span>
         <span class="file-meta">{formatBytes(sizeBytes)}</span>
       </span>
       {#if ondownload}
         <button
           type="button"
           class="file-download"
-          aria-label="Download {body || 'attachment'}"
-          title="Download"
+          aria-label={t('media-download', { name: body || t('media-attachment') })}
+          title={t('media-view-download')}
           onclick={ondownload}
         >
           <Icon icon={Download} size={16} />

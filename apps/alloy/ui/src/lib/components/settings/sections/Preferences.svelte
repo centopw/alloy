@@ -6,6 +6,7 @@
   import { viewport } from '$lib/stores/viewport.svelte';
   import { capabilities, currentEnv } from '$lib/platform/capabilities';
 
+  import { t } from '$lib/i18n';
   const caps = $derived(capabilities(currentEnv(viewport.isPhone)));
   let autostartBusy = $state(false);
   let autostartError = $state<string | null>(null);
@@ -52,9 +53,9 @@
 
 <div class="section">
   {#if caps.enterToSend}
-    <SettingGroup title="Composer">
+    <SettingGroup title={t('preferences-composer')}>
       <SettingToggle
-        label="Send messages with Enter"
+        label={t('preferences-send-messages-with-enter')}
         description="When off, Enter inserts a new line and Ctrl/Cmd+Enter sends."
         checked={prefs.enterToSend}
         onchange={(v) => prefs.set('enterToSend', v)}
@@ -62,45 +63,45 @@
     </SettingGroup>
   {/if}
 
-  <SettingGroup title="Timeline">
+  <SettingGroup title={t('preferences-timeline')}>
     <SettingToggle
-      label="Show typing notifications"
+      label={t('preferences-show-typing-notifications')}
       description="Let others see when you are typing, and show when they are typing."
       checked={prefs.showTyping}
       onchange={(v) => prefs.set('showTyping', v)}
     />
     <SettingToggle
-      label="Show a placeholder for removed messages"
+      label={t('preferences-show-a-placeholder-for-removed-messages')}
       checked={prefs.showRemovedPlaceholder}
       onchange={(v) => prefs.set('showRemovedPlaceholder', v)}
     />
     <SettingToggle
-      label="Show join and leave messages"
+      label={t('preferences-show-join-and-leave-messages')}
       checked={prefs.showMembershipEvents}
       onchange={(v) => prefs.set('showMembershipEvents', v)}
     />
     <SettingToggle
-      label="Show display name and profile picture changes"
+      label={t('preferences-show-display-name-and-profile-picture-changes')}
       checked={prefs.showProfileChanges}
       onchange={(v) => prefs.set('showProfileChanges', v)}
     />
     <SettingToggle
-      label="Show room name, topic and settings changes"
+      label={t('preferences-show-room-name-topic-and-settings-changes')}
       checked={prefs.showRoomUpdates}
       onchange={(v) => prefs.set('showRoomUpdates', v)}
     />
     <SettingToggle
-      label="Jump to the newest message when you send"
+      label={t('preferences-jump-to-the-newest-message-when-you-send')}
       checked={prefs.jumpToBottomOnSend}
       onchange={(v) => prefs.set('jumpToBottomOnSend', v)}
     />
     <SettingToggle
-      label="Autoplay GIFs and videos"
+      label={t('preferences-autoplay-gifs-and-videos')}
       checked={prefs.autoplayMedia}
       onchange={(v) => prefs.set('autoplayMedia', v)}
     />
     <SettingSelect
-      label="Link previews"
+      label={t('preferences-link-previews')}
       description="Your homeserver fetches the page to build the preview."
       value={prefs.linkPreviews}
       options={LINK_PREVIEW_OPTIONS}
@@ -108,14 +109,14 @@
     />
   </SettingGroup>
 
-  <SettingGroup title="Reactions">
+  <SettingGroup title={t('preferences-reactions')}>
     <SettingQuickReactions value={prefs.quickReactions} onchange={(v) => prefs.set('quickReactions', v)} />
   </SettingGroup>
 
   {#if caps.autostart}
-    <SettingGroup title="Startup">
+    <SettingGroup title={t('preferences-startup')}>
       <SettingToggle
-        label="Open Alloy when you log in"
+        label={t('preferences-open-alloy-when-you-log-in')}
         description="Start Alloy automatically when you sign in to your computer."
         checked={prefs.launchAtLogin}
         disabled={autostartBusy}

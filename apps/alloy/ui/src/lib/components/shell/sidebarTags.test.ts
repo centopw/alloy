@@ -19,7 +19,8 @@ const toolbar = sidebar.slice(
 
 describe('room-list tag grouping', () => {
   it('offers the grouping control beside the tag chips', () => {
-    expect(toolbar).toContain('label="Group"');
+    // By message id, not by English: the words moved into the catalog.
+    expect(toolbar).toContain("label={t('sidebar-group')}");
     expect(toolbar).toContain("pressed={prefs.roomSort === 'tag'}");
     expect(toolbar).toContain('setSort(sortForGroupToggle(prefs.roomSort, sortBeforeGroup))');
   });

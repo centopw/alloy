@@ -5,6 +5,7 @@
   import { permissionsStore } from '$lib/stores/permissions.svelte';
   import { prefs } from '$lib/stores/prefs.svelte';
 
+  import { t } from '$lib/i18n';
   interface Props {
     /** Opens Settings > Permissions, for the user who wants the full page. */
     onopensettings?: () => void;
@@ -30,18 +31,17 @@
   }
 </script>
 
-<Modal {open} title="Allow what Alloy needs" onclose={dismiss}>
+<Modal {open} title={t('permissions-gate-allow-what-alloy-needs')} onclose={dismiss}>
   <div class="gate">
     <p class="intro">
-      Alloy needs a few permissions to tell you about new messages. Allow them here; you can change any of them later in
-      Settings.
+      {t('permissions-gate-alloy-needs-a-few-permissions-to-tell-you-about-')}
     </p>
     <PermissionsPanel />
     <div class="actions">
       {#if onopensettings}
-        <Button variant="ghost" onclick={() => { dismiss(); onopensettings?.(); }}>All permissions</Button>
+        <Button variant="ghost" onclick={() => { dismiss(); onopensettings?.(); }}>{t('permissions-gate-all-permissions')}</Button>
       {/if}
-      <Button variant="primary" onclick={dismiss}>Continue</Button>
+      <Button variant="primary" onclick={dismiss}>{t('common-continue')}</Button>
     </div>
   </div>
 </Modal>

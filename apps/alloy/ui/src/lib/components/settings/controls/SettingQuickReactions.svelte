@@ -9,6 +9,7 @@
   } from '$lib/content/quickReactions';
   import { emojiPicker } from '$lib/stores/emojiPicker.svelte';
 
+  import { t } from '$lib/i18n';
   interface Props {
     value: readonly string[];
     onchange: (value: readonly string[]) => void;
@@ -28,18 +29,18 @@
 
 <div class="setting-row">
   <div class="text">
-    <span class="label">Quick reactions</span>
+    <span class="label">{t('setting-quick-reactions-quick-reactions')}</span>
     <span class="description">
-      Shown when you hover over a message, or press and hold it on a phone. Tap one to remove it, up to {MAX_QUICK_REACTIONS}.
+      {t('setting-quick-reactions-shown-when-you-hover-over-a-message-or-press-and')} {MAX_QUICK_REACTIONS}.
     </span>
   </div>
-  <div class="chips" role="group" aria-label="Quick reactions">
+  <div class="chips" role="group" aria-label={t('setting-quick-reactions-quick-reactions')}>
     {#each value as emoji (emoji)}
       <button
         type="button"
         class="chip"
-        aria-label="Remove {emoji}"
-        data-tooltip="Remove"
+        aria-label={t('setting-quick-reactions-remove-emoji', { emoji: emoji })}
+        data-tooltip={t('common-remove')}
         disabled={value.length <= 1}
         onclick={() => onchange(removeQuickReaction(value, emoji))}
       >
@@ -51,15 +52,15 @@
       <button
         type="button"
         class="chip add"
-        aria-label="Add a reaction"
-        data-tooltip="Add a reaction"
+        aria-label={t('setting-quick-reactions-add-a-reaction')}
+        data-tooltip={t('setting-quick-reactions-add-a-reaction')}
         onclick={(e) => add(e.currentTarget.getBoundingClientRect())}
       >
         <Icon icon={Plus} size={20} />
       </button>
     {/if}
     {#if !isDefault}
-      <button type="button" class="reset" onclick={() => onchange(DEFAULT_QUICK_REACTIONS)}>Reset</button>
+      <button type="button" class="reset" onclick={() => onchange(DEFAULT_QUICK_REACTIONS)}>{t('setting-quick-reactions-reset')}</button>
     {/if}
   </div>
 </div>

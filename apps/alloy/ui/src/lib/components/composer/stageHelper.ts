@@ -1,4 +1,4 @@
-import { importPastedImagePath, localFileUrl } from '$lib/platform/files';
+import { attachmentSize, importPastedImagePath, localFileUrl } from '$lib/platform/files';
 
 /** How the composer should render a staged file's thumbnail. */
 export type StagedKind = 'image' | 'video' | 'file';
@@ -8,6 +8,8 @@ export interface StagedPicture {
   name: string;
   kind: StagedKind;
   preview: string | null;
+  /** Bytes, or null while the shell has not answered. The preview card shows it when known. */
+  size: number | null;
 }
 
 const IMAGE_EXTENSION = /\.(png|jpe?g|gif|webp|bmp|avif|heic)$/i;
@@ -35,11 +37,14 @@ export async function stagedPreview(path: string): Promise<string | null> {
 
 /** Builds the staged item for a file already copied into the app's pick cache. */
 export async function stageFile(path: string): Promise<StagedPicture> {
+  // Both are shell round-trips, and neither needs the other.
+  const [preview, size] = await Promise.all([stagedPreview(path), attachmentSize(path)]);
   return {
     path,
     name: path.split(/[\\/]/).pop() ?? path,
     kind: stagedKind(path),
-    preview: await stagedPreview(path),
+    preview,
+    size,
   };
 }
 

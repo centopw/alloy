@@ -7,6 +7,7 @@
   import { viewport } from '$lib/stores/viewport.svelte';
   import { verification } from '$lib/stores/verification.svelte';
 
+  import { t } from '$lib/i18n';
   const view = $derived(verification.view);
   const open = $derived(view.step !== 'idle');
   const sheetOpen = $derived(open && viewport.isPhone);
@@ -42,31 +43,31 @@
 
 {#snippet body()}
   {#if view.step === 'incoming'}
-    <p>Another device of yours wants to verify. Only continue if you started it.</p>
+    <p>{t('verification-dialog-another-device-of-yours-wants-to-verify-only-con')}</p>
     <div class="actions">
-      <Button variant="ghost" onclick={() => verification.cancel()}>Decline</Button>
-      <Button onclick={() => verification.accept()}>Continue</Button>
+      <Button variant="ghost" onclick={() => verification.cancel()}>{t('verification-dialog-decline')}</Button>
+      <Button onclick={() => verification.accept()}>{t('common-continue')}</Button>
     </div>
   {:else if view.step === 'waiting'}
-    <p aria-busy="true">Waiting for your other device. Open Alloy there and accept the request.</p>
-    <div class="actions"><Button variant="ghost" onclick={() => verification.cancel()}>Cancel</Button></div>
+    <p aria-busy="true">{t('verification-dialog-waiting-for-your-other-device-open-alloy-there-a')}</p>
+    <div class="actions"><Button variant="ghost" onclick={() => verification.cancel()}>{t('common-cancel')}</Button></div>
   {:else if view.step === 'compare'}
-    <p>Check that the same emojis appear, in the same order, on your other device.</p>
-    <ul class="emojis" aria-label="Verification emojis">
+    <p>{t('verification-dialog-check-that-the-same-emojis-appear-in-the-same-or')}</p>
+    <ul class="emojis" aria-label={t('verification-dialog-verification-emojis')}>
       {#each view.emojis as e}
         <li><span class="glyph" aria-hidden="true">{e.emoji}</span><span>{e.description}</span></li>
       {/each}
     </ul>
     <div class="actions">
-      <Button variant="danger" onclick={() => verification.cancel()}>They don't match</Button>
-      <Button disabled={verification.busy} onclick={() => verification.confirm()}>They match</Button>
+      <Button variant="danger" onclick={() => verification.cancel()}>{t('verification-dialog-they-dont-match')}</Button>
+      <Button disabled={verification.busy} onclick={() => verification.confirm()}>{t('verification-dialog-they-match')}</Button>
     </div>
   {:else if view.step === 'done'}
-    <p>This device is verified. Your encrypted history is now available here.</p>
-    <div class="actions"><Button onclick={() => verification.dismiss()}>Done</Button></div>
+    <p>{t('verification-dialog-this-device-is-verified-your-encrypted-history-i')}</p>
+    <div class="actions"><Button onclick={() => verification.dismiss()}>{t('common-done')}</Button></div>
   {:else if view.step === 'cancelled'}
-    <p>Verification stopped: {view.reason}</p>
-    <div class="actions"><Button onclick={() => verification.dismiss()}>Close</Button></div>
+    <p>{t('verification-dialog-verification-stopped')} {view.reason}</p>
+    <div class="actions"><Button onclick={() => verification.dismiss()}>{t('common-close')}</Button></div>
   {/if}
   {#if verification.error}<p class="error" role="alert">{verification.error}</p>{/if}
 {/snippet}
@@ -84,8 +85,8 @@
     <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="verify-title" tabindex="-1" bind:this={sheet}>
       <span class="handle" aria-hidden="true"></span>
       <header>
-        <h2 id="verify-title">Verify this device</h2>
-        <button type="button" aria-label="Close verification" onclick={close}>
+        <h2 id="verify-title">{t('verification-dialog-verify-this-device')}</h2>
+        <button type="button" aria-label={t('verification-dialog-close-verification')} onclick={close}>
           <Icon icon={X} size={20} />
         </button>
       </header>
@@ -95,7 +96,7 @@
     </div>
   </div>
 {:else}
-  <Modal {open} title="Verify this device" onclose={close} width="460px">
+  <Modal {open} title={t('verification-dialog-verify-this-device')} onclose={close} width="460px">
     {@render body()}
   </Modal>
 {/if}
