@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.3.2 (pre-release)
+
+### Added
+- **A conversation a screen reader can follow.** The message list is a named feed: incoming messages produce one announcement per settled burst (which can be muted from the conversation menu), every message is reachable with a keyboard cursor (Enter, Space or Shift+F10 open its actions; PageUp/PageDown and Home/End move through history), and the conversation itself scrolls from the keyboard. Focus follows the phone layout between the room list and the chat, and the window title names the open room.
+- **Keyboard navigation for the shell and overlays.** Skip links jump straight to the conversation or the room list, the desktop room list is one tab stop with arrow-key movement and Shift+F10 for the full room menu, the quick switcher restores focus when it closes, the aria-modal sheets keep Tab inside them, and tabs, radio answers and the emoji and reaction pickers follow their keyboard patterns.
+- **A complete Vietnamese translation.** All 822 user-visible messages now ship in Vietnamese instead of falling back to English, the locale switches live, and a right-to-left verification locale stays available.
+- **A gate that keeps chrome translatable.** `pnpm check` fails on a hardcoded English string in a template, an attribute, a menu table or a TypeScript module, and on an `en`/`vi` bundle mismatch.
+
+### Changed
+- **Contrast now meets WCAG AA everywhere it is measured.** Error text, links, muted meta, unread badges, own-bubble timestamps and the destructive button fill are retuned across all four themes; avatar initials pick white or ink from the fill colour. The theme generator checks 70 pairs per theme instead of 32, including the worst-case translucent chrome and glass backdrops, so a new theme cannot regress silently.
+- **Pinch zoom is back on Android.** The viewport no longer disables user scaling, and the phone header grows instead of clipping when the system text size is raised.
+
+### Fixed
+- **Accessibility blocker: white initials on pastel avatars.** In the dark, AMOLED and midnight themes the initials measured as low as 1.67:1; they now clear 4.5:1 for every palette entry.
+- **The conversation could not be scrolled with the keyboard.** The timeline is now a focusable, named scroll region with a message cursor.
+- **Cached day dividers appeared as unsent messages.** A day divider restored from the timeline cache was carried into the send queue; only real local echoes are queued now.
+- **The ignore list was changed before the server state was known.** A failed request could leave the local list wrong; the engine now reads the block list first.
+
+### Security
+- **Dependency advisories.** `pulldown-cmark` is updated past the quadratic wikilink parse, `async-executor` moves off its yanked release, and the new `zip` symlink-abort advisory is accepted explicitly in `deny.toml` and `.cargo/audit.toml` with the same signed-package reasoning as the other zip advisories.
+
 ## 0.3.1 (pre-release)
 
 ### Added
