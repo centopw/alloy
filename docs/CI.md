@@ -67,7 +67,8 @@ graph LR
 - Android build job runs conditionally: gates execution on presence of generated project directory before installing SDKs
 - No secrets required for CI PR validation
 
-**Duration:** ~15–25 minutes per OS
+**Duration:** ~7–11 minutes per OS with a warm dependency cache; 25–35 minutes
+from a cold cache (see [Build time and the cache budget](#build-time-and-the-cache-budget)).
 
 ### 2. `.github/workflows/audit.yml`
 
@@ -330,6 +331,65 @@ Alloy binaries are distributed directly to users via GitHub Releases and direct 
 - `alloy-sbom-{macos,linux,windows}.json` (CycloneDX SBOMs)
 - `SHA256SUMS` (checksum file for integrity verification)
 - `update.json` (Tauri direct updater manifest)
+
+---
+
+## Build time and the cache budget
+
+Almost all of the wall time in CI and in a release is **cold Rust compilation** of a ~900-crate
+dependency graph (Tauri/wry, matrix-sdk plus its crypto and SQLite stack, Ruma, and the plugin
+host's Wasmtime in workspace jobs), not the tests themselves. Measured on 2026-11-02/03:
+
+| Job | Warm cache | Cold cache |
+|---|---|---|
+| CI · Clippy & Tests (ubuntu) | ~7–11 min | 25–35 min |
+| CI · Clippy & Tests (macOS) | ~12 min | 30+ min |
+| CI · Engine integration test shard | ~5–9 min | 20+ min |
+| Release · macOS x64 bundle | ~5–8 min | **27 min** (`Finished `release` profile … in 25m 01s`; bundling + signing takes under a minute) |
+| Release · macOS arm64 bundle | — | 20 min |
+| Release · Windows bundle | — | 19 min |
+| Release · Linux bundle | — | 13 min |
+
+`cargo clippy --workspace --all-targets` and `cargo test --workspace` are two separate compiles of
+the workspace crates; on a warm Ubuntu runner they cost about 2 min and 4 min respectively, so
+~6 minutes of the 7–11 minute job is unavoidable workspace work, and everything beyond that is a
+cache miss.
+
+### Why a build sometimes takes 30+ minutes
+
+1. **GitHub allows 10 GB of Actions cache per repository.** The debug matrix (three OSes plus
+   Android) needs ~1.3–1.6 GB per OS and the release profile ~0.7 GB per desktop platform. Every
+   dependency change writes a new cache key; old entries are only evicted at the budget cap, so
+   superseded debug caches can push the release caches out. When that happens the tag build finds
+   `No cache found` in its `Swatinem/rust-cache` step and recompiles everything.
+2. **A tag run cannot write a cache it will read again.** Its entries are scoped to
+   `refs/tags/vX.Y.Z`. Tag runs *can* read caches written on `main` (default-branch caches are
+   readable by every run in the repository), which is why the nightly build on `main` is what
+   actually warms a release.
+3. **Cache keys include the lockfile and a hash of the workflow environment.** A dependency bump
+   makes the primary key miss, but rust-cache's prefix restore key still restores the previous
+   target directory, so only the changed crates rebuild — a release with a warm cache stays fast
+   even across the version-bump commit.
+4. **Local `pnpm`/`cargo`/Gradle caches** are separate layers: the UI leg is ~2 min, the Android
+   leg ~9 min, and `setup-java` restores Gradle caches; those are not the bottleneck.
+
+### Keeping builds fast
+
+- **Prune the cache budget.** `just prune-caches` is a dry run; `just prune-caches --apply`
+  deletes tag-scoped caches and superseded entries of a family, keeping the newest of each. The
+  `Cache Maintenance` workflow (`.github/workflows/cache-maintenance.yml`) runs it weekly, after
+  the nightly build.
+- **Warm the release profile before a release.** Dispatch the `Nightly Builds` workflow once (or
+  let the nightly schedule do it) so the four `tauri-release-*` caches for the current lockfile
+  exist; then the tag build restores instead of recompiling. The announcement of "No cache found"
+  in a release job log means a ~25 minute cold build.
+- **Do not change cache-affecting inputs casually.** The rust-cache `prefix-key`, the workflow
+  `env` block (`CARGO_INCREMENTAL`, `CARGO_PROFILE_*`), the Rust version and the lockfile are all
+  part of the key. Changing them invalidates 1–1.6 GB of artifacts per OS.
+- **Local builds.** Reuse one `CARGO_TARGET_DIR` per checkout (the repo convention for shared
+  worktrees), build only what changed (`cargo build -p alloy-app` for the shell, `cargo check -p
+  <crate>` for a core crate), and run `cargo test -p <crate>` rather than `cargo test --workspace`
+  when iterating: the workspace's plugin host alone pulls Wasmtime into the test build.
 
 ---
 

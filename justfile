@@ -59,6 +59,10 @@ ci:
     pnpm -C {{UI_DIR}} check
     pnpm -C {{UI_DIR}} build
 
+# Prune superseded and tag-scoped GitHub Actions caches (dry run; pass `--apply` to delete)
+prune-caches *args:
+    scripts/prune-ci-caches.sh {{args}}
+
 # Enable repo git hooks (Conventional Commits check on commit-msg and pre-push)
 hooks:
     git config core.hooksPath .githooks

@@ -1,0 +1,34 @@
+name: Cache Maintenance
+
+# Keeps the repository's 10 GB Actions cache budget healthy.
+#
+# The 900-crate dependency graph produces ~1.3-1.6 GB of cache per OS for the debug matrix and
+# ~0.7 GB per desktop platform for the release profile. Every dependency change writes a new key,
+# and GitHub evicts entries by least-recent use only once the budget is exhausted - frequently
+# evicting the release caches the tag build needs. A cold tag build recompiles Tauri and
+# matrix-sdk from scratch (measured: macOS x64 "Finished `release` profile in 25m 01s").
+#
+# This job deletes caches that can never be useful again (tag-scoped entries) and superseded
+# entries of a family, keeping the newest of each. It runs weekly after the nightly build and can
+# be run by hand when a dependency bump has written several new cache families.
+on:
+  schedule:
+    - cron: '0 4 * * 0'  # Sunday 04:00 UTC, after the nightly build
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  prune:
+    name: Prune stale Actions caches
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Prune superseded and tag-scoped caches
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: scripts/prune-ci-caches.sh --apply
