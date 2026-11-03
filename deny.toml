@@ -18,6 +18,7 @@ ignore = [
     { id = "RUSTSEC-2026-0367", reason = "zip via tauri-plugin-updater; extracts only signature-verified packages, Windows only" },
     { id = "RUSTSEC-2026-0368", reason = "zip via tauri-plugin-updater; extracts only signature-verified packages, Windows only" },
     { id = "RUSTSEC-2026-0369", reason = "zip via tauri-plugin-updater; extracts only signature-verified packages, Windows only" },
+    { id = "RUSTSEC-2026-0429", reason = "zip via tauri-plugin-updater; process abort on a crafted symlink entry in a signature-verified package, Windows-only extraction path; fixed in zip 9, tauri-plugin-updater 2.x still pins zip 4" },
     # matrix-sdk 0.19.1 (latest) depends on anymap2; no replacement upstream yet.
     { id = "RUSTSEC-2026-0319", reason = "anymap2 via matrix-sdk 0.19.1; used for a type map, no fix upstream" },
     # RUSTSEC-2024-0388 (derivative via matrix-sdk's wasm-only wasm_evt_listener) is not in this
