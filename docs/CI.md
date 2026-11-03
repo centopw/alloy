@@ -395,6 +395,22 @@ cache miss.
 
 ## Troubleshooting
 
+### Engine integration test times out on the shared Synapse account
+
+**Symptom:** `forward_events_text_and_reply_and_strip_quotes` (or another parity test) panics with
+`timed out waiting for: both messages forwarded to B`, usually after ~150 s, while the other tests
+in the shard pass. Rerunning the job sometimes goes green, which makes it look random.
+
+**Cause:** every parity test logs in as `alice` and runs in parallel inside one test binary. On a
+loaded runner the six concurrent sliding-sync streams for the same account starve each other; the
+forward command itself succeeded (`failed` is empty) but the sync copy of one message is not
+delivered inside the test's 150 s budget.
+
+**Fix:** the `Engine integration tests` step runs with `--test-threads=1`, so the parity tests
+serialize on the account. Keep that flag when changing the shard script or the test invocation; if
+a single test still times out, capture the mirror dump it prints and treat it as an engine bug, not
+a flake.
+
 ### Android APK build fails
 
 **Check:** Does Android project directory exist?

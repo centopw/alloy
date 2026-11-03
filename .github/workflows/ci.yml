@@ -257,12 +257,18 @@ jobs:
           cargo test -p alloy-core --test synapse_integration -- --nocapture
           cargo test -p alloy-push --test push_integration -- --nocapture
 
+      # Every parity test logs in as the same account and creates its rooms on the same Synapse.
+      # Run them one at a time: on a loaded runner, six concurrent sliding-sync streams for one
+      # account starve each other and a 150 s timeline wait in forward_events_text_and_reply_...
+      # times out even though both forwards were accepted (seen twice on the 0.3.2 bump commit,
+      # then green on a rerun). Serial execution removes the contention instead of, or in addition
+      # to, raising the timeout.
       - name: Engine integration tests
         env:
           ALLOY_TEST_HS: http://localhost:8008
         run: |
           read -ra shard_args <<< "$(scripts/ci-engine-shards.sh "${{ matrix.shard }}")"
-          cargo test -p alloy-engine "${shard_args[@]}" -- --nocapture
+          cargo test -p alloy-engine "${shard_args[@]}" -- --nocapture --test-threads=1
 
       - name: Dump Docker logs on failure
         if: failure()
