@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.3 (pre-release)
+
+### Fixed
+- **Leaving a room opened a clipped, half-visible confirmation.** The leave-room card was rendered inside the room list, whose scroll container clips fixed-position content; only the left part of the card showed and the Leave button was cut off. Delete and report confirmations opened from a message had the same problem in the conversation. Dialogs now live in the document body and stay centred over the window wherever they are opened from.
+
 ## 0.3.2 (pre-release)
 
 ### Added
