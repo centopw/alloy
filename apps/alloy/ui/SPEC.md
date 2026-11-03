@@ -70,6 +70,14 @@ card 44px tall, and a shorthand there resets the quote card's asymmetric left in
 the 2px spine over the first glyph of the excerpt — the defect the 390 walk caught. The scroll
 engine (paging, anchoring, prepend) is untouched.
 
+### Overlays
+
+Dialogs, menus and pickers are portalled to the document body. Panes are
+`overflow: hidden` and carry a backdrop-filter (the room list and the conversation are the two
+obvious ones), which makes them the containing block for `position: fixed` descendants — a dialog
+mounted in place is clipped to its pane. `Modal` portals its backdrop for that reason; the same rule
+applies to any new overlay that can be opened from inside a pane.
+
 ### Room list
 
 A room's tags are the account's, not the install's: the catalogue is the synced `chat.alloy.room_tags`

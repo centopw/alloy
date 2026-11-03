@@ -4,6 +4,7 @@
   import Icon from '$lib/icons/Icon.svelte';
   import { X } from '$lib/icons';
   import { pushBack } from '$lib/platform/backstack';
+  import { portal } from '$lib/platform/portal';
 
   import { t } from '$lib/i18n';
   interface Props {
@@ -105,8 +106,13 @@
 </script>
 
 {#if open}
+  <!-- A dialog can be opened from inside a pane that scrolls and clips (the room list, the
+       conversation, the composer): those panes are `overflow: hidden` and carry a backdrop-filter,
+       which makes them the containing block for `position: fixed` descendants. Portalling the
+       overlay to the body keeps every dialog centred on the window and unclipped, wherever its
+       trigger lives. -->
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div class="backdrop" onclick={onclose}>
+  <div class="backdrop" use:portal onclick={onclose}>
     <div
       class="dialog"
       role="dialog"
