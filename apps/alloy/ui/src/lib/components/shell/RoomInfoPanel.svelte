@@ -106,9 +106,9 @@
   };
 
   const MEDIA_TITLE: Record<MediaView, string> = {
-    media: 'Shared media',
-    files: 'Files & documents',
-    links: 'Shared links',
+    media: t('room-info-panel-shared-media'),
+    files: t('room-info-panel-files-and-documents'),
+    links: t('room-info-panel-shared-links'),
   };
 
   /** Rows shown on the overview before "View all" opens the full list. */
@@ -122,9 +122,9 @@
   ];
 
   const EMPTY_TEXT: Record<MediaView, string> = {
-    media: 'No shared media yet',
-    files: 'No shared files yet',
-    links: 'No shared links yet',
+    media: t('room-info-panel-no-shared-media-yet'),
+    files: t('room-info-panel-no-shared-files-yet'),
+    links: t('room-info-panel-no-shared-links-yet'),
   };
 
   function isMediaView(v: View): v is MediaView {
@@ -132,7 +132,7 @@
   }
 
   function viewAll(count: number, done: boolean): string {
-    return done ? `View all (${count})` : 'View all';
+    return done ? t('room-info-panel-view-all-count', { count }) : t('room-info-panel-view-all');
   }
 
   let view = $state<View>('overview');
@@ -148,7 +148,7 @@
     return pushBack(() => (view = 'overview'));
   });
 
-  const title = $derived(view === 'overview' ? 'Details' : view === 'members' ? 'Members' : MEDIA_TITLE[view]);
+  const title = $derived(view === 'overview' ? t('room-info-panel-details') : view === 'members' ? t('room-info-panel-members-2') : MEDIA_TITLE[view]);
 
   // Details and note state
   const details = $derived(roomInfo.details(roomId));
@@ -497,10 +497,10 @@
   let pendingAction = $state<PendingAction | null>(null);
 
   const ACTION_COPY: Record<PendingAction['kind'], { title: string; confirm: string; message: (name: string) => string }> = {
-    kick: { title: t('room-info-panel-remove-from-room'), confirm: 'Remove', message: (n) => `${n} will be removed from this room. They can join again if the room allows it.` },
-    ban: { title: t('room-info-panel-ban-from-room'), confirm: 'Ban', message: (n) => `${n} will be removed and cannot rejoin until unbanned.` },
-    unban: { title: t('room-info-panel-unban'), confirm: 'Unban', message: (n) => `${n} will be able to join this room again.` },
-    block: { title: t('room-info-panel-block-user'), confirm: 'Block', message: (n) => `You will no longer see messages from ${n} in any room. You can unblock them in Settings.` },
+    kick: { title: t('room-info-panel-remove-from-room'), confirm: t('common-remove'), message: (n) => t('room-info-panel-kick-confirm-message', { name: n }) },
+    ban: { title: t('room-info-panel-ban-from-room'), confirm: t('room-info-panel-ban'), message: (n) => t('room-info-panel-ban-confirm-message', { name: n }) },
+    unban: { title: t('room-info-panel-unban'), confirm: t('room-info-panel-unban'), message: (n) => t('room-info-panel-unban-confirm-message', { name: n }) },
+    block: { title: t('room-info-panel-block-user'), confirm: t('room-info-panel-block'), message: (n) => t('room-info-panel-block-confirm-message', { name: n }) },
   };
 
   async function runAction() {
@@ -533,7 +533,7 @@
         label: t('room-info-panel-change-role'),
         icon: ShieldAlert,
         submenu: {
-          items: mod.levels.map((l): MenuItem => ({ id: `role-${l.level}`, label: `Make ${l.label.toLowerCase()}`, onselect: () => void setLevel(m, l.level) })),
+          items: mod.levels.map((l): MenuItem => ({ id: `role-${l.level}`, label: t('room-info-panel-make-role', { role: l.label.toLowerCase() }), onselect: () => void setLevel(m, l.level) })),
         },
       });
     }

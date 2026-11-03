@@ -1,5 +1,7 @@
 import type { PermissionId, PermissionState } from '../platform/permissions';
 
+import { t } from '$lib/i18n';
+
 /** One row of the Permissions screen, before its live state is known. */
 export interface PermissionSpec {
   id: PermissionId;
@@ -15,36 +17,36 @@ export interface PermissionSpec {
 export const PERMISSION_SPECS: readonly PermissionSpec[] = [
   {
     id: 'notifications',
-    label: 'Notifications',
-    why: 'Shows new messages when Alloy is not in front of you.',
+    label: t('sidebar-notifications'),
+    why: t('permissions-notifications-why'),
     required: true,
     androidOnly: false,
   },
   {
     id: 'push-app',
-    label: 'Push app',
-    why: 'A UnifiedPush app such as ntfy delivers messages while Alloy is closed, without Google services.',
+    label: t('notifications-push-app'),
+    why: t('permissions-push-app-why'),
     required: false,
     androidOnly: true,
   },
   {
     id: 'battery',
-    label: 'Unrestricted battery',
-    why: 'Stops Android from delaying messages while the phone is idle.',
+    label: t('permissions-battery-unrestricted'),
+    why: t('permissions-battery-why'),
     required: false,
     androidOnly: true,
   },
   {
     id: 'microphone',
-    label: 'Microphone',
-    why: 'Records voice messages.',
+    label: t('permissions-microphone'),
+    why: t('permissions-microphone-why'),
     required: false,
     androidOnly: false,
   },
   {
     id: 'location',
-    label: 'Location',
-    why: 'Shares where you are when you send your location.',
+    label: t('location-card-location'),
+    why: t('permissions-location-why'),
     required: false,
     androidOnly: false,
   },
@@ -59,14 +61,14 @@ export function specsFor(android: boolean): PermissionSpec[] {
 export function stateLabel(state: PermissionState): string {
   switch (state) {
     case 'granted':
-      return 'Allowed';
+      return t('permissions-state-allowed');
     case 'denied':
-      return 'Not allowed';
+      return t('permissions-state-not-allowed');
     case 'prompt':
     case 'unknown':
-      return 'Not asked yet';
+      return t('permissions-state-not-asked-yet');
     case 'unavailable':
-      return 'Not available';
+      return t('permissions-state-not-available');
   }
 }
 

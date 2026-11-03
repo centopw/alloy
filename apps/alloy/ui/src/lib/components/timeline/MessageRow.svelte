@@ -600,8 +600,8 @@
       class="tick"
       class:read={readByOthers}
       role="img"
-      aria-label={readByOthers ? `Seen by ${joinNames(readerNames)}` : t('message-row-sent')}
-      data-tooltip={readByOthers ? `Seen by ${joinNames(readerNames)}` : t('message-row-sent')}
+      aria-label={readByOthers ? t('message-row-seen-by', { names: joinNames(readerNames) }) : t('message-row-sent')}
+      data-tooltip={readByOthers ? t('message-row-seen-by', { names: joinNames(readerNames) }) : t('message-row-sent')}
     >
       <Icon icon={readByOthers ? CheckCheck : Check} size={16} />
     </span>
@@ -771,7 +771,7 @@
           {#if item.thread_summary && !inThread}
             <button type="button" class="thread-chip" onclick={openThread} aria-label={t('message-row-open-thread', { count: item.thread_summary.reply_count })}>
               <Icon icon={MessageSquare} size={16} />
-              <span>{item.thread_summary.reply_count} {item.thread_summary.reply_count === 1 ? 'reply' : 'replies'}</span>
+              <span>{t('message-row-thread-replies', { count: item.thread_summary.reply_count })}</span>
             </button>
           {/if}
           {#if (item.reactions ?? []).length > 0}
@@ -785,7 +785,7 @@
                   aria-pressed={r.by_me}
                   aria-label={t('message-row-reaction-count', { emoji: r.key, count: r.count })}
                   data-tooltip={joinNames(r.senders.map(nameOf))}
-                  use:contextmenu={() => [{ id: 'who', label: 'See who reacted', icon: Users, onselect: () => openWho(r.key) }]}
+                  use:contextmenu={() => [{ id: 'who', label: t('message-row-see-who-reacted'), icon: Users, onselect: () => openWho(r.key) }]}
                 >
                   <span class="pill"><span>{r.key}</span><span class="count">{r.count}</span></span>
                 </button>

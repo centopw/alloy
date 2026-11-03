@@ -134,7 +134,7 @@
        quoted sender's colour on the card's spine and on their name here. -->
   <span class="reply-header" style="--quote-border-color: {userColor};">
     <Icon icon={Reply} size={16} />
-    <span class="reply-header-text">{t('reply-quote-reply-to')} <span class="reply-header-name">{senderName || 'user'}</span></span>
+    <span class="reply-header-text">{t('reply-quote-reply-to')} <span class="reply-header-name">{senderName || t('common-user')}</span></span>
   </span>
   {@render quoteBubble()}
 {:else}

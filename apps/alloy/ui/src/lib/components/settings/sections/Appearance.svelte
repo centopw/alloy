@@ -30,7 +30,7 @@
 
   const fontScaleOptions = [90, 100, 110, 120, 130].map((scale) => ({
     value: String(scale),
-    label: scale === 100 ? '100% (default)' : `${scale}%`,
+    label: scale === 100 ? t('appearance-font-scale-default', { scale }) : `${scale}%`,
   }));
 
   const timeFormatOptions: { value: TimeFormat; label: string }[] = [
@@ -48,7 +48,7 @@
 
   // Choosing a theme is an explicit answer, so the store drops follow-system for us. Pure black is
   // the one switch that still needs a precondition of its own.
-  const amoledReason = $derived(!dark ? 'Turn on dark mode first.' : undefined);
+  const amoledReason = $derived(!dark ? t('appearance-turn-on-dark-mode-first') : undefined);
 </script>
 
 {#snippet modernPreview()}
@@ -111,7 +111,7 @@
   <SettingGroup title={t('appearance-messages')}>
     <div class="padded">
       <SettingRadioCards
-        legend="Message layout"
+        legend={t('appearance-message-layout')}
         value={prefs.messageLayout}
         options={layoutOptions}
         onchange={(v) => prefs.set('messageLayout', v as MessageLayout)}

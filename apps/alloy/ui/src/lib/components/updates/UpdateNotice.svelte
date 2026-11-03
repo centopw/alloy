@@ -19,22 +19,22 @@
     const version = updatesStore.info?.version;
     switch (updatesStore.phase) {
       case 'error':
-        return { title: t('update-notice-update-failed'), detail: 'You can keep using Alloy', action: 'Retry' };
+        return { title: t('update-notice-update-failed'), detail: t('update-notice-keep-using-alloy'), action: t('common-retry') };
       case 'installing':
-        return { title: t('update-notice-installing-update'), detail: 'Almost done', action: null };
+        return { title: t('update-notice-installing-update'), detail: t('update-notice-almost-done'), action: null };
       case 'downloading':
         return {
           title: t('update-notice-downloading-update'),
-          detail: percent === null ? 'Working in the background' : `${percent}%`,
+          detail: percent === null ? t('update-notice-working-in-background') : `${percent}%`,
           action: null,
         };
       case 'ready':
-        return { title: t('update-notice-update-ready'), detail: 'Restart to apply', action: 'Restart' };
+        return { title: t('update-notice-update-ready'), detail: t('update-notice-restart-to-apply'), action: t('update-notice-restart') };
       default:
         return {
           title: t('update-notice-update-available'),
-          detail: version ? `Version ${version}` : "See what's new",
-          action: updatesStore.info?.can_install === false ? 'Open' : 'Download',
+          detail: version ? t('changelog-dialog-version', { version }) : t('update-notice-see-whats-new'),
+          action: updatesStore.info?.can_install === false ? t('update-notice-open') : t('update-notice-download'),
         };
     }
   });

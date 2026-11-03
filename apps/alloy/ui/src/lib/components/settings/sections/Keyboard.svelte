@@ -18,29 +18,29 @@
     {
       title: t('keyboard-global'),
       rows: [
-        { action: 'Jump to a conversation or command', chords: [[mod, 'K']] },
-        { action: 'Open settings', chords: [[mod, ',']] },
-        { action: 'Refresh (restart sync, reload the open conversation)', chords: [[mod, 'R'], ['F5']] },
-        ...(caps.keyboardShortcuts ? [{ action: 'Search in the open conversation', chords: [[mod, 'F']] }] : []),
+        { action: t('keyboard-jump-to-conversation'), chords: [[mod, 'K']] },
+        { action: t('keyboard-open-settings'), chords: [[mod, ',']] },
+        { action: t('keyboard-refresh'), chords: [[mod, 'R'], ['F5']] },
+        ...(caps.keyboardShortcuts ? [{ action: t('keyboard-search-conversation'), chords: [[mod, 'F']] }] : []),
       ],
     },
     {
       title: t('preferences-composer'),
       rows: [
         {
-          action: 'Send message',
+          action: t('keyboard-send-message'),
           chords: enterToSend ? [['Enter']] : [[mod, 'Enter']],
         },
         {
-          action: 'Insert a new line',
+          action: t('keyboard-insert-new-line'),
           chords: enterToSend
             ? [['Shift', 'Enter'], [mod, 'Enter']]
             : [['Enter'], ['Shift', 'Enter']],
         },
-        { action: 'Pick the highlighted mention', chords: [['Tab'], ['Enter']] },
-        { action: 'Move through mention suggestions', chords: [['↑'], ['↓']] },
-        { action: 'Edit your last message (empty field)', chords: [['↑']] },
-        { action: 'Cancel reply or edit', chords: [['Esc']] },
+        { action: t('keyboard-pick-mention'), chords: [['Tab'], ['Enter']] },
+        { action: t('keyboard-move-mention-suggestions'), chords: [['↑'], ['↓']] },
+        { action: t('keyboard-edit-last-message'), chords: [['↑']] },
+        { action: t('keyboard-cancel-reply-or-edit'), chords: [['Esc']] },
       ],
     },
     {
@@ -58,12 +58,12 @@
     {
       title: t('keyboard-dialogs-and-menus'),
       rows: [
-        { action: 'Close a dialog, menu, palette or popover', chords: [['Esc']] },
-        { action: 'Move focus within an open dialog', chords: [['Tab'], ['Shift', 'Tab']] },
-        { action: 'Move through menus and palette results', chords: [['↑'], ['↓']] },
-        { action: 'Open the context menu for the focused item', chords: [['Shift', 'F10'], ['Menu']] },
-        { action: 'Move between tabs and segmented options', chords: [['←'], ['→']] },
-        { action: 'Turn a switch on or off', chords: [['Space'], ['Enter']] },
+        { action: t('keyboard-close-overlay'), chords: [['Esc']] },
+        { action: t('keyboard-move-focus-dialog'), chords: [['Tab'], ['Shift', 'Tab']] },
+        { action: t('keyboard-move-menus'), chords: [['↑'], ['↓']] },
+        { action: t('keyboard-open-context-menu'), chords: [['Shift', 'F10'], ['Menu']] },
+        { action: t('keyboard-move-tabs'), chords: [['←'], ['→']] },
+        { action: t('keyboard-toggle-switch'), chords: [['Space'], ['Enter']] },
       ],
     },
     ...(caps.resizablePanels
@@ -71,9 +71,9 @@
           {
             title: t('keyboard-layout'),
             rows: [
-              { action: 'Resize a focused panel divider', chords: [['←'], ['→']] },
-              { action: 'Resize a focused panel divider in larger steps', chords: [['Shift', '←'], ['Shift', '→']] },
-              { action: 'Set a focused panel divider to its minimum or maximum width', chords: [['Home'], ['End']] },
+              { action: t('keyboard-resize-divider'), chords: [['←'], ['→']] },
+              { action: t('keyboard-resize-divider-large'), chords: [['Shift', '←'], ['Shift', '→']] },
+              { action: t('keyboard-divider-min-max'), chords: [['Home'], ['End']] },
             ],
           },
         ]

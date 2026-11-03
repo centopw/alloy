@@ -584,7 +584,7 @@
             <span class="badge">{badgeLabel(mentionIds.length)}</span>
           </button>
         {/if}
-        <button class="fab" type="button" onclick={toBottom} aria-label={unseen > 0 ? `Jump to latest message, ${unseen} new` : t('timeline-jump-to-latest-message')}>
+        <button class="fab" type="button" onclick={toBottom} aria-label={unseen > 0 ? t('timeline-jump-to-latest-message-new', { count: unseen }) : t('timeline-jump-to-latest-message')}>
           <Icon icon={ArrowDown} size={20} />
           {#if unseen > 0}<span class="badge">{badgeLabel(unseen)}</span>{/if}
         </button>

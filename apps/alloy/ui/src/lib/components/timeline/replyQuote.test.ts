@@ -18,7 +18,7 @@ describe('reply quote', () => {
     const header = quote.indexOf('class="reply-header"');
     expect(header).toBeGreaterThan(-1);
     expect(quote.indexOf('{@render quoteBubble()}')).toBeGreaterThan(header);
-    expect(quote).toContain('<span class="reply-header-name">{senderName || \'user\'}</span>');
+    expect(quote).toContain('<span class="reply-header-name">{senderName || t(\'common-user\')}</span>');
     // ADR 0014: the quoted sender keeps their colour on the header name as well as the card spine.
     expect(quote).toContain('style="--quote-border-color: {userColor};"');
     // The name is rendered in the card only for the inline (flat layout) quote.

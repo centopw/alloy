@@ -9,12 +9,14 @@ import { muteRoom, setRoomLevel } from '$lib/stores/muteTimer.svelte';
 import { MUTE_DURATIONS } from '$lib/content/mute';
 import { ui } from '$lib/stores/ui.svelte';
 
+import { t } from '$lib/i18n';
+
 /** Notification choices in display order. `null` restores the account default. */
 const NOTIFY_LEVELS: readonly { target: NotificationLevel | null; label: string }[] = [
-  { target: null, label: 'Use default' },
-  { target: 'All', label: 'All messages' },
-  { target: 'Mentions', label: 'Mentions and keywords only' },
-  { target: 'Mute', label: 'Mute' },
+  { target: null, label: t('room-menu-use-default') },
+  { target: 'All', label: t('notifications-all-messages') },
+  { target: 'Mentions', label: t('notifications-mentions-and-keywords-only') },
+  { target: 'Mute', label: t('room-swipe-mute') },
 ];
 
 function isCurrentLevel(roomId: string, target: NotificationLevel | null): boolean {
@@ -47,14 +49,14 @@ export function notifyItems(roomId: string): MenuItem[] {
 /** Accessible label for the bell button: the room's current notification choice. */
 export function notifyLabel(roomId: string): string {
   const current = NOTIFY_LEVELS.find(({ target }) => isCurrentLevel(roomId, target));
-  return current ? `Notifications: ${current.label}` : 'Notifications';
+  return current ? t('room-menu-notifications-label', { level: current.label }) : t('sidebar-notifications');
 }
 
 /** Copy actions for a room. A direct room leads with the other person's Matrix ID. */
 export function copyItems(room: RoomSummary): MenuItem[] {
   const targets = [
-    ...(room.direct_user_id ? [{ id: 'copy-user-id', label: 'Copy user ID', value: room.direct_user_id }] : []),
-    { id: 'copy-room-id', label: 'Copy room ID', value: room.id },
+    ...(room.direct_user_id ? [{ id: 'copy-user-id', label: t('user-profile-card-copy-user-id'), value: room.direct_user_id }] : []),
+    { id: 'copy-room-id', label: t('room-menu-copy-room-id'), value: room.id },
   ];
   return targets.map(({ id, label, value }) => ({
     id,
@@ -84,14 +86,14 @@ export function roomPictureItems(roomId: string): MenuItem[] {
   return [
     {
       id: 'picture-replace',
-      label: 'Replace picture...',
+      label: t('room-menu-replace-picture'),
       icon: ImagePlus,
       disabled: !canSet || busy,
       onselect: () => void replacePicture(roomId),
     },
     {
       id: 'picture-remove',
-      label: 'Remove picture',
+      label: t('room-menu-remove-picture'),
       icon: Trash2,
       danger: true,
       disabled: !canSet || busy || !details?.avatar_url,

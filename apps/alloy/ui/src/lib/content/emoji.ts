@@ -15,6 +15,8 @@ const TONE_MODIFIER_HEX: Record<Exclude<SkinTone, 'none'>, string> = {
 
 const SKIN_MODIFIER_RE = /1F3F[B-F]/g;
 
+import { t } from '$lib/i18n';
+
 export interface SkinToneOption {
   id: SkinTone;
   label: string;
@@ -25,12 +27,12 @@ export interface SkinToneOption {
 const WAVING_HAND = 0x1f44b;
 
 export const SKIN_TONES: SkinToneOption[] = [
-  { id: 'none', label: 'Default', swatch: String.fromCodePoint(WAVING_HAND) },
-  { id: 'light', label: 'Light', swatch: String.fromCodePoint(WAVING_HAND, 0x1f3fb) },
-  { id: 'medium-light', label: 'Medium-light', swatch: String.fromCodePoint(WAVING_HAND, 0x1f3fc) },
-  { id: 'medium', label: 'Medium', swatch: String.fromCodePoint(WAVING_HAND, 0x1f3fd) },
-  { id: 'medium-dark', label: 'Medium-dark', swatch: String.fromCodePoint(WAVING_HAND, 0x1f3fe) },
-  { id: 'dark', label: 'Dark', swatch: String.fromCodePoint(WAVING_HAND, 0x1f3ff) },
+  { id: 'none', label: t('emoji-picker-skin-tone-default'), swatch: String.fromCodePoint(WAVING_HAND) },
+  { id: 'light', label: t('emoji-picker-skin-tone-light'), swatch: String.fromCodePoint(WAVING_HAND, 0x1f3fb) },
+  { id: 'medium-light', label: t('emoji-picker-skin-tone-medium-light'), swatch: String.fromCodePoint(WAVING_HAND, 0x1f3fc) },
+  { id: 'medium', label: t('emoji-picker-skin-tone-medium'), swatch: String.fromCodePoint(WAVING_HAND, 0x1f3fd) },
+  { id: 'medium-dark', label: t('emoji-picker-skin-tone-medium-dark'), swatch: String.fromCodePoint(WAVING_HAND, 0x1f3fe) },
+  { id: 'dark', label: t('emoji-picker-skin-tone-dark'), swatch: String.fromCodePoint(WAVING_HAND, 0x1f3ff) },
 ];
 
 export function isSkinTone(value: unknown): value is SkinTone {

@@ -10,6 +10,8 @@ import { liveLocation } from './liveLocation.svelte.js';
 import { pushStore } from './push.svelte.js';
 import { openExternal } from '../platform/links.js';
 
+import { t } from '$lib/i18n';
+
 export type Phase = 'booting' | 'onboarding' | 'ready' | 'no-engine';
 
 /** Why a browser sign-in stopped, keyed by the engine's stable reason. */
@@ -176,7 +178,7 @@ class SessionStore {
     this.oidcTimer = setTimeout(() => {
       this.oidcTimer = null;
       this.oidcWaiting = false;
-      this.oidcFailure = { reason: 'expired', message: 'the sign-in window timed out' };
+      this.oidcFailure = { reason: 'expired', message: t('session-sign-in-window-timed-out') };
       void client.cancelOidcLogin().catch(() => {});
     }, OIDC_WAIT_TIMEOUT_MS);
   }

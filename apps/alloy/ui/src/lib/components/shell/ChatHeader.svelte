@@ -28,7 +28,7 @@
   const canSetPicture = $derived(roomInfo.details(roomId)?.can_set_avatar ?? false);
   // Phones have no inline topic divider, so the second line carries the topic, else the member count.
   const subtitle = $derived(
-    topic ?? (members === null ? null : `${members} ${members === 1 ? 'member' : 'members'}`),
+    topic ?? (members === null ? null : t('chat-header-member-count', { count: members })),
   );
   const searchShortcut = shortcutLabel('F');
 
@@ -73,7 +73,7 @@
 {/snippet}
 
 <header class="head" use:contextmenu={headerMenu}>
-  <button type="button" class="icon back" aria-label={t('chat-header-back-to-rooms')} onclick={() => onback?.()} use:contextmenu={() => [{ id: 'back', label: 'Back to rooms', icon: ChevronLeft, onselect: () => onback?.() }]}>
+  <button type="button" class="icon back" aria-label={t('chat-header-back-to-rooms')} onclick={() => onback?.()} use:contextmenu={() => [{ id: 'back', label: t('chat-header-back-to-rooms'), icon: ChevronLeft, onselect: () => onback?.() }]}>
     <Icon icon={ChevronLeft} size={20} />
   </button>
   <h1 class="heading" tabindex="-1" data-chat-entry>
@@ -84,7 +84,7 @@
           class="picture-btn"
           aria-label={t('chat-header-room-picture-options')}
           title={t('chat-header-room-picture-options')}
-          onclick={(e) => openMenuFrom(e.currentTarget, roomPictureItems(roomId), 'Room picture')}
+          onclick={(e) => openMenuFrom(e.currentTarget, roomPictureItems(roomId), t('chat-header-room-picture-options'))}
         >
           {@render avatarEl()}
         </button>
@@ -119,7 +119,7 @@
     <button
       type="button"
       class="icon"
-      use:contextmenu={() => [{ id: 'details', label: 'Room details', icon: Info, onselect: () => ui.toggleRoomInfo('info') }]}
+      use:contextmenu={() => [{ id: 'details', label: t('common-room-details'), icon: Info, onselect: () => ui.toggleRoomInfo('info') }]}
       aria-label={t('chat-header-room-info-button')}
       aria-pressed={ui.roomInfoOpen && ui.roomInfoTab === 'info'}
       onclick={() => ui.toggleRoomInfo('info')}
@@ -130,7 +130,7 @@
     <button
       type="button"
       class="icon"
-      use:contextmenu={() => [{ id: 'members', label: 'Show members', icon: Users, onselect: () => ui.toggleRoomInfo('members') }]}
+      use:contextmenu={() => [{ id: 'members', label: t('chat-header-show-members'), icon: Users, onselect: () => ui.toggleRoomInfo('members') }]}
       aria-label={t('chat-header-member-list')}
       aria-pressed={ui.roomInfoOpen && ui.roomInfoTab === 'members'}
       onclick={() => ui.toggleRoomInfo('members')}
@@ -141,7 +141,7 @@
     <button
       type="button"
       class="icon"
-      use:contextmenu={() => [{ id: 'search', label: 'Search in room', icon: Search, onselect: () => ui.openRoomSearch() }]}
+      use:contextmenu={() => [{ id: 'search', label: t('chat-header-search-in-room'), icon: Search, onselect: () => ui.openRoomSearch() }]}
       aria-label={t('chat-header-search-in-room')}
       data-tooltip={t('chat-header-search-in-room')}
       data-shortcut={searchShortcut}

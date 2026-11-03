@@ -65,7 +65,7 @@
   <div class="changelog">
     <header class="summary">
       <div class="summary-text">
-        <p class="version">{info?.version ? `Version ${info.version}` : t('changelog-dialog-update')}</p>
+        <p class="version">{info?.version ? t('changelog-dialog-version', { version: info.version }) : t('changelog-dialog-update')}</p>
         <p class="status" role="status">{status}</p>
       </div>
       {#if updatesStore.phase === 'downloading'}

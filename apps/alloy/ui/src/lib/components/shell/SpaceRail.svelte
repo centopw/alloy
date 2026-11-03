@@ -97,7 +97,7 @@
         class="home"
         class:active={homeActive}
         use:contextmenu={homeMenu}
-        aria-label={homeUnread > 0 ? `Home, ${homeUnread} unread` : t('space-rail-home')}
+        aria-label={homeUnread > 0 ? t('space-rail-home-unread', { count: homeUnread }) : t('space-rail-home')}
         title={t('space-rail-home')}
         aria-current={homeActive ? 'true' : undefined}
         onclick={() => (ui.scope = 'home')}
@@ -118,7 +118,7 @@
           type="button"
           class="space"
           use:contextmenu={() => spaceMenu(space)}
-          aria-label={unread > 0 ? `${title}, ${unread} unread` : title}
+          aria-label={unread > 0 ? t('space-rail-space-unread', { name: title, count: unread }) : title}
           title={title}
           aria-current={active ? 'true' : undefined}
           onclick={() => (ui.scope = space.id)}

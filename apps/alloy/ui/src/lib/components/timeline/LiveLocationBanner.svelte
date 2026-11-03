@@ -15,7 +15,7 @@
   <div class="banner" role="status">
     <span class="icon" aria-hidden="true"><Icon icon={Navigation} size={16} /></span>
     <span class="text">
-      {t('live-location-banner-sharing-live-location')}{room ? ` in ${roomTitle(room)}` : ''} {t('live-location-banner-until')} {formatTime(active.until, prefs.timeFormat)}
+      {room ? t('live-location-banner-sharing-live-location-in-room', { room: roomTitle(room) }) : t('live-location-banner-sharing-live-location')} {t('live-location-banner-until')} {formatTime(active.until, prefs.timeFormat)}
     </span>
     <button type="button" class="stop" onclick={() => void liveLocation.stop()}>{t('live-location-banner-stop')}</button>
   </div>

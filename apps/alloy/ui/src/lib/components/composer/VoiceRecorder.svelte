@@ -64,7 +64,7 @@
       .catch((err: unknown) => {
         recording = false;
         holding = false;
-        onerror(err instanceof Error ? err.message : 'Recording failed');
+        onerror(err instanceof Error ? err.message : t('composer-recording-failed'));
         return false;
       });
   }
@@ -78,7 +78,7 @@
     } catch (err) {
       recording = false;
       // A press that was too short to be a message is an accidental tap.
-      if (!(err instanceof ClipTooShort)) onerror(err instanceof Error ? err.message : 'Could not save the recording');
+      if (!(err instanceof ClipTooShort)) onerror(err instanceof Error ? err.message : t('composer-could-not-save-recording'));
     }
   }
 

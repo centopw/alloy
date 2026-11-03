@@ -10,15 +10,17 @@ import { sortRooms } from './roomSort.js';
 import { displayTags } from './tags.js';
 import { tags } from './tags.svelte.js';
 
+import { t } from '$lib/i18n';
+
 export type RoomFilter = 'all' | 'unread' | 'direct' | 'rooms' | 'archive';
 
 /** Filter chips in display order. `label` is the chip text; `rooms` is the Channels chip. */
 export const ROOM_FILTERS: readonly { value: RoomFilter; label: string }[] = [
-  { value: 'all', label: 'All' },
-  { value: 'direct', label: 'Direct' },
-  { value: 'rooms', label: 'Channels' },
-  { value: 'unread', label: 'Unread' },
-  { value: 'archive', label: 'Archive' },
+  { value: 'all', label: t('room-filter-all') },
+  { value: 'direct', label: t('room-filter-direct') },
+  { value: 'rooms', label: t('room-filter-channels') },
+  { value: 'unread', label: t('room-filter-unread') },
+  { value: 'archive', label: t('room-filter-archive') },
 ];
 
 type RoomDiffEvent = Extract<EngineEvent, { type: 'RoomListDiff' }>;

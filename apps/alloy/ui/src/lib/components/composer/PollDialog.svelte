@@ -86,7 +86,7 @@
           />
           <Button
             variant="ghost"
-            ariaLabel="Remove answer {i + 1}"
+            ariaLabel={t('poll-dialog-remove-answer', { number: i + 1 })}
             disabled={answers.length <= MIN_ANSWERS}
             onclick={() => removeAnswer(i)}
           >

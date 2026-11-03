@@ -59,7 +59,7 @@
       <SegmentedControl
         label={t('new-room-dialog-create-or-join')}
         value={mode}
-        options={[{ value: 'create', label: 'Create room' }, { value: 'join', label: 'Join room' }]}
+        options={[{ value: 'create', label: t('new-room-dialog-create-room') }, { value: 'join', label: t('new-room-dialog-join-room') }]}
         onchange={(v) => (mode = v as 'create' | 'join')}
       />
     </div>

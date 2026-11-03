@@ -109,16 +109,16 @@
             {#if room.topic}<span class="topic" title={room.topic}>{room.topic}</span>{/if}
             <span class="members">
               <Icon icon={Users} size={16} />
-              {room.num_joined_members} {room.num_joined_members === 1 ? 'member' : 'members'}
+              {t('directory-dialog-member-count', { count: room.num_joined_members })}
             </span>
           </div>
           <div class="action">
             {#if room.joined}
-              <Button variant="ghost" disabled ariaLabel="Joined {title}">{t('directory-dialog-joined')}</Button>
+              <Button variant="ghost" disabled ariaLabel={t('directory-dialog-joined-room', { room: title })}>{t('directory-dialog-joined')}</Button>
             {:else}
               <Button
                 disabled={joining !== null}
-                ariaLabel="Join {title}"
+                ariaLabel={t('directory-dialog-join-room', { room: title })}
                 onclick={() => join(room)}
               >
                 {joining === room.room_id ? t('directory-dialog-joining') : t('directory-dialog-join')}

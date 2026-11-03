@@ -1,5 +1,7 @@
 import type { RoomDetails, RoomMemberDto } from '$lib/generated';
 
+import { t } from '$lib/i18n';
+
 export const POWER_ADMIN = 100;
 export const POWER_MODERATOR = 50;
 export const POWER_MEMBER = 0;
@@ -14,9 +16,9 @@ export interface ModerationOptions {
 }
 
 const LEVELS = [
-  { level: POWER_ADMIN, label: 'Admin' },
-  { level: POWER_MODERATOR, label: 'Moderator' },
-  { level: POWER_MEMBER, label: 'Member' },
+  { level: POWER_ADMIN, label: t('room-info-panel-admin') },
+  { level: POWER_MODERATOR, label: t('room-info-panel-moderator') },
+  { level: POWER_MEMBER, label: t('room-info-panel-member') },
 ];
 
 const NONE: ModerationOptions = { kick: false, ban: false, unban: false, levels: [] };

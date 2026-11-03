@@ -33,7 +33,7 @@
           aria-valuemin="0"
           aria-valuemax="100"
           aria-valuenow={hasSize ? percent : undefined}
-          aria-valuetext={hasSize ? `${formatBytes(progress.sent)} of ${formatBytes(progress.total)}` : t('upload-strip-uploading')}
+          aria-valuetext={hasSize ? t('upload-strip-progress-of', { sent: formatBytes(progress.sent), total: formatBytes(progress.total) }) : t('upload-strip-uploading')}
         >
           <div class="fill" style={hasSize ? `width: ${percent}%` : undefined}></div>
         </div>

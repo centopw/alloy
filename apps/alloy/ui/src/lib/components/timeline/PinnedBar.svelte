@@ -60,7 +60,7 @@
     <button type="button" class="main" onclick={openCurrent} aria-label={t('pinned-bar-jump-to-pinned', { index: Math.min(index, pins.length - 1) + 1, total: pins.length })}>
       <span class="stripe" aria-hidden="true"></span>
       <span class="text">
-        <span class="label">{pins.length === 1 ? t('pinned-bar-pinned-message') : `Pinned message ${Math.min(index, pins.length - 1) + 1} of ${pins.length}`}</span>
+        <span class="label">{pins.length === 1 ? t('pinned-bar-pinned-message') : t('pinned-bar-pinned-message-position', { index: Math.min(index, pins.length - 1) + 1, total: pins.length })}</span>
         <span class="preview">{pinPreview(quote(current))}</span>
       </span>
     </button>

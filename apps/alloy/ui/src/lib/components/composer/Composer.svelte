@@ -646,7 +646,7 @@
     return [
       {
         id: 'emoji',
-        label: emojiPicker.isOpen ? 'Hide emoji picker' : 'Show emoji picker',
+        label: emojiPicker.isOpen ? t('composer-hide-emoji-picker') : t('composer-show-emoji-picker'),
         icon: Smile,
         onselect: toggleEmoji,
       },
@@ -673,7 +673,7 @@
     const it = replying ?? editing;
     if (!it) return '';
     const c = it.content;
-    return c.kind === 'TextMessage' ? c.data.body : c.kind === 'Media' ? c.data.body || 'Attachment' : '';
+    return c.kind === 'TextMessage' ? c.data.body : c.kind === 'Media' ? c.data.body || t('media-attachment') : '';
   }
 </script>
 
@@ -691,7 +691,7 @@
   {#if composing}
     <div class="banner">
       <div class="banner-text">
-        <span class="label">{editing ? t('composer-editing-message') : `Replying to ${replying?.sender_display_name ?? replying?.sender}`}</span>
+        <span class="label">{editing ? t('composer-editing-message') : t('composer-replying-to', { name: replying?.sender_display_name ?? replying?.sender ?? '' })}</span>
         <span class="preview">{banner()}</span>
       </div>
       <button
@@ -743,7 +743,7 @@
       {/each}
       <span class="staged-hint">{text.trim() ? t('composer-your-text-becomes-the-caption') : t('composer-press-enter-to-send')}</span>
       <Button size="sm" onclick={() => void sendStaged()}>
-        {staged.length === 1 ? t('composer-send-attachment') : `Send ${staged.length} attachments`}
+        {staged.length === 1 ? t('composer-send-attachment') : t('composer-send-attachments-count', { count: staged.length })}
       </Button>
     </div>
   {/if}

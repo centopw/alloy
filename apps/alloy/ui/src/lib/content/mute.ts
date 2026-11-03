@@ -1,3 +1,5 @@
+import { t } from '$lib/i18n';
+
 /** Rooms muted for a limited time, as room id -> epoch milliseconds when the mute ends. */
 export type MutedUntil = Readonly<Record<string, number>>;
 
@@ -7,10 +9,10 @@ const HOUR_MS = 3_600_000;
 
 /** Mute choices offered in the room menu; `ms: null` mutes until the user turns notifications back on. */
 export const MUTE_DURATIONS: readonly { label: string; ms: number | null }[] = [
-  { label: 'For 1 hour', ms: HOUR_MS },
-  { label: 'For 8 hours', ms: 8 * HOUR_MS },
-  { label: 'For 24 hours', ms: 24 * HOUR_MS },
-  { label: 'Until I turn it back on', ms: null },
+  { label: t('composer-for-1-hour'), ms: HOUR_MS },
+  { label: t('composer-for-8-hours'), ms: 8 * HOUR_MS },
+  { label: t('notifications-mute-for-24-hours'), ms: 24 * HOUR_MS },
+  { label: t('notifications-mute-until-i-turn-it-back-on'), ms: null },
 ];
 
 export function isMutedUntil(value: unknown): value is MutedUntil {
@@ -42,5 +44,7 @@ export function withMute(map: MutedUntil, roomId: string, until: number | null):
 export function muteEndLabel(until: number | undefined, now: number, format: (ms: number) => string): string | null {
   if (until === undefined || until <= now) return null;
   const sameDay = new Date(until).toDateString() === new Date(now).toDateString();
-  return `Muted until ${sameDay ? '' : 'tomorrow '}${format(until)}`;
+  return sameDay
+    ? t('notifications-mute-until-time', { time: format(until) })
+    : t('notifications-mute-until-tomorrow-time', { time: format(until) });
 }

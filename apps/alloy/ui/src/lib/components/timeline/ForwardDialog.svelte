@@ -27,7 +27,7 @@
 
 <Modal
   open={forwardStore.open}
-  title={count > 1 ? `Forward ${count} messages` : t('forward-dialog-forward-message')}
+  title={count > 1 ? t('forward-dialog-forward-messages', { count }) : t('forward-dialog-forward-message')}
   onclose={() => forwardStore.close()}
   width="440px"
 >

@@ -54,10 +54,10 @@
   let renameTagId = $state<string | null>(null);
   let pendingTagDelete = $state<{ id: string; name: string; count: number } | null>(null);
   const SORT_LABELS: Record<RoomSort, string> = {
-    activity: 'Activity',
-    name: 'Name',
-    unread: 'Unread first',
-    tag: 'By tag',
+    activity: t('sidebar-sort-activity'),
+    name: t('sidebar-sort-name'),
+    unread: t('sidebar-sort-unread-first'),
+    tag: t('sidebar-sort-by-tag'),
   };
   // The three filters people actually flip between; the rest stay in the More menu.
   const PRIMARY_FILTERS = ROOM_FILTERS.filter(
@@ -125,9 +125,9 @@
     const d = roomInfo.details(r.id);
     const unread = roomsStore.unreadOf(r);
     return [
-      { id: 'mark-unread', label: unread > 0 || r.marked_unread ? 'Mark as read' : 'Mark as unread', icon: unread > 0 || r.marked_unread ? CheckCheck : Mail, onselect: () => (unread > 0 ? void markRead(r.id) : void roomsStore.setMarkedUnread(r.id, !r.marked_unread)) },
-      { id: 'pin', label: r.favourite ? 'Unpin from top' : 'Pin to top', icon: r.favourite ? PinOff : Pin, onselect: () => void roomsStore.setFavourite(r.id, !r.favourite) },
-      { id: 'archive', label: r.low_priority ? 'Unarchive' : 'Archive', icon: r.low_priority ? ArchiveRestore : Archive, onselect: () => void roomsStore.setArchived(r.id, !r.low_priority) },
+      { id: 'mark-unread', label: unread > 0 || r.marked_unread ? t('common-mark-as-read') : t('sidebar-mark-as-unread'), icon: unread > 0 || r.marked_unread ? CheckCheck : Mail, onselect: () => (unread > 0 ? void markRead(r.id) : void roomsStore.setMarkedUnread(r.id, !r.marked_unread)) },
+      { id: 'pin', label: r.favourite ? t('sidebar-unpin-from-top') : t('sidebar-pin-to-top'), icon: r.favourite ? PinOff : Pin, onselect: () => void roomsStore.setFavourite(r.id, !r.favourite) },
+      { id: 'archive', label: r.low_priority ? t('room-swipe-unarchive') : t('room-swipe-archive'), icon: r.low_priority ? ArchiveRestore : Archive, onselect: () => void roomsStore.setArchived(r.id, !r.low_priority) },
       { separator: true },
       {
         id: 'notifications',
@@ -155,7 +155,7 @@
             }),
           search: {
             placeholder: t('sidebar-search-or-create-a-tag'),
-            create: { label: (q) => `Create tag "${q}"`, onCreate: (q) => void createTagFor(r.id, q) },
+            create: { label: (q) => t('sidebar-create-tag', { name: q }), onCreate: (q) => void createTagFor(r.id, q) },
           },
           maxHeight: 320,
         },
@@ -343,8 +343,8 @@
   }
 
   const scopeSpace = $derived(ui.scope === 'home' ? null : (roomsStore.rooms.find((r) => r.id === ui.scope) ?? null));
-  const scopeTitle = $derived(scopeSpace ? roomTitle(scopeSpace) : 'Chats');
-  const filterLabel = $derived(ROOM_FILTERS.find((f) => f.value === roomsStore.filter)?.label ?? 'All');
+  const scopeTitle = $derived(scopeSpace ? roomTitle(scopeSpace) : t('sidebar-chats'));
+  const filterLabel = $derived(ROOM_FILTERS.find((f) => f.value === roomsStore.filter)?.label ?? t('room-filter-all'));
   const moreFilterActive = $derived(!PRIMARY_FILTERS.some((f) => f.value === roomsStore.filter));
   const unreadRoomsCount = $derived(
     roomsStore.rooms.filter(
@@ -478,7 +478,7 @@
         {/if}
         <span class="marks">
           {#if r.tags.length > 0}
-            <span class="tag-dots" role="img" aria-label={`Tags: ${r.tags.map((id) => tagById.get(id)?.name ?? id).join(', ')}`}>
+            <span class="tag-dots" role="img" aria-label={t('sidebar-tags-label', { tags: r.tags.map((id) => tagById.get(id)?.name ?? id).join(', ') })}>
               {#each r.tags.slice(0, 3) as id (id)}
                 <span class="tag-dot" style:background={TAG_COLOUR_VARS[tagById.get(id)?.colour ?? 'grey']}></span>
               {/each}
@@ -595,7 +595,7 @@
         type="button"
         class="icon"
         aria-label={t('sidebar-refresh')}
-        data-tooltip={refreshStore.busy ? t('sidebar-refreshing') : `Refresh (${shortcutLabel('R')})`}
+        data-tooltip={refreshStore.busy ? t('sidebar-refreshing') : t('sidebar-refresh-with-shortcut', { shortcut: shortcutLabel('R') })}
         disabled={refreshStore.busy}
         onclick={() => void refreshStore.run()}
       >
@@ -652,10 +652,10 @@
       class:on={moreFilterActive}
       aria-pressed={moreFilterActive}
       aria-haspopup="menu"
-      aria-label={moreFilterActive ? `Room list options, filter ${filterLabel}` : t('sidebar-room-list-options')}
+      aria-label={moreFilterActive ? t('sidebar-room-list-options-filter', { filter: filterLabel }) : t('sidebar-room-list-options')}
       data-tooltip={t('sidebar-filter-and-sort')}
       use:contextmenu={filterMenuItems}
-      onclick={(e) => openMenuFrom(e.currentTarget as HTMLElement, filterMenuItems(), 'Room list options')}
+      onclick={(e) => openMenuFrom(e.currentTarget as HTMLElement, filterMenuItems(), t('sidebar-room-list-options'))}
     >
       <Icon icon={ChevronDown} size={16} />
       {#if moreFilterActive}
