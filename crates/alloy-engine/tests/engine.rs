@@ -539,7 +539,10 @@ async fn restart_restores_accounts_and_messages() {
 
     let accounts = list_accounts(&engine).await;
     assert_eq!(accounts.len(), 1, "the account survives the restart");
-    assert_eq!(accounts[0].id, account.id, "the same account id is restored");
+    assert_eq!(
+        accounts[0].id, account.id,
+        "the same account id is restored"
+    );
 
     let room = chat_id_by_title(&engine, "Ada Lovelace").await;
     let records = engine
