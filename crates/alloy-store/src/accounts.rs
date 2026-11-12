@@ -13,7 +13,7 @@ impl Store {
     pub async fn insert_account(&self, new: NewAccount) -> Result<AccountRecord, StoreError> {
         let now = now_ms();
         let stored = AccountRecord {
-            account_id: Uuid::new_v4().to_string(),
+            account_id: new.account_id.unwrap_or_else(|| Uuid::new_v4().to_string()),
             network: new.network,
             remote_user_id: new.remote_user_id,
             display_name: new.display_name,

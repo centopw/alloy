@@ -19,6 +19,7 @@ async fn open() -> Store {
 async fn account_and_chat(store: &Store) -> (String, String) {
     let account = store
         .insert_account(NewAccount {
+            account_id: None,
             network: Network::Telegram,
             remote_user_id: Some("remote-user-1".to_owned()),
             display_name: Some("Tester".to_owned()),

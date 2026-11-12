@@ -128,9 +128,11 @@ pub struct AccountRecord {
     pub updated_at: i64,
 }
 
-/// Fields a caller supplies when linking a new account; `account_id` and timestamps are local.
+/// Fields a caller supplies when linking a new account. `account_id` is generated unless the
+/// caller already allocated one (the engine names the account's directory before login ends).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewAccount {
+    pub account_id: Option<String>,
     pub network: Network,
     pub remote_user_id: Option<String>,
     pub display_name: Option<String>,

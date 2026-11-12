@@ -422,13 +422,12 @@ impl Runtime {
             state.writer.is_some()
         };
 
-        if has_transport
-            && let Err(error) = self.request("stop", json!({})).await {
-                tracing::debug!(
-                    target: "alloy_sidecar",
-                    "the sidecar did not acknowledge `stop`: {error}"
-                );
-            }
+        if has_transport && let Err(error) = self.request("stop", json!({})).await {
+            tracing::debug!(
+                target: "alloy_sidecar",
+                "the sidecar did not acknowledge `stop`: {error}"
+            );
+        }
 
         let (child, writer, pending) = {
             let mut state = self.state.lock().await;
