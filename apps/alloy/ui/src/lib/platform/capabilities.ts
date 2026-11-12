@@ -93,6 +93,7 @@ export function currentEnv(phone: boolean = viewport.isPhone): PlatformEnv {
 
 export type SettingsSectionId =
   | 'account'
+  | 'networks'
   | 'appearance'
   | 'notifications'
   | 'permissions'
@@ -139,6 +140,7 @@ export const SETTINGS_GROUPS_DEF: RawSettingsGroup[] = [
   {
     label: 'App settings',
     items: [
+      { id: 'networks', label: 'Networks' },
       { id: 'appearance', label: 'Appearance' },
       { id: 'notifications', label: 'Notifications' },
       { id: 'permissions', label: 'Permissions' },

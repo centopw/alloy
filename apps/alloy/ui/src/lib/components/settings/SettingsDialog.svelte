@@ -15,6 +15,7 @@
     MessageSquare,
     Info,
     Tag,
+    Link,
     ShieldCheck as PermissionsIcon
   } from '$lib/icons';
   import { pushBack } from '$lib/platform/backstack';
@@ -28,6 +29,7 @@
     type SettingsSectionId,
   } from '$lib/platform/capabilities';
 import Account from './sections/Account.svelte';
+import Networks from './sections/Networks.svelte';
 import Appearance from './sections/Appearance.svelte';
 import Notifications from './sections/Notifications.svelte';
 import Preferences from './sections/Preferences.svelte';
@@ -53,6 +55,7 @@ import Permissions from './sections/Permissions.svelte';
 
   const NAV_ICONS: Record<SettingsSectionId, { icon: NavIcon; phoneIcon?: NavIcon }> = {
     account: { icon: User },
+    networks: { icon: Link },
     'security-privacy': { icon: ShieldCheck },
     appearance: { icon: Palette },
     notifications: { icon: Bell },
@@ -223,6 +226,8 @@ import Permissions from './sections/Permissions.svelte';
           <div class="column">
             {#if section === 'account'}
               <Account {onclose} />
+            {:else if section === 'networks'}
+              <Networks />
             {:else if section === 'appearance'}
               <Appearance />
             {:else if section === 'notifications'}

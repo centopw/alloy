@@ -102,7 +102,9 @@ describe('accounts and login', () => {
     expect(accounts.every((account) => account.state === 'active')).toBe(true);
 
     const networks = expectResponse(await client.listNetworks(), 'Networks').payload.networks;
-    expect(networks).toEqual(['telegram', 'messenger', 'fake']);
+    expect(networks.map((info) => info.network)).toEqual(['telegram', 'messenger', 'fake']);
+    // The demo starts with a stored Telegram pair, so every listed network can start a login.
+    expect(networks.every((info) => info.ready && info.setup === null)).toBe(true);
   });
 
   it('walks Telegram phone → code → done when the number has no two-step password', async () => {

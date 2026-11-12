@@ -7,13 +7,22 @@ import type {
   LoginAlternativeDto,
   LoginInputDto,
   LoginStepDto,
-  Network
+  Network,
+  NetworkInfoDto,
+  TelegramAppSource
 } from '../generated/index.js';
 import { errorCode, errorMessage, expect } from './errors.js';
 
 import { t } from '$lib/i18n';
 
 export type Phase = 'booting' | 'onboarding' | 'ready' | 'no-engine';
+
+/** The Telegram application pair in effect, as `GetTelegramApp` reports it (never the hash). */
+export interface TelegramAppState {
+  configured: boolean;
+  apiId: number | null;
+  source: TelegramAppSource;
+}
 
 /** One in-progress login attempt: the id the engine assigned and the step the UI must show. */
 export interface LoginAttempt {
@@ -44,8 +53,10 @@ class SessionStore {
   accounts = $state<Account[]>([]);
   /** Live connector status per account; an account without an event has no entry yet. */
   statuses = $state<Record<AccountId, ConnectionStatus>>({});
-  /** The networks this build can connect, from `ListNetworks`. */
-  networks = $state<Network[]>([]);
+  /** The networks this build can offer, with readiness and any setup they still need. */
+  networks = $state<NetworkInfoDto[]>([]);
+  /** The Telegram application pair in effect; null until `refreshTelegramApp` ran. */
+  telegramApp = $state<TelegramAppState | null>(null);
   /** Engine-level failure of the last account or login call (not a `LoginStepDto::Failed`). */
   error = $state<string | null>(null);
   /** True while an account or login command is in flight. */
@@ -101,11 +112,40 @@ class SessionStore {
     }
   }
 
-  /** The networks to offer, loaded once by onboarding. */
-  async loadNetworks(): Promise<Network[]> {
+  /** The networks to offer, and whether each can start a login right now. */
+  async loadNetworks(): Promise<NetworkInfoDto[]> {
     const res = expect(await client.invoke({ action: 'ListNetworks' }), 'Networks');
     this.networks = res.payload.networks;
     return this.networks;
+  }
+
+  /** The Telegram application pair in effect (never its hash), as `GetTelegramApp` reports it. */
+  async refreshTelegramApp(): Promise<TelegramAppState> {
+    const res = expect(await client.invoke({ action: 'GetTelegramApp' }), 'TelegramApp');
+    this.telegramApp = {
+      configured: res.payload.configured,
+      apiId: res.payload.api_id,
+      source: res.payload.source
+    };
+    return this.telegramApp;
+  }
+
+  /**
+   * Seals a Telegram application pair in the OS keyring, then re-reads it and the network list:
+   * a login can start as soon as the engine resolves the pair.
+   */
+  async setTelegramApp(apiId: number, apiHash: string): Promise<void> {
+    expect(
+      await client.invoke({ action: 'SetTelegramApp', params: { api_id: apiId, api_hash: apiHash } }),
+      'TelegramAppSet'
+    );
+    await Promise.all([this.refreshTelegramApp(), this.loadNetworks()]);
+  }
+
+  /** Deletes the sealed pair; Telegram becomes unready and cannot start a login. */
+  async clearTelegramApp(): Promise<void> {
+    expect(await client.invoke({ action: 'ClearTelegramApp' }), 'TelegramAppCleared');
+    await Promise.all([this.refreshTelegramApp(), this.loadNetworks()]);
   }
 
   /** Opens onboarding over the app, keeping the current accounts on screen behind it. */

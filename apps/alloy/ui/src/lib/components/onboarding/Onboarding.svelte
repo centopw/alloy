@@ -2,10 +2,11 @@
   import { onMount, onDestroy } from 'svelte';
   import { Button } from '../common';
   import LoginStep from './LoginStep.svelte';
+  import TelegramAppForm from '../settings/sections/TelegramAppForm.svelte';
   import { session, networkLabel } from '$lib/stores/session.svelte';
   import { errorMessage } from '$lib/stores/errors';
   import { openExternal } from '$lib/platform/links';
-  import type { LoginInputDto, Network } from '$lib/generated/index.js';
+  import type { LoginInputDto, Network, NetworkInfoDto } from '$lib/generated/index.js';
 
   import { t } from '$lib/i18n';
 
@@ -18,6 +19,8 @@
 
   let loadingNetworks = $state(true);
   let networksError = $state<string | null>(null);
+  /** The network whose setup form replaced the list: an unready network is not a dead end. */
+  let setupFor = $state<NetworkInfoDto | null>(null);
   let live = true;
 
   onMount(() => {
@@ -36,10 +39,12 @@
     networksError = null;
     try {
       const networks = await session.loadNetworks();
-      // Reconnect opens onboarding already knowing the network; start its login straight away.
+      // Reconnect opens onboarding already knowing the network; start its login straight away,
+      // unless it still needs setup — then the list offers that form instead of a failed attempt.
       const preferred = session.preferredNetwork;
       if (!live) return;
-      if (preferred && networks.includes(preferred)) {
+      const info = networks.find((candidate) => candidate.network === preferred);
+      if (preferred && info?.ready) {
         session.preferredNetwork = null;
         await session.beginLogin(preferred).catch(() => {});
       }
@@ -53,6 +58,20 @@
   async function choose(network: Network) {
     if (session.loginBusy) return;
     await session.beginLogin(network).catch(() => {});
+  }
+
+  /** A ready network starts its login; one that still needs setup opens its form inline. */
+  function openNetwork(info: NetworkInfoDto) {
+    if (session.loginBusy) return;
+    if (info.ready) void choose(info.network);
+    else if (info.setup) setupFor = info;
+  }
+
+  /** The pair is sealed: start the login it unblocked instead of returning to the list. */
+  async function saveAndStart() {
+    const network = setupFor?.network;
+    setupFor = null;
+    if (network) await session.beginLogin(network).catch(() => {});
   }
 
   function submit(input: LoginInputDto) {
@@ -120,47 +139,69 @@
         {/key}
       {:else}
         <div class="step-head">
-          <p class="eyebrow">{t('onboarding-connect-account')}</p>
-          <h2>{t('onboarding-choose-network')}</h2>
-          <p class="hint">{t('onboarding-choose-network-hint')}</p>
+          <p class="eyebrow">
+            {setupFor ? networkLabel(setupFor.network) : t('onboarding-connect-account')}
+          </p>
+          <h2>
+            {setupFor ? t('onboarding-telegram-setup-title') : t('onboarding-choose-network')}
+          </h2>
+          <p class="hint">
+            {setupFor
+              ? t('onboarding-telegram-setup-hint')
+              : t('onboarding-choose-network-hint')}
+          </p>
         </div>
 
-        <p class="notice">
-          {t('onboarding-unofficial-notice')}
-          <button type="button" class="link" onclick={() => void openExternal(TELEGRAM_TERMS)}>
-            {t('onboarding-unofficial-telegram')}
-          </button>
-          <button type="button" class="link" onclick={() => void openExternal(MESSENGER_LOCKS)}>
-            {t('onboarding-unofficial-messenger')}
-          </button>
-        </p>
-
-        {#if networksError || session.error}
-          <p class="error" role="alert">{networksError ?? session.error}</p>
-        {/if}
-
-        {#if loadingNetworks}
-          <p class="hint" role="status">{t('onboarding-loading-networks')}</p>
-        {:else if session.networks.length === 0}
+        {#if setupFor}
+          <TelegramAppForm onSaved={saveAndStart} />
           <div class="actions">
-            <Button variant="ghost" onclick={() => void start()}>{t('common-retry')}</Button>
+            <Button variant="ghost" type="button" onclick={() => (setupFor = null)}>
+              {t('common-back')}
+            </Button>
           </div>
         {:else}
-          <ul class="networks">
-            {#each session.networks as network (network)}
-              <li>
-                <button
-                  type="button"
-                  class="network"
-                  disabled={session.loginBusy}
-                  onclick={() => void choose(network)}
-                >
-                  <span class="network-name">{networkLabel(network)}</span>
-                  <span class="network-detail">{networkDetail(network)}</span>
-                </button>
-              </li>
-            {/each}
-          </ul>
+          <p class="notice">
+            {t('onboarding-unofficial-notice')}
+            <button type="button" class="link" onclick={() => void openExternal(TELEGRAM_TERMS)}>
+              {t('onboarding-unofficial-telegram')}
+            </button>
+            <button type="button" class="link" onclick={() => void openExternal(MESSENGER_LOCKS)}>
+              {t('onboarding-unofficial-messenger')}
+            </button>
+          </p>
+
+          {#if networksError || session.error || session.loginError}
+            <p class="error" role="alert">
+              {networksError ?? session.error ?? session.loginError}
+            </p>
+          {/if}
+
+          {#if loadingNetworks}
+            <p class="hint" role="status">{t('onboarding-loading-networks')}</p>
+          {:else if session.networks.length === 0}
+            <div class="actions">
+              <Button variant="ghost" onclick={() => void start()}>{t('common-retry')}</Button>
+            </div>
+          {:else}
+            <ul class="networks">
+              {#each session.networks as info (info.network)}
+                <li>
+                  <button
+                    type="button"
+                    class="network"
+                    disabled={session.loginBusy}
+                    onclick={() => openNetwork(info)}
+                  >
+                    <span class="network-name">{networkLabel(info.network)}</span>
+                    <span class="network-detail">{networkDetail(info.network)}</span>
+                    {#if !info.ready}
+                      <span class="network-setup">{t('settings-networks-needs-setup')}</span>
+                    {/if}
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          {/if}
         {/if}
       {/if}
     </div>
@@ -398,6 +439,11 @@
   .network-detail {
     font-size: var(--alloy-typography-size-sm);
     color: var(--alloy-color-text-secondary);
+  }
+  .network-setup {
+    font-size: var(--alloy-typography-size-sm);
+    font-weight: var(--alloy-typography-weight-medium);
+    color: var(--alloy-color-accent-primary);
   }
   .actions {
     display: flex;

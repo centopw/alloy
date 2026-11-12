@@ -30,6 +30,15 @@ export type AccountState =
 "disabled";
 
 /**
+ *  The Telegram application hash (`api_hash` from <https://my.telegram.org/apps>), a credential.
+ * 
+ *  The wire shape stays a plain string, but [`fmt::Debug`] prints `<redacted>`: no log line, panic
+ *  message or `{:?}` of [`EngineCommand`] can leak it. Read the value only where the network or the
+ *  keyring needs it, through [`ApiHash::expose`].
+ */
+export type ApiHash = string;
+
+/**
  *  What the network behind an account lets Alloy do.
  * 
  *  One flag per connector capability: `true` promises the matching command works, `false` promises
@@ -130,6 +139,20 @@ export type EngineCommand =
 { action: "Logout"; params: {
 	account_id: AccountId,
 } } | 
+/**
+ *  Stores the Telegram application pair, sealed in the OS keyring, so a login can start.
+ * 
+ *  `api_id` must be positive and `api_hash` a 32-character hex string. The hash is never
+ *  echoed back by any response, and [`ApiHash`] never prints it.
+ */
+{ action: "SetTelegramApp"; params: {
+	api_id: number,
+	api_hash: ApiHash,
+} } | 
+/**  Deletes the stored Telegram application pair; Telegram returns to `ready: false`. */
+{ action: "ClearTelegramApp" } | 
+/**  Reports whether a Telegram application pair is configured, and where it came from. */
+{ action: "GetTelegramApp" } | 
 /**  Starts the room list stream; `filter` narrows the projection by chat name. */
 { action: "SubscribeRoomList"; params: {
 	filter: string | null,
@@ -375,9 +398,21 @@ export type EngineEvent = { type: "ConnectionStatus"; payload: {
 export type EngineResponse = { type: "AccountsList"; payload: {
 	accounts: Account[],
 } } | 
-/**  The networks this build can connect. */
+/**  The networks this build can offer, with readiness and any setup they still need. */
 { type: "Networks"; payload: {
-	networks: Network[],
+	networks: NetworkInfoDto[],
+} } | 
+/**  The application pair is sealed; the hash is never returned. */
+{ type: "TelegramAppSet"; payload: {
+	configured: boolean,
+} } | 
+/**  The stored application pair is gone. */
+{ type: "TelegramAppCleared" } | 
+/**  The pair in effect: `api_id` only, never `api_hash`. */
+{ type: "TelegramApp"; payload: {
+	configured: boolean,
+	api_id: number | null,
+	source: TelegramAppSource,
 } } | 
 /**  The next login step of `login_id`; answers both `BeginLogin` and `SubmitLogin`. */
 { type: "LoginStep"; payload: {
@@ -621,6 +656,44 @@ export type MediaSource = {
  */
 export type Network = "telegram" | "messenger" | "fake";
 
+/**
+ *  One network the engine can offer, and whether it is ready for a login right now.
+ * 
+ *  Telegram is always listed: `ready: false` with a [`NetworkSetupDto`] names what the user still
+ *  has to enter. Networks this build does not ship (the Messenger sidecar is missing) are absent.
+ */
+export type NetworkInfoDto = {
+	network: Network,
+	/**  `BeginLogin` can start now; `false` means `setup` explains what is missing. */
+	ready: boolean,
+	/**  The values the user must provide first; `None` once the network is ready. */
+	setup: NetworkSetupDto | null,
+};
+
+/**  What the user has to enter before a network becomes usable. */
+export type NetworkSetupDto = {
+	kind: NetworkSetupKind,
+	/**  Page where the user registers the values, opened in a browser. */
+	app_url: string,
+	/**  Inputs to collect, in display order. */
+	fields: NetworkSetupFieldDto[],
+};
+
+/**  One input a [`NetworkSetupDto`] collects. */
+export type NetworkSetupFieldDto = {
+	/**  Key the setup command expects, e.g. `"api_id"`. */
+	key: string,
+	/**  Human-readable input label. */
+	label: string,
+	/**  The value is a credential: mask it while typing and never echo it back. */
+	secret: boolean,
+};
+
+/**  Which setup a [`NetworkSetupDto`] asks for. */
+export type NetworkSetupKind = 
+/**  The application `api_id`/`api_hash` pair from <https://my.telegram.org/apps>. */
+"telegram_app";
+
 export type NotificationCount = {
 	highlight_count: number,
 	notification_count: number,
@@ -744,6 +817,15 @@ export type SubscriptionId = string;
 
 /**  Palette colour of a chat tag. */
 export type TagColour = "grey" | "red" | "orange" | "amber" | "green" | "teal" | "blue" | "violet" | "pink";
+
+/**  Where the Telegram application pair in effect came from. */
+export type TelegramAppSource = 
+/**  Entered in the app and sealed in the OS keyring. */
+"runtime" | 
+/**  Exported as `ALLOY_TELEGRAM_API_ID`/`ALLOY_TELEGRAM_API_HASH` (developer override). */
+"environment" | 
+/**  Nothing is configured; a Telegram login cannot start. */
+"none";
 
 /**  The body of one timeline item. */
 export type TimelineItemContent = { kind: "TextMessage"; data: {

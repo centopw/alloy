@@ -12,6 +12,8 @@
  *   phone → code;
  * - sending is the outbox: `MessageQueued` answers the command, the local echo arrives as a
  *   `PushBack` with `send_state: Queued`, then `Sending`, then `Sent` with its local message id;
+ * - the Telegram application pair starts configured (as if it had been entered in Settings →
+ *   Networks), so `ClearTelegramApp` is the quickest way to walk the setup form;
  * - room-list and timeline changes are emitted as `VectorDiffDto` operations against what each
  *   subscription has already received, never as full snapshots after the initial `Reset`.
  */
@@ -29,6 +31,7 @@ import type {
   LoginInputDto,
   LoginStepDto,
   Network,
+  NetworkInfoDto,
   RoomId,
   RoomMediaItem,
   RoomMediaKind,
@@ -62,6 +65,18 @@ const MESSENGER_COOKIES: CookieFieldDto[] = [
   { name: 'xs', label: 'xs (the session cookie)', required: true },
   { name: 'datr', label: 'datr (the browser cookie)', required: false },
 ];
+
+/** Where the Telegram application pair is registered; `ListNetworks` hands it to the UI. */
+const TELEGRAM_APPS_URL = 'https://my.telegram.org/apps';
+
+/** The engine's `not_supported` reason when Telegram has no application pair yet. */
+const TELEGRAM_APP_FEATURE = 'telegram application credentials';
+
+/** The pair the demo starts with, as if entered in Settings → Networks on this device. */
+const DEMO_TELEGRAM_APP = {
+  api_id: 2040,
+  api_hash: '1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d',
+};
 
 const THEMES: [string, string][] = [
   ['dark', 'Dark'],
@@ -103,6 +118,10 @@ export class MockEngineError extends Error {
 
 function invalidArgument(message: string): MockEngineError {
   return new MockEngineError('invalid_argument', message);
+}
+
+function notSupported(message: string, reason: string): MockEngineError {
+  return new MockEngineError('not_supported', message, reason);
 }
 
 function notFound(message: string): MockEngineError {
@@ -171,6 +190,8 @@ export class MockTransport implements Transport {
     ['notificationLevel', JSON.stringify('all')],
     ['compactRows', JSON.stringify(false)],
   ]);
+  /** The Telegram application pair in effect; `null` until one is stored. */
+  private telegramApp: { api_id: number; api_hash: string } | null = { ...DEMO_TELEGRAM_APP };
   private counter = 0;
   private txnCounter = 0;
   private announced = false;
@@ -573,6 +594,29 @@ export class MockTransport implements Transport {
     return out.reverse();
   }
 
+  /** `ListNetworks`: Telegram is always offered, ready only once its pair is stored. */
+  private networkInfo(): NetworkInfoDto[] {
+    const configured = this.telegramApp !== null;
+    return [
+      {
+        network: 'telegram',
+        ready: configured,
+        setup: configured
+          ? null
+          : {
+              kind: 'telegram_app',
+              app_url: TELEGRAM_APPS_URL,
+              fields: [
+                { key: 'api_id', label: 'API ID', secret: false },
+                { key: 'api_hash', label: 'API hash', secret: true },
+              ],
+            },
+      },
+      { network: 'messenger', ready: true, setup: null },
+      { network: 'fake', ready: true, setup: null },
+    ];
+  }
+
   // === Command handling ===
 
   async invoke(command: EngineCommand): Promise<EngineResponse> {
@@ -581,9 +625,45 @@ export class MockTransport implements Transport {
         return { type: 'AccountsList', payload: { accounts: this.accountList() } };
 
       case 'ListNetworks':
-        return { type: 'Networks', payload: { networks: ['telegram', 'messenger', 'fake'] } };
+        return { type: 'Networks', payload: { networks: this.networkInfo() } };
+
+      case 'SetTelegramApp': {
+        const { api_id, api_hash } = command.params;
+        if (!Number.isInteger(api_id) || api_id <= 0) {
+          throw invalidArgument('the Telegram api_id must be a positive number');
+        }
+        if (!/^[0-9a-fA-F]{32}$/.test(api_hash.trim())) {
+          throw invalidArgument('the Telegram api_hash must be the 32-character hexadecimal value');
+        }
+        this.telegramApp = { api_id, api_hash: api_hash.trim() };
+        return { type: 'TelegramAppSet', payload: { configured: true } };
+      }
+
+      case 'ClearTelegramApp':
+        this.telegramApp = null;
+        return { type: 'TelegramAppCleared' };
+
+      case 'GetTelegramApp':
+        return {
+          type: 'TelegramApp',
+          payload: {
+            configured: this.telegramApp !== null,
+            api_id: this.telegramApp?.api_id ?? null,
+            source: this.telegramApp === null ? 'none' : 'runtime',
+          },
+        };
 
       case 'BeginLogin': {
+        const info = this.networkInfo().find(
+          (candidate) => candidate.network === command.params.network
+        );
+        if (!info?.ready) {
+          throw notSupported(
+            'Telegram needs its application pair first: enter the api_id and api_hash from ' +
+              `${TELEGRAM_APPS_URL} in Settings > Networks`,
+            TELEGRAM_APP_FEATURE
+          );
+        }
         const loginId = `login_${++this.counter}`;
         const step = this.firstStep(command.params.network);
         this.logins.set(loginId, {
