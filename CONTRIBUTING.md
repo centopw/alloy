@@ -65,6 +65,22 @@ Ensure you have the following installed on your machine:
    just ci
    ```
 
+### Telegram application credentials
+
+You never configure Telegram: the app asks for your phone number and the code it sends, nothing
+else. `api_id`/`api_hash` identify Alloy the *application*, the same role they play in a mautrix
+bridge config, and `crates/alloy-telegram/build.rs` bakes one pair into every binary. Only a
+developer building a distributable registers that application once, at
+<https://my.telegram.org/apps>, and then either exports `ALLOY_TELEGRAM_API_ID` /
+`ALLOY_TELEGRAM_API_HASH` before building or writes them to `.env.telegram` (`just telegram-app`
+prints the recipe; `just nightly-local` and `just android-*` read the file, and an exported value
+wins over it). Release CI passes the same pair as secrets. Without a pair the build still succeeds
+and Telegram is simply listed as unavailable, with the registration URL in the log. Telegram's API
+terms ask any client that is not the official app to carry a name prefixed "Unofficial", so the
+registered entry is titled "Unofficial Alloy"; if that prefix is not acceptable, the fix is to
+rename the client itself (display name, bundle name and docs) so the two titles agree — the title
+is what the terms constrain, not the phone-number prompt.
+
 ---
 
 ## Git & PR Conventions

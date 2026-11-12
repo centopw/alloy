@@ -1,6 +1,8 @@
 [package]
 name = "alloy-telegram"
 version = "0.1.0"
+# Bakes the application pair into the binary (see build.rs).
+build = "build.rs"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true

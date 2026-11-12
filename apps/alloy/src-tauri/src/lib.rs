@@ -46,26 +46,6 @@ fn open_secret_store(
     )))
 }
 
-/// Telegram application credentials.
-///
-/// A release build embeds Alloy's own `api_id`/`api_hash` at compile time through
-/// `ALLOY_TELEGRAM_API_ID`/`ALLOY_TELEGRAM_API_HASH` so every installed copy identifies the same
-/// application, as Telegram's API terms expect. A development build without them falls back to the
-/// same variables in the process environment.
-fn telegram_config() -> Option<alloy_telegram::TelegramConfig> {
-    let embedded = option_env!("ALLOY_TELEGRAM_API_ID")
-        .zip(option_env!("ALLOY_TELEGRAM_API_HASH"))
-        .and_then(|(api_id, api_hash)| {
-            let api_id = api_id.trim().parse::<i32>().ok()?;
-            let api_hash = api_hash.trim();
-            (!api_hash.is_empty()).then_some((api_id, api_hash))
-        });
-    match embedded {
-        Some((api_id, api_hash)) => Some(alloy_telegram::TelegramConfig::new(api_id, api_hash)),
-        None => alloy_telegram::TelegramConfig::from_env().ok(),
-    }
-}
-
 /// The Messenger sidecar executable, when this build has one.
 ///
 /// [`MESSENGER_SIDECAR_ENV`] wins so a developer can point at a sidecar built elsewhere; otherwise
@@ -157,10 +137,21 @@ pub fn run() {
             std::fs::create_dir_all(&data_dir)?;
 
             let secret_store = open_secret_store(&data_dir)?;
-            let factory: Arc<dyn ConnectorFactory> = Arc::new(DefaultConnectorFactory::new(
-                telegram_config(),
-                messenger_sidecar(),
-            ));
+            // One precedence rule for every binary (`TelegramConfig::resolve`): the process
+            // environment, then the pair `build.rs` baked in, then no Telegram at all (ADR 0016).
+            let telegram = match alloy_telegram::TelegramConfig::resolve() {
+                Ok(config) => Some(config),
+                Err(err @ alloy_telegram::ConfigError::NotConfigured) => {
+                    tracing::info!("{err}");
+                    None
+                }
+                Err(err) => {
+                    tracing::warn!(error = %err, "Telegram credentials are misconfigured");
+                    None
+                }
+            };
+            let factory: Arc<dyn ConnectorFactory> =
+                Arc::new(DefaultConnectorFactory::new(telegram, messenger_sidecar()));
             // The database is opened before the window is shown so the first `ListChats` is served
             // from the stored projection instead of racing the migrations.
             let ctx = tauri::async_runtime::block_on(EngineContext::open(

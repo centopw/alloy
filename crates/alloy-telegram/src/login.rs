@@ -52,6 +52,7 @@ pub(crate) fn field_of(input: &LoginInput) -> &'static str {
         LoginInput::Password { .. } => "password",
         LoginInput::Cookies { .. } => "cookies",
         LoginInput::Credentials { .. } => "credentials",
+        LoginInput::Switch { .. } => "alternative",
         LoginInput::QrRefresh => "qr",
     }
 }
@@ -90,6 +91,12 @@ mod tests {
                 password: "x".to_string()
             }),
             "password"
+        );
+        assert_eq!(
+            field_of(&LoginInput::Switch {
+                to: alloy_connector::LoginAlternative::Cookies
+            }),
+            "alternative"
         );
         assert_eq!(field_of(&LoginInput::QrRefresh), "qr");
     }

@@ -10,7 +10,7 @@ use std::sync::Arc;
 use alloy_connector::{Connector, ConnectorError};
 use alloy_protocol::Network;
 use alloy_sidecar::{SidecarConfig, SidecarConnector};
-use alloy_telegram::{TelegramConfig, TelegramConnector};
+use alloy_telegram::{ConfigError, TelegramConfig, TelegramConnector};
 
 use crate::convert::network_label;
 
@@ -48,14 +48,21 @@ impl DefaultConnectorFactory {
         }
     }
 
-    /// Reads the build's configuration: Telegram application credentials from the environment and
-    /// the Messenger sidecar from [`MESSENGER_SIDECAR_ENV`]. A missing piece only removes that
-    /// network; it is not an error, so a build with neither still starts and lists no networks.
+    /// Reads the build's configuration: the Telegram application pair through
+    /// [`TelegramConfig::resolve`] and the Messenger sidecar from [`MESSENGER_SIDECAR_ENV`]. A
+    /// missing piece only removes that network; it is not an error, so a build with neither still
+    /// starts and lists no networks.
     pub fn from_env() -> Self {
-        let telegram = match TelegramConfig::from_env() {
+        let telegram = match TelegramConfig::resolve() {
             Ok(config) => Some(config),
+            // Nothing is wrong with an install that lacks the pair, and nobody using the app can
+            // set it: the error carries the instructions the developer building it needs.
+            Err(err @ ConfigError::NotConfigured) => {
+                tracing::info!("{err}");
+                None
+            }
             Err(err) => {
-                tracing::warn!(error = %err, "Telegram credentials are not configured");
+                tracing::warn!(error = %err, "Telegram credentials are misconfigured");
                 None
             }
         };
