@@ -69,6 +69,30 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Set up Go (Messenger sidecar)
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: sidecars/alloy-meta/go.mod
+          cache-dependency-path: sidecars/alloy-meta/go.sum
+
+      # `tauri build` bundles `binaries/alloy-meta-<triple>` as the Messenger sidecar next to the app.
+      - name: Build the Messenger sidecar
+        shell: bash
+        run: |
+          triple="${{ matrix.target }}"
+          [ -n "$triple" ] || triple=$(rustc --print host-tuple)
+          case "$triple" in
+            *windows*) goos=windows; ext='.exe' ;;
+            *darwin*) goos=darwin; ext='' ;;
+            *) goos=linux; ext='' ;;
+          esac
+          case "$triple" in
+            aarch64-*) goarch=arm64 ;;
+            *) goarch=amd64 ;;
+          esac
+          mkdir -p apps/alloy/src-tauri/binaries
+          ( cd sidecars/alloy-meta && CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build -trimpath -ldflags='-s -w' -o "../../apps/alloy/src-tauri/binaries/alloy-meta-${triple}${ext}" . )
+
       - name: Cache cargo registry & targets
         uses: Swatinem/rust-cache@v2
         with:
@@ -116,6 +140,9 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Embedded at compile time so every installed copy identifies Alloy's own Telegram application.
+          ALLOY_TELEGRAM_API_ID: ${{ secrets.ALLOY_TELEGRAM_API_ID }}
+          ALLOY_TELEGRAM_API_HASH: ${{ secrets.ALLOY_TELEGRAM_API_HASH }}
         with:
           projectPath: apps/alloy
           tagName: nightly
@@ -217,6 +244,25 @@ jobs:
         with:
           targets: aarch64-linux-android
 
+      - name: Set up Go (Messenger sidecar)
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: sidecars/alloy-meta/go.mod
+          cache-dependency-path: sidecars/alloy-meta/go.sum
+
+      # The sidecar ships as a native library so Android extracts it and allows the app to execute it.
+      - name: Build the Messenger sidecar into jniLibs
+        run: |
+          mkdir -p apps/alloy/src-tauri/binaries
+          mkdir -p apps/alloy/src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a
+          cd sidecars/alloy-meta
+          CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build -trimpath -ldflags='-s -w' \
+            -o ../../apps/alloy/src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a/liballoymeta.so .
+          # The app build script copies `binaries/alloy-meta-<triple>` into the target dir and fails
+          # when it is missing, so the triple-named file must exist as well as the jniLibs copy.
+          cp ../../apps/alloy/src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a/liballoymeta.so \
+            ../../apps/alloy/src-tauri/binaries/alloy-meta-aarch64-linux-android
+
       - name: Cache cargo registry & targets
         uses: Swatinem/rust-cache@v2
         with:
@@ -249,6 +295,9 @@ jobs:
       - name: Build Android APK (release, arm64)
         working-directory: apps/alloy
         env:
+          # Embedded at compile time so every installed copy identifies Alloy's own Telegram application.
+          ALLOY_TELEGRAM_API_ID: ${{ secrets.ALLOY_TELEGRAM_API_ID }}
+          ALLOY_TELEGRAM_API_HASH: ${{ secrets.ALLOY_TELEGRAM_API_HASH }}
           # Size over speed on phones: 36.7 MB vs 72.5 MB with the plain release profile (#73).
           # panic=abort alone saves about 14 MB of unwind tables.
           CARGO_PROFILE_RELEASE_OPT_LEVEL: s

@@ -82,6 +82,30 @@ jobs:
           shared-key: dev-${{ matrix.os }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
+      - name: Set up Go (Messenger sidecar)
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: sidecars/alloy-meta/go.mod
+          cache-dependency-path: sidecars/alloy-meta/go.sum
+
+      # The app build script copies `binaries/alloy-meta-<triple>` into the target dir and fails when
+      # it is missing, so the sidecar must exist before any workspace build.
+      - name: Build the Messenger sidecar for this runner
+        shell: bash
+        run: |
+          triple=$(rustc --print host-tuple)
+          case "$triple" in
+            *windows*) goos=windows; ext=".exe" ;;
+            *darwin*) goos=darwin; ext="" ;;
+            *) goos=linux; ext="" ;;
+          esac
+          case "$triple" in
+            aarch64-*) goarch=arm64 ;;
+            *) goarch=amd64 ;;
+          esac
+          mkdir -p apps/alloy/src-tauri/binaries
+          ( cd sidecars/alloy-meta && CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build -trimpath -ldflags="-s -w" -o "../../apps/alloy/src-tauri/binaries/alloy-meta-${triple}${ext}" . )
+
       # Clippy findings are platform independent here; Windows only runs the tests (its slowest leg).
       - name: Clippy (zero warnings policy)
         if: matrix.os != 'windows-latest'
@@ -99,6 +123,54 @@ jobs:
         run: |
           cargo run -p alloy-protocol --bin generate-types
           git diff --exit-code apps/alloy/ui/src/lib/generated
+
+  # The trait contract, the engine driven end to end by the fake connector, and the NDJSON sidecar
+  # framing all live behind features, so the workspace run above never builds them.
+  connector-tests:
+    name: Connector contract & fake-connector engine tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry & targets
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: dev-ubuntu-latest
+          save-if: false
+
+      - name: Connector contract
+        run: cargo test -p alloy-connector --features testing
+
+      - name: Engine end-to-end (fake connector)
+        run: cargo test -p alloy-engine --features testing
+
+      - name: Sidecar protocol (fake sidecar)
+        run: cargo test -p alloy-sidecar --features fake-sidecar
+
+  sidecar-tests:
+    name: Messenger sidecar (Go)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: sidecars/alloy-meta/go.mod
+          cache-dependency-path: sidecars/alloy-meta/go.sum
+
+      - name: Vet
+        working-directory: sidecars/alloy-meta
+        run: go vet ./...
+
+      - name: Test
+        working-directory: sidecars/alloy-meta
+        run: go test ./...
 
   cargo-deny:
     name: Cargo Deny (Licenses & Bans)
@@ -187,6 +259,25 @@ jobs:
         with:
           targets: aarch64-linux-android
 
+      - name: Set up Go (Messenger sidecar)
+        if: steps.check-android.outputs.has_android == 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: sidecars/alloy-meta/go.mod
+          cache-dependency-path: sidecars/alloy-meta/go.sum
+
+      # The sidecar ships as a native library so Android extracts it and allows the app to execute it.
+      - name: Build the Messenger sidecar into jniLibs
+        if: steps.check-android.outputs.has_android == 'true'
+        run: |
+          mkdir -p apps/alloy/src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a
+          cd sidecars/alloy-meta
+          CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build -trimpath -ldflags='-s -w' \
+            -o ../../apps/alloy/src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a/liballoymeta.so .
+          mkdir -p apps/alloy/src-tauri/binaries
+          cp ../../apps/alloy/src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a/liballoymeta.so \
+            ../../apps/alloy/src-tauri/binaries/alloy-meta-aarch64-linux-android
+
       - name: Cache cargo registry & targets
         if: steps.check-android.outputs.has_android == 'true'
         uses: Swatinem/rust-cache@v2
@@ -217,140 +308,3 @@ jobs:
         if: steps.check-android.outputs.has_android == 'true'
         working-directory: apps/alloy
         run: pnpm tauri android build --apk --debug --target aarch64
-
-  # Each shard starts its own Synapse, so the integration tests (about a minute each, mostly waiting on sync)
-  # run side by side instead of one after another. scripts/ci-engine-shards.sh lists the shards and fails the
-  # check below when a new test file is in none of them.
-  engine-tests:
-    name: Engine integration tests (shard ${{ matrix.shard }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4]
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Every engine test file belongs to a shard
-        run: scripts/ci-engine-shards.sh check
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo registry & targets
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: dev-ubuntu-latest
-          save-if: false
-
-      - name: Start Synapse Homeserver
-        run: |
-          bash tests/synapse/start.sh
-          bash tests/synapse/register_test_users.sh || true
-
-      - name: Core and push integration tests (shard 1 only)
-        if: matrix.shard == 1
-        env:
-          ALLOY_TEST_HS: http://localhost:8008
-        run: |
-          cargo test -p alloy-core --test synapse_integration -- --nocapture
-          cargo test -p alloy-push --test push_integration -- --nocapture
-
-      # Every parity test logs in as the same account and creates its rooms on the same Synapse.
-      # Run them one at a time: on a loaded runner, six concurrent sliding-sync streams for one
-      # account starve each other and a 150 s timeline wait in forward_events_text_and_reply_...
-      # times out even though both forwards were accepted (seen twice on the 0.3.2 bump commit,
-      # then green on a rerun). Serial execution removes the contention instead of, or in addition
-      # to, raising the timeout.
-      - name: Engine integration tests
-        env:
-          ALLOY_TEST_HS: http://localhost:8008
-        run: |
-          read -ra shard_args <<< "$(scripts/ci-engine-shards.sh "${{ matrix.shard }}")"
-          cargo test -p alloy-engine "${shard_args[@]}" -- --nocapture --test-threads=1
-
-      - name: Dump Docker logs on failure
-        if: failure()
-        run: |
-          mkdir -p /tmp/synapse-logs
-          docker compose -f tests/synapse/docker-compose.yml logs > /tmp/synapse-logs/synapse.log 2>&1 || true
-
-      - name: Upload Synapse Docker logs
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: synapse-docker-logs-engine-${{ matrix.shard }}
-          path: /tmp/synapse-logs/synapse.log
-          if-no-files-found: ignore
-
-  e2e:
-    name: Full-stack E2E (UI + bridge + Synapse)
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo registry & targets
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: dev-ubuntu-latest
-          save-if: false
-
-      - name: Start Synapse Homeserver
-        run: |
-          bash tests/synapse/start.sh
-          bash tests/synapse/register_test_users.sh || true
-
-      - name: Build engine bridge
-        run: cargo build -p alloy-bridge
-
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 9
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: apps/alloy/ui/pnpm-lock.yaml
-
-      - name: Build UI
-        working-directory: apps/alloy/ui
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm build
-
-      - name: Full-stack E2E (UI + bridge + Synapse)
-        working-directory: apps/alloy/ui
-        env:
-          ALLOY_TEST_HS: http://localhost:8008
-          ALLOY_BRIDGE_BIN: ${{ github.workspace }}/target/debug/alloy-bridge
-          CHROME_PATH: /usr/bin/google-chrome
-        run: node scripts/e2e-bridge.mjs
-
-      - name: "Mobile E2E (390x844 touch, no page scroll, 44px targets)"
-        working-directory: apps/alloy/ui
-        env:
-          ALLOY_TEST_HS: http://localhost:8008
-          ALLOY_BRIDGE_BIN: ${{ github.workspace }}/target/debug/alloy-bridge
-          CHROME_PATH: /usr/bin/google-chrome
-          E2E_MOBILE: '1'
-          E2E_STRICT: '1'
-        run: node scripts/e2e-bridge.mjs
-
-      - name: Dump Docker logs on failure
-        if: failure()
-        run: |
-          mkdir -p /tmp/synapse-logs
-          docker compose -f tests/synapse/docker-compose.yml logs > /tmp/synapse-logs/synapse.log 2>&1 || true
-
-      - name: Upload Synapse Docker logs
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: synapse-docker-logs-e2e
-          path: /tmp/synapse-logs/synapse.log
-          if-no-files-found: ignore

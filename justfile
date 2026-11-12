@@ -5,7 +5,6 @@ set shell := ["bash", "-cu"]
 
 # UI workspace directory (apps/alloy by default; apps/alloy/ui configurable)
 UI_DIR := env_var_or_default("UI_DIR", "apps/alloy/ui")
-SYNAPSE_COMPOSE := "tests/synapse/docker-compose.yml"
 
 default:
     @just --list
@@ -40,13 +39,38 @@ ui-check:
 ui-build:
     pnpm -C {{UI_DIR}} build
 
-# Start local Synapse test homeserver in Docker
-synapse-up:
-    docker compose -f {{SYNAPSE_COMPOSE}} up -d
+# Build the Messenger sidecar (Go) for the host triple, where `tauri build` bundles it
+sidecar:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    triple=$(rustc --print host-tuple)
+    case "$triple" in
+      *windows*) goos=windows; ext=.exe ;;
+      *darwin*) goos=darwin; ext= ;;
+      *) goos=linux; ext= ;;
+    esac
+    case "$triple" in
+      aarch64-*) goarch=arm64 ;;
+      *) goarch=amd64 ;;
+    esac
+    mkdir -p apps/alloy/src-tauri/binaries
+    cd sidecars/alloy-meta
+    CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build -trimpath -ldflags='-s -w' \
+      -o "../../apps/alloy/src-tauri/binaries/alloy-meta-$triple$ext" .
 
-# Stop local Synapse test homeserver in Docker
-synapse-down:
-    docker compose -f {{SYNAPSE_COMPOSE}} down
+# Build the Messenger sidecar for the arm64 Android APK (it ships as a native library)
+sidecar-android:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p apps/alloy/src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a
+    cd sidecars/alloy-meta
+    CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build -trimpath -ldflags='-s -w' \
+      -o ../../apps/alloy/src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a/liballoymeta.so .
+    # The app build script copies `binaries/alloy-meta-<triple>` into the target dir and fails
+    # when it is missing, so the triple-named file must exist as well as the jniLibs copy.
+    mkdir -p ../../apps/alloy/src-tauri/binaries
+    cp ../../apps/alloy/src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a/liballoymeta.so \
+      ../../apps/alloy/src-tauri/binaries/alloy-meta-aarch64-linux-android
 
 # Run complete local CI validation suite
 ci:
@@ -77,13 +101,13 @@ changelog *args:
     git-cliff {{args}}
 
 # Build unsigned desktop bundle locally
-nightly-local:
+nightly-local: sidecar
     pnpm -C {{UI_DIR}} install
     pnpm -C {{UI_DIR}} build
     pnpm -C apps/alloy tauri build
 
 # Build Android debug APK (requires JAVA_HOME (JDK 17), ANDROID_HOME, and target e.g. aarch64)
-android-debug target="aarch64":
+android-debug target="aarch64": sidecar-android
     @test -n "$$JAVA_HOME" || (echo "Error: JAVA_HOME is not set. Android build requires JDK 17." && exit 1)
     @test -n "$$ANDROID_HOME" || (echo "Error: ANDROID_HOME is not set. Android build requires Android SDK/NDK." && exit 1)
     rustup target add {{target}}-linux-android 2>/dev/null || true
@@ -101,7 +125,7 @@ perf-desktop binary="target/release/alloy-app" runs="5":
     node scripts/perf-desktop.mjs {{binary}} --runs {{runs}}
 
 # Build the size-optimised release APK that CI ships (unsigned; see scripts/sign-android-apk.sh)
-android-release target="aarch64":
+android-release target="aarch64": sidecar-android
     @test -n "$ANDROID_HOME" || (echo "Error: ANDROID_HOME is not set." && exit 1)
     rustup target add {{target}}-linux-android 2>/dev/null || true
     pnpm -C {{UI_DIR}} install

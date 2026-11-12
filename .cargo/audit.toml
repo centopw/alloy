@@ -6,8 +6,6 @@ ignore = [
     "RUSTSEC-2026-0368", # zip, same
     "RUSTSEC-2026-0369", # zip, same
     "RUSTSEC-2026-0429", # zip, same (symlink-entry abort); fixed in zip 9, updater 2.x pins zip 4
-    "RUSTSEC-2026-0319", # anymap2 via matrix-sdk 0.19.1
-    "RUSTSEC-2024-0388", # derivative via wasm_evt_listener (wasm32 only)
     "RUSTSEC-2024-0370", # proc-macro-error via gtk3-rs (tauri/wry on Linux)
     "RUSTSEC-2024-0429", # glib 0.18 unsoundness via tauri/wry on Linux; API not used
     # zstd/zstd-safe via wasmtime-internal-cache (wasmtime's default `cache` feature); the plugin

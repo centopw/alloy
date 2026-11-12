@@ -11,3 +11,6 @@ dist/
 !AGENTS.md
 docs/spikes/ui/e2e-failure.png
 *.cdx.json
+
+# Messenger sidecar built by `just sidecar` (Tauri bundles it).
+apps/alloy/src-tauri/binaries/

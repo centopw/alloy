@@ -11,6 +11,7 @@
 //!   bridge -> client: `{"id": 1, "ok": <EngineResponse>}` | `{"id": 1, "err": <EngineError>}`
 //!                     `{"event": <EngineEvent>}`
 
+use alloy_engine::factory::{ConnectorFactory, DefaultConnectorFactory};
 use alloy_engine::{AppEngine, Engine, EngineContext};
 use alloy_protocol::{EngineCommand, EngineError};
 use alloy_storage::{InMemorySecretStore, KeyringSecretStore, SecretStore};
@@ -42,6 +43,10 @@ struct Args {
     /// `$ALLOY_BRIDGE_TOKEN`, else a random token printed at startup.
     #[arg(long)]
     token: Option<String>,
+    /// Serve the deterministic fake connector instead of the real networks (needs the `fake`
+    /// feature).
+    #[arg(long)]
+    fake: bool,
 }
 
 #[derive(Deserialize)]
@@ -137,6 +142,35 @@ fn token_is_valid(token: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
+/// The networks this bridge can reach.
+///
+/// `--fake` uses the deterministic connector so the web UI can be driven without Telegram or
+/// Messenger credentials; that variant only exists when the crate is built with the `fake` feature.
+fn connector_factory(fake: bool) -> std::io::Result<Arc<dyn ConnectorFactory>> {
+    if fake {
+        return fake_factory();
+    }
+    Ok(Arc::new(DefaultConnectorFactory::from_env()))
+}
+
+#[cfg(feature = "fake")]
+fn fake_factory() -> std::io::Result<Arc<dyn ConnectorFactory>> {
+    Ok(Arc::new(alloy_engine::factory::FakeConnectorFactory::new()))
+}
+
+#[cfg(not(feature = "fake"))]
+fn fake_factory() -> std::io::Result<Arc<dyn ConnectorFactory>> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        "--fake needs a build with the `fake` feature",
+    ))
+}
+
+/// The engine reports protocol errors, which are not `std::error::Error`; `main` returns `io::Error`.
+fn engine_error(err: EngineError) -> std::io::Error {
+    std::io::Error::other(format!("{}: {}", err.code, err.message))
+}
+
 async fn serve(stream: TcpStream, engine: Arc<AppEngine>, ctx: EngineContext, token: Arc<str>) {
     // The callback's error type is fixed by tungstenite's `Callback` trait.
     #[allow(clippy::result_large_err)]
@@ -219,8 +253,13 @@ async fn main() -> std::io::Result<()> {
     } else {
         Arc::new(InMemorySecretStore::new())
     };
-    let ctx = EngineContext::new(args.data_dir, secrets);
+    let factory = connector_factory(args.fake)?;
+    tracing::info!(networks = ?factory.networks(), "connector factory ready");
+    let ctx = EngineContext::open(args.data_dir, secrets, factory)
+        .await
+        .map_err(engine_error)?;
     let engine = Arc::new(AppEngine::new(ctx.clone()));
+    engine.start().await.map_err(engine_error)?;
 
     let token = match args
         .token

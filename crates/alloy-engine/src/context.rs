@@ -1,12 +1,26 @@
-use crate::registry::SubscriptionRegistry;
-use crate::sink::EventSink;
-use alloy_core::AlloyClient;
-use alloy_storage::SecretStore;
+//! Shared engine context passed to command handlers and background actors.
+
 use std::collections::HashSet;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use tokio::sync::RwLock;
+
+use alloy_storage::{SecretStore, StorageError};
+use alloy_store::Store;
+use base64::Engine as _;
+
+use crate::accounts::AccountManager;
+use crate::error::{EngineError, map_store};
+use crate::factory::ConnectorFactory;
+use crate::login::LoginManager;
+use crate::projection::{ChangeBus, TimelineRegistry};
+use crate::registry::SubscriptionRegistry;
+use crate::sink::EventSink;
+
+/// Secret under which the store's sealing key is kept in the platform secret store.
+pub const STORE_KEY_SECRET: &str = "alloy.store.key.v1";
+
+const STORE_KEY_LEN: usize = 32;
 
 /// Files and directories `SendAttachment` may read. Paths are canonical.
 #[derive(Default)]
@@ -15,53 +29,86 @@ struct AttachmentAllowlist {
     roots: Vec<PathBuf>,
 }
 
-/// An OIDC login waiting for the app to deliver the authorization redirect.
+/// Everything a command handler or account actor needs.
 ///
-/// The client holds the PKCE verifier and CSRF state, so it must be the one that finishes the
-/// login. Its store directory is temporary until the login succeeds.
-pub struct PendingOidcLogin {
-    pub client: AlloyClient,
-    pub store_id: String,
-    pub started_at: std::time::Instant,
-    /// Loopback listener waiting for the authorization redirect; aborted when the attempt ends.
-    pub callback: Option<tokio::task::JoinHandle<()>>,
-}
-
-/// Shared engine context passed to command handlers.
+/// Cloning shares the store, the subscriptions and the running accounts; the sink and bus are
+/// themselves cloneable handles.
 #[derive(Clone)]
 pub struct EngineContext {
-    pub client: Arc<RwLock<Option<Arc<AlloyClient>>>>,
     pub sink: EventSink,
     pub data_dir: PathBuf,
     pub secrets: Arc<dyn SecretStore>,
     pub subscriptions: SubscriptionRegistry,
-    /// Start sync, recovery and verification watchers after login (disable for headless use).
+    /// Start account actors on [`crate::AppEngine::start`] (disable for headless use).
     pub background: bool,
-    /// The one OIDC login between `StartOidcLogin` and `CompleteOidcLogin`/`CancelOidcLogin`.
-    pub pending_oidc: Arc<tokio::sync::Mutex<Option<PendingOidcLogin>>>,
-    /// Persists refreshed OAuth tokens for the active session; aborted on logout.
-    pub session_watch: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    /// The local database: accounts, chats, messages, media rows, outbox and change feed.
+    pub store: Store,
+    /// One actor and one outbox worker per connected account.
+    pub accounts: AccountManager,
+    /// Login attempts waiting for the user's next answer.
+    pub logins: LoginManager,
+    /// Builds the connector for a network this build can reach.
+    pub factory: Arc<dyn ConnectorFactory>,
+    /// Store-change fan-out feeding the UI projections.
+    pub bus: ChangeBus,
+    /// Open timeline windows, one per subscribed chat.
+    pub timelines: TimelineRegistry,
     attachments: Arc<Mutex<AttachmentAllowlist>>,
     unrestricted_attachments: bool,
 }
 
 impl EngineContext {
-    pub fn new(data_dir: PathBuf, secrets: Arc<dyn SecretStore>) -> Self {
+    /// Opens the on-device database under `data_dir`, creating it on first start.
+    ///
+    /// The sealing key for connector sessions is generated once and kept in the platform secret
+    /// store, so a restart can decrypt the sessions the previous run stored.
+    pub async fn open(
+        data_dir: PathBuf,
+        secrets: Arc<dyn SecretStore>,
+        factory: Arc<dyn ConnectorFactory>,
+    ) -> Result<Self, EngineError> {
+        std::fs::create_dir_all(&data_dir).map_err(|err| {
+            EngineError::internal_error(format!(
+                "cannot create the data directory {}: {err}",
+                data_dir.display()
+            ))
+        })?;
+        let key = store_key(secrets.as_ref()).await?;
+        let store = Store::open(data_dir.join("alloy.db"), key).map_err(map_store)?;
+        let context = Self::with_store(store, data_dir, secrets, factory);
+        // No connector is running yet: a directory with no stored account belongs to a login
+        // attempt that died before finishing, and nothing will ever use it.
+        context.remove_orphan_account_dirs().await;
+        Ok(context)
+    }
+
+    /// Builds a context around an already open store; the entry point for tests that keep an
+    /// in-memory database or reopen the same file.
+    pub fn with_store(
+        store: Store,
+        data_dir: PathBuf,
+        secrets: Arc<dyn SecretStore>,
+        factory: Arc<dyn ConnectorFactory>,
+    ) -> Self {
+        let sink = EventSink::new();
         Self {
-            client: Arc::new(RwLock::new(None)),
-            sink: EventSink::new(),
+            sink,
             data_dir,
             secrets,
             subscriptions: SubscriptionRegistry::new(),
             background: true,
-            pending_oidc: Arc::new(tokio::sync::Mutex::new(None)),
-            session_watch: Arc::new(Mutex::new(None)),
+            store,
+            accounts: AccountManager::new(),
+            logins: LoginManager::new(),
+            factory,
+            bus: ChangeBus::new(),
+            timelines: TimelineRegistry::new(),
             attachments: Arc::new(Mutex::new(AttachmentAllowlist::default())),
             unrestricted_attachments: false,
         }
     }
 
-    /// Do not start background sync/watchers after login.
+    /// Do not start account actors on [`crate::AppEngine::start`].
     pub fn without_background(mut self) -> Self {
         self.background = false;
         self
@@ -100,6 +147,51 @@ impl EngineContext {
         list.files.contains(&canonical) || list.roots.iter().any(|root| canonical.starts_with(root))
     }
 
+    /// Directory holding the downloaded-media cache.
+    pub fn media_dir(&self) -> PathBuf {
+        self.data_dir.join("media")
+    }
+
+    /// Directory holding one sub-directory per connected account.
+    pub fn accounts_dir(&self) -> PathBuf {
+        self.data_dir.join("accounts")
+    }
+
+    /// Deletes account directories that no stored account owns.
+    async fn remove_orphan_account_dirs(&self) {
+        let Ok(accounts) = self.store.list_accounts().await else {
+            return;
+        };
+        let known: HashSet<String> = accounts
+            .into_iter()
+            .map(|record| record.account_id)
+            .collect();
+        let Ok(entries) = std::fs::read_dir(self.accounts_dir()) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            if known.contains(name) {
+                continue;
+            }
+            match std::fs::remove_dir_all(&path) {
+                Ok(()) => {}
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                Err(err) => tracing::warn!(
+                    path = %path.display(),
+                    error = %err,
+                    "cannot remove an orphaned account directory"
+                ),
+            }
+        }
+    }
+
     fn allowlist(&self) -> MutexGuard<'_, AttachmentAllowlist> {
         self.attachments
             .lock()
@@ -107,22 +199,41 @@ impl EngineContext {
     }
 }
 
-impl EngineContext {
-    /// The active client, or an `auth_failed` error when nobody is logged in.
-    pub async fn active_client(&self) -> Result<Arc<AlloyClient>, alloy_protocol::EngineError> {
-        self.client
-            .read()
-            .await
-            .clone()
-            .ok_or_else(|| alloy_protocol::EngineError::auth_failed("not logged in"))
-    }
-
-    /// Replace the active client, cancelling all subscriptions of the previous one.
-    pub async fn set_client(&self, client: Option<AlloyClient>) {
-        self.subscriptions.clear().await;
-        let old = std::mem::replace(&mut *self.client.write().await, client.map(Arc::new));
-        if let Some(old) = old {
-            old.stop_sync().await;
+/// Reads the store key, generating and persisting it on first start.
+async fn store_key(secrets: &dyn SecretStore) -> Result<[u8; STORE_KEY_LEN], EngineError> {
+    match secrets.get_secret(STORE_KEY_SECRET).await {
+        Ok(encoded) => {
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(encoded.trim())
+                .map_err(|err| {
+                    EngineError::internal_error(format!(
+                        "the stored database key is not valid base64: {err}"
+                    ))
+                })?;
+            let key: [u8; STORE_KEY_LEN] = bytes.as_slice().try_into().map_err(|_| {
+                EngineError::internal_error(format!(
+                    "the stored database key is {} bytes, expected {STORE_KEY_LEN}",
+                    bytes.len()
+                ))
+            })?;
+            Ok(key)
         }
+        Err(StorageError::SecretNotFound(_)) => {
+            let mut key = [0u8; STORE_KEY_LEN];
+            getrandom::fill(&mut key).map_err(|err| {
+                EngineError::internal_error(format!("cannot generate the database key: {err}"))
+            })?;
+            let encoded = base64::engine::general_purpose::STANDARD.encode(key);
+            secrets
+                .set_secret(STORE_KEY_SECRET, &encoded)
+                .await
+                .map_err(|err| {
+                    EngineError::internal_error(format!("cannot store the database key: {err}"))
+                })?;
+            Ok(key)
+        }
+        Err(err) => Err(EngineError::internal_error(format!(
+            "cannot read the database key: {err}"
+        ))),
     }
 }

@@ -1,23 +1,26 @@
-use super::rooms::map_err;
-use crate::context::EngineContext;
-use crate::error::EngineError;
-use crate::router::{CommandGroup, GroupHandler, command_name};
-use alloy_core::AlloyClient;
-use alloy_protocol::{
-    EngineCommand, EngineEvent, EngineResponse, EventId, RoomId, SubscriptionId, TimelineItemDto,
-    VectorDiffDto,
-};
-use std::sync::Arc;
+//! Timeline commands: subscriptions, pagination, sends and message-level mutations.
 
-/// Handler for timeline/messaging operations (`CommandGroup::Timeline`).
-///
-/// Owned by stream: `core-rooms-timeline`.
-#[derive(Default)]
+use alloy_protocol::{AccountId, EngineCommand, EngineResponse, EventId, ForwardFailure, RoomId};
+use alloy_store::{MessageKind as StoreMessageKind, OutboxOp, SendState, StoreError};
+
+use crate::context::EngineContext;
+use crate::error::{EngineError, map_store};
+use crate::projection;
+use crate::router::{CommandGroup, GroupHandler, command_name};
+use crate::support::{self, OutgoingDraft};
+
+/// Handler for timeline commands (`CommandGroup::Timeline`).
 pub struct TimelineHandler;
 
 impl TimelineHandler {
     pub fn new() -> Self {
         Self
+    }
+}
+
+impl Default for TimelineHandler {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -35,352 +38,383 @@ impl GroupHandler for TimelineHandler {
         let name = command_name(&cmd);
         match cmd {
             EngineCommand::SubscribeTimeline { room_id } => {
-                let client = ctx.active_client().await?;
-                // Fail fast on unknown rooms instead of inside the spawned task.
-                client.cached_timeline(&room_id).await.map_err(map_err)?;
-                let subscription_id = spawn_subscription(ctx, client, room_id, None).await;
-                Ok(EngineResponse::TimelineSubscribed { subscription_id })
-            }
-            EngineCommand::SubscribeThread {
-                room_id,
-                thread_root_event_id,
-            } => {
-                let client = ctx.active_client().await?;
-                // Fail fast on unknown rooms or roots instead of inside the spawned task.
-                client
-                    .cached_thread_timeline(&room_id, &thread_root_event_id)
-                    .await
-                    .map_err(map_err)?;
-                let subscription_id =
-                    spawn_subscription(ctx, client, room_id, Some(thread_root_event_id)).await;
+                let subscription_id = projection::subscribe_timeline(ctx, &room_id).await?;
                 Ok(EngineResponse::TimelineSubscribed { subscription_id })
             }
             EngineCommand::CloseTimeline { room_id } => {
-                let client = ctx.active_client().await?;
-                // Abort first: a live stream holds the timeline's drop handle, so dropping the
-                // cached entry while a subscription still streams would free nothing.
-                let aborted = ctx.subscriptions.cancel_room(&room_id).await;
-                let dropped = client
-                    .drop_cached_timelines(&room_id)
-                    .await
-                    .map_err(map_err)?;
-                Ok(EngineResponse::TimelineClosed {
-                    room_id,
-                    closed: aborted + dropped > 0,
-                })
+                if let Some(window) = ctx.timelines.remove(&room_id.0).await {
+                    ctx.subscriptions.cancel(&window.subscription_id).await;
+                }
+                Ok(EngineResponse::TimelineClosed)
             }
             EngineCommand::PaginateBackwards { room_id, count } => {
-                let client = ctx.active_client().await?;
-                let count = u16::try_from(count).unwrap_or(u16::MAX).max(1);
-                let reached_start = client
-                    .paginate_backwards(&room_id, count)
-                    .await
-                    .map_err(map_err)?;
-                Ok(EngineResponse::Paginated {
-                    room_id,
-                    reached_start,
-                })
+                let reached_start = projection::paginate_backwards(ctx, &room_id, count).await?;
+                Ok(EngineResponse::Paginated { reached_start })
             }
             EngineCommand::SendText {
                 room_id,
                 body,
-                markdown,
                 reply_to,
-                mentions,
-                mention_room,
-                txn_id: _,
-                in_thread_root,
-            } => {
-                if body.trim().is_empty() {
-                    return Err(EngineError::invalid_argument("empty message"));
-                }
-                let client = ctx.active_client().await?;
-                let txn_id = client
-                    .send_text(
-                        &room_id,
-                        &body,
-                        markdown.unwrap_or(false),
-                        reply_to.as_ref(),
-                        mentions.as_deref(),
-                        mention_room,
-                        in_thread_root.as_ref(),
-                    )
-                    .await
-                    .map_err(map_err)?;
-                Ok(EngineResponse::MessageSent {
-                    room_id,
-                    txn_id,
-                    event_id: None,
-                })
-            }
+                txn_id,
+            } => send_text(ctx, &room_id, body, reply_to, txn_id).await,
             EngineCommand::EditMessage {
                 room_id,
                 event_id,
                 body,
-                markdown,
-            } => {
-                let client = ctx.active_client().await?;
-                client
-                    .edit_message(&room_id, &event_id, &body, markdown.unwrap_or(false))
-                    .await
-                    .map_err(map_err)?;
-                Ok(EngineResponse::MessageEdited { room_id, event_id })
-            }
-            EngineCommand::RedactEvent {
+            } => edit_message(ctx, &room_id, &event_id, body).await,
+            EngineCommand::DeleteMessage {
                 room_id,
                 event_id,
-                reason,
-            } => {
-                let client = ctx.active_client().await?;
-                client
-                    .redact_event(&room_id, &event_id, reason.as_deref())
-                    .await
-                    .map_err(map_err)?;
-                Ok(EngineResponse::EventRedacted { room_id, event_id })
-            }
+                for_everyone,
+            } => delete_message(ctx, &room_id, &event_id, for_everyone).await,
             EngineCommand::ToggleReaction {
                 room_id,
                 event_id,
                 key,
-            } => {
-                let client = ctx.active_client().await?;
-                let added = client
-                    .toggle_reaction(&room_id, &event_id, &key)
-                    .await
-                    .map_err(map_err)?;
-                Ok(EngineResponse::ReactionToggled {
-                    room_id,
-                    event_id,
-                    key,
-                    added,
-                })
-            }
-            EngineCommand::SetEventPinned {
-                room_id,
-                event_id,
-                pinned,
-            } => {
-                let client = ctx.active_client().await?;
-                client
-                    .set_event_pinned(&room_id, &event_id, pinned)
-                    .await
-                    .map_err(map_err)?;
-                if let Ok(event_ids) = client.pinned_event_ids(&room_id).await {
-                    ctx.sink
-                        .emit(alloy_protocol::EngineEvent::PinnedEventsChanged {
-                            room_id: room_id.clone(),
-                            event_ids,
-                        });
-                }
-                Ok(EngineResponse::EventPinned {
-                    room_id,
-                    event_id,
-                    pinned,
-                })
-            }
-            EngineCommand::GetPinnedEvents { room_id } => {
-                let client = ctx.active_client().await?;
-                let items = client.get_pinned_events(&room_id).await.map_err(map_err)?;
-                Ok(EngineResponse::PinnedEvents { room_id, items })
-            }
+            } => toggle_reaction(ctx, &room_id, &event_id, key).await,
             EngineCommand::ForwardEvents {
                 room_id,
                 event_ids,
                 targets,
-            } => {
-                let client = ctx.active_client().await?;
-                let (forwarded, failed) = client
-                    .forward_events(&room_id, &event_ids, &targets)
-                    .await
-                    .map_err(map_err)?;
-                Ok(EngineResponse::EventsForwarded { forwarded, failed })
-            }
+            } => forward_events(ctx, &room_id, event_ids, targets).await,
             EngineCommand::RetrySend { room_id, txn_id } => {
-                let client = ctx.active_client().await?;
-                client
-                    .retry_send(&room_id, &txn_id)
-                    .await
-                    .map_err(map_err)?;
-                Ok(EngineResponse::SendRetried { room_id, txn_id })
+                retry_send(ctx, &room_id, &txn_id).await
             }
             EngineCommand::CancelSend { room_id, txn_id } => {
-                let client = ctx.active_client().await?;
-                client
-                    .cancel_send(&room_id, &txn_id)
-                    .await
-                    .map_err(map_err)?;
-                Ok(EngineResponse::SendCancelled { room_id, txn_id })
+                cancel_send(ctx, &room_id, &txn_id).await
             }
             EngineCommand::MarkRead { room_id, event_id } => {
-                let client = ctx.active_client().await?;
-                client
-                    .mark_read(&room_id, &event_id)
-                    .await
-                    .map_err(map_err)?;
-                Ok(EngineResponse::ReadMarked { room_id })
+                mark_read(ctx, &room_id, &event_id).await
             }
-            EngineCommand::SetTyping { room_id, typing } => {
-                let client = ctx.active_client().await?;
-                client.set_typing(&room_id, typing).await.map_err(map_err)?;
-                Ok(EngineResponse::TypingStatusSet { room_id })
-            }
-            EngineCommand::SendPoll {
-                room_id,
-                question,
-                answers,
-                disclosed,
-                max_selections,
-            } => {
-                if question.trim().is_empty() {
-                    return Err(EngineError::invalid_argument("empty poll question"));
-                }
-                if !(2..=20).contains(&answers.len()) {
-                    return Err(EngineError::invalid_argument(
-                        "a poll needs between 2 and 20 answers",
-                    ));
-                }
-                if answers.iter().any(|a| a.trim().is_empty()) {
-                    return Err(EngineError::invalid_argument("empty poll answer"));
-                }
-                if max_selections == 0 || (max_selections as usize) > answers.len() {
-                    return Err(EngineError::invalid_argument(
-                        "max selections must be between 1 and the number of answers",
-                    ));
-                }
-                let client = ctx.active_client().await?;
-                let event_id = client
-                    .send_poll(&room_id, &question, &answers, disclosed, max_selections)
-                    .await
-                    .map_err(map_err)?;
-                Ok(EngineResponse::MessageSent {
-                    room_id,
-                    txn_id: format!("poll-{}", event_id.0),
-                    event_id: Some(event_id),
-                })
-            }
-            EngineCommand::RespondToPoll {
-                room_id,
-                poll_event_id,
-                answer_ids,
-            } => {
-                let client = ctx.active_client().await?;
-                client
-                    .respond_to_poll(&room_id, &poll_event_id, &answer_ids)
-                    .await
-                    .map_err(map_err)?;
-                Ok(EngineResponse::Unit)
-            }
-            EngineCommand::EndPoll {
-                room_id,
-                poll_event_id,
-            } => {
-                let client = ctx.active_client().await?;
-                client
-                    .end_poll(&room_id, &poll_event_id)
-                    .await
-                    .map_err(map_err)?;
-                Ok(EngineResponse::Unit)
-            }
-            EngineCommand::SendLocation {
-                room_id,
-                latitude,
-                longitude,
-                accuracy_m,
-                description,
-            } => {
-                let client = ctx.active_client().await?;
-                client
-                    .send_location(&room_id, latitude, longitude, accuracy_m, description)
-                    .await
-                    .map_err(map_err)?;
-                Ok(EngineResponse::LocationSent { room_id })
-            }
-            EngineCommand::StartLiveLocation {
-                room_id,
-                duration_ms,
-            } => {
-                let client = ctx.active_client().await?;
-                client
-                    .start_live_location(&room_id, duration_ms)
-                    .await
-                    .map_err(map_err)?;
-                Ok(EngineResponse::LiveLocationStarted { room_id })
-            }
-            EngineCommand::SendLocationBeacon { room_id, geo_uri } => {
-                let client = ctx.active_client().await?;
-                client
-                    .send_location_beacon(&room_id, &geo_uri)
-                    .await
-                    .map_err(map_err)?;
-                Ok(EngineResponse::LocationBeaconSent { room_id })
-            }
-            EngineCommand::StopLiveLocation { room_id } => {
-                let client = ctx.active_client().await?;
-                client.stop_live_location(&room_id).await.map_err(map_err)?;
-                Ok(EngineResponse::LiveLocationStopped { room_id })
-            }
-            EngineCommand::SearchAllMessages {
-                query,
-                next_batch,
-                limit,
-            } => {
-                let client = ctx.active_client().await?;
-                let (hits, next_batch) = client
-                    .search_all_messages(&query, limit, next_batch.as_deref())
-                    .await
-                    .map_err(map_err)?;
-                Ok(EngineResponse::AllMessagesFound { hits, next_batch })
-            }
+            EngineCommand::SetTyping { room_id, typing } => set_typing(ctx, &room_id, typing).await,
             _ => Err(EngineError::invalid_argument(format!(
-                "Command '{}' does not belong to Timeline group",
+                "Command '{}' does not belong to the Timeline group",
                 name
             ))),
         }
     }
 }
 
-/// Spawn a task that streams a room timeline, or one thread of it, as `TimelineDiff` events and
-/// register it for cancellation. Thread diffs carry their own subscription id, so the UI keeps
-/// them apart from the room timeline.
-async fn spawn_subscription(
+async fn send_text(
     ctx: &EngineContext,
-    client: Arc<AlloyClient>,
-    room_id: RoomId,
-    thread_root: Option<EventId>,
-) -> SubscriptionId {
-    let subscription_id = SubscriptionId(uuid::Uuid::new_v4().to_string());
-    let sink = ctx.sink.clone();
-    let sid = subscription_id.clone();
-    let rid = room_id.clone();
-    let task = tokio::spawn(async move {
-        let emit_sink = sink.clone();
-        let emit_rid = rid.clone();
-        let on_diffs = move |diffs: Vec<VectorDiffDto<TimelineItemDto>>| {
-            for diff in diffs {
-                emit_sink.emit(EngineEvent::TimelineDiff {
-                    subscription_id: sid.clone(),
-                    room_id: emit_rid.clone(),
-                    diff: Box::new(diff),
-                });
-            }
-        };
-        let res = match &thread_root {
-            Some(root) => client.run_thread_timeline(&rid, root, on_diffs).await,
-            None => client.run_timeline(&rid, on_diffs).await,
-        };
-        if let Err(e) = res {
-            sink.emit(EngineEvent::ToastNotice {
-                message: format!("Timeline stopped: {e}"),
-                level: "error".into(),
+    room_id: &RoomId,
+    body: String,
+    reply_to: Option<EventId>,
+    txn_id: Option<String>,
+) -> Result<EngineResponse, EngineError> {
+    let (chat, account, runtime) = support::chat_and_runtime(ctx, room_id).await?;
+    if body.trim().is_empty() {
+        return Err(EngineError::invalid_argument("the message body is empty"));
+    }
+    if reply_to.is_some() && !runtime.capabilities.replies {
+        return Err(EngineError::not_supported("replies"));
+    }
+    let txn_id = support::queue_message(
+        ctx,
+        &chat,
+        &account,
+        OutgoingDraft {
+            kind: StoreMessageKind::Text,
+            body: Some(body.clone()),
+            send_body: Some(body),
+            reply_to,
+            txn_id,
+            attachment: None,
+        },
+    )
+    .await?;
+    Ok(EngineResponse::MessageQueued { txn_id })
+}
+
+async fn edit_message(
+    ctx: &EngineContext,
+    room_id: &RoomId,
+    event_id: &EventId,
+    body: String,
+) -> Result<EngineResponse, EngineError> {
+    let (chat, _account, runtime) = support::chat_and_runtime(ctx, room_id).await?;
+    if !runtime.capabilities.edit {
+        return Err(EngineError::not_supported("edit"));
+    }
+    if body.trim().is_empty() {
+        return Err(EngineError::invalid_argument("the edited message is empty"));
+    }
+    let message = support::message_in_chat(ctx, &chat.chat_id, event_id).await?;
+    if !message.is_own {
+        return Err(EngineError::forbidden(
+            "only your own messages can be edited",
+        ));
+    }
+    support::remote_id(&message)?;
+    if let Some(window) = runtime.capabilities.edit_window_secs {
+        let age = support::now_ms().saturating_sub(message.sent_at);
+        if age > i64::from(window).saturating_mul(1000) {
+            return Err(EngineError::not_supported("edit_window"));
+        }
+    }
+    support::enqueue_op(
+        ctx,
+        &chat.account_id,
+        &chat.chat_id,
+        OutboxOp::Edit,
+        serde_json::json!({ "event_id": message.message_id, "body": body }),
+    )
+    .await?;
+    Ok(EngineResponse::MessageEdited)
+}
+
+async fn delete_message(
+    ctx: &EngineContext,
+    room_id: &RoomId,
+    event_id: &EventId,
+    for_everyone: bool,
+) -> Result<EngineResponse, EngineError> {
+    let (chat, _account, runtime) = support::chat_and_runtime(ctx, room_id).await?;
+    if for_everyone && !runtime.capabilities.delete_for_everyone {
+        return Err(EngineError::not_supported("delete_for_everyone"));
+    }
+    let message = support::message_in_chat(ctx, &chat.chat_id, event_id).await?;
+    support::remote_id(&message)?;
+    ctx.store
+        .mark_deleted(&message.message_id, support::now_ms())
+        .await
+        .map_err(map_store)?;
+    support::enqueue_op(
+        ctx,
+        &chat.account_id,
+        &chat.chat_id,
+        OutboxOp::Delete,
+        serde_json::json!({ "event_id": message.message_id, "for_everyone": for_everyone }),
+    )
+    .await?;
+    ctx.bus.timeline(&chat.chat_id);
+    Ok(EngineResponse::MessageDeleted)
+}
+
+async fn toggle_reaction(
+    ctx: &EngineContext,
+    room_id: &RoomId,
+    event_id: &EventId,
+    key: String,
+) -> Result<EngineResponse, EngineError> {
+    let (chat, _account, runtime) = support::chat_and_runtime(ctx, room_id).await?;
+    if !runtime.capabilities.reactions {
+        return Err(EngineError::not_supported("reactions"));
+    }
+    let key = key.trim().to_string();
+    if key.is_empty() {
+        return Err(EngineError::invalid_argument("the reaction is empty"));
+    }
+    let message = support::message_in_chat(ctx, &chat.chat_id, event_id).await?;
+    let own = runtime
+        .remote_user_id
+        .clone()
+        .ok_or_else(|| EngineError::unavailable("the account has no signed-in user yet"))?;
+
+    let stored = ctx
+        .store
+        .list_reactions(std::slice::from_ref(&message.message_id))
+        .await
+        .map_err(map_store)?;
+    let active = stored
+        .iter()
+        .any(|reaction| reaction.emoji == key && reaction.sender_remote_id == own);
+
+    if active {
+        ctx.store
+            .remove_reaction(&message.message_id, &own, &key)
+            .await
+            .map_err(map_store)?;
+    } else {
+        ctx.store
+            .set_reaction(&message.message_id, &own, &key, support::now_ms())
+            .await
+            .map_err(map_store)?;
+    }
+    ctx.bus.timeline(&chat.chat_id);
+
+    support::enqueue_op(
+        ctx,
+        &chat.account_id,
+        &chat.chat_id,
+        if active {
+            OutboxOp::Unreact
+        } else {
+            OutboxOp::React
+        },
+        serde_json::json!({ "event_id": message.message_id, "key": key }),
+    )
+    .await?;
+    Ok(EngineResponse::ReactionToggled)
+}
+
+async fn forward_events(
+    ctx: &EngineContext,
+    room_id: &RoomId,
+    event_ids: Vec<EventId>,
+    targets: Vec<RoomId>,
+) -> Result<EngineResponse, EngineError> {
+    let source = support::chat_record(ctx, room_id).await?;
+    let mut bodies = Vec::with_capacity(event_ids.len());
+    for event_id in &event_ids {
+        let message = support::message_in_chat(ctx, &source.chat_id, event_id).await?;
+        let body = message
+            .body
+            .clone()
+            .ok_or_else(|| EngineError::invalid_argument("a forwarded message has no text body"))?;
+        bodies.push(body);
+    }
+
+    let mut failures = Vec::new();
+    for target in targets {
+        if let Err(err) = forward_to(ctx, &bodies, &target).await {
+            failures.push(ForwardFailure {
+                room_id: target,
+                error: err.message,
             });
         }
-    });
-    ctx.subscriptions
-        .register_for_room(
-            subscription_id.clone(),
-            room_id.clone(),
-            task.abort_handle(),
-        )
-        .await;
-    subscription_id
+    }
+    Ok(EngineResponse::EventsForwarded { failures })
+}
+
+async fn forward_to(
+    ctx: &EngineContext,
+    bodies: &[String],
+    target: &RoomId,
+) -> Result<(), EngineError> {
+    let chat = support::chat_record(ctx, target).await?;
+    let account = support::account_record(ctx, &AccountId(chat.account_id.clone())).await?;
+    support::runtime_for(ctx, &chat.account_id).await?;
+    for body in bodies {
+        support::queue_message(ctx, &chat, &account, OutgoingDraft::text(body.clone())).await?;
+    }
+    Ok(())
+}
+
+async fn retry_send(
+    ctx: &EngineContext,
+    room_id: &RoomId,
+    txn_id: &str,
+) -> Result<EngineResponse, EngineError> {
+    let chat = support::chat_record(ctx, room_id).await?;
+    let message = ctx
+        .store
+        .find_message_by_txn(txn_id)
+        .await
+        .map_err(map_store)?
+        .ok_or_else(|| EngineError::not_found(format!("transaction '{txn_id}'")))?;
+    if message.chat_id != chat.chat_id {
+        return Err(EngineError::not_found(format!(
+            "transaction '{txn_id}' in this chat"
+        )));
+    }
+
+    match message.send_state {
+        Some(SendState::Failed) => {
+            ctx.store
+                .set_send_state(&message.message_id, SendState::Queued, None, None)
+                .await
+                .map_err(map_store)?;
+            match ctx
+                .store
+                .fail_outbox(txn_id, "retry requested", support::now_ms())
+                .await
+            {
+                Ok(()) | Err(StoreError::NotFound(_)) => {}
+                Err(err) => return Err(map_store(err)),
+            }
+            if let Some(runtime) = ctx.accounts.get(&chat.account_id).await {
+                runtime.notify_outbox();
+            }
+            ctx.bus.timeline(&chat.chat_id);
+            Ok(EngineResponse::SendRetried)
+        }
+        Some(SendState::Sent) | Some(SendState::Delivered) | Some(SendState::Read) => Err(
+            EngineError::invalid_argument("the message was already sent"),
+        ),
+        _ => Ok(EngineResponse::SendRetried),
+    }
+}
+
+async fn cancel_send(
+    ctx: &EngineContext,
+    room_id: &RoomId,
+    txn_id: &str,
+) -> Result<EngineResponse, EngineError> {
+    let chat = support::chat_record(ctx, room_id).await?;
+    let message = ctx
+        .store
+        .find_message_by_txn(txn_id)
+        .await
+        .map_err(map_store)?
+        .ok_or_else(|| EngineError::not_found(format!("transaction '{txn_id}'")))?;
+    if message.chat_id != chat.chat_id {
+        return Err(EngineError::not_found(format!(
+            "transaction '{txn_id}' in this chat"
+        )));
+    }
+    if matches!(
+        message.send_state,
+        Some(SendState::Sent) | Some(SendState::Delivered) | Some(SendState::Read)
+    ) {
+        return Err(EngineError::invalid_argument(
+            "the message was already sent",
+        ));
+    }
+
+    match ctx.store.delete_outbox(txn_id).await {
+        Ok(()) | Err(StoreError::NotFound(_)) => {}
+        Err(err) => return Err(map_store(err)),
+    }
+    ctx.store
+        .delete_local_message(&message.message_id)
+        .await
+        .map_err(map_store)?;
+    ctx.bus.timeline(&chat.chat_id);
+    ctx.bus.chats();
+    Ok(EngineResponse::SendCancelled)
+}
+
+async fn mark_read(
+    ctx: &EngineContext,
+    room_id: &RoomId,
+    event_id: &EventId,
+) -> Result<EngineResponse, EngineError> {
+    let (chat, _account, _runtime) = support::chat_and_runtime(ctx, room_id).await?;
+    let message = support::message_in_chat(ctx, &chat.chat_id, event_id).await?;
+    support::remote_id(&message)?;
+    ctx.store
+        .set_unread(&chat.chat_id, 0, 0)
+        .await
+        .map_err(map_store)?;
+    support::enqueue_op(
+        ctx,
+        &chat.account_id,
+        &chat.chat_id,
+        OutboxOp::Read,
+        serde_json::json!({ "event_id": message.message_id }),
+    )
+    .await?;
+    ctx.bus.chats();
+    Ok(EngineResponse::ReadMarked)
+}
+
+async fn set_typing(
+    ctx: &EngineContext,
+    room_id: &RoomId,
+    typing: bool,
+) -> Result<EngineResponse, EngineError> {
+    let (chat, _account, runtime) = support::chat_and_runtime(ctx, room_id).await?;
+    if !runtime.capabilities.typing {
+        return Err(EngineError::not_supported("typing"));
+    }
+    support::enqueue_op(
+        ctx,
+        &chat.account_id,
+        &chat.chat_id,
+        OutboxOp::Typing,
+        serde_json::json!({ "typing": typing }),
+    )
+    .await?;
+    Ok(EngineResponse::Typing)
 }

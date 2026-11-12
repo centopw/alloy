@@ -26,6 +26,12 @@ android {
         versionCode = appVersionCode
         versionName = appVersionName
     }
+    // The Messenger sidecar ships as jniLibs/arm64-v8a/liballoymeta.so and the app executes it from
+    // the native library directory, so the libraries must be extracted at install time rather than
+    // mapped straight out of the APK.
+    packaging {
+        jniLibs.useLegacyPackaging = true
+    }
     buildTypes {
         getByName("debug") {
             manifestPlaceholders["usesCleartextTraffic"] = "true"
@@ -76,7 +82,6 @@ dependencies {
     implementation("androidx.activity:activity-ktx:1.10.1")
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.lifecycle:lifecycle-process:2.10.0")
-    implementation("org.unifiedpush.android:connector:3.3.5")
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.4")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.0")

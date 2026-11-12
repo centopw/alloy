@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Keeps the GitHub Actions cache under the repository's 10 GB budget.
 #
-# Why this exists: the repository runs a 900-crate debug matrix (three OSes + Android) plus four
+# Why this exists: the repository runs a large debug matrix (three OSes + Android) plus four
 # release-profile caches from the nightly job. Every dependency change writes a *new* key for each
 # of those, and GitHub only evicts entries when the 10 GB budget is exhausted - by then it may
-# evict the release caches, and the next tag build recompiles Tauri, matrix-sdk and E2E for ~25
+# evict the release caches, and the next tag build recompiles Tauri and the Go sidecar for ~25
 # minutes from scratch (measured: macOS x64 `Finished release profile in 25m 01s`).
 #
 # Rules, in order of confidence:

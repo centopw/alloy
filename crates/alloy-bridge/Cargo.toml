@@ -10,6 +10,10 @@ repository.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Enables `--fake`: the deterministic connector factory, for driving the UI without accounts.
+fake = ["alloy-engine/testing"]
+
 [dependencies]
 alloy-engine = { path = "../alloy-engine" }
 alloy-protocol = { path = "../alloy-protocol" }

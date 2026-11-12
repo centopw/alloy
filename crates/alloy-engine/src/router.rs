@@ -1,18 +1,22 @@
-use crate::context::EngineContext;
-use crate::error::EngineError;
-use crate::sink::EventSink;
-use alloy_protocol::{EngineCommand, EngineResponse};
+//! Command routing: one `GroupHandler` per functional area, dispatched by [`CommandGroup`].
+
 use std::collections::HashMap;
+
+use alloy_protocol::{EngineCommand, EngineResponse};
+use alloy_store::AccountState as StoreAccountState;
+
+use crate::accounts::start_stored_account;
+use crate::context::EngineContext;
+use crate::error::{EngineError, map_store};
+use crate::sink::EventSink;
 
 /// Functional command groups corresponding to owning implementation streams.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CommandGroup {
-    Auth,
+    Accounts,
     Rooms,
     Timeline,
-    Crypto,
     Media,
-    Spaces,
     Settings,
 }
 
@@ -20,115 +24,62 @@ impl CommandGroup {
     /// Maps an `EngineCommand` variant to its responsible `CommandGroup`.
     pub fn from_command(cmd: &EngineCommand) -> Self {
         match cmd {
-            EngineCommand::DiscoverHomeserver { .. }
-            | EngineCommand::LoginPassword { .. }
-            | EngineCommand::StartOidcLogin { .. }
-            | EngineCommand::CompleteOidcLogin { .. }
-            | EngineCommand::CancelOidcLogin
-            | EngineCommand::RestoreSession { .. }
-            | EngineCommand::Logout { .. }
-            | EngineCommand::ListAccounts
-            | EngineCommand::GetOwnProfile
-            | EngineCommand::SetDisplayName { .. }
-            | EngineCommand::SetOwnAvatar { .. }
-            | EngineCommand::ListDevices
-            | EngineCommand::GetSessionInfo
-            | EngineCommand::DeleteDevices { .. }
-            | EngineCommand::IgnoreUser { .. }
-            | EngineCommand::UnignoreUser { .. }
-            | EngineCommand::ListIgnoredUsers => CommandGroup::Auth,
+            EngineCommand::ListAccounts
+            | EngineCommand::ListNetworks
+            | EngineCommand::BeginLogin { .. }
+            | EngineCommand::SubmitLogin { .. }
+            | EngineCommand::CancelLogin { .. }
+            | EngineCommand::Logout { .. } => CommandGroup::Accounts,
 
             EngineCommand::SubscribeRoomList { .. }
             | EngineCommand::Unsubscribe { .. }
-            | EngineCommand::JoinRoom { .. }
-            | EngineCommand::LeaveRoom { .. }
-            | EngineCommand::CreateRoom { .. }
             | EngineCommand::GetRoomMembers { .. }
             | EngineCommand::GetRoomDetails { .. }
-            | EngineCommand::SearchPublicRooms { .. }
-            | EngineCommand::SetRoomName { .. }
-            | EngineCommand::SetRoomTopic { .. }
-            | EngineCommand::SetRoomAvatar { .. }
+            | EngineCommand::GetUserProfile { .. }
             | EngineCommand::GetRoomNote { .. }
             | EngineCommand::SetRoomNote { .. }
-            | EngineCommand::MarkRoomRead { .. }
-            | EngineCommand::GetUserProfile { .. }
-            | EngineCommand::StartDirectMessage { .. }
-            | EngineCommand::SearchUsers { .. }
-            | EngineCommand::GetNotificationSettings
-            | EngineCommand::SetDefaultNotificationLevel { .. }
-            | EngineCommand::SetMentionRules { .. }
-            | EngineCommand::GetRoomNotificationLevel { .. }
-            | EngineCommand::SetRoomNotificationLevel { .. }
             | EngineCommand::GetTagCatalog
             | EngineCommand::CreateRoomTag { .. }
             | EngineCommand::RenameRoomTag { .. }
             | EngineCommand::ReorderRoomTags { .. }
             | EngineCommand::SetRoomTag { .. }
             | EngineCommand::DeleteRoomTag { .. }
-            | EngineCommand::SearchRoomMessages { .. }
-            | EngineCommand::SetRoomFavourite { .. }
-            | EngineCommand::RefreshSync
-            | EngineCommand::SetRoomLowPriority { .. }
+            | EngineCommand::MarkRoomRead { .. }
+            | EngineCommand::SetRoomPinned { .. }
+            | EngineCommand::SetRoomArchived { .. }
             | EngineCommand::SetRoomMarkedUnread { .. }
+            | EngineCommand::SetRoomMuted { .. }
+            | EngineCommand::GetRoomMedia { .. }
+            | EngineCommand::SearchRoomMessages { .. }
+            | EngineCommand::SearchAllMessages { .. }
+            | EngineCommand::ClearMediaCache
+            | EngineCommand::RefreshSync
             | EngineCommand::SaveDraft { .. }
             | EngineCommand::GetDraft { .. }
-            | EngineCommand::ListDrafts
-            | EngineCommand::KickUser { .. }
-            | EngineCommand::BanUser { .. }
-            | EngineCommand::UnbanUser { .. }
-            | EngineCommand::SetPowerLevel { .. }
-            | EngineCommand::ReportEvent { .. } => CommandGroup::Rooms,
+            | EngineCommand::ListDrafts => CommandGroup::Rooms,
 
             EngineCommand::SubscribeTimeline { .. }
-            | EngineCommand::SubscribeThread { .. }
+            | EngineCommand::CloseTimeline { .. }
             | EngineCommand::PaginateBackwards { .. }
             | EngineCommand::SendText { .. }
             | EngineCommand::EditMessage { .. }
-            | EngineCommand::RedactEvent { .. }
+            | EngineCommand::DeleteMessage { .. }
             | EngineCommand::ToggleReaction { .. }
-            | EngineCommand::SetEventPinned { .. }
-            | EngineCommand::GetPinnedEvents { .. }
             | EngineCommand::ForwardEvents { .. }
             | EngineCommand::RetrySend { .. }
             | EngineCommand::CancelSend { .. }
             | EngineCommand::MarkRead { .. }
-            | EngineCommand::SetTyping { .. }
-            | EngineCommand::SendPoll { .. }
-            | EngineCommand::RespondToPoll { .. }
-            | EngineCommand::EndPoll { .. }
-            | EngineCommand::SendLocation { .. }
-            | EngineCommand::StartLiveLocation { .. }
-            | EngineCommand::SendLocationBeacon { .. }
-            | EngineCommand::StopLiveLocation { .. }
-            | EngineCommand::SearchAllMessages { .. }
-            | EngineCommand::CloseTimeline { .. } => CommandGroup::Timeline,
+            | EngineCommand::SetTyping { .. } => CommandGroup::Timeline,
 
-            EngineCommand::RequestSelfVerification
-            | EngineCommand::AcceptVerification { .. }
-            | EngineCommand::StartSas { .. }
-            | EngineCommand::ConfirmSas { .. }
-            | EngineCommand::CancelVerification { .. }
-            | EngineCommand::GetRecoveryStatus
-            | EngineCommand::EnableRecovery { .. }
-            | EngineCommand::RecoverWithKey { .. }
-            | EngineCommand::ResetRecovery { .. } => CommandGroup::Crypto,
             EngineCommand::GetMedia { .. }
-            | EngineCommand::GetUrlPreview { .. }
             | EngineCommand::SendAttachment { .. }
-            | EngineCommand::SendVoice { .. }
-            | EngineCommand::GetRoomMedia { .. }
-            | EngineCommand::ClearMediaCache => CommandGroup::Media,
-
-            EngineCommand::GetSpaceParents => CommandGroup::Spaces,
+            | EngineCommand::SendVoice { .. } => CommandGroup::Media,
 
             EngineCommand::ListThemes
             | EngineCommand::GetTheme { .. }
             | EngineCommand::SetActiveTheme { .. }
             | EngineCommand::GetSettings
-            | EngineCommand::SetSetting { .. }
-            | EngineCommand::GetAccountPrefs
-            | EngineCommand::SetAccountPrefs { .. } => CommandGroup::Settings,
+            | EngineCommand::SetSetting { .. } => CommandGroup::Settings,
         }
     }
 }
@@ -137,7 +88,11 @@ impl CommandGroup {
 pub fn command_name(cmd: &EngineCommand) -> String {
     serde_json::to_value(cmd)
         .ok()
-        .and_then(|v| v.get("action").and_then(|a| a.as_str().map(String::from)))
+        .and_then(|value| {
+            value
+                .get("action")
+                .and_then(|action| action.as_str().map(String::from))
+        })
         .unwrap_or_else(|| "unknown".to_string())
 }
 
@@ -208,14 +163,43 @@ pub struct AppEngine {
 impl AppEngine {
     pub fn new(ctx: EngineContext) -> Self {
         let mut router = RouterEngine::new(ctx);
-        router.register_handler(Box::new(crate::handlers::auth::AuthHandler::new()));
+        router.register_handler(Box::new(crate::handlers::accounts::AccountsHandler::new()));
         router.register_handler(Box::new(crate::handlers::rooms::RoomsHandler::new()));
         router.register_handler(Box::new(crate::handlers::timeline::TimelineHandler::new()));
-        router.register_handler(Box::new(crate::handlers::crypto::CryptoHandler::new()));
         router.register_handler(Box::new(crate::handlers::media::MediaHandler::new()));
-        router.register_handler(Box::new(crate::handlers::spaces::SpacesHandler::new()));
         router.register_handler(Box::new(crate::handlers::settings::SettingsHandler::new()));
         Self { router }
+    }
+
+    /// Starts one actor and one outbox worker per stored, active account.
+    ///
+    /// Errors are logged per account: one broken session must not prevent the others from
+    /// syncing, and the account is marked for a fresh login instead.
+    pub async fn start(&self) -> Result<(), EngineError> {
+        let ctx = self.router.context();
+        if !ctx.background {
+            return Ok(());
+        }
+        // No worker is running yet, so recovering rows a previous run claimed cannot steal a live
+        // send: the store-wide reset is only safe before the workers start.
+        if let Err(err) = ctx.store.reset_in_flight_outbox().await {
+            tracing::warn!(error = %err, "cannot recover interrupted outbox rows");
+        }
+        let records = ctx.store.list_accounts().await.map_err(map_store)?;
+        for record in records {
+            if record.state != StoreAccountState::Active {
+                continue;
+            }
+            if let Err(err) = start_stored_account(ctx, record).await {
+                tracing::warn!(error = %err.message, "account could not be started");
+            }
+        }
+        Ok(())
+    }
+
+    /// Stops every account actor; the stored data stays untouched.
+    pub async fn stop(&self) {
+        self.router.context().accounts.stop_all().await;
     }
 
     pub fn router(&self) -> &RouterEngine {

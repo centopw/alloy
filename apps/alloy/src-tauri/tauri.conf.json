@@ -45,7 +45,10 @@
     "macOS": {
       "signingIdentity": "-",
       "infoPlist": "Info.plist"
-    }
+    },
+    "externalBin": [
+      "binaries/alloy-meta"
+    ]
   },
   "plugins": {
     "updater": {

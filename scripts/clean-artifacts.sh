@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Remove regenerable build leftovers (per-agent cargo targets, docker build cache, android build output).
-# Never touches source, docs, the running Synapse container or tests/synapse/synapse_data.
+# Never touches source, docs or the local database under the app data directory.
 #   scripts/clean-artifacts.sh              clean /tmp/alloy-target-* and docker build cache
 #   scripts/clean-artifacts.sh --keep NAME  keep /tmp/alloy-target-NAME (repeatable)
 #   scripts/clean-artifacts.sh --deep       also remove ./target, ui/.svelte-kit, ui/build, android build dirs
@@ -35,7 +35,9 @@ fi
 
 if [ "$deep" = 1 ]; then
   rm -rf "$root/target" "$root/apps/alloy/ui/.svelte-kit" "$root/apps/alloy/ui/build" \
-    "$root/apps/alloy/src-tauri/gen/android/app/build" "$root/apps/alloy/src-tauri/gen/android/.gradle"
+    "$root/apps/alloy/src-tauri/gen/android/app/build" "$root/apps/alloy/src-tauri/gen/android/.gradle" \
+    "$root/apps/alloy/src-tauri/binaries" \
+    "$root/apps/alloy/src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a/liballoymeta.so"
 fi
 
 after=$(df -k / | awk 'NR==2 {print $4}')

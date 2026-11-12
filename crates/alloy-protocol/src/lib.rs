@@ -1,291 +1,308 @@
+//! Engine IPC protocol, version 2.
+//!
+//! Alloy connects personal Telegram and Messenger accounts from the device and keeps every byte in
+//! a local SQLite store, so every id crossing this boundary is local: `AccountId`, `RoomId` and
+//! `EventId` name rows in `alloy-store`, never objects on a network. Remote ids stay opaque strings
+//! inside `UserId` and media references, exactly as the network produced them.
+//!
+//! The shell sends one [`EngineCommand`] and receives one [`EngineResponse`]; live updates arrive as
+//! [`EngineEvent`]s. Login is a state machine the connector drives: the engine relays each
+//! [`LoginStepDto`] to the UI and forwards the user's answer back as a [`LoginInputDto`].
+
+use std::collections::BTreeMap;
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 use specta::{Type, Types};
 use specta_typescript::{Number, Typescript};
 
 // === Core Identifiers ===
 
+/// Local account id: the `accounts.account_id` row of the on-device store (UUID v4 string).
+///
+/// Never produced by a network; the store assigns it when an account is created.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
 pub struct AccountId(pub String);
 
+/// Local chat id: the `chats.chat_id` row of the on-device store.
+///
+/// One chat belongs to one account; the network-side chat id stays inside the engine.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
 pub struct RoomId(pub String);
 
+/// Local message id: the `messages.message_id` row of the on-device store.
+///
+/// Stable across edits and restarts; the network-side message id stays inside the engine.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
 pub struct EventId(pub String);
 
+/// A remote user id, opaque and used verbatim.
+///
+/// Never parsed or concatenated: the network assigns it and only the connector interprets it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
 pub struct UserId(pub String);
 
+/// Id of a live subscription created by `SubscribeRoomList` or `SubscribeTimeline`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
 pub struct SubscriptionId(pub String);
 
+/// Engine-generated id of one in-progress login attempt.
+///
+/// The engine returns it with every `LoginStep` and the UI passes it back with `SubmitLogin` and
+/// `CancelLogin`; it is meaningless once the attempt ended.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+pub struct LoginId(pub String);
+
+// === Networks and Accounts ===
+
+/// A network Alloy can connect a personal account to.
+///
+/// `Fake` exists only for the deterministic test connector.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+#[serde(rename_all = "lowercase")]
+pub enum Network {
+    Telegram,
+    Messenger,
+    Fake,
+}
+
+/// Lifecycle of one locally stored account.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum AccountState {
+    /// Credentials were entered but the connector has not been started yet.
+    Pending,
+    /// The connector holds a valid session and syncs.
+    Active,
+    /// The stored session is dead; only a new login helps.
+    NeedsRelogin,
+    /// The user disabled the account; nothing syncs until it is enabled again.
+    Disabled,
+}
+
+/// What the network behind an account lets Alloy do.
+///
+/// One flag per connector capability: `true` promises the matching command works, `false` promises
+/// it fails with `EngineError::not_supported`. The UI hides an action instead of offering one that
+/// fails.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-pub enum ConnectionStatus {
-    Disconnected,
-    Connecting,
-    Syncing,
-    Connected,
-    Reconnecting {
-        attempt: u32,
-        #[specta(type = Number)]
-        next_retry_millis: u64,
+pub struct CapabilitiesDto {
+    /// The network allows editing sent messages.
+    pub edit: bool,
+    /// How long after sending an edit is still accepted, in seconds. `None` with `edit: true`
+    /// means no window the connector is aware of.
+    #[specta(type = Option<Number>)]
+    pub edit_window_secs: Option<u32>,
+    /// The network allows deleting a message for every participant.
+    pub delete_for_everyone: bool,
+    /// The network supports reactions.
+    pub reactions: bool,
+    /// Maximum number of distinct reactions one user may add per message.
+    pub max_reactions_per_user: Option<u8>,
+    /// The network supports replies to a specific message.
+    pub replies: bool,
+    /// The network exposes message threads.
+    pub threads: bool,
+    /// The connector can send typing indicators.
+    pub typing: bool,
+    /// The network reports read receipts from other participants.
+    pub read_receipts: bool,
+    /// The network reports delivery receipts from other participants.
+    pub delivered_receipts: bool,
+    /// The connector can send and receive voice notes.
+    pub voice: bool,
+    /// The network supports polls.
+    pub polls: bool,
+    /// The network supports shared locations.
+    pub location: bool,
+    /// Largest attachment the network accepts, in bytes. `None` when unknown.
+    #[specta(type = Option<Number>)]
+    pub max_upload_bytes: Option<u64>,
+    /// The network renders formatted text (`TimelineItemContent::TextMessage::formatted_body`).
+    pub formatted_text: bool,
+}
+
+/// One connected account, as listed by `ListAccounts`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct Account {
+    pub id: AccountId,
+    pub network: Network,
+    /// The network's id for the signed-in user; `None` until login finished.
+    pub remote_user_id: Option<UserId>,
+    pub display_name: Option<String>,
+    pub avatar: Option<MediaSource>,
+    pub state: AccountState,
+    pub capabilities: CapabilitiesDto,
+}
+
+// === Login ===
+
+/// One cookie the user has to copy for cookie-based login (Messenger).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct CookieFieldDto {
+    /// Cookie name exactly as the browser shows it, e.g. `"c_user"`.
+    pub name: String,
+    /// Human-readable description for the input label.
+    pub label: String,
+    /// The connector cannot log in without this cookie.
+    pub required: bool,
+}
+
+/// How the network delivered a login code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum CodeChannel {
+    /// Delivered inside the network's own app or by an already logged-in session.
+    App,
+    Sms,
+    Email,
+    Other,
+}
+
+/// Why a login attempt ended. A `Failed` step is terminal for that attempt; the UI restarts with
+/// `BeginLogin`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum LoginFailureDto {
+    /// The submitted value was missing, malformed or rejected (wrong code, wrong password, bad
+    /// cookie). `field` names the input, e.g. `"code"` or `"password"`.
+    InvalidInput {
+        field: Option<String>,
+        message: String,
     },
-    Terminated,
+    /// The step the user was answering is no longer valid (QR code or code expired).
+    Expired,
+    /// This connector does not implement the requested login method.
+    NotSupported,
+    /// The network asked us to slow down before another attempt.
+    RateLimited {
+        #[specta(type = Number)]
+        retry_after_ms: u64,
+    },
+    /// Transport failure while logging in.
+    Network { message: String },
+    /// The network blocked the account itself; the user has to resolve it on the network's own site
+    /// or app, no local retry helps.
+    AccountLocked { message: String },
 }
 
+/// The next thing the login UI must show.
+///
+/// Steps are renderer instructions, not UI state: the UI stores nothing about which step came
+/// before, it renders whatever the engine returns.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-pub enum RoomMembership {
-    Joined,
-    Invited,
-    Left,
-    Banned,
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum LoginStepDto {
+    /// Ask for a phone number in international format.
+    PhoneNumber,
+    /// Ask for the login code the network sent.
+    Code {
+        via: CodeChannel,
+        /// Number of characters the network expects, when it says so.
+        length: Option<u8>,
+    },
+    /// Ask for the account's two-step verification password.
+    Password {
+        /// Network-provided hint, when it has one. Never the password itself.
+        hint: Option<String>,
+    },
+    /// Show a QR code the user scans with the network's mobile app. `payload` is the string to
+    /// encode; `expires_at` is milliseconds since the Unix epoch, after which the UI sends
+    /// `LoginInputDto::QrRefresh`.
+    Qr {
+        payload: String,
+        #[specta(type = Number)]
+        expires_at: i64,
+    },
+    /// Ask the user to copy cookies from a logged-in browser session (Messenger).
+    Cookies {
+        fields: Vec<CookieFieldDto>,
+        /// Page that explains where to find the cookies, when the network has one.
+        help_url: Option<String>,
+    },
+    /// Ask for a username/handle and password.
+    Credentials {
+        /// Label for the username field as the network names it.
+        username_label: String,
+    },
+    /// Login finished; the account is stored and the connector starts.
+    Done { account: Account },
+    /// The attempt failed. Terminal for this attempt.
+    Failed { reason: LoginFailureDto },
 }
 
-/// One member of a room, as listed by `GetRoomMembers`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-pub struct RoomMemberDto {
-    pub user_id: UserId,
-    pub display_name: Option<String>,
-    /// `mxc://` avatar URI, if any; fetch it with `GetMedia`.
-    pub avatar_url: Option<String>,
-    /// Matrix power level (0 = default member, 50 = moderator, 100 = admin).
-    #[specta(type = Number)]
-    pub power_level: i64,
-    pub membership: RoomMembership,
+/// What the user typed for the step the engine last returned.
+///
+/// Secrets travel here only. `Debug` redacts codes, passwords and cookie values so a stray log line
+/// or panic message cannot leak them; cookie names stay visible for diagnostics.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum LoginInputDto {
+    /// Answer to [`LoginStepDto::PhoneNumber`], international format (`+15550100`).
+    PhoneNumber { phone: String },
+    /// Answer to [`LoginStepDto::Code`].
+    Code { code: String },
+    /// Answer to [`LoginStepDto::Password`].
+    Password { password: String },
+    /// Answer to [`LoginStepDto::Cookies`]. Keys are [`CookieFieldDto::name`] values.
+    Cookies { values: BTreeMap<String, String> },
+    /// Answer to [`LoginStepDto::Credentials`].
+    Credentials { username: String, password: String },
+    /// Ask for a fresh [`LoginStepDto::Qr`] payload (the previous one expired, or the user chose QR
+    /// login).
+    QrRefresh,
 }
 
-/// A room and the joined spaces that contain it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-pub struct SpaceParentDto {
-    pub room_id: RoomId,
-    pub spaces: Vec<RoomId>,
+const REDACTED: &str = "<redacted>";
+
+impl fmt::Debug for LoginInputDto {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::PhoneNumber { phone } => {
+                f.debug_struct("PhoneNumber").field("phone", phone).finish()
+            }
+            Self::Code { .. } => f.debug_struct("Code").field("code", &REDACTED).finish(),
+            Self::Password { .. } => f
+                .debug_struct("Password")
+                .field("password", &REDACTED)
+                .finish(),
+            Self::Cookies { values } => {
+                let redacted: BTreeMap<&str, &str> = values
+                    .keys()
+                    .map(|name| (name.as_str(), REDACTED))
+                    .collect();
+                f.debug_struct("Cookies")
+                    .field("values", &redacted)
+                    .finish()
+            }
+            Self::Credentials { username, .. } => f
+                .debug_struct("Credentials")
+                .field("username", username)
+                .field("password", &REDACTED)
+                .finish(),
+            Self::QrRefresh => f.write_str("QrRefresh"),
+        }
+    }
 }
 
-/// Static details about a room for the details drawer.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-pub struct RoomDetails {
-    pub room_id: RoomId,
-    pub name: Option<String>,
-    pub topic: Option<String>,
-    pub canonical_alias: Option<String>,
-    pub avatar_url: Option<String>,
-    pub is_direct: bool,
-    pub encrypted: bool,
-    #[specta(type = Number)]
-    pub joined_members: u64,
-    #[specta(type = Number)]
-    pub invited_members: u64,
-    /// What the active account may change, from the room's power levels.
-    #[serde(default)]
-    pub can_set_name: bool,
-    #[serde(default)]
-    pub can_set_topic: bool,
-    #[serde(default)]
-    pub can_set_avatar: bool,
-    /// Whether the active account can pin messages (power >= `m.room.pinned_events`).
-    #[serde(default)]
-    pub can_pin: bool,
-    /// Whether the active account can redact others' messages (power >= `redact`).
-    #[serde(default)]
-    pub can_redact_others: bool,
-    /// Whether the active account can use `@room` mentions (power >= `notifications.room`).
-    #[serde(default)]
-    pub can_mention_room: bool,
-    /// Event IDs of currently pinned messages (oldest first).
-    #[serde(default)]
-    pub pinned_event_ids: Vec<EventId>,
-    /// Active account's power level in the room.
-    #[serde(default)]
-    #[specta(type = Number)]
-    pub my_power_level: i64,
-    /// Whether the active account can kick users (power >= kick level).
-    #[serde(default)]
-    pub can_kick: bool,
-    /// Whether the active account can ban users (power >= ban level).
-    #[serde(default)]
-    pub can_ban: bool,
-    /// Whether the active account can change power levels (power >= power levels state event level).
-    #[serde(default)]
-    pub can_set_power_levels: bool,
-}
+// === Chats ===
 
-/// How loudly a room (or a kind of room) notifies, as stored in the account's push rules.
+/// Kind of a chat, in network-neutral terms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
-pub enum NotificationLevel {
-    /// Every message notifies.
-    All,
-    /// Only mentions and keywords notify.
-    Mentions,
-    /// Nothing notifies.
-    Mute,
+#[serde(rename_all = "lowercase")]
+pub enum ChatKind {
+    Direct,
+    Group,
+    Channel,
 }
 
-/// Account-wide notification rules (server-side push rules, shared by all devices).
+/// Pointer to one media object in the on-device store.
+///
+/// `media_id` is a local row id. Fetch the bytes with `GetMedia`; the engine downloads them through
+/// the owning account's connector and caches the file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-pub struct NotificationSettingsDto {
-    /// Default for one-to-one rooms (encrypted and not).
-    pub one_to_one: NotificationLevel,
-    /// Default for group rooms (encrypted and not).
-    pub group: NotificationLevel,
-    /// `@room` mentions notify.
-    pub room_mention: bool,
-    /// Mentions of the user's ID or display name notify.
-    pub user_mention: bool,
-    /// Calls and invitations notify.
-    pub invite: bool,
-}
-
-/// The signed-in user's own profile and device.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-pub struct OwnProfileDto {
-    pub user_id: UserId,
-    pub display_name: Option<String>,
-    /// `mxc://` avatar URI, fetch it with `GetMedia`.
-    pub avatar_url: Option<String>,
-    pub device_id: String,
-    pub homeserver: String,
-}
-
-/// One login session (device) of the account.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-pub struct DeviceDto {
-    pub device_id: String,
-    pub display_name: Option<String>,
-    #[specta(type = Option<Number>)]
-    pub last_seen_ts: Option<u64>,
-    pub last_seen_ip: Option<String>,
-    pub is_current: bool,
-    /// Cross-signing verified.
-    pub verified: bool,
-}
-
-/// Cryptographic identity of this session, for comparing out of band.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-pub struct SessionInfoDto {
-    pub device_id: String,
-    /// Unpadded base64 Ed25519 fingerprint key.
-    pub ed25519_key: Option<String>,
-    pub curve25519_key: Option<String>,
-    pub cross_signing_ready: bool,
-    pub backup_enabled: bool,
-    /// This device is cross-signing verified — the same check `DeviceDto::verified` makes. When it
-    /// is true the session is already trusted; when it is false the UI can offer verification.
-    pub verified: bool,
-}
-
-/// Whether a room's messages were searched on the homeserver.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
-pub enum RoomSearchScope {
-    /// The homeserver searched the room's messages.
-    Server,
-    /// The room is end-to-end encrypted, so the homeserver cannot search it and no search was made.
-    Unavailable,
-}
-
-/// One message matched by `SearchRoomMessages`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-pub struct RoomSearchHit {
-    pub event_id: EventId,
-    pub sender: UserId,
-    pub sender_display_name: Option<String>,
-    #[specta(type = Number)]
-    pub timestamp_millis: u64,
-    pub body: String,
-}
-
-/// One message matched across rooms by `SearchAllMessages`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-pub struct GlobalSearchHit {
-    pub room_id: RoomId,
-    pub room_name: Option<String>,
-    pub event_id: EventId,
-    pub sender: UserId,
-    pub sender_display_name: Option<String>,
-    #[specta(type = Number)]
-    pub timestamp_millis: u64,
-    pub body: String,
-}
-
-/// Which kind of shared content `GetRoomMedia` lists.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
-pub enum RoomMediaKind {
-    /// Images and videos.
-    Media,
-    /// Other files and audio.
-    Files,
-    /// Messages containing web links.
-    Links,
-}
-
-/// One shared item in a room: a media or file message, or a message with links.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-pub struct RoomMediaItem {
-    pub event_id: EventId,
-    pub sender: UserId,
-    pub sender_display_name: Option<String>,
-    #[specta(type = Number)]
-    pub timestamp_millis: u64,
-    /// `image`, `video`, `audio`, `file` or `link`.
-    pub kind: String,
-    /// Caption or file name, or the message text for links.
-    pub body: String,
-    /// `mxc://` URI, or a JSON-encoded encrypted source (starts with `{`); `None` for links.
-    pub uri: Option<String>,
-    pub thumbnail_uri: Option<String>,
-    pub mime_type: Option<String>,
-    #[specta(type = Option<Number>)]
-    pub size_bytes: Option<u64>,
-    pub width: Option<u32>,
-    pub height: Option<u32>,
-    /// `http(s)` links found in the message (only for `link` items).
-    #[serde(default)]
-    pub urls: Vec<String>,
-}
-
-/// Profile of one user, optionally as seen in a room.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-pub struct UserProfileDto {
-    pub user_id: UserId,
-    pub display_name: Option<String>,
-    /// `mxc://` avatar URI, fetch it with `GetMedia`.
-    pub avatar_url: Option<String>,
-    /// `join`, `invite`, `leave`, `ban` or `knock` in the given room, if a room was given.
-    pub membership: Option<String>,
-    #[specta(type = Option<Number>)]
-    pub power_level: Option<i64>,
-    /// An existing direct-message room with this user.
-    pub dm_room_id: Option<RoomId>,
-    pub is_me: bool,
-}
-
-/// One user-directory match returned by `SearchUsers`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-pub struct UserSearchResultDto {
-    pub user_id: UserId,
-    pub display_name: Option<String>,
-    /// `mxc://` avatar URI, if any; fetch it with `GetMedia`.
-    pub avatar_url: Option<String>,
-    /// The user joins or is invited to a room the active account is joined to.
-    pub already_in_room: bool,
-}
-
-/// One room listed in a homeserver's public room directory.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-pub struct PublicRoomDto {
-    pub room_id: RoomId,
-    /// Canonical alias such as `#general:example.org`, if the room has one.
-    pub alias: Option<String>,
-    pub name: Option<String>,
-    pub topic: Option<String>,
-    /// `mxc://` avatar URI, if any; fetch it with `GetMedia`.
-    pub avatar_url: Option<String>,
-    #[specta(type = Number)]
-    pub num_joined_members: u64,
-    /// Whether guests may read the room without joining.
-    pub world_readable: bool,
-    pub guest_can_join: bool,
-    /// Whether the active account is already joined to this room.
-    pub joined: bool,
+pub struct MediaSource {
+    pub media_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -296,6 +313,7 @@ pub struct NotificationCount {
     pub notification_count: u64,
 }
 
+/// Last message of a chat, for the room list row.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct TimelineItemPreview {
     pub sender: UserId,
@@ -304,154 +322,131 @@ pub struct TimelineItemPreview {
     pub body: String,
 }
 
+/// One chat in the room list.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct RoomSummary {
     pub id: RoomId,
+    pub account_id: AccountId,
+    pub network: Network,
     pub name: Option<String>,
-    pub avatar_url: Option<String>,
+    pub avatar: Option<MediaSource>,
+    pub kind: ChatKind,
+    /// `kind == ChatKind::Direct`, kept so a row does not have to branch on the enum.
+    pub is_direct: bool,
     pub unread_notifications: NotificationCount,
     pub latest_event: Option<TimelineItemPreview>,
-    pub is_direct: bool,
-    pub is_space: bool,
-    pub encrypted: bool,
-    pub membership: RoomMembership,
-    pub favourite: Option<bool>,
-    pub low_priority: Option<bool>,
-    /// Ids of the room's custom tags (`u.<id>` room tags with the prefix stripped), sorted.
-    pub tags: Vec<String>,
-    /// For a direct room, the other person's Matrix ID; `None` for every other room.
-    pub direct_user_id: Option<UserId>,
-    /// Whether the room is marked as unread by the user (creates bold row with accent dot).
+    pub pinned: bool,
+    pub archived: bool,
+    /// `None` when not muted, `u64::MAX` when muted forever, otherwise the end of the mute in
+    /// milliseconds since the Unix epoch.
+    #[specta(type = Option<Number>)]
+    pub muted_until: Option<u64>,
+    /// Whether the user marked the chat as unread (bold row with accent dot).
     #[serde(default)]
     pub marked_unread: bool,
-    /// First 80 chars of the room's draft message, if any.
+    /// Ids of the chat's custom tags, sorted.
+    pub tags: Vec<String>,
+    /// First 80 chars of the chat's draft message, if any.
     #[serde(default)]
     pub draft: Option<String>,
 }
 
-/// A user-defined room tag, as stored in the account's tag catalogue.
+/// One member of a chat, as listed by `GetRoomMembers`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-pub struct RoomTagDef {
-    pub id: String,
-    pub name: String,
-    pub colour: TagColour,
+pub struct RoomMemberDto {
+    pub user_id: UserId,
+    pub display_name: Option<String>,
+    pub avatar: Option<MediaSource>,
+    /// Network role name such as `"admin"` or `"owner"`; `None` for an ordinary member.
+    pub role: Option<String>,
 }
 
-/// Palette colour of a room tag.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "lowercase")]
-pub enum TagColour {
-    Grey,
-    Red,
-    Orange,
-    Amber,
-    Green,
-    Teal,
-    Blue,
-    Violet,
-    Pink,
-}
-
-/// One answer of a poll. `votes` is zero while results are hidden.
+/// Static details about a chat for the details drawer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-pub struct PollAnswerDto {
-    pub id: String,
-    pub text: String,
-    pub votes: u32,
+pub struct RoomDetails {
+    pub room_id: RoomId,
+    pub account_id: AccountId,
+    pub network: Network,
+    pub name: Option<String>,
+    pub avatar: Option<MediaSource>,
+    pub kind: ChatKind,
+    pub is_direct: bool,
+    #[specta(type = Number)]
+    pub member_count: u64,
+    /// The private note the user keeps about this chat, if any.
+    pub note: Option<String>,
+    /// What the account may do in this chat.
+    pub capabilities: CapabilitiesDto,
 }
 
+/// Profile of one user, as the engine knows it locally.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct UserProfileDto {
+    pub user_id: UserId,
+    pub account_id: AccountId,
+    pub display_name: Option<String>,
+    pub avatar: Option<MediaSource>,
+    pub is_me: bool,
+    /// An existing direct chat with this user, when one is known.
+    pub dm_room_id: Option<RoomId>,
+}
+
+// === Timeline ===
+
+/// The body of one timeline item.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(tag = "kind", content = "data")]
 pub enum TimelineItemContent {
     TextMessage {
         body: String,
+        /// Network markup, when the network supplied it and the account renders formatted text.
         formatted_body: Option<String>,
+        /// The engine already sanitised `formatted_body` and it is safe to render as HTML.
         html_sanitized: bool,
     },
     Media {
-        /// `mxc://` URI for plain media, or a JSON-encoded encrypted source (starts with `{`).
-        uri: String,
+        source: MediaSource,
         mime_type: String,
         #[specta(type = Number)]
         size_bytes: u64,
-        thumbnail_uri: Option<String>,
         /// Caption or file name.
-        #[serde(default)]
         body: String,
-        /// `image`, `video`, `audio`, `file` or `sticker`.
-        #[serde(default)]
+        /// `image`, `video`, `audio`, `voice`, `file` or `sticker`.
         media_kind: String,
-        #[serde(default)]
         width: Option<u32>,
-        #[serde(default)]
         height: Option<u32>,
-        #[serde(default)]
         #[specta(type = Option<Number>)]
         duration_ms: Option<u64>,
-        #[serde(default)]
+        /// A recorded voice note (shown with a player instead of a file row).
         voice: bool,
-        #[serde(default)]
-        waveform: Option<Vec<u16>>,
-    },
-    Reaction {
-        key: String,
-        #[specta(type = Number)]
-        count: usize,
-        senders: Vec<UserId>,
-    },
-    Poll {
-        question: String,
-        answers: Vec<PollAnswerDto>,
-        disclosed: bool,
-        max_selections: u32,
-        total_votes: u32,
-        has_ended: bool,
-        #[specta(type = Option<Number>)]
-        end_time: Option<u64>,
-        my_votes: Vec<String>,
-    },
-    CallInvite {
-        call_id: String,
-        is_video: bool,
-    },
-    Redacted,
-    RoomState {
-        state_type: String,
-        content_json: String,
-    },
-    DayDivider {
-        #[specta(type = Number)]
-        timestamp_millis: u64,
-    },
-    Virtual,
-    UnableToDecrypt {
-        reason: String,
     },
     Location {
         geo_uri: String,
         description: Option<String>,
-        #[serde(default)]
-        live: bool,
-        #[serde(default)]
-        #[specta(type = Option<Number>)]
-        live_until_millis: Option<u64>,
+    },
+    /// The message was deleted, locally or for everyone.
+    Deleted,
+    /// A network event rendered as a neutral line (`"Ada joined"`), never as a bubble.
+    System { text: String },
+    /// A date separator the engine inserts between days.
+    DayDivider {
+        #[specta(type = Number)]
+        timestamp_millis: u64,
     },
 }
 
+/// Delivery state of one message.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(tag = "status", content = "data")]
 pub enum EventSendState {
+    /// Stored in the outbox, not handed to the connector yet.
+    Queued { transaction_id: String },
+    /// Handed to the connector and awaiting its ack.
     Sending { transaction_id: String },
-    Sent { event_id: EventId },
+    /// The network accepted the message; `event_id` is set once the echo arrives.
+    Sent { event_id: Option<EventId> },
+    /// The outbox worker gave up; `can_retry` tells the UI whether RetrySend helps.
     Failed { error: String, can_retry: bool },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-pub struct ThreadSummary {
-    pub root_event_id: EventId,
-    pub reply_count: u32,
-    #[specta(type = Number)]
-    pub latest_reply_timestamp: u64,
 }
 
 /// Aggregated reactions for one key on a message.
@@ -461,39 +456,35 @@ pub struct ReactionSummary {
     #[specta(type = Number)]
     pub count: usize,
     pub senders: Vec<UserId>,
-    /// Whether the current user reacted with this key.
+    /// Whether the signed-in user of the owning account reacted with this key.
     pub by_me: bool,
 }
 
+/// One message in a chat timeline.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct TimelineItemDto {
+    /// Stable id of this item within the timeline.
     pub internal_id: String,
+    /// Local message id; `None` while the local echo has no stored row yet.
     pub event_id: Option<EventId>,
     pub sender: UserId,
+    pub sender_display_name: Option<String>,
+    pub sender_avatar: Option<MediaSource>,
     #[specta(type = Number)]
     pub timestamp_millis: u64,
     pub content: TimelineItemContent,
     pub send_state: EventSendState,
     pub is_own: bool,
     pub reply_to: Option<Box<TimelineItemDto>>,
-    pub thread_summary: Option<ThreadSummary>,
-    pub read_receipts: Option<Vec<UserId>>,
-    #[serde(default)]
-    pub sender_display_name: Option<String>,
-    #[serde(default)]
-    pub sender_avatar_url: Option<String>,
-    #[serde(default)]
+    /// Users the network reported as having read this message (newest first).
+    pub read_by: Vec<UserId>,
     pub edited: bool,
-    #[serde(default)]
     pub reactions: Vec<ReactionSummary>,
     /// Transaction id for local echoes (use with RetrySend/CancelSend).
-    #[serde(default)]
     pub transaction_id: Option<String>,
-    /// Whether this event mentions the current user (causes highlighting in the UI).
-    #[serde(default)]
-    pub mentions_me: bool,
 }
 
+/// One incremental change to a streamed vector (the room list or one timeline).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(tag = "type", content = "content")]
 pub enum VectorDiffDto<T> {
@@ -532,98 +523,107 @@ pub enum VectorDiffDto<T> {
     },
 }
 
-// === Authentication ===
+// === Search and shared media ===
 
+/// One message matched by `SearchRoomMessages`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-pub struct AuthSession {
-    pub account_id: AccountId,
-    pub user_id: UserId,
-    pub homeserver_url: String,
-    pub access_token: String,
-    pub device_id: String,
+pub struct RoomSearchHit {
+    pub event_id: EventId,
+    pub sender: UserId,
+    pub sender_display_name: Option<String>,
+    #[specta(type = Number)]
+    pub timestamp_millis: u64,
+    pub body: String,
 }
 
+/// One message matched across chats by `SearchAllMessages`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-pub struct Account {
-    pub id: AccountId,
-    pub user_id: UserId,
-    pub display_name: Option<String>,
-    pub avatar_url: Option<String>,
-    pub homeserver_url: String,
+pub struct GlobalSearchHit {
+    pub room_id: RoomId,
+    pub room_name: Option<String>,
+    pub event_id: EventId,
+    pub sender: UserId,
+    pub sender_display_name: Option<String>,
+    #[specta(type = Number)]
+    pub timestamp_millis: u64,
+    pub body: String,
 }
 
-// === Verification ===
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-pub struct SasEmoji {
-    pub emoji: String,
-    pub decimal: u32,
-    pub description: String,
+/// Which kind of shared content `GetRoomMedia` lists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub enum RoomMediaKind {
+    /// Images and videos.
+    Media,
+    /// Other files and audio.
+    Files,
+    /// Messages containing web links.
+    Links,
 }
 
+/// One shared item in a chat: a media or file message, or a message with links.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-pub enum VerificationState {
-    Ready,
-    WaitingForPartner,
-    CompareEmojis {
-        emojis: Vec<SasEmoji>,
-        decimal_1: u32,
-        decimal_2: u32,
-        decimal_3: u32,
-    },
-    Verified,
-    Cancelled {
-        reason: String,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-pub enum RecoveryState {
-    Unknown,
-    Enabled,
-    Disabled,
-    Lost,
-}
-
-// === Media ===
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(tag = "kind", content = "data")]
-pub enum MediaSource {
-    Remote { uri: String },
-}
-
-/// Open Graph summary of a link, as the homeserver reports it. Every field is optional: a page may not
-/// declare it, and the image is an `mxc://` URI that is fetched through `GetMedia`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-pub struct UrlPreviewDto {
-    pub url: String,
-    pub title: Option<String>,
-    pub description: Option<String>,
-    pub site_name: Option<String>,
-    pub image: Option<String>,
+pub struct RoomMediaItem {
+    pub event_id: EventId,
+    pub sender: UserId,
+    pub sender_display_name: Option<String>,
+    #[specta(type = Number)]
+    pub timestamp_millis: u64,
+    /// `image`, `video`, `audio`, `file` or `link`.
+    pub kind: String,
+    /// Caption or file name, or the message text for links.
+    pub body: String,
+    /// The stored media object; `None` for link items.
+    pub source: Option<MediaSource>,
+    pub mime_type: Option<String>,
     #[specta(type = Option<Number>)]
-    pub image_width: Option<u32>,
-    #[specta(type = Option<Number>)]
-    pub image_height: Option<u32>,
+    pub size_bytes: Option<u64>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    /// `http(s)` links found in the message (only for `link` items).
+    #[serde(default)]
+    pub urls: Vec<String>,
 }
 
-/// A message draft for a room.
+// === Tags, drafts and forwarding ===
+
+/// A user-defined chat tag, as stored in the device-local tag catalogue.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct RoomTagDef {
+    pub id: String,
+    pub name: String,
+    pub colour: TagColour,
+}
+
+/// Palette colour of a chat tag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "lowercase")]
+pub enum TagColour {
+    Grey,
+    Red,
+    Orange,
+    Amber,
+    Green,
+    Teal,
+    Blue,
+    Violet,
+    Pink,
+}
+
+/// A message draft for a chat.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct DraftDto {
     pub text: String,
     pub reply_to: Option<EventId>,
-    pub edit_of: Option<EventId>,
 }
 
-/// Summary of a room's draft for `ListDrafts`.
+/// Summary of a chat's draft for `ListDrafts`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct DraftSummary {
     pub room_id: RoomId,
     pub text: String,
 }
 
-/// Failure details when forwarding an event to a target room.
+/// Failure details when forwarding a message to a target chat.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct ForwardFailure {
     pub room_id: RoomId,
@@ -632,82 +632,53 @@ pub struct ForwardFailure {
 
 // === Commands ===
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(tag = "action", content = "params")]
 pub enum EngineCommand {
-    // Auth
-    DiscoverHomeserver {
-        input: String,
+    // Accounts
+    /// Lists every locally stored account, with its state and capabilities.
+    ListAccounts,
+    /// Lists the networks this build can connect (a build without the Messenger sidecar omits it).
+    ListNetworks,
+    /// Starts a login attempt for `network` and returns the first step.
+    BeginLogin {
+        network: Network,
     },
-    LoginPassword {
-        homeserver_url: String,
-        username: String,
-        password: String,
+    /// Answers the last `LoginStepDto` of the attempt `login_id`.
+    SubmitLogin {
+        login_id: LoginId,
+        input: LoginInputDto,
     },
-    StartOidcLogin {
-        homeserver_url: String,
+    /// Abandons the attempt `login_id`; nothing is stored.
+    CancelLogin {
+        login_id: LoginId,
     },
-    CompleteOidcLogin {
-        redirect_url: String,
-    },
-    CancelOidcLogin,
-    RestoreSession {
-        account_id: AccountId,
-    },
+    /// Removes the account and its local data after revoking the session on the network.
     Logout {
         account_id: AccountId,
     },
-    ListAccounts,
-    // Rooms
+    // Chats
+    /// Starts the room list stream; `filter` narrows the projection by chat name.
     SubscribeRoomList {
         filter: Option<String>,
     },
+    /// Aborts any subscription (room list or timeline).
     Unsubscribe {
         subscription_id: SubscriptionId,
     },
-    JoinRoom {
-        room_id_or_alias: String,
-    },
-    LeaveRoom {
-        room_id: RoomId,
-    },
-    CreateRoom {
-        name: String,
-        encrypted: bool,
-        invite: Option<Vec<UserId>>,
-    },
-    /// Lists joined and invited members of a room (loads the full member list from the server if needed).
+    /// Lists the known members of a chat.
     GetRoomMembers {
         room_id: RoomId,
     },
     GetRoomDetails {
         room_id: RoomId,
     },
-    /// Searches the public room directory. `query` matches names, topics and aliases; `since` is the
-    /// `next_batch` token of a previous page; `server` defaults to the active homeserver.
-    SearchPublicRooms {
+    /// Reads one user's profile inside the account that knows them.
+    GetUserProfile {
         account_id: AccountId,
-        query: Option<String>,
-        server: Option<String>,
-        since: Option<String>,
-        limit: u32,
+        user_id: UserId,
     },
-    /// Renames a room (needs the power level to change the name).
-    SetRoomName {
-        room_id: RoomId,
-        name: String,
-    },
-    SetRoomTopic {
-        room_id: RoomId,
-        topic: String,
-    },
-    /// Sets the room avatar from a file the user picked (same path rules as `SendAttachment`);
-    /// `None` removes it.
-    SetRoomAvatar {
-        room_id: RoomId,
-        file_path: Option<String>,
-    },
-    /// Reads the private note the active account keeps about a room (account data, never shared).
+    /// Reads the private note the user keeps about a chat (local, never sent to the network).
     GetRoomNote {
         room_id: RoomId,
     },
@@ -716,128 +687,96 @@ pub enum EngineCommand {
         room_id: RoomId,
         note: String,
     },
-    /// Reads the account's room tag catalogue (display order preserved).
+    // Tag catalogue (device-local, shared by every account)
+    /// Reads the tag catalogue in display order.
     GetTagCatalog,
     /// Adds one tag to the catalogue; the engine assigns its id and returns the stored definition.
     CreateRoomTag {
         name: String,
         colour: TagColour,
     },
-    /// Renames and/or recolours one tag. At least one of `name`/`colour` must be set and `id` must
-    /// be in the catalogue.
+    /// Renames and/or recolours one tag. At least one of `name`/`colour` must be set.
     RenameRoomTag {
         id: String,
         name: Option<String>,
         colour: Option<TagColour>,
     },
-    /// Sets the catalogue's display order. `ids` must list every tag in the catalogue exactly once;
-    /// a list built from a stale copy is refused rather than dropping the entries it omits.
+    /// Sets the catalogue's display order. `ids` must list every tag exactly once; a stale list is
+    /// refused rather than dropping the entries it omits.
     ReorderRoomTags {
         ids: Vec<String>,
     },
-    /// Assigns (`enabled: true`) or removes the custom tag `tag_id` on a room.
+    /// Assigns (`enabled: true`) or removes the tag `tag_id` on a chat.
     SetRoomTag {
         room_id: RoomId,
         tag_id: String,
         enabled: bool,
     },
-    /// Removes a tag from the catalogue and from every room that carries it.
+    /// Removes a tag from the catalogue and from every chat that carries it.
     DeleteRoomTag {
         tag_id: String,
     },
-    /// Marks the whole room as read (read receipt at the latest event and clears the unread flag).
+    // Chat flags
+    /// Marks the whole chat as read and clears its unread notifications.
     MarkRoomRead {
         room_id: RoomId,
     },
-    /// Looks up a user's profile, with membership and power level when a room is given.
-    GetUserProfile {
-        user_id: UserId,
-        room_id: Option<RoomId>,
+    /// Pins or unpins the chat in the room list.
+    SetRoomPinned {
+        room_id: RoomId,
+        pinned: bool,
     },
-    /// Opens the direct-message room with a user, creating it (and inviting them) if none exists.
-    StartDirectMessage {
-        user_id: UserId,
+    /// Archives or unarchives the chat.
+    SetRoomArchived {
+        room_id: RoomId,
+        archived: bool,
     },
-    /// Searches the homeserver user directory by user id and display name. `query` must not be
-    /// blank and is sent as given; `limit` is clamped to 1..=50. Each result's `already_in_room`
-    /// is derived from locally known joined-room membership.
-    SearchUsers {
-        query: String,
-        limit: u32,
+    /// Sets the chat's marked-as-unread flag.
+    SetRoomMarkedUnread {
+        room_id: RoomId,
+        unread: bool,
     },
-    /// Lists shared media, files or links of a room, newest first. `from` is the `next_batch` of
-    /// the previous page. Pages may hold fewer than `limit` items; keep paging while `next_batch`
-    /// is set.
+    /// Mutes the chat until `muted_until` (milliseconds since the Unix epoch), `None` to unmute.
+    SetRoomMuted {
+        room_id: RoomId,
+        #[specta(type = Option<Number>)]
+        muted_until: Option<u64>,
+    },
+    // Local search and shared media
+    /// Lists shared media, files or links of a chat, newest first. `before` is the `next` cursor of
+    /// the previous page.
     GetRoomMedia {
         room_id: RoomId,
         kind: RoomMediaKind,
-        from: Option<String>,
+        before: Option<String>,
         limit: u32,
     },
-    /// Searches the text messages of a room on the homeserver, newest first. `query` must not be
-    /// blank and `limit` is clamped to 1..=50. `next_batch` is the token of the previous page.
-    /// Encrypted rooms are not searched; the response then reports `RoomSearchScope::Unavailable`.
+    /// Searches the text messages of one chat in the local full-text index, newest first.
     SearchRoomMessages {
         room_id: RoomId,
         query: String,
-        sender: Option<UserId>,
         limit: u32,
-        next_batch: Option<String>,
     },
-    /// Reads the account-wide notification rules.
-    GetNotificationSettings,
-    /// Sets the default level for one-to-one or group rooms (encrypted and not).
-    SetDefaultNotificationLevel {
-        one_to_one: bool,
-        level: NotificationLevel,
+    /// Searches the text messages of every chat in the local full-text index, newest first.
+    SearchAllMessages {
+        query: String,
+        limit: Option<u32>,
     },
-    /// Toggles mention rules; a `None` field is left unchanged.
-    SetMentionRules {
-        room_mention: Option<bool>,
-        user_mention: Option<bool>,
-        invite: Option<bool>,
-    },
-    /// Reads the level of one room and whether it follows the default.
-    GetRoomNotificationLevel {
-        room_id: RoomId,
-    },
-    /// Sets one room's level; `None` restores the default.
-    SetRoomNotificationLevel {
-        room_id: RoomId,
-        level: Option<NotificationLevel>,
-    },
-    /// Reads the signed-in user's profile.
-    GetOwnProfile,
-    SetDisplayName {
-        name: String,
-    },
-    /// Sets the user's avatar from a picked file (same path rules as `SendAttachment`); `None` removes it.
-    SetOwnAvatar {
-        file_path: Option<String>,
-    },
-    /// Lists the account's sessions.
-    ListDevices,
-    /// This session's cryptographic identity.
-    GetSessionInfo,
-    /// Deletes cached downloaded media (it is fetched again when needed).
+    /// Deletes cached downloaded media; it is fetched again when needed.
     ClearMediaCache,
+    /// Reconnects every account's connector; live updates resume as they catch up.
+    RefreshSync,
     // Timeline
+    /// Starts the timeline stream of one chat.
     SubscribeTimeline {
         room_id: RoomId,
     },
-    /// Streams the timeline of one thread (the root event and its replies).
-    SubscribeThread {
-        room_id: RoomId,
-        thread_root_event_id: EventId,
-    },
-    /// Aborts every subscription for this room and drops its cached timelines — the room timeline
-    /// and each of its threads. Best-effort: any later command that needs the timeline rebuilds it,
-    /// and the next subscription replays a full `Reset`. Intended for evicting rooms the app no
-    /// longer shows; calling it for a room still on screen blanks that view until it subscribes
-    /// again.
+    /// Aborts the timeline subscription of one chat and drops its cached timeline. Best-effort: the
+    /// next subscription replays a full `Reset`.
     CloseTimeline {
         room_id: RoomId,
     },
+    /// Loads older messages into the timeline of one chat.
     PaginateBackwards {
         room_id: RoomId,
         #[specta(type = Number)]
@@ -846,93 +785,43 @@ pub enum EngineCommand {
     SendText {
         room_id: RoomId,
         body: String,
-        markdown: Option<bool>,
         reply_to: Option<EventId>,
-        mentions: Option<Vec<UserId>>,
-        #[serde(default)]
-        mention_room: bool,
+        /// Client-generated id that reconciles the outbox row with the remote echo.
         txn_id: Option<String>,
-        /// When set, the message is posted into this thread instead of the main timeline.
-        in_thread_root: Option<EventId>,
     },
     EditMessage {
         room_id: RoomId,
         event_id: EventId,
         body: String,
-        markdown: Option<bool>,
     },
-    RedactEvent {
+    DeleteMessage {
         room_id: RoomId,
         event_id: EventId,
-        reason: Option<String>,
+        for_everyone: bool,
     },
+    /// Adds the reaction `key`, or removes it when the user already reacted with it.
     ToggleReaction {
         room_id: RoomId,
         event_id: EventId,
         key: String,
     },
-    /// Pin a message in a room (requires `can_pin`).
-    SetEventPinned {
-        room_id: RoomId,
-        event_id: EventId,
-        pinned: bool,
-    },
-    /// Load pinned messages in a room.
-    GetPinnedEvents {
-        room_id: RoomId,
-    },
-    /// Forward one or more events to one or more target rooms, stripping relations.
+    /// Forwards messages to one or more target chats, dropping replies and reactions.
     ForwardEvents {
         room_id: RoomId,
         event_ids: Vec<EventId>,
         targets: Vec<RoomId>,
     },
-    /// Restart background sync and rebuild open timelines: the manual Refresh. Returns at once; sync resumes in the background.
-    RefreshSync,
-    /// Set the room's favourite flag (pin to top of the list).
-    SetRoomFavourite {
-        room_id: RoomId,
-        favourite: bool,
-    },
-    /// Set the room's low-priority flag (archive).
-    SetRoomLowPriority {
-        room_id: RoomId,
-        low_priority: bool,
-    },
-    /// Set the room's marked-as-unread flag.
-    SetRoomMarkedUnread {
-        room_id: RoomId,
-        unread: bool,
-    },
-    /// Save a message draft for a room (empty text clears it).
+    /// Saves a draft for a chat; empty text clears it.
     SaveDraft {
         room_id: RoomId,
         text: String,
         reply_to: Option<EventId>,
-        edit_of: Option<EventId>,
     },
-    /// Load the message draft for a room.
     GetDraft {
         room_id: RoomId,
     },
-    /// Load all room drafts (returns the first 80 chars of each).
+    /// Lists every chat with a non-empty draft (first 80 chars of each).
     ListDrafts,
-    SendPoll {
-        room_id: RoomId,
-        question: String,
-        answers: Vec<String>,
-        disclosed: bool,
-        max_selections: u32,
-    },
-    RespondToPoll {
-        room_id: RoomId,
-        poll_event_id: EventId,
-        answer_ids: Vec<String>,
-    },
-    EndPoll {
-        room_id: RoomId,
-        poll_event_id: EventId,
-    },
     RetrySend {
         room_id: RoomId,
         txn_id: String,
@@ -946,48 +835,18 @@ pub enum EngineCommand {
         file_path: String,
         mime_type: Option<String>,
         /// Optional caption, sent as the media message body.
-        #[serde(default)]
         body: Option<String>,
         txn_id: Option<String>,
     },
-    /// Send a voice message (audio with waveform): file must be registered for attachment.
+    /// Sends a voice note; the file stays the user's, the engine copies it into the store.
     SendVoice {
         room_id: RoomId,
         file_path: String,
         #[specta(type = Number)]
         duration_ms: u64,
-        waveform: Vec<u16>,
-        #[serde(default)]
         txn_id: Option<String>,
     },
-    /// Send a static location message.
-    SendLocation {
-        room_id: RoomId,
-        #[specta(type = Number)]
-        latitude: f64,
-        #[specta(type = Number)]
-        longitude: f64,
-        #[serde(default)]
-        #[specta(type = Option<Number>)]
-        accuracy_m: Option<f64>,
-        #[serde(default)]
-        description: Option<String>,
-    },
-    /// Start a live location share.
-    StartLiveLocation {
-        room_id: RoomId,
-        #[specta(type = Number)]
-        duration_ms: u64,
-    },
-    /// Send a location beacon update (only valid while live share is active).
-    SendLocationBeacon {
-        room_id: RoomId,
-        geo_uri: String,
-    },
-    /// Stop the active live location share in this room.
-    StopLiveLocation {
-        room_id: RoomId,
-    },
+    /// Reports that the user read the chat up to `event_id`.
     MarkRead {
         room_id: RoomId,
         event_id: EventId,
@@ -997,51 +856,14 @@ pub enum EngineCommand {
         typing: bool,
     },
     // Media
+    /// Fetches a stored media object into the local file cache and returns its path.
     GetMedia {
         source: MediaSource,
-        kind: String, // "thumbnail" | "file"
-        width: Option<u32>,
-        height: Option<u32>,
-        /// Used to pick the cache file extension; pass the timeline item's mime type.
-        #[serde(default)]
+        /// `"thumbnail"` or `"file"`.
+        kind: String,
+        /// Used to pick the cache file extension.
         mime_type: Option<String>,
     },
-    /// Fetches the homeserver's link preview for `url`. The response is `None` when the server has no preview.
-    GetUrlPreview {
-        url: String,
-    },
-    // Crypto
-    RequestSelfVerification,
-    AcceptVerification {
-        user_id: UserId,
-        device_id: String,
-    },
-    StartSas {
-        user_id: UserId,
-        device_id: String,
-    },
-    ConfirmSas {
-        user_id: UserId,
-        device_id: String,
-    },
-    CancelVerification {
-        user_id: UserId,
-        device_id: String,
-    },
-    GetRecoveryStatus,
-    EnableRecovery {
-        /// Account password; needed when cross-signing must be created (UIA).
-        password: Option<String>,
-    },
-    RecoverWithKey {
-        recovery_key: String,
-    },
-    ResetRecovery {
-        password: Option<String>,
-    },
-    // Spaces
-    /// Lists, for every joined room that sits in a joined space, its parent spaces.
-    GetSpaceParents,
     // Settings / Theme
     ListThemes,
     GetTheme {
@@ -1055,74 +877,6 @@ pub enum EngineCommand {
         key: String,
         value_json: String,
     },
-    /// Reads the account's synced preferences document (`chat.alloy.prefs`).
-    GetAccountPrefs,
-    /// Stores the account's synced preferences document. `json` must be a JSON object of at most
-    /// 64 KiB with an integer `updated_at`.
-    SetAccountPrefs {
-        json: String,
-    },
-    // Moderation & Account
-    /// Delete one or more of the active account's devices (login sessions).
-    /// Requires the active account's password when UIA is required.
-    DeleteDevices {
-        device_ids: Vec<String>,
-        #[serde(default)]
-        password: Option<String>,
-    },
-    /// Kick a user from a room.
-    KickUser {
-        room_id: RoomId,
-        user_id: UserId,
-        #[serde(default)]
-        reason: Option<String>,
-    },
-    /// Ban a user from a room.
-    BanUser {
-        room_id: RoomId,
-        user_id: UserId,
-        #[serde(default)]
-        reason: Option<String>,
-    },
-    /// Unban a user from a room.
-    UnbanUser {
-        room_id: RoomId,
-        user_id: UserId,
-        #[serde(default)]
-        reason: Option<String>,
-    },
-    /// Set the power level of a user in a room.
-    SetPowerLevel {
-        room_id: RoomId,
-        user_id: UserId,
-        #[specta(type = Number)]
-        level: i64,
-    },
-    /// Add a user to the active account's block list.
-    IgnoreUser {
-        user_id: UserId,
-    },
-    /// Remove a user from the active account's block list.
-    UnignoreUser {
-        user_id: UserId,
-    },
-    /// List users on the active account's block list.
-    ListIgnoredUsers,
-    /// Report a message to room moderators.
-    ReportEvent {
-        room_id: RoomId,
-        event_id: EventId,
-        #[serde(default)]
-        reason: Option<String>,
-    },
-    /// Search messages across all unencrypted rooms.
-    SearchAllMessages {
-        query: String,
-        #[serde(default)]
-        next_batch: Option<String>,
-        #[serde(default)]
-        limit: Option<u32>,
-    },
 }
 
 // === Responses ===
@@ -1130,56 +884,43 @@ pub enum EngineCommand {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(tag = "type", content = "payload")]
 pub enum EngineResponse {
-    // Auth responses
-    HomeserverInfo {
-        url: String,
-        name: String,
-        supports_oidc: bool,
-    },
-    OidcUrl {
-        /// Authorization URL to open in the system browser.
-        authorization_url: String,
-        /// Redirect URI registered with the server; the app must receive this URL and pass it
-        /// back with `CompleteOidcLogin`.
-        redirect_uri: String,
-    },
-    SessionRestored {
-        account: Account,
-    },
-    LoggedIn {
-        account: Account,
-    },
-    LoggedOut,
+    // Accounts
     AccountsList {
         accounts: Vec<Account>,
+    },
+    /// The networks this build can connect.
+    Networks {
+        networks: Vec<Network>,
+    },
+    /// The next login step of `login_id`; answers both `BeginLogin` and `SubmitLogin`.
+    LoginStep {
+        login_id: LoginId,
+        step: LoginStepDto,
+    },
+    LoginCancelled,
+    LoggedOut {
+        account_id: AccountId,
     },
     // Room list
     RoomListSubscribed {
         subscription_id: SubscriptionId,
     },
-    Unsubscribed {
-        subscription_id: SubscriptionId,
-    },
+    Unsubscribed,
     RoomMembers {
-        room_id: RoomId,
         members: Vec<RoomMemberDto>,
     },
     RoomDetailsRetrieved {
         details: RoomDetails,
     },
-    /// One page of public room directory results for `SearchPublicRooms`.
-    PublicRooms {
-        rooms: Vec<PublicRoomDto>,
-        next_batch: Option<String>,
-        #[specta(type = Number)]
-        total_estimate: Option<u64>,
+    UserProfile {
+        profile: UserProfileDto,
     },
-    /// The private note of a room (empty when none is set).
+    /// The private note of a chat, `None` when none is set.
     RoomNote {
-        room_id: RoomId,
-        note: String,
+        note: Option<String>,
     },
-    /// The account's room tag catalogue, in display order.
+    RoomNoteSet,
+    /// The tag catalogue, in display order.
     TagCatalog {
         tags: Vec<RoomTagDef>,
     },
@@ -1187,228 +928,62 @@ pub enum EngineResponse {
     RoomTagCreated {
         tag: RoomTagDef,
     },
-    UserProfile {
-        profile: UserProfileDto,
-    },
-    /// One page of user-directory results for `SearchUsers`; `limited` is the server's flag that
-    /// more matches exist than the returned page holds.
-    UserSearchResults {
-        results: Vec<UserSearchResultDto>,
-        limited: bool,
-    },
-    /// The direct-message room opened by `StartDirectMessage`.
-    DirectMessageRoom {
-        room_id: RoomId,
-        created: bool,
-    },
+    /// A tag was renamed, recoloured, reordered or removed.
+    RoomTagsUpdated,
+    /// A chat flag changed (pinned, archived, marked unread, muted or read); the room list diff
+    /// carries the new values.
+    RoomFlagsUpdated,
     RoomMedia {
-        room_id: RoomId,
         items: Vec<RoomMediaItem>,
-        next_batch: Option<String>,
+        /// Cursor for the next page, `None` when this was the last one.
+        next: Option<String>,
     },
-    /// The page of hits returned by `SearchRoomMessages`.
     RoomSearchResults {
         hits: Vec<RoomSearchHit>,
-        next_batch: Option<String>,
-        scope: RoomSearchScope,
     },
-    NotificationSettings {
-        settings: NotificationSettingsDto,
+    AllMessagesFound {
+        hits: Vec<GlobalSearchHit>,
     },
-    RoomNotificationLevel {
-        room_id: RoomId,
-        level: NotificationLevel,
-        /// The room follows the account default.
-        is_default: bool,
-    },
-    OwnProfile {
-        profile: OwnProfileDto,
-    },
-    Devices {
-        devices: Vec<DeviceDto>,
-    },
-    SessionInfo {
-        info: SessionInfoDto,
-    },
-    /// Bytes freed by `ClearMediaCache`.
-    MediaCacheCleared {
-        #[specta(type = Number)]
-        freed_bytes: u64,
-    },
-    RoomJoined {
-        room_id: RoomId,
-    },
-    RoomLeft {
-        room_id: RoomId,
-    },
-    RoomCreated {
-        room_id: RoomId,
-    },
+    MediaCacheCleared,
+    SyncRefreshed,
     // Timeline
     TimelineSubscribed {
         subscription_id: SubscriptionId,
     },
-    /// Whether `CloseTimeline` had anything to abort or drop; `false` means it was already closed
-    /// and the call changed nothing.
-    TimelineClosed {
-        room_id: RoomId,
-        closed: bool,
-    },
+    TimelineClosed,
     Paginated {
-        room_id: RoomId,
-        /// True when the start of the room history was reached.
+        /// True when the start of the chat history was reached.
         reached_start: bool,
     },
-    /// The message was queued; the local echo arrives via `TimelineDiff` and the final
-    /// event id is delivered through the item's `send_state` once sent.
-    MessageSent {
-        room_id: RoomId,
+    /// The message was queued; the local echo arrives through `TimelineDiff` and the final state
+    /// through the item's `send_state`.
+    MessageQueued {
         txn_id: String,
-        event_id: Option<EventId>,
     },
-    MessageEdited {
-        room_id: RoomId,
-        event_id: EventId,
-    },
-    EventRedacted {
-        room_id: RoomId,
-        event_id: EventId,
-    },
-    ReactionToggled {
-        room_id: RoomId,
-        event_id: EventId,
-        key: String,
-        added: bool,
-    },
-    /// Pin state of a message changed.
-    EventPinned {
-        room_id: RoomId,
-        event_id: EventId,
-        pinned: bool,
-    },
-    /// Pinned messages for a room (first load or refresh).
-    PinnedEvents {
-        room_id: RoomId,
-        items: Vec<TimelineItemDto>,
-    },
-    /// Events forwarded to target rooms.
+    MessageEdited,
+    MessageDeleted,
+    ReactionToggled,
+    /// Events forwarded; one entry per target chat that failed.
     EventsForwarded {
-        forwarded: Vec<RoomId>,
-        failed: Vec<ForwardFailure>,
+        failures: Vec<ForwardFailure>,
     },
-    /// Sync was restarted; messages arrive again as it catches up.
-    SyncRefreshed,
-    /// Room's favourite flag changed.
-    RoomFavouriteSet {
-        room_id: RoomId,
-        favourite: bool,
-    },
-    /// Room's low-priority flag changed.
-    RoomLowPrioritySet {
-        room_id: RoomId,
-        low_priority: bool,
-    },
-    /// Room's marked-as-unread flag changed.
-    RoomMarkedUnreadSet {
-        room_id: RoomId,
-        unread: bool,
-    },
-    /// A room's draft was saved.
-    DraftSaved {
-        room_id: RoomId,
-    },
-    /// A room's draft (or None if cleared).
+    DraftSaved,
+    /// The chat's draft, `None` when it has none.
     Draft {
-        room_id: RoomId,
         draft: Option<DraftDto>,
     },
-    /// All rooms with non-empty drafts.
+    /// Every chat with a non-empty draft.
     Drafts {
-        items: Vec<DraftSummary>,
+        drafts: Vec<DraftSummary>,
     },
-    SendRetried {
-        room_id: RoomId,
-        txn_id: String,
-    },
-    SendCancelled {
-        room_id: RoomId,
-        txn_id: String,
-    },
-    AttachmentSent {
-        room_id: RoomId,
-        txn_id: String,
-        /// Known only once the server confirmed the event; the timeline item carries it later.
-        event_id: Option<EventId>,
-    },
-    VoiceMessageSent {
-        room_id: RoomId,
-        txn_id: String,
-        event_id: Option<EventId>,
-    },
-    LocationSent {
-        room_id: RoomId,
-    },
-    LiveLocationStarted {
-        room_id: RoomId,
-    },
-    LocationBeaconSent {
-        room_id: RoomId,
-    },
-    LiveLocationStopped {
-        room_id: RoomId,
-    },
-    ReadMarked {
-        room_id: RoomId,
-    },
-    TypingStatusSet {
-        room_id: RoomId,
-    },
+    SendRetried,
+    SendCancelled,
+    ReadMarked,
+    Typing,
     // Media
-    MediaRetrieved {
-        local_path: String,
-    },
-    /// `None` when the homeserver has no preview for the URL, or previews are disabled there.
-    UrlPreview {
-        preview: Option<UrlPreviewDto>,
-    },
-    // Crypto / Verification
-    VerificationRequested {
-        user_id: UserId,
-        device_id: String,
-    },
-    VerificationAccepted {
-        user_id: UserId,
-        device_id: String,
-    },
-    SasStarted {
-        user_id: UserId,
-        device_id: String,
-        emojis: Vec<SasEmoji>,
-    },
-    SasConfirmed {
-        user_id: UserId,
-        device_id: String,
-    },
-    VerificationCancelled {
-        user_id: UserId,
-        device_id: String,
-    },
-    RecoveryStatusRetrieved {
-        state: RecoveryState,
-    },
-    /// The recovery key: show it once, it cannot be retrieved again.
-    RecoveryEnabled {
-        recovery_key: String,
-    },
-    RecoveredFromKey {
-        recovered: bool,
-    },
-    RecoveryReset {
-        recovery_key: String,
-    },
-    // Spaces
-    SpaceParents {
-        parents: Vec<SpaceParentDto>,
+    Media {
+        /// Local file path of the cached media.
+        path: String,
     },
     // Settings / Theme
     ThemesList {
@@ -1424,52 +999,6 @@ pub enum EngineResponse {
     SettingSet {
         key: String,
     },
-    /// The synced preferences document, or `None` when the account has never stored one.
-    AccountPrefs {
-        json: Option<String>,
-    },
-    DevicesDeleted {
-        deleted: Vec<String>,
-    },
-    AuthRequired {
-        flows: Vec<String>,
-    },
-    UserKicked {
-        room_id: RoomId,
-        user_id: UserId,
-    },
-    UserBanned {
-        room_id: RoomId,
-        user_id: UserId,
-    },
-    UserUnbanned {
-        room_id: RoomId,
-        user_id: UserId,
-    },
-    PowerLevelSet {
-        room_id: RoomId,
-        user_id: UserId,
-        #[specta(type = Number)]
-        level: i64,
-    },
-    UserIgnored {
-        user_id: UserId,
-    },
-    UserUnignored {
-        user_id: UserId,
-    },
-    IgnoredUsers {
-        user_ids: Vec<UserId>,
-    },
-    EventReported {
-        room_id: RoomId,
-        event_id: EventId,
-    },
-    AllMessagesFound {
-        hits: Vec<GlobalSearchHit>,
-        next_batch: Option<String>,
-    },
-    Unit,
 }
 
 // === Errors ===
@@ -1478,7 +1007,7 @@ pub enum EngineResponse {
 pub struct EngineError {
     pub code: String,
     pub message: String,
-    /// Stable machine-readable detail for a coarse `code`, for example why an auth attempt
+    /// Stable machine-readable detail for a coarse `code`, for example why a login attempt
     /// failed. The UI branches on this; `message` is for humans and may change.
     pub reason: Option<String>,
 }
@@ -1488,6 +1017,25 @@ impl EngineError {
         Self {
             code: "not_implemented".to_string(),
             message: format!("Command '{}' not yet implemented", command),
+            reason: None,
+        }
+    }
+
+    /// The network behind the account cannot do `feature`; the UI should have hidden the action.
+    pub fn not_supported(feature: impl Into<String>) -> Self {
+        let feature = feature.into();
+        Self {
+            code: "not_supported".to_string(),
+            message: format!("Feature '{feature}' is not supported by this network"),
+            reason: Some(feature),
+        }
+    }
+
+    /// The request is valid but cannot run now (no such account, disabled account, no cached data).
+    pub fn unavailable(msg: impl Into<String>) -> Self {
+        Self {
+            code: "unavailable".to_string(),
+            message: msg.into(),
             reason: None,
         }
     }
@@ -1552,24 +1100,35 @@ impl EngineError {
 
 // === Events ===
 
+/// Connection state of one account's connector.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub enum ConnectionStatus {
+    Disconnected,
+    Connecting,
+    Syncing,
+    Connected,
+    Reconnecting {
+        attempt: u32,
+        #[specta(type = Number)]
+        next_retry_millis: u64,
+    },
+    Terminated,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(tag = "type", content = "payload")]
 pub enum EngineEvent {
     ConnectionStatus {
+        account_id: AccountId,
         status: ConnectionStatus,
     },
-    AuthState {
-        account: Option<Account>,
-    },
-    /// A browser sign-in failed after it started, so the app can leave its waiting state.
-    /// `reason` is the same stable discriminator `EngineError` carries; `message` is for logs.
-    AuthFailed {
-        reason: String,
-        message: String,
+    /// The stored account list changed (login finished, logout, state transition).
+    AccountsChanged {
+        accounts: Vec<Account>,
     },
     RoomListDiff {
         subscription_id: SubscriptionId,
-        diff: VectorDiffDto<RoomSummary>,
+        diff: Box<VectorDiffDto<RoomSummary>>,
     },
     TimelineDiff {
         subscription_id: SubscriptionId,
@@ -1580,7 +1139,7 @@ pub enum EngineEvent {
         room_id: RoomId,
         users: Vec<UserId>,
     },
-    /// Attachment upload progress, keyed by the `txn_id` passed to `SendAttachment`.
+    /// Attachment upload progress, keyed by the `txn_id` passed to `SendAttachment`/`SendVoice`.
     UploadProgress {
         room_id: RoomId,
         txn_id: String,
@@ -1589,26 +1148,9 @@ pub enum EngineEvent {
         #[specta(type = Number)]
         total_bytes: u64,
     },
-    VerificationState {
-        user_id: UserId,
-        device_id: String,
-        state: VerificationState,
-    },
-    RecoveryState {
-        state: RecoveryState,
-    },
     ToastNotice {
         message: String,
         level: String, // "info" | "warning" | "error"
-    },
-    /// The account's synced preferences changed on another device; `json` is the new document.
-    AccountPrefsChanged {
-        json: String,
-    },
-    /// The pinned events for a room changed.
-    PinnedEventsChanged {
-        room_id: RoomId,
-        event_ids: Vec<EventId>,
     },
 }
 
@@ -1619,44 +1161,40 @@ pub fn register_types() -> Types {
         .register::<EventId>()
         .register::<UserId>()
         .register::<SubscriptionId>()
-        .register::<ConnectionStatus>()
-        .register::<RoomMembership>()
-        .register::<RoomMemberDto>()
-        .register::<RoomDetails>()
-        .register::<RoomMediaKind>()
-        .register::<NotificationLevel>()
-        .register::<NotificationSettingsDto>()
-        .register::<OwnProfileDto>()
-        .register::<DeviceDto>()
-        .register::<SessionInfoDto>()
-        .register::<RoomMediaItem>()
-        .register::<RoomSearchScope>()
-        .register::<RoomSearchHit>()
-        .register::<UserProfileDto>()
-        .register::<UserSearchResultDto>()
-        .register::<SpaceParentDto>()
+        .register::<LoginId>()
+        .register::<Network>()
+        .register::<AccountState>()
+        .register::<CapabilitiesDto>()
+        .register::<Account>()
+        .register::<CookieFieldDto>()
+        .register::<CodeChannel>()
+        .register::<LoginFailureDto>()
+        .register::<LoginStepDto>()
+        .register::<LoginInputDto>()
+        .register::<ChatKind>()
+        .register::<MediaSource>()
         .register::<NotificationCount>()
         .register::<TimelineItemPreview>()
         .register::<RoomSummary>()
-        .register::<RoomTagDef>()
-        .register::<TagColour>()
+        .register::<RoomMemberDto>()
+        .register::<RoomDetails>()
+        .register::<UserProfileDto>()
         .register::<TimelineItemContent>()
         .register::<EventSendState>()
-        .register::<ThreadSummary>()
         .register::<ReactionSummary>()
         .register::<TimelineItemDto>()
-        .register::<VectorDiffDto<RoomSummary>>()
-        .register::<VectorDiffDto<TimelineItemDto>>()
-        .register::<AuthSession>()
-        .register::<Account>()
-        .register::<SasEmoji>()
-        .register::<VerificationState>()
-        .register::<RecoveryState>()
-        .register::<MediaSource>()
-        .register::<UrlPreviewDto>()
+        .register::<RoomSearchHit>()
+        .register::<GlobalSearchHit>()
+        .register::<RoomMediaKind>()
+        .register::<RoomMediaItem>()
+        .register::<RoomTagDef>()
+        .register::<TagColour>()
         .register::<DraftDto>()
         .register::<DraftSummary>()
         .register::<ForwardFailure>()
+        .register::<VectorDiffDto<RoomSummary>>()
+        .register::<VectorDiffDto<TimelineItemDto>>()
+        .register::<ConnectionStatus>()
         .register::<EngineCommand>()
         .register::<EngineResponse>()
         .register::<EngineError>()
@@ -1678,10 +1216,16 @@ pub fn export_typescript_to_file(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn test_export_typescript() {
         let ts = export_typescript().expect("export typescript should succeed");
+        assert!(ts.contains("export type Account"));
+        assert!(ts.contains("export type CapabilitiesDto"));
+        assert!(ts.contains("export type LoginStepDto"));
+        assert!(ts.contains("export type LoginInputDto"));
+        assert!(ts.contains("export type MediaSource"));
         assert!(ts.contains("export type RoomSummary"));
         assert!(ts.contains("export type TimelineItemDto"));
         assert!(ts.contains("export type EngineCommand"));
@@ -1691,40 +1235,140 @@ mod tests {
         assert!(ts.contains("export type VectorDiffDto"));
     }
 
-    #[test]
-    fn test_serde_roundtrip() {
-        let summary = RoomSummary {
-            id: RoomId("!test:example.org".into()),
-            name: Some("Test Room".into()),
-            avatar_url: None,
+    fn sample_summary() -> RoomSummary {
+        RoomSummary {
+            id: RoomId("chat-1".into()),
+            account_id: AccountId("acc-1".into()),
+            network: Network::Telegram,
+            name: Some("Ada".into()),
+            avatar: Some(MediaSource {
+                media_id: "media-1".into(),
+            }),
+            kind: ChatKind::Direct,
+            is_direct: true,
             unread_notifications: NotificationCount {
                 highlight_count: 1,
                 notification_count: 2,
             },
             latest_event: Some(TimelineItemPreview {
-                sender: UserId("@alice:example.org".into()),
-                timestamp_millis: 1234567890,
+                sender: UserId("u-1".into()),
+                timestamp_millis: 1_700_000_000_000,
                 body: "Hello world".into(),
             }),
-            is_direct: false,
-            is_space: false,
-            encrypted: false,
-            membership: RoomMembership::Joined,
-            favourite: None,
-            low_priority: None,
-            tags: Vec::new(),
-            direct_user_id: None,
-            marked_unread: false,
-            draft: None,
-        };
-        let json = serde_json::to_string(&summary).unwrap();
-        let decoded: RoomSummary = serde_json::from_str(&json).unwrap();
+            pinned: false,
+            archived: false,
+            muted_until: None,
+            marked_unread: true,
+            tags: vec!["work".into()],
+            draft: Some("draft".into()),
+        }
+    }
+
+    #[test]
+    fn test_serde_roundtrip() {
+        let summary = sample_summary();
+        let encoded = serde_json::to_string(&summary).unwrap();
+        let decoded: RoomSummary = serde_json::from_str(&encoded).unwrap();
         assert_eq!(summary, decoded);
 
         let diff = VectorDiffDto::PushBack { value: summary };
         let diff_json = serde_json::to_string(&diff).unwrap();
         let decoded_diff: VectorDiffDto<RoomSummary> = serde_json::from_str(&diff_json).unwrap();
         assert_eq!(diff, decoded_diff);
+    }
+
+    #[test]
+    fn test_qr_step_roundtrip() {
+        let step = LoginStepDto::Qr {
+            payload: "tg://login?token=abc".into(),
+            expires_at: 1_700_000_060_000,
+        };
+        let value = serde_json::to_value(&step).unwrap();
+        assert_eq!(
+            value,
+            json!({
+                "type": "qr",
+                "payload": "tg://login?token=abc",
+                "expires_at": 1_700_000_060_000u64,
+            })
+        );
+        let decoded: LoginStepDto = serde_json::from_value(value).unwrap();
+        assert_eq!(step, decoded);
+    }
+
+    #[test]
+    fn test_cookies_input_roundtrip() {
+        let input = LoginInputDto::Cookies {
+            values: BTreeMap::from([(String::from("c_user"), String::from("1000"))]),
+        };
+        let value = serde_json::to_value(&input).unwrap();
+        assert_eq!(
+            value,
+            json!({"type": "cookies", "values": {"c_user": "1000"}})
+        );
+        let decoded: LoginInputDto = serde_json::from_value(value).unwrap();
+        assert_eq!(input, decoded);
+    }
+
+    #[test]
+    fn test_begin_login_wire_shape() {
+        let command = EngineCommand::BeginLogin {
+            network: Network::Telegram,
+        };
+        assert_eq!(
+            serde_json::to_value(&command).unwrap(),
+            json!({"action": "BeginLogin", "params": {"network": "telegram"}})
+        );
+
+        let command = EngineCommand::BeginLogin {
+            network: Network::Messenger,
+        };
+        assert_eq!(
+            serde_json::to_value(&command).unwrap(),
+            json!({"action": "BeginLogin", "params": {"network": "messenger"}})
+        );
+    }
+
+    #[test]
+    fn test_login_input_debug_redacts_secrets() {
+        let secrets = ["123456", "hunter2", "cookie-secret"];
+        let inputs = [
+            LoginInputDto::Code {
+                code: secrets[0].into(),
+            },
+            LoginInputDto::Password {
+                password: secrets[1].into(),
+            },
+            LoginInputDto::Credentials {
+                username: "ada".into(),
+                password: secrets[1].into(),
+            },
+            LoginInputDto::Cookies {
+                values: BTreeMap::from([(String::from("sessionid"), String::from(secrets[2]))]),
+            },
+        ];
+        for input in &inputs {
+            let rendered = format!("{input:?}");
+            for secret in secrets {
+                assert!(
+                    !rendered.contains(secret),
+                    "Debug output leaked a secret: {rendered}"
+                );
+            }
+        }
+
+        // Usernames, phone numbers and cookie names stay visible for diagnostics.
+        assert!(format!("{:?}", inputs[2]).contains("ada"));
+        assert!(format!("{:?}", inputs[3]).contains("sessionid"));
+        assert!(
+            format!(
+                "{:?}",
+                LoginInputDto::PhoneNumber {
+                    phone: "+15550100".into()
+                }
+            )
+            .contains("+15550100")
+        );
     }
 
     #[test]
@@ -1735,6 +1379,15 @@ mod tests {
 
         let err = EngineError::auth_failed("Invalid credentials");
         assert_eq!(err.code, "auth_failed");
+
+        let err = EngineError::not_supported("polls");
+        assert_eq!(err.code, "not_supported");
+        assert!(err.message.contains("polls"));
+        assert_eq!(err.reason.as_deref(), Some("polls"));
+
+        let err = EngineError::unavailable("account is disabled");
+        assert_eq!(err.code, "unavailable");
+        assert_eq!(err.message, "account is disabled");
     }
 
     #[test]

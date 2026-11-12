@@ -351,7 +351,7 @@ mod platform {
     pub async fn check(app: &AppHandle) -> Result<UpdateInfo, String> {
         let current = parse_version(&app.package_info().version.to_string())
             .ok_or_else(|| "unreadable app version".to_string())?;
-        let releases: Vec<Release> = alloy_core::tls::with_system_roots(
+        let releases: Vec<Release> = crate::tls::with_system_roots(
             reqwest::Client::builder().user_agent(concat!("alloy/", env!("CARGO_PKG_VERSION"))),
         )
         .build()

@@ -780,7 +780,14 @@ mod tests {
         let secrets = std::sync::Arc::new(alloy_storage::FileSecretStore::new(
             dir.join("secrets.json"),
         ));
-        EngineContext::new(dir.to_path_buf(), secrets)
+        // The allowlist lives on the context, not the store, so an in-memory database is enough.
+        let store = alloy_store::Store::open_in_memory([7u8; 32]).expect("open the test store");
+        EngineContext::with_store(
+            store,
+            dir.to_path_buf(),
+            secrets,
+            std::sync::Arc::new(alloy_engine::factory::DefaultConnectorFactory::from_env()),
+        )
     }
 
     #[cfg(unix)]

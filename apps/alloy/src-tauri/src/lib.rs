@@ -6,14 +6,16 @@ mod pick;
 mod save;
 mod update;
 
+#[cfg(mobile)]
+mod tls;
+
 use alloy_engine::context::EngineContext;
+use alloy_engine::factory::{ConnectorFactory, DefaultConnectorFactory, MESSENGER_SIDECAR_ENV};
 use alloy_engine::router::AppEngine;
 use commands::{alloy_invoke, alloy_subscribe};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::Manager;
-
-#[cfg(target_os = "android")]
-use alloy_ffi as _;
 
 pub struct AppState {
     pub engine: Arc<AppEngine>,
@@ -24,7 +26,7 @@ pub struct AppState {
 /// running Secret Service falls back to the owner-only file, with a warning. Android and iOS have
 /// no keyring backend and always use the owner-only file.
 fn open_secret_store(
-    data_dir: &std::path::Path,
+    data_dir: &Path,
 ) -> Result<Arc<dyn alloy_storage::SecretStore>, alloy_storage::StorageError> {
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     {
@@ -42,6 +44,78 @@ fn open_secret_store(
     Ok(Arc::new(alloy_storage::FileSecretStore::new(
         data_dir.join("secrets.json"),
     )))
+}
+
+/// Telegram application credentials.
+///
+/// A release build embeds Alloy's own `api_id`/`api_hash` at compile time through
+/// `ALLOY_TELEGRAM_API_ID`/`ALLOY_TELEGRAM_API_HASH` so every installed copy identifies the same
+/// application, as Telegram's API terms expect. A development build without them falls back to the
+/// same variables in the process environment.
+fn telegram_config() -> Option<alloy_telegram::TelegramConfig> {
+    let embedded = option_env!("ALLOY_TELEGRAM_API_ID")
+        .zip(option_env!("ALLOY_TELEGRAM_API_HASH"))
+        .and_then(|(api_id, api_hash)| {
+            let api_id = api_id.trim().parse::<i32>().ok()?;
+            let api_hash = api_hash.trim();
+            (!api_hash.is_empty()).then_some((api_id, api_hash))
+        });
+    match embedded {
+        Some((api_id, api_hash)) => Some(alloy_telegram::TelegramConfig::new(api_id, api_hash)),
+        None => alloy_telegram::TelegramConfig::from_env().ok(),
+    }
+}
+
+/// The Messenger sidecar executable, when this build has one.
+///
+/// [`MESSENGER_SIDECAR_ENV`] wins so a developer can point at a sidecar built elsewhere; otherwise
+/// the sidecar Tauri bundled next to the app is used. A missing sidecar only removes Messenger from
+/// the network list (ADR 0016): Telegram keeps working.
+fn messenger_sidecar() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os(MESSENGER_SIDECAR_ENV) {
+        return Some(PathBuf::from(path));
+    }
+    let path = bundled_sidecar();
+    if path.is_none() {
+        tracing::info!("no Messenger sidecar next to the executable; Messenger is unavailable");
+    }
+    path
+}
+
+/// Desktop bundles ship the sidecar next to the main executable (`externalBin` in `tauri.conf.json`).
+#[cfg(not(target_os = "android"))]
+fn bundled_sidecar() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let path = exe
+        .parent()?
+        .join(format!("alloy-meta{}", std::env::consts::EXE_SUFFIX));
+    path.is_file().then_some(path)
+}
+
+/// Android ships the sidecar as the native library `liballoymeta.so`, because an app may only
+/// execute files from its native library directory. That directory carries an install-specific hash,
+/// so its path is read back from the mapped libraries instead of guessed.
+#[cfg(target_os = "android")]
+fn bundled_sidecar() -> Option<PathBuf> {
+    let maps = std::fs::read_to_string("/proc/self/maps").ok()?;
+    let dir = maps.lines().find_map(|line| {
+        let path = line.split_whitespace().last()?;
+        if path.ends_with("/liballoy_app_lib.so") {
+            std::path::Path::new(path).parent()
+        } else {
+            None
+        }
+    })?;
+    ["liballoymeta.so", "liballoy-meta.so", "alloy-meta"]
+        .into_iter()
+        .map(|name| dir.join(name))
+        .find(|candidate| candidate.is_file())
+}
+
+/// The engine reports protocol errors, which are not `std::error::Error`; setup returns boxed
+/// errors, so give it a message it can print.
+fn engine_error(err: alloy_engine::EngineError) -> std::io::Error {
+    std::io::Error::other(format!("{}: {}", err.code, err.message))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -77,17 +151,40 @@ pub fn run() {
             let data_dir = app
                 .path()
                 .app_data_dir()
-                .unwrap_or_else(|_| std::path::PathBuf::from("./data"));
+                .unwrap_or_else(|_| PathBuf::from("./data"));
 
             // Create data dir if not exists
-            let _ = std::fs::create_dir_all(&data_dir);
+            std::fs::create_dir_all(&data_dir)?;
 
             let secret_store = open_secret_store(&data_dir)?;
-            let ctx = EngineContext::new(data_dir.clone(), secret_store);
+            let factory: Arc<dyn ConnectorFactory> = Arc::new(DefaultConnectorFactory::new(
+                telegram_config(),
+                messenger_sidecar(),
+            ));
+            // The database is opened before the window is shown so the first `ListChats` is served
+            // from the stored projection instead of racing the migrations.
+            let ctx = tauri::async_runtime::block_on(EngineContext::open(
+                data_dir.clone(),
+                secret_store,
+                factory,
+            ))
+            .map_err(engine_error)?;
+
             let temp_voice_path = data_dir.join(save::TEMP_VOICE_DIR);
-            let _ = std::fs::create_dir_all(&temp_voice_path);
-            let _ = ctx.allow_attachment_root(&temp_voice_path);
+            std::fs::create_dir_all(&temp_voice_path)?;
+            if let Err(err) = ctx.allow_attachment_root(&temp_voice_path) {
+                tracing::warn!(error = %err, "cannot allow the voice-clip directory");
+            }
             let engine = Arc::new(AppEngine::new(ctx));
+
+            // Account actors reconnect in the background: each one owns a connector and an outbox
+            // worker, and a dead session only marks that account for a fresh login.
+            let accounts = engine.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(err) = accounts.start().await {
+                    tracing::error!(error = %err.message, "cannot load the connected accounts");
+                }
+            });
 
             app.manage(AppState { engine });
             app.manage(pick::DroppedPaths::default());
