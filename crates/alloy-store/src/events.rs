@@ -38,6 +38,19 @@ impl Store {
         })
         .await
     }
+
+    /// Newest `seq` in the change feed, or 0 before the first event. The engine records it when a
+    /// projection is built so it can replay only what happened afterwards.
+    pub async fn latest_event_seq(&self) -> Result<i64, StoreError> {
+        self.with_conn(|conn| {
+            Ok(
+                conn.query_row("SELECT COALESCE(MAX(seq), 0) FROM event_log", [], |row| {
+                    row.get(0)
+                })?,
+            )
+        })
+        .await
+    }
 }
 
 pub(crate) fn append(

@@ -186,6 +186,17 @@ pub struct ChatFlagsUpdate {
     pub note: Option<Option<String>>,
 }
 
+/// One member of a chat as the network reports them. Identity is `(chat_id, remote_user_id)`;
+/// names, avatars and roles are refreshed by sync, never owned by the user.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ParticipantRecord {
+    pub chat_id: String,
+    pub remote_user_id: String,
+    pub display_name: Option<String>,
+    pub avatar_media_id: Option<String>,
+    pub role: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MessageRecord {
     pub message_id: String,
@@ -227,6 +238,65 @@ pub struct NewMessage {
     pub media_id: Option<String>,
     pub send_state: Option<SendState>,
     pub extra: Option<serde_json::Value>,
+}
+
+/// One attachment known to the database. Identity is `(account_id, remote_ref)`: the same network
+/// file is one row per account, cached once on disk.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MediaRecord {
+    pub media_id: String,
+    pub account_id: String,
+    pub remote_ref: String,
+    pub mime: Option<String>,
+    pub size_bytes: Option<i64>,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
+    pub duration_ms: Option<i64>,
+    pub file_name: Option<String>,
+    pub local_path: Option<String>,
+    pub sha256: Option<String>,
+    pub fetched_at: Option<i64>,
+}
+
+/// Metadata a connector reports for a `MediaRef`. `insert_media` dedupes on
+/// `(account_id, remote_ref)` and refreshes these fields without touching the cache columns.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewMedia {
+    pub account_id: String,
+    pub remote_ref: String,
+    pub mime: Option<String>,
+    pub size_bytes: Option<i64>,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
+    pub duration_ms: Option<i64>,
+    pub file_name: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReactionRecord {
+    pub message_id: String,
+    pub sender_remote_id: String,
+    pub emoji: String,
+    pub reacted_at: i64,
+}
+
+/// How far one participant has read in a chat. The store keeps the newest marker per
+/// `(chat_id, remote_user_id)`, so an out-of-order older update never rewinds it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReadMarkerRecord {
+    pub chat_id: String,
+    pub remote_user_id: String,
+    pub up_to_message_id: String,
+    pub read_at: i64,
+}
+
+/// Which messages a media browser wants: attachments, documents, or text carrying a link.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RoomMediaQuery {
+    Media,
+    Files,
+    Links,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

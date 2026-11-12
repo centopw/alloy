@@ -191,7 +191,7 @@ pub trait Connector: Send + Sync {
     /// Marks the chat read up to and including the given remote message id. Idempotent.
     ///
     /// Connectors must actually report this to the network: suppressing read receipts violates
-    /// Telegram's API terms (ADR 0015) and leaves recipients without acknowledgement.
+    /// Telegram's API terms (ADR 0016) and leaves recipients without acknowledgement.
     async fn mark_read(
         &self,
         remote_chat_id: &str,

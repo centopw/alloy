@@ -110,4 +110,47 @@ impl Store {
         })
         .await
     }
+
+    /// Every unfinished row of one chat, oldest first: what the UI shows next to the messages it
+    /// has not managed to send yet. Completed rows are excluded.
+    pub async fn pending_outbox_for_chat(
+        &self,
+        chat_id: &str,
+    ) -> Result<Vec<OutboxItem>, StoreError> {
+        let chat_id = chat_id.to_owned();
+        self.with_conn(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT * FROM outbox
+                 WHERE chat_id = ?1 AND state <> 'done'
+                 ORDER BY created_at ASC, txn_id ASC",
+            )?;
+            let rows = stmt.query_map([chat_id], rows::outbox)?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+        .await
+    }
+
+    /// Drop a queued operation, used when CancelSend withdraws a message before it was sent. A
+    /// row that is already gone is a success: the caller wanted it removed.
+    pub async fn delete_outbox(&self, txn_id: &str) -> Result<(), StoreError> {
+        let txn_id = txn_id.to_owned();
+        self.with_conn(move |conn| {
+            conn.execute("DELETE FROM outbox WHERE txn_id = ?1", [txn_id])?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Return rows a previous run claimed but never finished to `pending`, so the outbox worker
+    /// retries them after a crash. Returns how many rows moved.
+    pub async fn reset_in_flight_outbox(&self) -> Result<usize, StoreError> {
+        self.with_conn(|conn| {
+            let reset = conn.execute(
+                "UPDATE outbox SET state = ?1 WHERE state = ?2",
+                rusqlite::params![OutboxState::Pending, OutboxState::InFlight],
+            )?;
+            Ok(reset)
+        })
+        .await
+    }
 }

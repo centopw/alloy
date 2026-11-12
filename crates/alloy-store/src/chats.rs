@@ -165,4 +165,143 @@ impl Store {
         })
         .await
     }
+
+    /// Resolve the local chat row for a network chat id within one account.
+    pub async fn find_chat(
+        &self,
+        account_id: &str,
+        remote_chat_id: &str,
+    ) -> Result<Option<ChatRecord>, StoreError> {
+        let account_id = account_id.to_owned();
+        let remote_chat_id = remote_chat_id.to_owned();
+        self.with_conn(move |conn| {
+            Ok(conn
+                .query_row(
+                    "SELECT * FROM chats WHERE account_id = ?1 AND remote_chat_id = ?2",
+                    rusqlite::params![account_id, remote_chat_id],
+                    rows::chat,
+                )
+                .optional()?)
+        })
+        .await
+    }
+
+    /// Refresh the network-owned chat metadata the engine receives from a connector event.
+    /// `None` keeps the stored value; `last_activity_at` only ever moves forward, so an older
+    /// chat-list page cannot rewind a chat.
+    pub async fn update_chat_meta(
+        &self,
+        chat_id: &str,
+        title: Option<String>,
+        avatar_media_id: Option<String>,
+        last_message_id: Option<String>,
+        last_activity_at: Option<i64>,
+    ) -> Result<ChatRecord, StoreError> {
+        let chat_id = chat_id.to_owned();
+        self.with_conn(move |conn| {
+            let tx = conn.transaction()?;
+            let updated = tx.execute(
+                "UPDATE chats SET
+                     title = COALESCE(?2, title),
+                     avatar_media_id = COALESCE(?3, avatar_media_id),
+                     last_message_id = COALESCE(?4, last_message_id),
+                     last_activity_at = CASE
+                         WHEN ?5 IS NULL THEN last_activity_at
+                         WHEN last_activity_at IS NULL OR ?5 > last_activity_at THEN ?5
+                         ELSE last_activity_at
+                     END
+                 WHERE chat_id = ?1",
+                rusqlite::params![
+                    &chat_id,
+                    title,
+                    avatar_media_id,
+                    last_message_id,
+                    last_activity_at
+                ],
+            )?;
+            if updated == 0 {
+                return Err(StoreError::NotFound("chat"));
+            }
+            let record = rows::chat_by_id(&tx, &chat_id)?;
+            events::append(
+                &tx,
+                &record.account_id,
+                Some(record.chat_id.as_str()),
+                "chat.updated",
+                serde_json::to_value(&record)?,
+                now_ms(),
+            )?;
+            tx.commit()?;
+            Ok(record)
+        })
+        .await
+    }
+
+    /// Replace the unread counters with the network's numbers (the network is authoritative for
+    /// them; a mute suppresses the badge in the UI, not the count in the store).
+    pub async fn set_unread(
+        &self,
+        chat_id: &str,
+        unread_count: i64,
+        mention_count: i64,
+    ) -> Result<ChatRecord, StoreError> {
+        let chat_id = chat_id.to_owned();
+        self.with_conn(move |conn| {
+            let tx = conn.transaction()?;
+            let updated = tx.execute(
+                "UPDATE chats SET unread_count = ?2, mention_count = ?3 WHERE chat_id = ?1",
+                rusqlite::params![&chat_id, unread_count, mention_count],
+            )?;
+            if updated == 0 {
+                return Err(StoreError::NotFound("chat"));
+            }
+            let record = rows::chat_by_id(&tx, &chat_id)?;
+            events::append(
+                &tx,
+                &record.account_id,
+                Some(record.chat_id.as_str()),
+                "chat.updated",
+                serde_json::to_value(&record)?,
+                now_ms(),
+            )?;
+            tx.commit()?;
+            Ok(record)
+        })
+        .await
+    }
+
+    /// Add one unread message to a chat that the engine did not otherwise re-sync, and one
+    /// mention when `mention` is set.
+    pub async fn increment_unread(
+        &self,
+        chat_id: &str,
+        mention: bool,
+    ) -> Result<ChatRecord, StoreError> {
+        let chat_id = chat_id.to_owned();
+        self.with_conn(move |conn| {
+            let tx = conn.transaction()?;
+            let updated = tx.execute(
+                "UPDATE chats SET
+                     unread_count = unread_count + 1,
+                     mention_count = mention_count + ?2
+                 WHERE chat_id = ?1",
+                rusqlite::params![&chat_id, mention],
+            )?;
+            if updated == 0 {
+                return Err(StoreError::NotFound("chat"));
+            }
+            let record = rows::chat_by_id(&tx, &chat_id)?;
+            events::append(
+                &tx,
+                &record.account_id,
+                Some(record.chat_id.as_str()),
+                "chat.updated",
+                serde_json::to_value(&record)?,
+                now_ms(),
+            )?;
+            tx.commit()?;
+            Ok(record)
+        })
+        .await
+    }
 }

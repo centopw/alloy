@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::Store;
 use crate::error::StoreError;
 use crate::events;
-use crate::model::{MessageRecord, NewMessage, now_ms};
+use crate::model::{MessageRecord, NewMessage, ReactionRecord, RoomMediaQuery, SendState, now_ms};
 use crate::rows;
 
 impl Store {
@@ -206,7 +206,9 @@ impl Store {
         account_id: Option<String>,
         limit: u32,
     ) -> Result<Vec<MessageRecord>, StoreError> {
-        let query = query.to_owned();
+        let Some(match_query) = fts_query(query) else {
+            return Ok(Vec::new());
+        };
         self.with_conn(move |conn| {
             let mut stmt = conn.prepare(
                 "SELECT m.*
@@ -217,8 +219,258 @@ impl Store {
                  ORDER BY m.sent_at DESC, m.message_id DESC
                  LIMIT ?3",
             )?;
-            let rows =
-                stmt.query_map(rusqlite::params![query, account_id, limit], rows::message)?;
+            let rows = stmt.query_map(
+                rusqlite::params![match_query, account_id, limit],
+                rows::message,
+            )?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+        .await
+    }
+
+    /// FTS5 `MATCH` limited to one chat. Same safe query construction as [`Self::search_messages`].
+    pub async fn search_messages_in_chat(
+        &self,
+        chat_id: &str,
+        query: &str,
+        limit: u32,
+    ) -> Result<Vec<MessageRecord>, StoreError> {
+        let Some(match_query) = fts_query(query) else {
+            return Ok(Vec::new());
+        };
+        let chat_id = chat_id.to_owned();
+        self.with_conn(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT m.*
+                 FROM messages_fts
+                 JOIN messages m ON m.seq = messages_fts.rowid
+                 WHERE messages_fts MATCH ?1 AND m.chat_id = ?2
+                 ORDER BY m.sent_at DESC, m.message_id DESC
+                 LIMIT ?3",
+            )?;
+            let rows = stmt.query_map(
+                rusqlite::params![match_query, chat_id, limit],
+                rows::message,
+            )?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+        .await
+    }
+
+    pub async fn get_message(&self, message_id: &str) -> Result<Option<MessageRecord>, StoreError> {
+        let message_id = message_id.to_owned();
+        self.with_conn(move |conn| {
+            Ok(conn
+                .query_row(
+                    "SELECT * FROM messages WHERE message_id = ?1",
+                    [message_id],
+                    rows::message,
+                )
+                .optional()?)
+        })
+        .await
+    }
+
+    pub async fn find_message_by_remote(
+        &self,
+        chat_id: &str,
+        remote_msg_id: &str,
+    ) -> Result<Option<MessageRecord>, StoreError> {
+        let chat_id = chat_id.to_owned();
+        let remote_msg_id = remote_msg_id.to_owned();
+        self.with_conn(move |conn| {
+            Ok(conn
+                .query_row(
+                    "SELECT * FROM messages WHERE chat_id = ?1 AND remote_msg_id = ?2",
+                    rusqlite::params![chat_id, remote_msg_id],
+                    rows::message,
+                )
+                .optional()?)
+        })
+        .await
+    }
+
+    pub async fn find_message_by_txn(
+        &self,
+        txn_id: &str,
+    ) -> Result<Option<MessageRecord>, StoreError> {
+        let txn_id = txn_id.to_owned();
+        self.with_conn(move |conn| {
+            Ok(conn
+                .query_row(
+                    "SELECT * FROM messages WHERE txn_id = ?1",
+                    [txn_id],
+                    rows::message,
+                )
+                .optional()?)
+        })
+        .await
+    }
+
+    /// Move a message along the send pipeline, optionally attaching the remote id and the
+    /// network's timestamp from the send ack. Absent values keep the stored ones.
+    pub async fn set_send_state(
+        &self,
+        message_id: &str,
+        state: SendState,
+        remote_msg_id: Option<String>,
+        sent_at: Option<i64>,
+    ) -> Result<(), StoreError> {
+        let message_id = message_id.to_owned();
+        self.with_conn(move |conn| {
+            let tx = conn.transaction()?;
+            let updated = tx.execute(
+                "UPDATE messages SET
+                     send_state = ?2,
+                     remote_msg_id = COALESCE(?3, remote_msg_id),
+                     sent_at = COALESCE(?4, sent_at)
+                 WHERE message_id = ?1",
+                rusqlite::params![&message_id, state, remote_msg_id, sent_at],
+            )?;
+            if updated == 0 {
+                return Err(StoreError::NotFound("message"));
+            }
+            let record = rows::message_by_id(&tx, &message_id)?;
+            let account_id = rows::account_for_chat(&tx, &record.chat_id)?;
+            events::append(
+                &tx,
+                &account_id,
+                Some(record.chat_id.as_str()),
+                "message.updated",
+                serde_json::to_value(&record)?,
+                now_ms(),
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Replace the editable body of a message. `None` clears the text of a message that lost it
+    /// (for example an edited media-only message); the FTS index follows through its trigger.
+    pub async fn edit_message_body(
+        &self,
+        message_id: &str,
+        body: Option<String>,
+        formatted: Option<String>,
+        edited_at: i64,
+    ) -> Result<(), StoreError> {
+        let message_id = message_id.to_owned();
+        self.with_conn(move |conn| {
+            let tx = conn.transaction()?;
+            let updated = tx.execute(
+                "UPDATE messages SET body = ?2, formatted = ?3, edited_at = ?4
+                 WHERE message_id = ?1",
+                rusqlite::params![&message_id, body, formatted, edited_at],
+            )?;
+            if updated == 0 {
+                return Err(StoreError::NotFound("message"));
+            }
+            let record = rows::message_by_id(&tx, &message_id)?;
+            let account_id = rows::account_for_chat(&tx, &record.chat_id)?;
+            events::append(
+                &tx,
+                &account_id,
+                Some(record.chat_id.as_str()),
+                "message.updated",
+                serde_json::to_value(&record)?,
+                now_ms(),
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Hard delete a message that never reached the network (CancelSend). Reactions go with it
+    /// through the foreign key; the row is gone rather than tombstoned, so nothing can resolve it
+    /// by `message_id`, `txn_id` or `remote_msg_id` afterwards.
+    pub async fn delete_local_message(&self, message_id: &str) -> Result<(), StoreError> {
+        let message_id = message_id.to_owned();
+        self.with_conn(move |conn| {
+            let tx = conn.transaction()?;
+            let record = rows::message_by_id(&tx, &message_id)?;
+            let account_id = rows::account_for_chat(&tx, &record.chat_id)?;
+            tx.execute(
+                "DELETE FROM messages WHERE message_id = ?1",
+                rusqlite::params![&message_id],
+            )?;
+            let payload = serde_json::json!({
+                "message_id": &record.message_id,
+                "chat_id": &record.chat_id,
+            });
+            events::append(
+                &tx,
+                &account_id,
+                Some(record.chat_id.as_str()),
+                "message.removed",
+                payload,
+                now_ms(),
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Every reaction on the given messages, oldest first. The engine asks for a page's worth of
+    /// ids at once instead of one query per message.
+    pub async fn list_reactions(
+        &self,
+        message_ids: &[String],
+    ) -> Result<Vec<ReactionRecord>, StoreError> {
+        if message_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let message_ids = message_ids.to_vec();
+        self.with_conn(move |conn| {
+            let placeholders = vec!["?"; message_ids.len()].join(", ");
+            let mut stmt = conn.prepare(&format!(
+                "SELECT message_id, sender_remote_id, emoji, reacted_at
+                 FROM reactions
+                 WHERE message_id IN ({placeholders})
+                 ORDER BY reacted_at ASC, sender_remote_id ASC, emoji ASC"
+            ))?;
+            let rows = stmt.query_map(rusqlite::params_from_iter(message_ids), rows::reaction)?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+        .await
+    }
+
+    /// One page of media, files or links from a chat, newest first. `before` is the
+    /// `(sent_at, message_id)` cursor of the last row of the previous page, exactly as
+    /// [`Self::page_messages`]; deleted messages never appear.
+    pub async fn room_media(
+        &self,
+        chat_id: &str,
+        kind: RoomMediaQuery,
+        before: Option<(i64, String)>,
+        limit: u32,
+    ) -> Result<Vec<MessageRecord>, StoreError> {
+        let chat_id = chat_id.to_owned();
+        let before_sent_at = before.as_ref().map(|(sent_at, _)| *sent_at);
+        let before_id = before.as_ref().map(|(_, message_id)| message_id.clone());
+        let filter = match kind {
+            RoomMediaQuery::Media => "kind IN ('image', 'video')",
+            RoomMediaQuery::Files => "kind IN ('file', 'audio', 'voice')",
+            RoomMediaQuery::Links => "(body LIKE '%http://%' OR body LIKE '%https://%')",
+        };
+        self.with_conn(move |conn| {
+            let mut stmt = conn.prepare(&format!(
+                "SELECT * FROM messages
+                 WHERE chat_id = ?1
+                   AND deleted_at IS NULL
+                   AND {filter}
+                   AND (?2 IS NULL
+                        OR sent_at < ?2
+                        OR (sent_at = ?2 AND message_id < ?3))
+                 ORDER BY sent_at DESC, message_id DESC
+                 LIMIT ?4"
+            ))?;
+            let rows = stmt.query_map(
+                rusqlite::params![chat_id, before_sent_at, before_id, limit],
+                rows::message,
+            )?;
             Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
         })
         .await
@@ -357,4 +609,21 @@ fn message_chat(conn: &rusqlite::Connection, message_id: &str) -> Result<String,
     )
     .optional()?
     .ok_or(StoreError::NotFound("message"))
+}
+
+/// Turn free text into an FTS5 query that cannot be a syntax error.
+///
+/// Every whitespace-separated term is wrapped in double quotes with embedded quotes doubled, so
+/// `"`, `*`, `(`, `-`, `OR`, `NEAR` and friends only ever match literally instead of being parsed
+/// as FTS5 operators. Terms are ANDed by FTS5 itself. An all-whitespace query yields `None`
+/// because it has no term to match.
+fn fts_query(raw: &str) -> Option<String> {
+    let terms = raw
+        .split_whitespace()
+        .map(|term| format!("\"{}\"", term.replace('"', "\"\"")))
+        .collect::<Vec<_>>();
+    if terms.is_empty() {
+        return None;
+    }
+    Some(terms.join(" "))
 }

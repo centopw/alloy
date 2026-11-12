@@ -1,6 +1,6 @@
 //! Local SQLite store for Alloy accounts, chats, messages and the outbound queue.
 //!
-//! The store owns all persistence and is backend-neutral in spirit: schema v1 keeps every column
+//! The store owns all persistence and is backend-neutral in spirit: the schema keeps every column
 //! to INTEGER/TEXT/BLOB so the same tables can later live on Postgres behind `alloy-gateway`.
 //!
 //! A single writer connection lives behind a `std::sync::Mutex`; async methods move the blocking
@@ -16,10 +16,13 @@ mod chats;
 mod crypto;
 mod error;
 mod events;
+mod media;
 mod messages;
 mod migrate;
 mod model;
 mod outbox;
+mod participants;
+mod read_markers;
 mod rows;
 
 use std::path::Path;
@@ -31,8 +34,9 @@ pub use error::StoreError;
 pub use migrate::{CURRENT_SCHEMA_VERSION, migrate};
 pub use model::{
     AccountRecord, AccountState, ChatFlagsUpdate, ChatKind, ChatRecord, ChatUpsert, EventRecord,
-    MessageKind, MessageRecord, Network, NewAccount, NewEvent, NewMessage, NewOutboxItem,
-    OutboxItem, OutboxOp, OutboxState, SendState,
+    MediaRecord, MessageKind, MessageRecord, Network, NewAccount, NewEvent, NewMedia, NewMessage,
+    NewOutboxItem, OutboxItem, OutboxOp, OutboxState, ParticipantRecord, ReactionRecord,
+    ReadMarkerRecord, RoomMediaQuery, SendState,
 };
 
 /// Shared handle to the local database.

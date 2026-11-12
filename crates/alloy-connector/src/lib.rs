@@ -1,7 +1,7 @@
 //! The serializable connector contract.
 //!
 //! Alloy connects a user's personal Telegram and Messenger accounts directly from the device
-//! (ADR 0015). A **connector** implements one network behind [`Connector`]; the engine owns one
+//! (ADR 0016). A **connector** implements one network behind [`Connector`]; the engine owns one
 //! actor per account, an outbox, and the local store. This crate is the seam: it contains no
 //! network code, no database code and no engine code, so the same contract can be driven
 //! in-process, across a sidecar process, or by the optional M6 gateway.

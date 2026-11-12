@@ -11,7 +11,7 @@ use crate::error::StoreError;
 use crate::model::now_ms;
 
 /// Highest schema version this binary knows how to produce.
-pub const CURRENT_SCHEMA_VERSION: u32 = 1;
+pub const CURRENT_SCHEMA_VERSION: u32 = 2;
 
 struct Migration {
     version: u32,
@@ -27,11 +27,18 @@ impl Migration {
 }
 
 /// Ordered, append-only. Add new migrations at the end; never edit a released file.
-static MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    name: "0001_init",
-    sql: include_str!("../migrations/0001_init.sql"),
-}];
+static MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "0001_init",
+        sql: include_str!("../migrations/0001_init.sql"),
+    },
+    Migration {
+        version: 2,
+        name: "0002_engine",
+        sql: include_str!("../migrations/0002_engine.sql"),
+    },
+];
 
 /// Apply the PRAGMAs every connection needs. Call before any schema access.
 pub(crate) fn configure(conn: &Connection) -> Result<(), StoreError> {

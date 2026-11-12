@@ -1,7 +1,7 @@
 # 10 — Connector Protocol (M0 contract)
 
 Status: implemented by `crates/alloy-connector` (issue #128, epic #125). Decision record:
-[ADR 0015](../decisions/0015-on-device-connectors.md).
+[ADR 0016](../decisions/0016-on-device-connectors.md).
 
 This document specifies the contract between Alloy's engine and a **connector**: the component
 that talks to one network (Telegram, Messenger, or the test fake) on behalf of one personal

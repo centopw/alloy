@@ -4,7 +4,10 @@ use rusqlite::{Connection, Error, OptionalExtension, Row, types::Type};
 use serde_json::Value;
 
 use crate::error::StoreError;
-use crate::model::{AccountRecord, ChatRecord, EventRecord, MessageRecord, OutboxItem};
+use crate::model::{
+    AccountRecord, ChatRecord, EventRecord, MediaRecord, MessageRecord, OutboxItem,
+    ParticipantRecord, ReactionRecord, ReadMarkerRecord,
+};
 
 fn text_error(err: serde_json::Error) -> Error {
     Error::FromSqlConversionFailure(0, Type::Text, Box::new(err))
@@ -104,6 +107,51 @@ pub(crate) fn event(row: &Row<'_>) -> rusqlite::Result<EventRecord> {
         kind: row.get("kind")?,
         payload: serde_json::from_str(&payload).map_err(text_error)?,
         created_at: row.get("created_at")?,
+    })
+}
+
+pub(crate) fn participant(row: &Row<'_>) -> rusqlite::Result<ParticipantRecord> {
+    Ok(ParticipantRecord {
+        chat_id: row.get("chat_id")?,
+        remote_user_id: row.get("remote_user_id")?,
+        display_name: row.get("display_name")?,
+        avatar_media_id: row.get("avatar_media_id")?,
+        role: row.get("role")?,
+    })
+}
+
+pub(crate) fn media(row: &Row<'_>) -> rusqlite::Result<MediaRecord> {
+    Ok(MediaRecord {
+        media_id: row.get("media_id")?,
+        account_id: row.get("account_id")?,
+        remote_ref: row.get("remote_ref")?,
+        mime: row.get("mime")?,
+        size_bytes: row.get("size_bytes")?,
+        width: row.get("width")?,
+        height: row.get("height")?,
+        duration_ms: row.get("duration_ms")?,
+        file_name: row.get("file_name")?,
+        local_path: row.get("local_path")?,
+        sha256: row.get("sha256")?,
+        fetched_at: row.get("fetched_at")?,
+    })
+}
+
+pub(crate) fn reaction(row: &Row<'_>) -> rusqlite::Result<ReactionRecord> {
+    Ok(ReactionRecord {
+        message_id: row.get("message_id")?,
+        sender_remote_id: row.get("sender_remote_id")?,
+        emoji: row.get("emoji")?,
+        reacted_at: row.get("reacted_at")?,
+    })
+}
+
+pub(crate) fn read_marker(row: &Row<'_>) -> rusqlite::Result<ReadMarkerRecord> {
+    Ok(ReadMarkerRecord {
+        chat_id: row.get("chat_id")?,
+        remote_user_id: row.get("remote_user_id")?,
+        up_to_message_id: row.get("up_to_message_id")?,
+        read_at: row.get("read_at")?,
     })
 }
 
