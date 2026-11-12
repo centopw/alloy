@@ -398,18 +398,44 @@ func failureNotSupported() LoginFailure { return LoginFailure{Type: "not_support
 
 // LoginStep mirrors alloy_connector::LoginStep. Only the fields of the active variant are
 // emitted; every variant carries its own tag.
+//
+// Password steps carry no hint and code steps carry no length: this network never tells us either
+// value, and the contract's Option fields decode a missing key as None.
 type LoginStep struct {
-	Type         string        `json:"type"`
-	Fields       []CookieField `json:"fields,omitempty"`
-	HelpURL      *string       `json:"help_url,omitempty"`
-	RemoteUserID string        `json:"remote_user_id,omitempty"`
-	DisplayName  string        `json:"display_name,omitempty"`
-	Session      string        `json:"session,omitempty"`
-	Reason       *LoginFailure `json:"reason,omitempty"`
+	Type          string        `json:"type"`
+	Fields        []CookieField `json:"fields,omitempty"`
+	HelpURL       *string       `json:"help_url,omitempty"`
+	Via           string        `json:"via,omitempty"`
+	UsernameLabel string        `json:"username_label,omitempty"`
+	Alternatives  []string      `json:"alternatives,omitempty"`
+	RemoteUserID  string        `json:"remote_user_id,omitempty"`
+	DisplayName   string        `json:"display_name,omitempty"`
+	Session       string        `json:"session,omitempty"`
+	Reason        *LoginFailure `json:"reason,omitempty"`
 }
 
 func cookiesStep(fields []CookieField, helpURL string) LoginStep {
 	return LoginStep{Type: "cookies", Fields: fields, HelpURL: &helpURL}
+}
+
+// credentialsStep asks for the Facebook account's email/phone and password. Cookie import stays one
+// click away as the fallback for accounts the Lite flow refuses.
+func credentialsStep() LoginStep {
+	return LoginStep{
+		Type:          "credentials",
+		UsernameLabel: liteUsernameLabel,
+		Alternatives:  []string{"cookies"},
+	}
+}
+
+// codeStep asks for a one-time code. via is the CodeChannel wire value.
+func codeStep(via string) LoginStep {
+	return LoginStep{Type: "code", Via: via}
+}
+
+// passwordStep asks for the account password on its own (the flow re-prompts after a rejection).
+func passwordStep() LoginStep {
+	return LoginStep{Type: "password"}
 }
 
 func doneStep(remoteUserID, displayName, session string) LoginStep {
@@ -432,6 +458,7 @@ type LoginInput struct {
 	Code     string            `json:"code,omitempty"`
 	Password string            `json:"password,omitempty"`
 	Username string            `json:"username,omitempty"`
+	To       string            `json:"to,omitempty"`
 	Values   map[string]string `json:"values,omitempty"`
 }
 

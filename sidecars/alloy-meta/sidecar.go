@@ -71,6 +71,7 @@ type Messenger struct {
 
 	mu         sync.Mutex
 	cookies    *cookies.Cookies
+	native     *types.NativeSession
 	cli        *messagix.Client
 	initial    *table.LSTable
 	remoteUser string
@@ -87,6 +88,7 @@ type Messenger struct {
 	txns             map[string]string
 
 	pendingLogin bool
+	lite         *liteLogin
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -178,6 +180,7 @@ func (m *Messenger) ensureClientLocked() *WireError {
 	}
 	if m.cli == nil {
 		m.cli = messagix.NewClient(m.cookies, m.logger(), &messagix.Config{})
+		m.cli.MessengerLite.SetNativeSession(m.native)
 	}
 	return nil
 }
@@ -213,14 +216,16 @@ func (m *Messenger) restore(ctx context.Context, params json.RawMessage) (any, *
 	if err != nil {
 		return nil, errUnauthorized()
 	}
-	c, err := cookiesFromSession(data)
+	c, native, err := cookiesFromSession(data)
 	if err != nil {
 		return nil, errUnauthorized()
 	}
 
 	m.mu.Lock()
 	m.cookies = c
+	m.native = native
 	m.cli = messagix.NewClient(c, m.logger(), &messagix.Config{})
+	m.cli.MessengerLite.SetNativeSession(native)
 	m.loggedOut = false
 	m.mu.Unlock()
 
@@ -228,6 +233,7 @@ func (m *Messenger) restore(ctx context.Context, params json.RawMessage) (any, *
 		m.mu.Lock()
 		m.cli = nil
 		m.cookies = nil
+		m.native = nil
 		m.mu.Unlock()
 		return nil, werr
 	}
@@ -338,7 +344,7 @@ func (m *Messenger) sessionRotationLoop(ctx context.Context) {
 	var last string
 	m.mu.Lock()
 	if m.cookies != nil {
-		last, _ = encodeSession("messenger", m.cookies)
+		last, _ = encodeSession(m.cookies, m.native)
 	}
 	m.mu.Unlock()
 	for {
@@ -349,11 +355,12 @@ func (m *Messenger) sessionRotationLoop(ctx context.Context) {
 		}
 		m.mu.Lock()
 		c := m.cookies
+		native := m.native
 		m.mu.Unlock()
 		if c == nil {
 			continue
 		}
-		current, err := encodeSession("messenger", c)
+		current, err := encodeSession(c, native)
 		if err != nil || current == last {
 			continue
 		}
@@ -414,7 +421,10 @@ func (m *Messenger) logout(ctx context.Context) {
 	m.mu.Lock()
 	user := m.remoteUser
 	m.cookies = nil
+	m.native = nil
 	m.cli = nil
+	m.lite = nil
+	m.pendingLogin = false
 	m.loggedOut = true
 	m.messages = make(map[string]*msgMeta)
 	m.threads = make(map[int64]*threadInfo)

@@ -3,6 +3,7 @@ module github.com/centopw/alloy/sidecars/alloy-meta
 go 1.26.0
 
 require (
+	github.com/google/uuid v1.6.0
 	github.com/rs/zerolog v1.35.1
 	go.mau.fi/mautrix-meta v0.2610.0
 	go.mau.fi/util v0.11.0
@@ -25,7 +26,6 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/elliotchance/orderedmap/v3 v3.1.0 // indirect
 	github.com/google/go-querystring v1.2.0 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/gtank/ristretto255 v0.2.0 // indirect
 	github.com/icholy/digest v1.2.0 // indirect
 	github.com/imroc/req/v3 v3.56.0 // indirect

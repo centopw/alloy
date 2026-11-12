@@ -2,8 +2,18 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"io"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
+	"github.com/rs/zerolog"
+
+	"go.mau.fi/mautrix-meta/pkg/messagix/cookies"
+	"go.mau.fi/mautrix-meta/pkg/messagix/types"
 )
 
 // encodeFrame renders one frame the way the sidecar writes it, without the trailing newline.
@@ -95,6 +105,77 @@ func TestDoneLoginStep(t *testing.T) {
 	}
 }
 
+// TestCredentialsLoginStep pins the first step of the credentials flow and the cookie fallback it
+// advertises.
+func TestCredentialsLoginStep(t *testing.T) {
+	got := encodeFrame(t, credentialsStep())
+	want := `{"type":"credentials","username_label":"Email or phone number","alternatives":["cookies"]}`
+	if got != want {
+		t.Fatalf("credentials step mismatch\n got: %s\nwant: %s", got, want)
+	}
+}
+
+func TestCodeLoginStep(t *testing.T) {
+	got := encodeFrame(t, codeStep("email"))
+	// length is Option<u8> in the contract; a missing key decodes as None.
+	want := `{"type":"code","via":"email"}`
+	if got != want {
+		t.Fatalf("code step mismatch\n got: %s\nwant: %s", got, want)
+	}
+}
+
+func TestPasswordLoginStep(t *testing.T) {
+	got := encodeFrame(t, passwordStep())
+	want := `{"type":"password"}`
+	if got != want {
+		t.Fatalf("password step mismatch\n got: %s\nwant: %s", got, want)
+	}
+}
+
+// TestSwitchToCookies drives the login switch the UI sends when the user picks the cookie fallback.
+func TestSwitchToCookies(t *testing.T) {
+	m := newMessenger(zerolog.Nop(), newWriter(io.Discard))
+	if step := m.beginLogin(); step.Type != "credentials" {
+		t.Fatalf("begin_login returned %q, want credentials", step.Type)
+	}
+	result, werr := m.submitLogin(context.Background(), json.RawMessage(`{"input":{"type":"switch","to":"cookies"}}`))
+	if werr != nil {
+		t.Fatalf("switch failed: %v", werr)
+	}
+	step, ok := result.(LoginStep)
+	if !ok || step.Type != "cookies" {
+		t.Fatalf("switch returned %#v, want the cookies step", result)
+	}
+	if step.HelpURL == nil || *step.HelpURL != cookieLoginHelpURL {
+		t.Fatalf("cookies step lost its help url: %#v", step)
+	}
+	m.mu.Lock()
+	pending := m.pendingLogin
+	m.mu.Unlock()
+	if !pending {
+		t.Fatal("switching to cookies must keep the attempt open")
+	}
+}
+
+func TestSwitchToUnknownAlternativeFails(t *testing.T) {
+	m := newMessenger(zerolog.Nop(), newWriter(io.Discard))
+	m.beginLogin()
+	result, _ := m.submitLogin(context.Background(), json.RawMessage(`{"input":{"type":"switch","to":"qr"}}`))
+	step, ok := result.(LoginStep)
+	if !ok || step.Type != "failed" || step.Reason == nil || step.Reason.Type != "not_supported" {
+		t.Fatalf("unknown alternative returned %#v, want failed/not_supported", result)
+	}
+}
+
+func TestLoginRequiresBegin(t *testing.T) {
+	m := newMessenger(zerolog.Nop(), newWriter(io.Discard))
+	result, _ := m.submitLogin(context.Background(), json.RawMessage(`{"input":{"type":"code","code":"1"}}`))
+	step, ok := result.(LoginStep)
+	if !ok || step.Type != "failed" || step.Reason == nil || step.Reason.Type != "invalid_input" {
+		t.Fatalf("submit without begin_login returned %#v, want failed/invalid_input", result)
+	}
+}
+
 func TestCookiesLoginStep(t *testing.T) {
 	got := encodeFrame(t, cookiesStep(cookieFields(), cookieLoginHelpURL))
 	if !strings.HasPrefix(got, `{"type":"cookies","fields":[`) {
@@ -156,7 +237,7 @@ func TestSessionRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build cookies: %v", err)
 	}
-	blob, err := encodeSession("messenger", c)
+	blob, err := encodeSession(c, nil)
 	if err != nil {
 		t.Fatalf("encode session: %v", err)
 	}
@@ -167,7 +248,65 @@ func TestSessionRoundTrip(t *testing.T) {
 	if decoded.Cookies["xs"] != "token" || decoded.Platform != "messenger" {
 		t.Fatalf("session round trip lost fields: %+v", decoded)
 	}
+	if decoded.Native != nil {
+		t.Fatalf("cookie login must not store a native session: %+v", decoded.Native)
+	}
 	if _, err := decodeSession("not base64!"); err == nil {
 		t.Fatal("expected an error for a malformed blob")
+	}
+}
+
+// TestSessionRoundTripNative covers the version 2 payload the Messenger Lite flow writes.
+func TestSessionRoundTripNative(t *testing.T) {
+	c := &cookies.Cookies{Platform: types.MessengerLiteAndroid}
+	c.UpdateValues(map[cookies.MetaCookieName]string{
+		cookies.FBCookieXS:     "token",
+		cookies.FBCookieCUser:  "100012345",
+		cookies.MetaCookieDatr: "datr-value",
+	})
+	native := &types.NativeSession{AccessToken: "access", AppID: "app", DeviceID: uuid.MustParse("11111111-1111-1111-1111-111111111111")}
+	blob, err := encodeSession(c, native)
+	if err != nil {
+		t.Fatalf("encode session: %v", err)
+	}
+	decoded, err := decodeSession(blob)
+	if err != nil {
+		t.Fatalf("decode session: %v", err)
+	}
+	if decoded.V != 2 || decoded.Platform != "messenger-lite-android" {
+		t.Fatalf("native session envelope lost fields: %+v", decoded)
+	}
+	restored, restoredNative, err := cookiesFromSession(decoded)
+	if err != nil {
+		t.Fatalf("cookies from session: %v", err)
+	}
+	if restored.Platform != types.MessengerLiteAndroid {
+		t.Fatalf("restored platform = %v, want messenger lite android", restored.Platform)
+	}
+	if restoredNative == nil || restoredNative.AccessToken != "access" || restoredNative.DeviceID.String() != "11111111-1111-1111-1111-111111111111" {
+		t.Fatalf("restored native session = %+v", restoredNative)
+	}
+}
+
+// TestSessionVersion1StillRestores keeps blobs written before the native session existed usable.
+func TestSessionVersion1StillRestores(t *testing.T) {
+	blob := base64.StdEncoding.EncodeToString([]byte(
+		`{"v":1,"platform":"messenger","cookies":{"xs":"token","c_user":"100012345","datr":"d"}}`,
+	))
+	data, err := decodeSession(blob)
+	if err != nil {
+		t.Fatalf("decode version 1 session: %v", err)
+	}
+	if data.Platform != "messenger" || data.Native != nil {
+		t.Fatalf("version 1 session decoded wrong: %+v", data)
+	}
+}
+
+func TestSessionRejectsForeignPlatform(t *testing.T) {
+	blob := base64.StdEncoding.EncodeToString([]byte(
+		`{"v":2,"platform":"instagram","cookies":{"xs":"token","c_user":"1","datr":"d"}}`,
+	))
+	if _, err := decodeSession(blob); err == nil {
+		t.Fatal("expected an error for a foreign platform")
 	}
 }
