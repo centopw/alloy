@@ -157,6 +157,11 @@ impl EngineContext {
         self.data_dir.join("accounts")
     }
 
+    /// File holding the non-secret network settings the factory launches connectors with.
+    pub fn network_settings_path(&self) -> PathBuf {
+        crate::factory::network_settings_path(&self.data_dir)
+    }
+
     /// Deletes account directories that no stored account owns.
     async fn remove_orphan_account_dirs(&self) {
         let Ok(accounts) = self.store.list_accounts().await else {

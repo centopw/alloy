@@ -143,6 +143,7 @@ pub fn run() {
             let factory: Arc<dyn ConnectorFactory> = Arc::new(DefaultConnectorFactory::new(
                 secret_store.clone(),
                 messenger_sidecar(),
+                data_dir.clone(),
             ));
             // The database is opened before the window is shown so the first `ListChats` is served
             // from the stored projection instead of racing the migrations.

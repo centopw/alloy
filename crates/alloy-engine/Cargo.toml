@@ -45,3 +45,8 @@ required-features = ["testing"]
 name = "accounts_config"
 path = "tests/accounts_config.rs"
 required-features = ["testing"]
+
+[[test]]
+name = "network_settings"
+path = "tests/network_settings.rs"
+required-features = ["testing"]

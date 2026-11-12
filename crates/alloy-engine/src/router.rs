@@ -32,7 +32,9 @@ impl CommandGroup {
             | EngineCommand::Logout { .. }
             | EngineCommand::SetTelegramApp { .. }
             | EngineCommand::ClearTelegramApp
-            | EngineCommand::GetTelegramApp => CommandGroup::Accounts,
+            | EngineCommand::GetTelegramApp
+            | EngineCommand::SetNetworkSetting { .. }
+            | EngineCommand::ClearNetworkSetting { .. } => CommandGroup::Accounts,
 
             EngineCommand::SubscribeRoomList { .. }
             | EngineCommand::Unsubscribe { .. }

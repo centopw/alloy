@@ -87,6 +87,28 @@ version.
   `ready: false` plus a setup block naming the two fields and the registration URL; `BeginLogin`
   then fails with an actionable `not_supported`. `just telegram-app` prints this recipe.
 
+### Network settings
+
+Every network-specific knob is a runtime setting, never a build input. No endpoint, proxy,
+platform selector or default value is compiled into the engine or the UI: a network declares what
+it accepts in `crates/alloy-engine/src/factory.rs` (`network_setting_specs`), `ListNetworks`
+reports that declaration with the value in effect, and `SetNetworkSetting` /
+`ClearNetworkSetting` change it. Messenger's `proxy` and `platform` are the first non-Telegram
+examples.
+
+- **Adding a knob** means adding a `NetworkSettingSpec`: no protocol change, no new command, no
+  caller to update. Adding a network means adding its declaration; a setting the declaration does
+  not list is refused by the engine.
+- **Storage:** non-secret values live in `<data_dir>/network_settings.json`, written atomically
+  (temporary file, fsync, rename). A `secret` setting is sealed in the OS keyring and never
+  written to that file or returned by `ListNetworks`.
+- **Delivery:** the value in effect is read when the next connector is created, so a Messenger
+  sidecar is launched with `ALLOY_META_PROXY` (omitted when unset) and `ALLOY_META_PLATFORM`. A
+  running account keeps the settings it started with; changing one does not restart it.
+- **Never** hard-code a network's endpoint, proxy, credential or client platform in Rust, the UI or
+  a build script. If a value belongs to the network rather than to the person, it is still a
+  declaration with a default, not a literal in a call site.
+
 ---
 
 ## Git & PR Conventions

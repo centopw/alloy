@@ -75,26 +75,40 @@ pub struct NetworkInfoDto {
     pub network: Network,
     /// `BeginLogin` can start now; `false` means `setup` explains what is missing.
     pub ready: bool,
-    /// The values the user must provide first; `None` once the network is ready.
+    /// The setup block: credentials still missing, and the network's runtime settings.
+    ///
+    /// Changing a setting never changes `ready`, and it applies to the next connector the engine
+    /// creates; a running account keeps the settings it was started with. `None` only when the
+    /// network needs no input and declares no settings.
     pub setup: Option<NetworkSetupDto>,
 }
 
-/// What the user has to enter before a network becomes usable.
+/// What a network asks the user for: credentials it cannot work without, and the knobs it lets
+/// the person change at runtime.
+///
+/// The two are deliberately separate. A credential identifies the application and never carries a
+/// value on the wire; a setting is a choice that is read back, and each declared setting is the
+/// complete list of what `SetNetworkSetting` accepts for that key.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct NetworkSetupDto {
     pub kind: NetworkSetupKind,
-    /// Page where the user registers the values, opened in a browser.
+    /// Page where the user registers the credentials, opened in a browser. Empty when the network
+    /// registers nothing there.
     pub app_url: String,
-    /// Inputs to collect, in display order.
-    pub fields: Vec<NetworkSetupFieldDto>,
+    /// Credentials to collect, in display order. Never carries a value: the wire type has none.
+    pub credentials: Vec<NetworkSetupFieldDto>,
+    /// Runtime settings, in display order, with the value in effect.
+    pub settings: Vec<NetworkSettingDto>,
 }
 
-/// Which setup a [`NetworkSetupDto`] asks for.
+/// Which setup a [`NetworkSetupDto`] describes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum NetworkSetupKind {
     /// The application `api_id`/`api_hash` pair from <https://my.telegram.org/apps>.
     TelegramApp,
+    /// Messenger's own runtime settings; it asks for no credential here.
+    Messenger,
 }
 
 /// One input a [`NetworkSetupDto`] collects.
@@ -106,6 +120,46 @@ pub struct NetworkSetupFieldDto {
     pub label: String,
     /// The value is a credential: mask it while typing and never echo it back.
     pub secret: bool,
+}
+
+/// One runtime knob of a network, with the value in effect.
+///
+/// `SetNetworkSetting` accepts only the keys the network declares, and an empty value clears the
+/// stored one so the default (if any) applies again.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct NetworkSettingDto {
+    /// Key `SetNetworkSetting` and `ClearNetworkSetting` expect, e.g. `"proxy"`.
+    pub key: String,
+    /// Human-readable label.
+    pub label: String,
+    /// How the value is edited and validated.
+    pub kind: NetworkSettingKind,
+    /// Allowed values for [`NetworkSettingKind::Choice`]; empty for the other kinds.
+    pub options: Vec<NetworkSettingOptionDto>,
+    /// The value in effect: the stored one, else the declared default, else `None`. A
+    /// [`NetworkSettingKind::Secret`] setting never carries its value.
+    pub value: Option<String>,
+}
+
+/// One allowed value of a [`NetworkSettingKind::Choice`] setting.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct NetworkSettingOptionDto {
+    /// Value `SetNetworkSetting` stores.
+    pub value: String,
+    /// Human-readable label.
+    pub label: String,
+}
+
+/// How a [`NetworkSettingDto`] is edited and stored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum NetworkSettingKind {
+    /// Free text, persisted in the engine's settings file.
+    Text,
+    /// Free text sealed in the OS keyring; never returned and never written in the clear.
+    Secret,
+    /// Exactly one of the declared options.
+    Choice,
 }
 
 /// Where the Telegram application pair in effect came from.
@@ -769,6 +823,22 @@ pub enum EngineCommand {
     ClearTelegramApp,
     /// Reports whether a Telegram application pair is configured, and where it came from.
     GetTelegramApp,
+    /// Stores one runtime setting of `network`; an empty `value` clears it.
+    ///
+    /// Only the settings `ListNetworks` declares for that network are accepted: an unknown `key`
+    /// is `invalid_argument`, as is a `choice` value outside its options or a text setting whose
+    /// declaration asks for a proxy URL that does not parse. The change applies to the next
+    /// connector the engine creates; a running account is not restarted.
+    SetNetworkSetting {
+        network: Network,
+        key: String,
+        value: String,
+    },
+    /// Removes the stored value of one runtime setting; its declared default applies again.
+    ClearNetworkSetting {
+        network: Network,
+        key: String,
+    },
     // Chats
     /// Starts the room list stream; `filter` narrows the projection by chat name.
     SubscribeRoomList {
@@ -1016,6 +1086,12 @@ pub enum EngineResponse {
         api_id: Option<i32>,
         source: TelegramAppSource,
     },
+    /// The setting after the write, with the value now in effect (never a secret's value).
+    NetworkSettingSet {
+        setting: NetworkSettingDto,
+    },
+    /// The stored value is gone; the declared default applies again.
+    NetworkSettingCleared,
     /// The next login step of `login_id`; answers both `BeginLogin` and `SubmitLogin`.
     LoginStep {
         login_id: LoginId,

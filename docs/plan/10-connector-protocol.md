@@ -96,14 +96,48 @@ UI can tell "this build does not ship the network" from "this network needs a se
 |---|---|
 | `network` | `telegram`, `messenger` (tests: `fake`) |
 | `ready` | `BeginLogin` can start now; `false` means `setup` explains what is missing |
-| `setup` | `NetworkSetupDto { kind, app_url, fields }`, or `null` when ready |
+| `setup` | `NetworkSetupDto { kind, app_url, credentials, settings }`, or `null` when the network asks for nothing and declares no setting |
+
+`NetworkSetupDto` separates two kinds of input that must never be confused:
+
+| Field | Meaning |
+|---|---|
+| `credentials` | `NetworkSetupFieldDto { key, label, secret }`: values the network cannot work without. The wire type has no value field, so a credential is never echoed back. |
+| `settings` | `NetworkSettingDto { key, label, kind, options, value }`: runtime knobs, with the value in effect. `kind` is `text`, `secret` or `choice`; `options` lists `{ value, label }` for `choice` and is empty otherwise. A `secret` setting never carries its value. |
 
 - **Telegram** is always listed. It is `ready: false` with `setup.kind = telegram_app`,
-  `app_url = "https://my.telegram.org/apps"` and fields `api_id` (visible) and `api_hash`
+  `app_url = "https://my.telegram.org/apps"` and credentials `api_id` (visible) and `api_hash`
   (`secret: true`) until the user enters the application pair. `BeginLogin` on that state fails
-  with `not_supported`, reason `telegram application credentials`.
+  with `not_supported`, reason `telegram application credentials`. Telegram declares no settings.
 - **Messenger** is listed only when the sidecar executable exists, and is always `ready: true`
-  with `setup: null`: no application-level configuration is involved.
+  with `setup.kind = messenger`, `app_url = ""` and no credentials: it asks for nothing, but its
+  settings are how it presents itself. A setting never makes a network unready.
+
+| Network | key | kind | label | options | default |
+|---|---|---|---|---|---|
+| messenger | `proxy` | `text` | Proxy URL (http://, https://, socks5://) | — | unset |
+| messenger | `platform` | `choice` | Platform | `android` ("Messenger for Android"), `ios` ("Messenger for iOS") | `android` |
+
+`SetNetworkSetting { network, key, value }` answers `NetworkSettingSet { setting }` (the setting
+with the value now in effect) and `ClearNetworkSetting { network, key }` answers
+`NetworkSettingCleared`. Both validate against the network's declaration:
+
+- an undeclared `key` is `invalid_argument` naming the declared keys;
+- a `choice` value outside its options is `invalid_argument` listing the options;
+- a `text` setting declared as a proxy must parse as `http://`, `https://` or `socks5://` with a
+  host, otherwise `invalid_argument`;
+- an empty `value` clears the stored one instead of being rejected, so the default (if any)
+  applies again.
+
+Non-secret values are written to `<data_dir>/network_settings.json` (temporary file, fsync, rename,
+so a crash leaves the previous file readable); a `secret` setting is sealed in the OS keyring under
+`alloy.network.<network>.<key>.v1` and never appears in that file. Nothing is compiled in: a
+network's settings are exactly the ones its declaration lists.
+
+A saved setting applies to the **next connector the engine creates**; a running account keeps the
+settings it was started with and is not restarted. A Messenger connector is launched from the
+settings file with `ALLOY_META_PROXY` (omitted when unset) and `ALLOY_META_PLATFORM` (always sent,
+so the sidecar never guesses).
 
 The pair is the *application's*, not the account's. It is entered once and sealed in the OS keyring
 under `alloy.telegram.app.v1` as `{"api_id":<i32>,"api_hash":"<hex>"}`; the engine resolves it per

@@ -24,7 +24,10 @@ const KEY: [u8; 32] = [7; 32];
 
 /// Opens the engine on `data_dir`, the way the app does on start.
 async fn open_engine(data_dir: &Path, secrets: Arc<dyn SecretStore>) -> AppEngine {
-    let factory = Arc::new(SealedTelegramFactory::new(secrets.clone()));
+    let factory = Arc::new(SealedTelegramFactory::new(
+        secrets.clone(),
+        data_dir.to_path_buf(),
+    ));
     let ctx = EngineContext::open(data_dir.to_path_buf(), secrets, factory)
         .await
         .expect("open the engine");
@@ -36,7 +39,10 @@ async fn open_engine(data_dir: &Path, secrets: Arc<dyn SecretStore>) -> AppEngin
 fn engine_with_secrets(secrets: Arc<dyn SecretStore>) -> AppEngine {
     let store = Store::open_in_memory(KEY).expect("open the store");
     let dir = tempfile::tempdir().expect("temp dir");
-    let factory = Arc::new(SealedTelegramFactory::new(secrets.clone()));
+    let factory = Arc::new(SealedTelegramFactory::new(
+        secrets.clone(),
+        dir.path().to_path_buf(),
+    ));
     let ctx = EngineContext::with_store(store, dir.path().to_path_buf(), secrets, factory);
     AppEngine::new(ctx)
 }
@@ -78,13 +84,14 @@ async fn telegram_is_listed_unready_with_setup_before_the_pair_is_entered() {
     assert_eq!(setup.kind, NetworkSetupKind::TelegramApp);
     assert_eq!(setup.app_url, "https://my.telegram.org/apps");
     let keys: Vec<&str> = setup
-        .fields
+        .credentials
         .iter()
         .map(|field| field.key.as_str())
         .collect();
     assert_eq!(keys, ["api_id", "api_hash"]);
-    assert!(!setup.fields[0].secret);
-    assert!(setup.fields[1].secret);
+    assert!(!setup.credentials[0].secret);
+    assert!(setup.credentials[1].secret);
+    assert!(setup.settings.is_empty());
 
     // No Messenger sidecar is configured, so Telegram is the only network.
     assert_eq!(networks.len(), 1);

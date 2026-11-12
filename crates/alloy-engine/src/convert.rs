@@ -12,7 +12,7 @@ use alloy_protocol::{
     AccountState as ProtocolAccountState, CapabilitiesDto, ChatKind as ProtocolChatKind,
     CodeChannel as ProtocolCodeChannel, ConnectionStatus, CookieFieldDto, LoginAlternativeDto,
     LoginFailureDto, LoginInputDto, LoginStepDto, Network as ProtocolNetwork, NetworkInfoDto,
-    NetworkSetupDto, NetworkSetupFieldDto, NetworkSetupKind,
+    NetworkSettingDto, NetworkSettingKind, NetworkSetupDto, NetworkSetupFieldDto, NetworkSetupKind,
     TelegramAppSource as ProtocolTelegramAppSource,
 };
 use alloy_store::{
@@ -20,7 +20,7 @@ use alloy_store::{
     Network as StoreNetwork,
 };
 
-use crate::factory::TelegramAppSource;
+use crate::factory::{self, NetworkSettingSpec, NetworkSettings, TelegramAppSource};
 
 // === Networks ===
 
@@ -56,21 +56,25 @@ pub const TELEGRAM_APP_URL: &str = "https://my.telegram.org/apps";
 /// Without a pair the setup block names the two values the user has to enter and where to get
 /// them, so `BeginLogin` failing with `NotSupported` has actionable context.
 pub fn telegram_network_info(configured: bool) -> NetworkInfoDto {
-    let setup = (!configured).then(|| NetworkSetupDto {
-        kind: NetworkSetupKind::TelegramApp,
-        app_url: TELEGRAM_APP_URL.to_string(),
-        fields: vec![
-            NetworkSetupFieldDto {
-                key: "api_id".to_string(),
-                label: "API ID".to_string(),
-                secret: false,
-            },
-            NetworkSetupFieldDto {
-                key: "api_hash".to_string(),
-                label: "API hash".to_string(),
-                secret: true,
-            },
-        ],
+    let setup = (!configured).then(|| {
+        let settings = network_setting_dtos(ProtocolNetwork::Telegram, &NetworkSettings::default());
+        NetworkSetupDto {
+            kind: NetworkSetupKind::TelegramApp,
+            app_url: TELEGRAM_APP_URL.to_string(),
+            credentials: vec![
+                NetworkSetupFieldDto {
+                    key: "api_id".to_string(),
+                    label: "API ID".to_string(),
+                    secret: false,
+                },
+                NetworkSetupFieldDto {
+                    key: "api_hash".to_string(),
+                    label: "API hash".to_string(),
+                    secret: true,
+                },
+            ],
+            settings,
+        }
     });
     NetworkInfoDto {
         network: ProtocolNetwork::Telegram,
@@ -79,13 +83,61 @@ pub fn telegram_network_info(configured: bool) -> NetworkInfoDto {
     }
 }
 
-/// Messenger as `ListNetworks` reports it: listed only when the sidecar exists, and never needs
-/// app-level configuration.
-pub fn messenger_network_info() -> NetworkInfoDto {
+/// Messenger as `ListNetworks` reports it: listed only when the sidecar exists, always ready.
+///
+/// It asks for no credential, so its setup block carries settings only. A setting never changes
+/// `ready`: a sidecar that exists can log in, and the settings say how it presents itself.
+pub fn messenger_network_info(settings: &NetworkSettings) -> NetworkInfoDto {
+    let setup = NetworkSetupDto {
+        kind: NetworkSetupKind::Messenger,
+        // Messenger registers no application in a browser.
+        app_url: String::new(),
+        credentials: Vec::new(),
+        settings: network_setting_dtos(ProtocolNetwork::Messenger, settings),
+    };
     NetworkInfoDto {
         network: ProtocolNetwork::Messenger,
         ready: true,
-        setup: None,
+        setup: Some(setup),
+    }
+}
+
+/// Every declared setting of `network`, with the value in effect.
+pub fn network_setting_dtos(
+    network: ProtocolNetwork,
+    settings: &NetworkSettings,
+) -> Vec<NetworkSettingDto> {
+    factory::network_setting_specs(network)
+        .iter()
+        .map(|spec| network_setting_dto(network, spec, settings))
+        .collect()
+}
+
+/// One declared setting with the value in effect.
+///
+/// A secret setting never carries a value: `ListNetworks` is not a way to read a credential back.
+pub fn network_setting_dto(
+    network: ProtocolNetwork,
+    spec: &NetworkSettingSpec,
+    settings: &NetworkSettings,
+) -> NetworkSettingDto {
+    NetworkSettingDto {
+        key: spec.key.to_string(),
+        label: spec.label.to_string(),
+        kind: spec.kind,
+        options: spec
+            .options
+            .iter()
+            .map(|option| alloy_protocol::NetworkSettingOptionDto {
+                value: option.value.to_string(),
+                label: option.label.to_string(),
+            })
+            .collect(),
+        value: if spec.kind == NetworkSettingKind::Secret {
+            None
+        } else {
+            factory::effective_network_setting(settings, network, spec)
+        },
     }
 }
 

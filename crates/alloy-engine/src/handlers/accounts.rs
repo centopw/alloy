@@ -64,6 +64,14 @@ impl GroupHandler for AccountsHandler {
             }
             EngineCommand::ClearTelegramApp => clear_telegram_app(ctx).await,
             EngineCommand::GetTelegramApp => get_telegram_app(ctx).await,
+            EngineCommand::SetNetworkSetting {
+                network,
+                key,
+                value,
+            } => set_network_setting(ctx, network, &key, &value).await,
+            EngineCommand::ClearNetworkSetting { network, key } => {
+                clear_network_setting(ctx, network, &key).await
+            }
             _ => Err(EngineError::invalid_argument(format!(
                 "Command '{}' does not belong to the Accounts group",
                 name
@@ -356,6 +364,71 @@ async fn set_telegram_app(
 async fn clear_telegram_app(ctx: &EngineContext) -> Result<EngineResponse, EngineError> {
     factory::clear_telegram_app(ctx.secrets.as_ref()).await?;
     Ok(EngineResponse::TelegramAppCleared)
+}
+
+/// The declaration of one network setting, or the `invalid_argument` naming what is declared.
+fn network_setting(
+    network: Network,
+    key: &str,
+) -> Result<&'static factory::NetworkSettingSpec, EngineError> {
+    factory::network_setting_spec(network, key).ok_or_else(|| {
+        let declared: Vec<&str> = factory::network_setting_specs(network)
+            .iter()
+            .map(|spec| spec.key)
+            .collect();
+        let label = convert::network_label(network);
+        let message = if declared.is_empty() {
+            format!("{label} declares no settings, so '{key}' is not one of them")
+        } else {
+            format!(
+                "'{key}' is not a {label} setting; {label} declares {}",
+                declared
+                    .iter()
+                    .map(|key| format!("'{key}'"))
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            )
+        };
+        EngineError::invalid_argument(message)
+    })
+}
+
+/// Stores one runtime setting, after checking it against the network's declaration.
+///
+/// A non-secret value goes to `<data_dir>/network_settings.json`, a secret one to the OS keyring;
+/// an empty value clears whatever was stored. Nothing here touches a running connector: the value
+/// is read when the next connector for that network is created.
+async fn set_network_setting(
+    ctx: &EngineContext,
+    network: Network,
+    key: &str,
+    value: &str,
+) -> Result<EngineResponse, EngineError> {
+    let spec = network_setting(network, key)?;
+    let validated = factory::validate_network_setting(spec, value)?;
+    let path = ctx.network_settings_path();
+    factory::store_network_setting(ctx.secrets.as_ref(), &path, network, spec, &validated).await?;
+    let settings = factory::read_network_settings(&path)?;
+    Ok(EngineResponse::NetworkSettingSet {
+        setting: convert::network_setting_dto(network, spec, &settings),
+    })
+}
+
+/// Removes the stored value of one runtime setting; the declared default applies again.
+async fn clear_network_setting(
+    ctx: &EngineContext,
+    network: Network,
+    key: &str,
+) -> Result<EngineResponse, EngineError> {
+    let spec = network_setting(network, key)?;
+    factory::clear_network_setting(
+        ctx.secrets.as_ref(),
+        &ctx.network_settings_path(),
+        network,
+        spec,
+    )
+    .await?;
+    Ok(EngineResponse::NetworkSettingCleared)
 }
 
 /// Reports the pair in effect without ever returning the hash.

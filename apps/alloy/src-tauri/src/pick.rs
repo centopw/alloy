@@ -788,6 +788,7 @@ mod tests {
             secrets.clone(),
             std::sync::Arc::new(alloy_engine::factory::DefaultConnectorFactory::from_env(
                 secrets,
+                dir.to_path_buf(),
             )),
         )
     }

@@ -149,11 +149,14 @@ fn token_is_valid(token: &str) -> bool {
 fn connector_factory(
     fake: bool,
     secrets: Arc<dyn SecretStore>,
+    data_dir: PathBuf,
 ) -> std::io::Result<Arc<dyn ConnectorFactory>> {
     if fake {
         return fake_factory();
     }
-    Ok(Arc::new(DefaultConnectorFactory::from_env(secrets)))
+    Ok(Arc::new(DefaultConnectorFactory::from_env(
+        secrets, data_dir,
+    )))
 }
 
 #[cfg(feature = "fake")]
@@ -256,7 +259,7 @@ async fn main() -> std::io::Result<()> {
     } else {
         Arc::new(InMemorySecretStore::new())
     };
-    let factory = connector_factory(args.fake, secrets.clone())?;
+    let factory = connector_factory(args.fake, secrets.clone(), args.data_dir.clone())?;
     tracing::info!(
         networks = ?factory.networks().await,
         "connector factory ready"
