@@ -1,0 +1,20 @@
+alloy-meta — Alloy's Messenger sidecar
+Copyright (C) 2026 the Alloy contributors
+
+This program is free software: you can redistribute it and/or modify it under the terms of
+the GNU Affero General Public License as published by the Free Software Foundation, either
+version 3 of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+See the GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License along with this
+program. If not, see <https://www.gnu.org/licenses/agpl-3.0.txt>.
+
+The full licence text must be added to this file before the first release that ships the
+binary; it was unavailable offline when this file was written. The canonical text is at
+<https://www.gnu.org/licenses/agpl-3.0.txt>.
+
+This binary links go.mau.fi/mautrix-meta (AGPL-3.0), go.mau.fi/whatsmeow (MPL-2.0) and other
+Go modules; see go.sum for the exact dependency set.
