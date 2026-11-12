@@ -4,6 +4,7 @@ import type {
   AccountId,
   ConnectionStatus,
   LoginId,
+  LoginAlternativeDto,
   LoginInputDto,
   LoginStepDto,
   Network
@@ -182,6 +183,14 @@ class SessionStore {
     } finally {
       this.loginBusy = false;
     }
+  }
+
+  /**
+   * Answers the current step by switching to one of its alternatives (cookies for a password
+   * sign-in) instead of filling the form.
+   */
+  async switchLoginMethod(to: LoginAlternativeDto) {
+    await this.submitLogin({ type: 'switch', to });
   }
 
   /** Abandons the attempt in the engine and returns to the network list. */

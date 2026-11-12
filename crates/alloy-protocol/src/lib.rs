@@ -224,11 +224,22 @@ pub enum LoginStepDto {
     Credentials {
         /// Label for the username field as the network names it.
         username_label: String,
+        /// Other sign-in methods this account may use instead; the UI offers one link per entry
+        /// and answers with [`LoginInputDto::Switch`].
+        alternatives: Vec<LoginAlternativeDto>,
     },
     /// Login finished; the account is stored and the connector starts.
     Done { account: Account },
     /// The attempt failed. Terminal for this attempt.
     Failed { reason: LoginFailureDto },
+}
+
+/// A sign-in method offered next to the one currently asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum LoginAlternativeDto {
+    /// Copy the cookies of an already signed-in browser session.
+    Cookies,
 }
 
 /// What the user typed for the step the engine last returned.
@@ -248,6 +259,8 @@ pub enum LoginInputDto {
     Cookies { values: BTreeMap<String, String> },
     /// Answer to [`LoginStepDto::Credentials`].
     Credentials { username: String, password: String },
+    /// The user picked one of [`LoginStepDto::Credentials::alternatives`] instead.
+    Switch { to: LoginAlternativeDto },
     /// Ask for a fresh [`LoginStepDto::Qr`] payload (the previous one expired, or the user chose QR
     /// login).
     QrRefresh,
@@ -280,6 +293,7 @@ impl fmt::Debug for LoginInputDto {
                 .field("username", username)
                 .field("password", &REDACTED)
                 .finish(),
+            Self::Switch { to } => f.debug_struct("Switch").field("to", to).finish(),
             Self::QrRefresh => f.write_str("QrRefresh"),
         }
     }
@@ -1306,6 +1320,36 @@ mod tests {
             value,
             json!({"type": "cookies", "values": {"c_user": "1000"}})
         );
+        let decoded: LoginInputDto = serde_json::from_value(value).unwrap();
+        assert_eq!(input, decoded);
+    }
+
+    #[test]
+    fn test_credentials_step_wire_shape() {
+        let step = LoginStepDto::Credentials {
+            username_label: "Email".into(),
+            alternatives: vec![LoginAlternativeDto::Cookies],
+        };
+        let value = serde_json::to_value(&step).unwrap();
+        assert_eq!(
+            value,
+            json!({
+                "type": "credentials",
+                "username_label": "Email",
+                "alternatives": ["cookies"],
+            })
+        );
+        let decoded: LoginStepDto = serde_json::from_value(value).unwrap();
+        assert_eq!(step, decoded);
+    }
+
+    #[test]
+    fn test_switch_input_wire_shape() {
+        let input = LoginInputDto::Switch {
+            to: LoginAlternativeDto::Cookies,
+        };
+        let value = serde_json::to_value(&input).unwrap();
+        assert_eq!(value, json!({"type": "switch", "to": "cookies"}));
         let decoded: LoginInputDto = serde_json::from_value(value).unwrap();
         assert_eq!(input, decoded);
     }

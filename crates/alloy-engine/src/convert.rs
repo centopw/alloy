@@ -10,8 +10,8 @@ use alloy_connector::login::{CodeChannel as ConnectorCodeChannel, CookieField, L
 use alloy_connector::types::{ChatKind as ConnectorChatKind, MessageKind as ConnectorMessageKind};
 use alloy_protocol::{
     AccountState as ProtocolAccountState, CapabilitiesDto, ChatKind as ProtocolChatKind,
-    CodeChannel as ProtocolCodeChannel, ConnectionStatus, CookieFieldDto, LoginFailureDto,
-    LoginInputDto, LoginStepDto, Network as ProtocolNetwork,
+    CodeChannel as ProtocolCodeChannel, ConnectionStatus, CookieFieldDto, LoginAlternativeDto,
+    LoginFailureDto, LoginInputDto, LoginStepDto, Network as ProtocolNetwork,
 };
 use alloy_store::{
     AccountState as StoreAccountState, ChatKind as StoreChatKind, MessageKind as StoreMessageKind,
@@ -204,10 +204,26 @@ pub fn pending_login_step(step: alloy_connector::LoginStep) -> Option<LoginStepD
             fields: fields.into_iter().map(cookie_field).collect(),
             help_url,
         }),
-        alloy_connector::LoginStep::Credentials { username_label } => {
-            Some(LoginStepDto::Credentials { username_label })
-        }
+        alloy_connector::LoginStep::Credentials {
+            username_label,
+            alternatives,
+        } => Some(LoginStepDto::Credentials {
+            username_label,
+            alternatives: alternatives.into_iter().map(login_alternative).collect(),
+        }),
         alloy_connector::LoginStep::Done { .. } | alloy_connector::LoginStep::Failed { .. } => None,
+    }
+}
+
+fn login_alternative(value: alloy_connector::LoginAlternative) -> LoginAlternativeDto {
+    match value {
+        alloy_connector::LoginAlternative::Cookies => LoginAlternativeDto::Cookies,
+    }
+}
+
+fn connector_login_alternative(value: LoginAlternativeDto) -> alloy_connector::LoginAlternative {
+    match value {
+        LoginAlternativeDto::Cookies => alloy_connector::LoginAlternative::Cookies,
     }
 }
 
@@ -220,6 +236,9 @@ pub fn login_input(input: LoginInputDto) -> alloy_connector::LoginInput {
         LoginInputDto::Credentials { username, password } => {
             alloy_connector::LoginInput::Credentials { username, password }
         }
+        LoginInputDto::Switch { to } => alloy_connector::LoginInput::Switch {
+            to: connector_login_alternative(to),
+        },
         LoginInputDto::QrRefresh => alloy_connector::LoginInput::QrRefresh,
     }
 }

@@ -93,6 +93,10 @@ pub enum LoginStep {
     Credentials {
         /// Label for the username field as the network names it.
         username_label: String,
+        /// Other methods this account may use instead, in preference order. Empty when the step
+        /// is the only way in; the UI offers a link per entry and answers with
+        /// [`LoginInput::Switch`].
+        alternatives: Vec<LoginAlternative>,
     },
     /// Login finished. The session blob must be persisted before the connector is started.
     Done {
@@ -127,8 +131,18 @@ pub enum LoginInput {
     Cookies { values: BTreeMap<String, String> },
     /// Answer to [`LoginStep::Credentials`].
     Credentials { username: String, password: String },
+    /// One of the [`LoginStep::Credentials::alternatives`] the user picked instead.
+    Switch { to: LoginAlternative },
     /// Ask for a fresh [`LoginStep::Qr`] payload (previous one expired, or the user chose QR login).
     QrRefresh,
+}
+
+/// A login method offered next to the one currently asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LoginAlternative {
+    /// Copy the cookies of a browser session that is already signed in.
+    Cookies,
 }
 
 const REDACTED: &str = "<redacted>";
@@ -158,6 +172,7 @@ impl fmt::Debug for LoginInput {
                 .field("username", username)
                 .field("password", &REDACTED)
                 .finish(),
+            Self::Switch { to } => f.debug_struct("Switch").field("to", to).finish(),
             Self::QrRefresh => f.write_str("QrRefresh"),
         }
     }

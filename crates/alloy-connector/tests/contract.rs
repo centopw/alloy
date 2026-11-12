@@ -9,8 +9,9 @@ use alloy_connector::fake::{
 };
 use alloy_connector::{
     ChatKind, CodeChannel, ConnectionState, Connector, ConnectorError, ConnectorEvent, Frame,
-    LoginFailure, LoginInput, LoginStep, MediaRef, MessageKind, Network, OutgoingMessage,
-    PROTOCOL_VERSION, RemoteChat, RemoteMessage, SessionBlob, decode_frame, encode_frame,
+    LoginAlternative, LoginFailure, LoginInput, LoginStep, MediaRef, MessageKind, Network,
+    OutgoingMessage, PROTOCOL_VERSION, RemoteChat, RemoteMessage, SessionBlob, decode_frame,
+    encode_frame,
 };
 use tokio::sync::mpsc::Receiver;
 
@@ -294,6 +295,34 @@ fn malformed_frames_are_protocol_errors() {
         );
         assert!(!error.is_retryable());
     }
+}
+
+#[test]
+fn login_alternatives_round_trip() {
+    let step = LoginStep::Credentials {
+        username_label: "Email".to_string(),
+        alternatives: vec![LoginAlternative::Cookies],
+    };
+    let value = serde_json::to_value(&step).unwrap();
+    assert_eq!(
+        value,
+        serde_json::json!({
+            "type": "credentials",
+            "username_label": "Email",
+            "alternatives": ["cookies"],
+        })
+    );
+    assert_eq!(serde_json::from_value::<LoginStep>(value).unwrap(), step);
+
+    let input = LoginInput::Switch {
+        to: LoginAlternative::Cookies,
+    };
+    let value = serde_json::to_value(&input).unwrap();
+    assert_eq!(
+        value,
+        serde_json::json!({"type": "switch", "to": "cookies"})
+    );
+    assert_eq!(serde_json::from_value::<LoginInput>(value).unwrap(), input);
 }
 
 #[test]

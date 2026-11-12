@@ -501,6 +501,11 @@ export type GlobalSearchHit = {
 	body: string,
 };
 
+/**  A sign-in method offered next to the one currently asked for. */
+export type LoginAlternativeDto = 
+/**  Copy the cookies of an already signed-in browser session. */
+"cookies";
+
 /**
  *  Why a login attempt ended. A `Failed` step is terminal for that attempt; the UI restarts with
  *  `BeginLogin`.
@@ -550,6 +555,8 @@ export type LoginInputDto =
 { type: "cookies"; values: { [key in string]: string } } | 
 /**  Answer to [`LoginStepDto::Credentials`]. */
 { type: "credentials"; username: string; password: string } | 
+/**  The user picked one of [`LoginStepDto::Credentials::alternatives`] instead. */
+{ type: "switch"; to: LoginAlternativeDto } | 
 /**
  *  Ask for a fresh [`LoginStepDto::Qr`] payload (the previous one expired, or the user chose QR
  *  login).
@@ -586,7 +593,12 @@ help_url: string | null } |
 /**  Ask for a username/handle and password. */
 { type: "credentials"; 
 /**  Label for the username field as the network names it. */
-username_label: string } | 
+username_label: string; 
+/**
+ *  Other sign-in methods this account may use instead; the UI offers one link per entry
+ *  and answers with [`LoginInputDto::Switch`].
+ */
+alternatives: LoginAlternativeDto[] } | 
 /**  Login finished; the account is stored and the connector starts. */
 { type: "done"; account: Account } | 
 /**  The attempt failed. Terminal for this attempt. */

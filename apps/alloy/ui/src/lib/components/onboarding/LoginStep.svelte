@@ -5,6 +5,7 @@
   import { toDataURL } from 'qrcode';
   import type {
     CookieFieldDto,
+    LoginAlternativeDto,
     LoginFailureDto,
     LoginInputDto,
     LoginStepDto
@@ -21,12 +22,15 @@
     /** A transport-level failure from the last call, shown above the step. */
     error: string | null;
     onsubmit: (input: LoginInputDto) => void;
+    /** Picks one of the step's alternatives (`switch` input) without going through the form. */
+    onswitch: (to: LoginAlternativeDto) => void;
     oncancel: () => void;
     onretry: () => void;
     onback: () => void;
   }
 
-  let { step, networkName, busy, error, onsubmit, oncancel, onretry, onback }: Props = $props();
+  let { step, networkName, busy, error, onsubmit, onswitch, oncancel, onretry, onback }: Props =
+    $props();
 
   let phone = $state('');
   let code = $state('');
@@ -85,6 +89,18 @@
     e.preventDefault();
     if (!credentialsValid || busy) return;
     onsubmit({ type: 'credentials', username: username.trim(), password: credentialPassword });
+  }
+
+  function chooseAlternative(to: LoginAlternativeDto) {
+    if (busy) return;
+    onswitch(to);
+  }
+
+  function alternativeLabel(alternative: LoginAlternativeDto): string {
+    switch (alternative) {
+      case 'cookies':
+        return t('onboarding-alternative-cookies');
+    }
   }
 
   function submitCookies(e: SubmitEvent) {
@@ -306,6 +322,7 @@
     </div>
   {:else if step.type === 'cookies'}
     <h3>{t('onboarding-cookies-title')}</h3>
+    <p class="hint">{t('onboarding-cookies-reason')}</p>
     <p class="hint">{t('onboarding-cookies-hint')}</p>
     {#if step.help_url}
       <button type="button" class="link" onclick={openCookiesHelp}>
@@ -361,10 +378,24 @@
       <div class="actions">
         <Button variant="ghost" type="button" onclick={oncancel}>{t('common-cancel')}</Button>
         <Button type="submit" disabled={busy || !credentialsValid}>
-          {busy ? t('onboarding-working') : t('common-continue')}
+          {busy ? t('onboarding-working') : t('onboarding-credentials-submit')}
         </Button>
       </div>
     </form>
+    {#if step.alternatives.length > 0}
+      <div class="alternatives">
+        {#each step.alternatives as alternative (alternative)}
+          <button
+            type="button"
+            class="link"
+            disabled={busy}
+            onclick={() => chooseAlternative(alternative)}
+          >
+            {alternativeLabel(alternative)}
+          </button>
+        {/each}
+      </div>
+    {/if}
   {:else if step.type === 'done'}
     <h3>{t('onboarding-done-title')}</h3>
     <p class="hint" role="status">{t('onboarding-done-hint', { network: networkName })}</p>
@@ -443,6 +474,12 @@
     width: 216px;
     height: 216px;
     max-width: 100%;
+  }
+  .alternatives {
+    display: flex;
+    flex-direction: column;
+    gap: var(--alloy-spacing-scale-2);
+    margin-top: var(--alloy-spacing-scale-2);
   }
   .link {
     align-self: flex-start;

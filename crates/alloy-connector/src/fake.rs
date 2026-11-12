@@ -219,6 +219,7 @@ impl Connector for FakeConnector {
                 failed(Some("step"), "code submitted before a phone number")
             }
             (_, LoginInput::QrRefresh)
+            | (_, LoginInput::Switch { .. })
             | (_, LoginInput::Password { .. })
             | (_, LoginInput::Cookies { .. })
             | (_, LoginInput::Credentials { .. }) => LoginStep::Failed {

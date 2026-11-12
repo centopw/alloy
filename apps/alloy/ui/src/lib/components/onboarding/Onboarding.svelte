@@ -112,6 +112,7 @@
             busy={session.loginBusy}
             error={session.loginError}
             onsubmit={submit}
+            onswitch={(to) => void session.switchLoginMethod(to).catch(() => {})}
             oncancel={() => void session.cancelLogin()}
             onretry={() => void session.retryLogin().catch(() => {})}
             onback={() => session.dismissLogin()}
