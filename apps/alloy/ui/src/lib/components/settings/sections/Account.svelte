@@ -1,310 +1,207 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { Avatar, Button, TextField } from '$lib/components/common';
-  import { SettingButtonRow, SettingGroup } from '$lib/components/settings/controls';
-  import { client } from '$lib/ipc';
-  import { pickFile } from '$lib/platform/files';
-  import { errorMessage, expect } from '$lib/stores/errors';
-  import { session } from '$lib/stores/session.svelte';
-  import { Copy, ImagePlus, Trash2 } from '$lib/icons';
+  import { Button } from '$lib/components/common';
+  import Onboarding from '$lib/components/onboarding/Onboarding.svelte';
+  import { session, networkLabel } from '$lib/stores/session.svelte';
+  import type { Account, AccountId, ConnectionStatus } from '$lib/generated/index.js';
 
   import { t } from '$lib/i18n';
+
   interface Props {
-    onclose: () => void;
+    /** Closes the settings dialog; used once the last account is gone and the section is empty. */
+    onclose?: () => void;
   }
+
   let { onclose }: Props = $props();
 
-  let draftName = $state('');
-  let savingName = $state(false);
-  let savingAvatar = $state(false);
-  let signingOut = $state(false);
-  let copied = $state(false);
-  let error = $state<string | null>(null);
+  const accounts = $derived(session.accounts);
 
-  const trimmedName = $derived(draftName.trim());
-  const nameChanged = $derived(
-    trimmedName.length > 0 && trimmedName !== (session.account?.display_name ?? '').trim()
-  );
-  const busy = $derived(savingName || savingAvatar);
-
-  onMount(() => {
-    void loadProfile();
-  });
-
-  async function loadProfile() {
-    try {
-      const profile = expect(await client.invoke({ action: 'GetOwnProfile' }), 'OwnProfile')
-        .payload.profile;
-      draftName = profile.display_name ?? '';
-    } catch (e) {
-      error = errorMessage(e);
+  function statusLabel(status: ConnectionStatus): string {
+    if (typeof status === 'object') {
+      return t('account-status-reconnecting', { attempt: status.Reconnecting.attempt });
     }
-  }
-
-  async function saveName(e: SubmitEvent) {
-    e.preventDefault();
-    if (!nameChanged || busy) return;
-    savingName = true;
-    error = null;
-    try {
-      expect(
-        await client.invoke({ action: 'SetDisplayName', params: { name: trimmedName } }),
-        'Unit'
-      );
-      if (session.account) session.account = { ...session.account, display_name: trimmedName };
-    } catch (err) {
-      error = errorMessage(err);
-    } finally {
-      savingName = false;
+    switch (status) {
+      case 'Connecting':
+        return t('account-status-connecting');
+      case 'Syncing':
+        return t('account-status-syncing');
+      case 'Connected':
+        return t('account-state-active');
+      case 'Disconnected':
+        return t('account-status-disconnected');
+      case 'Terminated':
+        return t('account-status-terminated');
     }
+    return t('account-status-disconnected');
   }
 
-  async function setAvatar(path: string | null) {
-    savingAvatar = true;
-    error = null;
-    try {
-      expect(
-        await client.invoke({ action: 'SetOwnAvatar', params: { file_path: path } }),
-        'Unit'
-      );
-      const profile = expect(await client.invoke({ action: 'GetOwnProfile' }), 'OwnProfile')
-        .payload.profile;
-      if (session.account)
-        session.account = { ...session.account, avatar_url: profile.avatar_url };
-    } catch (err) {
-      error = errorMessage(err);
-    } finally {
-      savingAvatar = false;
+  /** Lifecycle state first (a dead session is not "connected"), then the connector's live status. */
+  function stateLabel(account: Account): string {
+    switch (account.state) {
+      case 'needs_relogin':
+        return t('account-state-needs-relogin');
+      case 'disabled':
+        return t('account-state-disabled');
+      case 'pending':
+        return t('account-state-pending');
+      case 'active': {
+        const status = session.statuses[account.id];
+        return status ? statusLabel(status) : t('account-state-active');
+      }
     }
+    return t('account-state-active');
   }
 
-  async function changeAvatar() {
-    const path = await pickFile();
-    if (path) await setAvatar(path);
+  function accountName(account: Account): string {
+    return account.display_name ?? account.remote_user_id ?? t('account-unnamed');
   }
 
-  async function copyUserId() {
-    if (!session.account) return;
-    try {
-      await navigator.clipboard.writeText(session.account.user_id);
-      copied = true;
-    } catch (err) {
-      error = errorMessage(err);
-    }
-  }
-
-  async function signOut() {
-    signingOut = true;
-    // Close first so the dialog never renders the signed-out state.
-    onclose();
-    await session.logout();
-    signingOut = false;
+  async function logOut(accountId: AccountId) {
+    await session.logout(accountId).catch(() => {});
+    // With nothing left the section has no content and the app is back on onboarding.
+    if (session.accounts.length === 0) onclose?.();
   }
 </script>
 
 <section class="section">
-  {#if session.account}
-    <div class="profile">
-      <Avatar
-        userId={session.account.user_id}
-        displayName={session.account.display_name ?? session.account.user_id}
-        src={session.account.avatar_url}
-        size="xl"
-      />
-      <div class="identity">
-        <p class="name">{session.account.display_name ?? session.account.user_id}</p>
-        <p class="meta">{session.account.user_id}</p>
-      </div>
+  <div class="section-head">
+    <div class="section-text">
+      <h2 class="section-title">{t('account-connected-accounts')}</h2>
+      <p class="muted">{t('account-connected-accounts-hint')}</p>
     </div>
+    <Button size="sm" onclick={() => session.openAddAccount()}>{t('account-add')}</Button>
+  </div>
 
-    <div class="actions">
-      <Button
-        variant="ghost"
-        size="sm"
-        icon={ImagePlus}
-        disabled={busy}
-        onclick={() => void changeAvatar()}>{t('account-change-photo')}</Button
-      >
-      {#if session.account.avatar_url}
-        <Button
-          variant="ghost"
-          size="sm"
-          icon={Trash2}
-          disabled={busy}
-          onclick={() => void setAvatar(null)}>{t('account-remove-photo')}</Button
-        >
-      {/if}
-    </div>
-
-    <SettingGroup title={t('account-profile')}>
-      <form class="name-form" onsubmit={saveName}>
-        <label class="field">
-          <span class="field-label">{t('account-display-name')}</span>
-          <TextField
-            type="text"
-            bind:value={draftName}
-            autocomplete="nickname"
-            disabled={savingName}
-          />
-        </label>
-        <Button type="submit" disabled={!nameChanged || busy}>
-          {savingName ? t('account-saving') : t('common-save')}
-        </Button>
-      </form>
-    </SettingGroup>
-
-    <SettingGroup title={t('account-identity')}>
-      <div class="row">
-        <span class="row-label">{t('account-username')}</span>
-        <span class="row-value">
-          {session.account.user_id}
-          <button
-            type="button"
-            class="icon-button"
-            aria-label={t('account-copy-username')}
-            onclick={() => void copyUserId()}
-          >
-            <Copy size={16} />
-          </button>
-        </span>
-      </div>
-      {#if copied}
-        <p class="row note" role="status">{t('account-username-copied')}</p>
-      {/if}
-      <div class="row">
-        <span class="row-label">{t('account-homeserver')}</span>
-        <span class="row-value">{session.account.homeserver_url}</span>
-      </div>
-    </SettingGroup>
-
-    <SettingGroup title={t('account-session')}>
-      <SettingButtonRow
-        label={t('account-sign-out')}
-        description="Removes this account from Alloy on this device."
-        buttonLabel={signingOut ? 'Signing out...' : 'Sign out'}
-        danger
-        busy={signingOut}
-        onclick={() => void signOut()}
-      />
-    </SettingGroup>
+  {#if accounts.length === 0}
+    <p class="muted">{t('account-no-account-is-connected')}</p>
   {:else}
-    <p class="muted">{t('account-no-account-is-signed-in')}</p>
+    <ul class="accounts">
+      {#each accounts as account (account.id)}
+        <li class="account">
+          <div class="identity">
+            <span class="name">{accountName(account)}</span>
+            <span class="meta">
+              {networkLabel(account.network)} · {stateLabel(account)}
+            </span>
+          </div>
+          <div class="row-actions">
+            {#if account.state === 'needs_relogin'}
+              <Button
+                size="sm"
+                disabled={session.busy}
+                onclick={() => session.openReconnect(account.network)}
+                >{t('account-reconnect')}</Button
+              >
+            {/if}
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={session.busy}
+              onclick={() => void logOut(account.id)}
+              >{t('account-log-out')}</Button
+            >
+          </div>
+        </li>
+      {/each}
+    </ul>
   {/if}
 
-  {#if error}<p class="error" role="alert">{error}</p>{/if}
+  {#if session.error}<p class="error" role="alert">{session.error}</p>{/if}
 </section>
+
+{#if session.addingAccount}
+  <Onboarding />
+{/if}
 
 <style>
   .section {
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-layout-section-gap);
-  }
-  .profile {
-    display: flex;
-    align-items: center;
     gap: var(--alloy-spacing-scale-4);
-    padding: 0 var(--alloy-layout-row-pad-x);
   }
-  .identity {
-    min-width: 0;
+  .section-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--alloy-layout-gutter);
+  }
+  .section-text {
     display: flex;
     flex-direction: column;
     gap: var(--alloy-spacing-scale-1);
+    min-width: 0;
   }
-  .name {
+  .section-title {
     margin: 0;
     font-size: var(--alloy-typography-size-lg);
     font-weight: var(--alloy-typography-weight-semibold);
     color: var(--alloy-color-text-primary);
-    overflow-wrap: anywhere;
-  }
-  .meta {
-    margin: 0;
-    font-size: var(--alloy-typography-size-sm);
-    color: var(--alloy-color-text-secondary);
-    overflow-wrap: anywhere;
-  }
-  .actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--alloy-spacing-scale-2);
-    padding: 0 var(--alloy-layout-row-pad-x);
-  }
-  .name-form {
-    display: flex;
-    align-items: flex-end;
-    gap: var(--alloy-spacing-scale-2);
-    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-row-pad-x);
-  }
-  .field {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--alloy-spacing-scale-1);
-  }
-  .field-label {
-    font-size: var(--alloy-typography-size-sm);
-    color: var(--alloy-color-text-secondary);
-  }
-  .row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--alloy-spacing-scale-3);
-    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-row-pad-x);
-    font-size: var(--alloy-typography-size-base);
-    color: var(--alloy-color-text-primary);
-  }
-  .row + .row {
-    border-top: 1px solid var(--alloy-color-border-subtle);
-  }
-  .row-label {
-    color: var(--alloy-color-text-secondary);
-  }
-  .row-value {
-    min-width: 0;
-    display: inline-flex;
-    align-items: center;
-    gap: var(--alloy-spacing-scale-2);
-    overflow-wrap: anywhere;
-    text-align: right;
-  }
-  .note {
-    color: var(--alloy-color-text-secondary);
-    font-size: var(--alloy-typography-size-sm);
-    justify-content: flex-start;
-  }
-  .icon-button {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: var(--alloy-layout-control-height-sm);
-    height: var(--alloy-layout-control-height-sm);
-    padding: 0;
-    border: none;
-    border-radius: var(--alloy-radii-full);
-    background: transparent;
-    color: var(--alloy-color-text-secondary);
-    cursor: pointer;
-  }
-  .icon-button:hover {
-    background: var(--alloy-color-surface-hover);
-    color: var(--alloy-color-text-primary);
-  }
-  .icon-button:focus-visible {
-    outline: 2px solid var(--alloy-color-accent-primary);
-    outline-offset: 2px;
   }
   .muted {
     margin: 0;
-    color: var(--alloy-color-text-muted);
+    font-size: var(--alloy-typography-size-sm);
+    color: var(--alloy-color-text-secondary);
+  }
+  .accounts {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--alloy-color-surface-subtle);
+    border-radius: var(--alloy-radii-lg);
+    overflow: hidden;
+  }
+  .account {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--alloy-layout-gutter);
+    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-row-pad-x);
+    border-top: 1px solid var(--alloy-color-border-subtle);
+  }
+  .account:first-child {
+    border-top: none;
+  }
+  .identity {
+    display: flex;
+    flex-direction: column;
+    gap: var(--alloy-spacing-scale-1);
+    min-width: 0;
+  }
+  .name {
+    font-size: var(--alloy-typography-size-base);
+    font-weight: var(--alloy-typography-weight-medium);
+    color: var(--alloy-color-text-primary);
+    overflow-wrap: anywhere;
+  }
+  .meta {
+    font-size: var(--alloy-typography-size-sm);
+    color: var(--alloy-color-text-secondary);
+  }
+  .row-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--alloy-spacing-scale-2);
+    flex-shrink: 0;
   }
   .error {
     margin: 0;
-    padding: 0 var(--alloy-layout-row-pad-x);
     color: var(--alloy-color-status-error);
-    overflow-wrap: anywhere;
+    font-size: var(--alloy-typography-size-sm);
+  }
+  @media (max-width: 899px) {
+    .section-head {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .account {
+      flex-direction: column;
+      align-items: stretch;
+      min-height: 56px;
+      padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x);
+    }
+    .row-actions {
+      justify-content: flex-end;
+    }
   }
 </style>

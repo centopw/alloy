@@ -7,8 +7,6 @@ const mocks = vi.hoisted(() => ({
   onclose: vi.fn(),
   onpick: vi.fn(),
   pushBack: vi.fn(() => () => {}),
-  invoke: vi.fn(),
-  openProfile: vi.fn(),
 }));
 
 vi.mock('$lib/stores/rooms.svelte', () => ({
@@ -24,22 +22,25 @@ vi.mock('$lib/platform/backstack', () => ({
   pushBack: mocks.pushBack,
 }));
 
-vi.mock('$lib/ipc', () => ({ client: { invoke: mocks.invoke } }));
-
-vi.mock('$lib/stores/profileCard.svelte', () => ({
-  profileCard: { open: mocks.openProfile },
-}));
-
 import CommandPalette from './CommandPalette.svelte';
 
 function room(overrides: Partial<RoomSummary> = {}): RoomSummary {
   return {
-    id: '!room:example.org',
-    name: 'Room',
-    membership: 'Joined',
-    is_space: false,
+    id: 'chat-a',
+    account_id: 'account-1',
+    network: 'telegram',
+    name: 'Chat',
+    avatar: null,
+    kind: 'direct',
+    is_direct: true,
+    unread_notifications: { highlight_count: 0, notification_count: 0 },
+    latest_event: null,
+    pinned: false,
+    archived: false,
+    muted_until: null,
+    tags: [],
     ...overrides,
-  } as RoomSummary;
+  };
 }
 
 function render(open = true) {
@@ -53,6 +54,12 @@ function render(open = true) {
   return { target, component };
 }
 
+function type(input: HTMLInputElement, value: string) {
+  input.value = value;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.rooms.length = 0;
@@ -60,14 +67,14 @@ beforeEach(() => {
 
 describe('CommandPalette accessibility', () => {
   it('wires the input as a combobox pointing at the first option', () => {
-    mocks.rooms.push(room({ id: '!a:example.org', name: 'Alpha' }), room({ id: '!b:example.org', name: 'Beta' }));
+    mocks.rooms.push(room({ id: 'chat-a', name: 'Alpha' }), room({ id: 'chat-b', name: 'Beta' }));
 
     const { target, component } = render();
 
     const input = target.querySelector('input[role="combobox"]');
     expect(input).not.toBeNull();
     expect(input!.getAttribute('aria-controls')).toBe('palette-results');
-    expect(input!.getAttribute('aria-activedescendant')).toBe('palette-option-!a:example.org');
+    expect(input!.getAttribute('aria-activedescendant')).toBe('palette-option-chat-a');
 
     const options = target.querySelectorAll('[role="option"]');
     expect(options).toHaveLength(2);
@@ -79,18 +86,18 @@ describe('CommandPalette accessibility', () => {
   });
 
   it('moves aria-activedescendant as the highlighted row changes', () => {
-    mocks.rooms.push(room({ id: '!a:example.org', name: 'Alpha' }), room({ id: '!b:example.org', name: 'Beta' }));
+    mocks.rooms.push(room({ id: 'chat-a', name: 'Alpha' }), room({ id: 'chat-b', name: 'Beta' }));
 
     const { target, component } = render();
     const input = target.querySelector('input[role="combobox"]') as HTMLInputElement;
 
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
     flushSync();
-    expect(input.getAttribute('aria-activedescendant')).toBe('palette-option-!b:example.org');
+    expect(input.getAttribute('aria-activedescendant')).toBe('palette-option-chat-b');
 
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
     flushSync();
-    expect(input.getAttribute('aria-activedescendant')).toBe('palette-option-!a:example.org');
+    expect(input.getAttribute('aria-activedescendant')).toBe('palette-option-chat-a');
 
     unmount(component);
     target.remove();
@@ -110,8 +117,8 @@ describe('CommandPalette accessibility', () => {
     target.remove();
   });
 
-  it('picks the highlighted room on Enter', () => {
-    mocks.rooms.push(room({ id: '!a:example.org', name: 'Alpha' }), room({ id: '!b:example.org', name: 'Beta' }));
+  it('picks the highlighted chat on Enter', () => {
+    mocks.rooms.push(room({ id: 'chat-a', name: 'Alpha' }), room({ id: 'chat-b', name: 'Beta' }));
 
     const { target, component } = render();
     const input = target.querySelector('input[role="combobox"]') as HTMLInputElement;
@@ -120,7 +127,7 @@ describe('CommandPalette accessibility', () => {
     flushSync();
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     flushSync();
-    expect(mocks.onpick).toHaveBeenCalledWith('!b:example.org');
+    expect(mocks.onpick).toHaveBeenCalledWith('chat-b');
 
     unmount(component);
     target.remove();
@@ -136,40 +143,34 @@ describe('CommandPalette accessibility', () => {
   });
 });
 
-describe('CommandPalette people search', () => {
-  it('lists user-directory matches and opens the profile card', async () => {
-    vi.useFakeTimers();
-    try {
-      mocks.invoke.mockResolvedValue({
-        type: 'UserSearchResults',
-        payload: {
-          results: [{ user_id: '@bob:example.org', display_name: 'Bob', avatar_url: null, already_in_room: true }],
-          limited: false,
-        },
-      });
-      mocks.rooms.length = 0;
-      const { target, component } = render();
-      const input = target.querySelector('input') as HTMLInputElement;
-      input.value = 'bob';
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-      await vi.advanceTimersByTimeAsync(300);
-      flushSync();
+describe('CommandPalette search', () => {
+  it('narrows the list to chats whose title matches, ignoring case', () => {
+    mocks.rooms.push(
+      room({ id: 'chat-a', name: 'Alpha team' }),
+      room({ id: 'chat-b', name: 'Beta crew' }),
+      room({ id: 'chat-c', name: 'Gamma' }),
+    );
 
-      expect(mocks.invoke).toHaveBeenCalledWith({ action: 'SearchUsers', params: { query: 'bob', limit: 6 } });
-      const options = [...target.querySelectorAll('[role="option"]')];
-      const person = options.find((o) => o.textContent?.includes('Bob'));
-      expect(person, 'the directory match is an option').toBeTruthy();
-      expect(person!.textContent).toContain('in a room');
+    const { target, component } = render();
+    const input = target.querySelector('input[role="combobox"]') as HTMLInputElement;
+    type(input, 'CREW');
 
-      // Options are presentational listbox options (A11Y-21): the row itself is the click target.
-      (person as HTMLElement).click();
-      flushSync();
-      expect(mocks.openProfile).toHaveBeenCalledWith('@bob:example.org', null, expect.any(Object));
-      expect(mocks.onpick).not.toHaveBeenCalled();
-      unmount(component);
-      target.remove();
-    } finally {
-      vi.useRealTimers();
-    }
+    const options = [...target.querySelectorAll('[role="option"]')];
+    expect(options).toHaveLength(1);
+    expect(options[0].textContent).toContain('Beta crew');
+    expect(input.getAttribute('aria-activedescendant')).toBe('palette-option-chat-b');
+
+    unmount(component);
+    target.remove();
+  });
+
+  it('offers a chat with no stored title by its id', () => {
+    mocks.rooms.push(room({ id: 'telegram-77', name: null }));
+
+    const { target, component } = render();
+    expect(target.querySelector('[role="option"]')?.textContent).toContain('telegram-77');
+
+    unmount(component);
+    target.remove();
   });
 });

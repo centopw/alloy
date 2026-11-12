@@ -10,16 +10,15 @@ interface CachedProfile {
   expires: number;
 }
 
-/** Profile lookups cached for `PROFILE_TTL_MS`, plus direct-message room opening. */
+/** Profile lookups cached for `PROFILE_TTL_MS`. */
 export class UserProfileStore {
-  /** Keys are `userId NUL roomId`, so one user's entries share a prefix. */
+  /** Keys are `accountId NUL userId`, so one user's entries share a prefix. */
   private cache = new Map<string, CachedProfile>();
   private inflight = new Map<string, Promise<UserProfileDto>>();
-  private dmInflight = new Map<string, Promise<string>>();
 
-  /** Profile of a user, as seen in `roomId` when given. Concurrent calls share one request. */
-  get(userId: string, roomId: string | null): Promise<UserProfileDto> {
-    const key = profileKey(userId, roomId);
+  /** Profile of a user inside the account that knows them. Concurrent calls share one request. */
+  get(accountId: string, userId: string): Promise<UserProfileDto> {
+    const key = profileKey(accountId, userId);
     const hit = this.cache.get(key);
     if (hit && hit.expires > Date.now()) return Promise.resolve(hit.profile);
 
@@ -27,7 +26,7 @@ export class UserProfileStore {
     if (pending) return pending;
 
     const p: Promise<UserProfileDto> = client
-      .invoke({ action: 'GetUserProfile', params: { user_id: userId, room_id: roomId } })
+      .invoke({ action: 'GetUserProfile', params: { account_id: accountId, user_id: userId } })
       .then((res) => {
         const profile = expect(res, 'UserProfile').payload.profile;
         this.cache.set(key, { profile, expires: Date.now() + PROFILE_TTL_MS });
@@ -40,34 +39,15 @@ export class UserProfileStore {
     return p;
   }
 
-  /** Opens (or reuses) the direct-message room with a user and returns its room id. */
-  startDirectMessage(userId: string): Promise<string> {
-    const pending = this.dmInflight.get(userId);
-    if (pending) return pending;
-
-    const p: Promise<string> = client
-      .invoke({ action: 'StartDirectMessage', params: { user_id: userId } })
-      .then((res) => {
-        const roomId = expect(res, 'DirectMessageRoom').payload.room_id;
-        // Cached profiles carry `dm_room_id`, which is stale now that the room exists.
-        this.forget(userId);
-        return roomId;
-      })
-      .finally(() => {
-        if (this.dmInflight.get(userId) === p) this.dmInflight.delete(userId);
-      });
-    this.dmInflight.set(userId, p);
-    return p;
-  }
-
-  private forget(userId: string): void {
-    const prefix = `${userId}\u0000`;
+  /** Drop every cached profile of one account (logout, account switch). */
+  forgetAccount(accountId: string): void {
+    const prefix = `${accountId}\u0000`;
     for (const key of [...this.cache.keys()]) {
       if (key.startsWith(prefix)) this.cache.delete(key);
     }
   }
 }
 
-const profileKey = (userId: string, roomId: string | null) => `${userId}\u0000${roomId ?? ''}`;
+const profileKey = (accountId: string, userId: string) => `${accountId}\u0000${userId}`;
 
 export const userProfile = new UserProfileStore();

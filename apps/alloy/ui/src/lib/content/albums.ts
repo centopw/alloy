@@ -14,12 +14,12 @@ export interface AlbumLayout {
   hidden: ReadonlySet<string>;
 }
 
-/** A captionless picture or video that can sit in a grid: no reply, reactions or thread to lose. */
+/** A captionless picture or video that can sit in a grid: no reply or reactions to lose. */
 export function isAlbumCandidate(item: TimelineItemDto): boolean {
   const c = item.content;
   if (c.kind !== 'Media' || !item.event_id) return false;
   if (c.data.media_kind !== 'image' && c.data.media_kind !== 'video') return false;
-  if (item.reply_to || item.thread_summary || (item.reactions ?? []).length > 0) return false;
+  if (item.reply_to || (item.reactions ?? []).length > 0) return false;
   if (item.send_state.status !== 'Sent') return false;
   return !c.data.body || isFileName(c.data.body);
 }

@@ -1,5 +1,5 @@
 import { client } from '../ipc/index.js';
-import type { EngineResponse, RoomDetails } from '../generated/index.js';
+import type { RoomDetails } from '../generated/index.js';
 import { errorMessage, expect } from './errors.js';
 import { registerFlushHandler } from './prefs.svelte.js';
 
@@ -14,7 +14,7 @@ interface RoomInfoEntry {
 }
 
 /**
- * Details, private note and edit actions of the room info drawer, cached per room.
+ * Details and the private note of the room info drawer, cached per room.
  * Failures are stored and readable through `error(roomId)`; the methods never reject.
  */
 export class RoomInfoStore {
@@ -26,8 +26,7 @@ export class RoomInfoStore {
 
   /**
    * Forgets every cached note and detail (sign-out). Notes are private to the account that wrote
-   * them, and room ids are shared across accounts on a homeserver, so this cache must not survive
-   * an account change.
+   * them, so this cache must not survive an account change.
    */
   reset(): void {
     this.generation += 1;
@@ -63,26 +62,7 @@ export class RoomInfoStore {
     return p;
   }
 
-  rename(roomId: string, name: string): Promise<void> {
-    return this.write(roomId, () =>
-      client.invoke({ action: 'SetRoomName', params: { room_id: roomId, name } })
-    );
-  }
-
-  setTopic(roomId: string, topic: string): Promise<void> {
-    return this.write(roomId, () =>
-      client.invoke({ action: 'SetRoomTopic', params: { room_id: roomId, topic } })
-    );
-  }
-
-  /** `path` is a picked file, or `null` to remove the avatar. */
-  setAvatar(roomId: string, path: string | null): Promise<void> {
-    return this.write(roomId, () =>
-      client.invoke({ action: 'SetRoomAvatar', params: { room_id: roomId, file_path: path } })
-    );
-  }
-
-  /** Saves the private note for the room. */
+  /** Saves the private note for the room; an empty note deletes it. */
   saveNote(roomId: string, note: string): Promise<void> {
     return this.write(roomId, () =>
       client.invoke({ action: 'SetRoomNote', params: { room_id: roomId, note } })
@@ -109,7 +89,7 @@ export class RoomInfoStore {
         client.invoke({ action: 'GetRoomNote', params: { room_id: roomId } }),
       ]);
       const details = expect(detailsRes, 'RoomDetailsRetrieved').payload.details;
-      const note = expect(noteRes, 'RoomNote').payload.note;
+      const note = expect(noteRes, 'RoomNote').payload.note ?? '';
       if (generation !== this.generation) return;
       const room = this.room(roomId);
       room.details = details;
@@ -123,13 +103,13 @@ export class RoomInfoStore {
   }
 
   /** Runs one engine write, then re-reads details and note. Failures are stored, not thrown. */
-  private write(roomId: string, action: () => Promise<EngineResponse>): Promise<void> {
+  private write(roomId: string, action: () => Promise<unknown>): Promise<void> {
     const generation = this.generation;
     this.room(roomId).writes += 1;
     this.room(roomId).error = null;
     const pending = (async () => {
       try {
-        expect(await action(), 'Unit');
+        await action();
         await this.fetchInfo(roomId);
       } catch (err) {
         if (generation === this.generation) this.room(roomId).error = errorMessage(err);

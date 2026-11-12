@@ -9,9 +9,6 @@ import type { TimelineItemDto } from '$lib/generated';
 
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
-  subscribe: vi.fn(),
-  unsubscribe: vi.fn(),
-  subscribeTimeline: vi.fn(),
   handlers: [] as ((e: unknown) => void)[],
 }));
 
@@ -22,18 +19,13 @@ vi.mock('../ipc/index.js', () => ({
       mocks.handlers.push(fn);
       return () => {};
     },
-    unsubscribe: vi.fn().mockResolvedValue(undefined),
-    subscribeTimeline: mocks.subscribeTimeline,
-    markRead: vi.fn(),
   },
   applyDiff: (target: unknown[], diff: { type: string; content?: { values?: unknown[] } }) => {
     if (diff.type === 'Append' && diff.content?.values) target.push(...diff.content.values);
   },
 }));
-vi.mock('./uploads.svelte.js', () => ({ uploadsStore: { cancel: vi.fn() } }));
-vi.mock('./rooms.svelte.js', () => ({ roomsStore: { markRead: vi.fn() } }));
-vi.mock('./prefs.svelte.js', () => ({ prefs: { showReadReceipts: true } }));
-vi.mock('../content/receipts.js', () => ({ lastOwnEventId: () => null, readersByEvent: () => new Map() }));
+vi.mock('./uploads.svelte.js', () => ({ uploadsStore: { begin: vi.fn(), end: vi.fn() } }));
+vi.mock('./rooms.svelte.js', () => ({ roomsStore: { markRead: vi.fn(), activeCapabilities: null } }));
 vi.mock('../platform/files.js', () => ({ voiceExtension: vi.fn(), writeTempFile: vi.fn() }));
 vi.mock('./subscription.js', () => ({
   Subscription: class {
@@ -59,13 +51,16 @@ function item(id: string, ts: number, eventId: string | null = `$e${id}`): Timel
     event_id: eventId,
     sender: '@a:x',
     timestamp_millis: ts,
+    sender_display_name: null,
+    sender_avatar: null,
     content: { kind: 'TextMessage', data: { body: id, formatted_body: null, html_sanitized: true } },
     send_state: { status: 'Sent', data: { event_id: eventId ?? '' } },
     is_own: false,
     reply_to: null,
-    thread_summary: null,
-    read_receipts: null,
-    mentions_me: false,
+    read_by: [],
+    edited: false,
+    reactions: [],
+    transaction_id: null,
   } as unknown as TimelineItemDto;
 }
 
@@ -76,21 +71,29 @@ function divider(id: string): TimelineItemDto {
     event_id: null,
     sender: '',
     timestamp_millis: 0,
+    sender_display_name: null,
+    sender_avatar: null,
     content: { kind: 'DayDivider', data: { timestamp_millis: 0 } },
     send_state: { status: 'Sent', data: { event_id: '' } },
     is_own: false,
     reply_to: null,
-    thread_summary: null,
-    read_receipts: null,
-    mentions_me: false,
+    read_by: [],
+    edited: false,
+    reactions: [],
+    transaction_id: null,
   } as unknown as TimelineItemDto;
 }
 
 beforeEach(() => {
-  mocks.invoke.mockReset().mockResolvedValue({ type: 'TimelineClosed', payload: { room_id: '!r', closed: true } });
-  mocks.subscribeTimeline.mockReset().mockResolvedValue({
-    type: 'TimelineSubscribed',
-    payload: { subscription_id: 'sub' },
+  mocks.invoke.mockReset().mockImplementation(async (cmd: { action: string }) => {
+    switch (cmd.action) {
+      case 'SubscribeTimeline':
+        return { type: 'TimelineSubscribed', payload: { subscription_id: 'sub' } };
+      case 'CloseTimeline':
+        return { type: 'TimelineClosed' };
+      default:
+        return { type: 'Unsubscribed' };
+    }
   });
   mocks.handlers.length = 0;
   timelineStore.items = [];

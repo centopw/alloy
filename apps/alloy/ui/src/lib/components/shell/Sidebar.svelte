@@ -5,17 +5,13 @@
   import TagChip from '../tags/TagChip.svelte';
   import TagEditDialog from '../tags/TagEditDialog.svelte';
   import Icon from '$lib/icons/Icon.svelte';
-  import { Archive, ArchiveRestore, ArrowUpDown, Bell, BellOff, Check, CheckCheck, ChevronDown, ChevronUp, Compass, Copy, Ellipsis, Info, LogOut, Lock, Mail, Palette, Pencil, Pin, PinOff, Plus, RefreshCw, Search, Settings, StickyNote, Tag, Trash2, X } from '$lib/icons';
-  import { client } from '$lib/ipc';
+  import { Archive, ArchiveRestore, ArrowUpDown, Bell, BellOff, CheckCheck, ChevronDown, ChevronUp, Copy, Ellipsis, Info, Mail, Palette, Pencil, Pin, PinOff, RefreshCw, Search, Settings, StickyNote, Tag, Trash2 } from '$lib/icons';
   import { contextmenu } from '$lib/platform/contextmenu';
   import { pullToRefresh } from '$lib/platform/pullToRefresh';
   import { shortcutLabel } from '$lib/platform/shortcuts';
   import type { MenuItem } from '$lib/stores/contextmenu.svelte';
-  import { expect } from '$lib/stores/errors';
-  import { roomInfo } from '$lib/stores/roomInfo.svelte';
-  import { ROOM_FILTERS, roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
+  import { isRoomMuted, MUTE_FOREVER, networkBadge, networkName, ROOM_FILTERS, roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
   import { prefs } from '$lib/stores/prefs.svelte';
-  import { roomNotify } from '$lib/stores/roomNotify.svelte';
   import { displayTags, TAG_COLOUR_VARS, TAG_COLOURS } from '$lib/stores/tags';
   import { tags } from '$lib/stores/tags.svelte';
   import { connectivity } from '$lib/stores/connectivity.svelte';
@@ -24,33 +20,30 @@
   import { groupRoomsByTag, ROOM_SORTS, sortForGroupToggle, type RoomSort } from '$lib/stores/roomSort';
   import { rovingTabStop, rovingTargetIndex } from '$lib/platform/rovingFocus';
   import { roomRowSelector } from '$lib/platform/shellFocus';
-  import type { TagColour } from '$lib/generated';
+  import type { Network, TagColour } from '$lib/generated';
   import { ui } from '$lib/stores/ui.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
   import { formatListTime } from '$lib/content/format';
   import { highlightRuns } from '$lib/content/searchHighlight';
-  import RenameRoomDialog from './RenameRoomDialog.svelte';
   import { copyItems, notifyItems, openMenuFrom } from './roomMenus';
   import RoomSwipe from './RoomSwipe.svelte';
   import { draftsStore } from '$lib/stores/drafts.svelte';
-  import { muteRoom, setRoomLevel } from '$lib/stores/muteTimer.svelte';
+  import { muteRoom, unmuteRoom } from '$lib/stores/muteTimer.svelte';
+  import { resolveAvatar } from '$lib/stores/avatars.svelte';
   import { globalSearch, isSearchable } from '$lib/stores/globalSearch.svelte';
   import { muteEndLabel } from '$lib/content/mute';
 
   import { t } from '$lib/i18n';
   interface Props {
     onselect?: (roomId: string) => void;
-    onnew?: () => void;
-    onbrowse?: () => void;
     onsettings?: (section?: 'tags') => void;
   }
-  let { onselect, onnew, onbrowse, onsettings }: Props = $props();
+  let { onselect, onsettings }: Props = $props();
 
   type RoomItem = (typeof roomsStore.rooms)[number];
 
-  let inviteBusy = $state<string | null>(null);
-  let renameRoomId = $state<string | null>(null);
-  let pendingLeave = $state<{ id: string; title: string } | null>(null);
+  /** Resolved chat avatars by room id; null while a lookup runs. */
+  let avatars = $state<Record<string, string | null>>({});
   let renameTagId = $state<string | null>(null);
   let pendingTagDelete = $state<{ id: string; name: string; count: number } | null>(null);
   const SORT_LABELS: Record<RoomSort, string> = {
@@ -64,23 +57,6 @@
     (f) => f.value === 'all' || f.value === 'unread' || f.value === 'direct',
   );
 
-  async function answerInvite(roomId: string, accept: boolean) {
-    inviteBusy = roomId;
-    try {
-      if (accept) {
-        await client.joinRoom(roomId);
-        roomsStore.select(roomId);
-        onselect?.(roomId);
-      } else {
-        await client.leaveRoom(roomId);
-      }
-    } catch {
-      /* the room list stream reflects the real state; nothing to roll back */
-    } finally {
-      inviteBusy = null;
-    }
-  }
-
   function openRoom(roomId: string) {
     roomsStore.select(roomId);
     onselect?.(roomId);
@@ -89,24 +65,6 @@
   function showRoomInfo(roomId: string) {
     openRoom(roomId);
     ui.openRoomInfo('info');
-  }
-
-  async function markRead(roomId: string) {
-    roomsStore.markRead(roomId);
-    try {
-      await client.invoke({ action: 'MarkRoomRead', params: { room_id: roomId } });
-    } catch {
-      /* the room list stream reflects the real state; nothing to roll back */
-    }
-  }
-
-  async function leaveRoom(roomId: string) {
-    expect(await client.invoke({ action: 'LeaveRoom', params: { room_id: roomId } }), 'RoomLeft');
-    if (roomsStore.activeRoomId === roomId) roomsStore.select(null);
-  }
-
-  async function confirmLeave() {
-    if (pendingLeave) await leaveRoom(pendingLeave.id);
   }
 
   /** Tag ids of a room as they are now, so the Tags submenu reflects each toggle. */
@@ -120,14 +78,13 @@
   }
 
   function roomItems(r: RoomItem): MenuItem[] {
-    void roomInfo.load(r.id);
-    void roomNotify.load(r.id);
-    const d = roomInfo.details(r.id);
     const unread = roomsStore.unreadOf(r);
+    const muted = isRoomMuted(r);
     return [
-      { id: 'mark-unread', label: unread > 0 || r.marked_unread ? t('common-mark-as-read') : t('sidebar-mark-as-unread'), icon: unread > 0 || r.marked_unread ? CheckCheck : Mail, onselect: () => (unread > 0 ? void markRead(r.id) : void roomsStore.setMarkedUnread(r.id, !r.marked_unread)) },
-      { id: 'pin', label: r.favourite ? t('sidebar-unpin-from-top') : t('sidebar-pin-to-top'), icon: r.favourite ? PinOff : Pin, onselect: () => void roomsStore.setFavourite(r.id, !r.favourite) },
-      { id: 'archive', label: r.low_priority ? t('room-swipe-unarchive') : t('room-swipe-archive'), icon: r.low_priority ? ArchiveRestore : Archive, onselect: () => void roomsStore.setArchived(r.id, !r.low_priority) },
+      { id: 'mark-unread', label: unread > 0 || r.marked_unread ? t('common-mark-as-read') : t('sidebar-mark-as-unread'), icon: unread > 0 || r.marked_unread ? CheckCheck : Mail, onselect: () => (unread > 0 ? roomsStore.markRead(r.id) : void roomsStore.setMarkedUnread(r.id, !r.marked_unread)) },
+      { id: 'pin', label: r.pinned ? t('sidebar-unpin-from-top') : t('sidebar-pin-to-top'), icon: r.pinned ? PinOff : Pin, onselect: () => void roomsStore.setPinned(r.id, !r.pinned) },
+      { id: 'archive', label: r.archived ? t('room-swipe-unarchive') : t('room-swipe-archive'), icon: r.archived ? ArchiveRestore : Archive, onselect: () => void roomsStore.setArchived(r.id, !r.archived) },
+      { id: 'mute', label: muted ? t('room-swipe-unmute') : t('room-swipe-mute'), icon: BellOff, onselect: () => void (muted ? unmuteRoom(r.id) : muteRoom(r.id, null)) },
       { separator: true },
       {
         id: 'notifications',
@@ -168,7 +125,6 @@
         submenu: {
           items: [
             { id: 'details', label: t('common-room-details'), icon: Info, onselect: () => showRoomInfo(r.id) },
-            { id: 'rename', label: t('rename-room-dialog-rename-room'), icon: Pencil, disabled: d !== null && !d.can_set_name, onselect: () => (renameRoomId = r.id) },
             { id: 'note', label: t('sidebar-edit-note'), icon: StickyNote, onselect: () => showRoomInfo(r.id) },
           ],
         },
@@ -181,8 +137,6 @@
           items: copyItems(r),
         },
       },
-      { separator: true },
-      { id: 'leave', label: t('sidebar-leave-room'), icon: LogOut, danger: true, onselect: () => (pendingLeave = { id: r.id, title: roomTitle(r) }) },
     ];
   }
 
@@ -208,36 +162,24 @@
     }));
   }
 
-  /** Marks every joined room in `list` with unread messages as read, through the same path as the room menu. */
+  /** Marks every room in `list` with unread messages as read, through the same path as the room menu. */
   function markAllRead(list: readonly RoomItem[]) {
-    for (const r of list) if (r.membership !== 'Invited' && roomsStore.unreadOf(r) > 0) void markRead(r.id);
+    for (const r of list) if (roomsStore.unreadOf(r) > 0) roomsStore.markRead(r.id);
   }
 
   function hasUnread(list: readonly RoomItem[]): boolean {
-    return list.some((r) => r.membership !== 'Invited' && roomsStore.unreadOf(r) > 0);
+    return list.some((r) => roomsStore.unreadOf(r) > 0);
   }
 
-  /** Header add button: start a room, or discover public ones on desktop. */
-  function createItems(): MenuItem[] {
-    // Public-room browsing lives here on every layout: the phone tab bar has no Discover tab, and
-    // the pane menu is where a phone user looks for "find a room" now.
-    return [
-      { id: 'new-room', label: t('sidebar-new-room'), icon: Plus, onselect: () => onnew?.() },
-      { id: 'browse', label: t('sidebar-browse-public-rooms'), icon: Compass, onselect: () => onbrowse?.() },
-    ];
-  }
-
-  /** Pane header and blank list area: room creation, discovery and read state. */
+  /** Pane header and blank list area: read state of everything the pane shows. */
   function paneItems(): MenuItem[] {
     return [
-      ...createItems(),
-      { separator: true },
       {
         id: 'mark-all',
         label: t('common-mark-all-as-read'),
         icon: CheckCheck,
-        disabled: !hasUnread(roomsStore.rooms),
-        onselect: () => markAllRead(roomsStore.rooms),
+        disabled: !hasUnread(roomsStore.visible),
+        onselect: () => markAllRead(roomsStore.visible),
       },
     ];
   }
@@ -281,7 +223,7 @@
   function tagItems(id: string): MenuItem[] {
     const def = tags.defs.find((d) => d.id === id);
     if (!def) {
-      return [{ id: 'add-tag', label: t('sidebar-add-to-my-tags'), icon: Plus, onselect: () => void tags.create(id, 'grey') }];
+      return [{ id: 'add-tag', label: t('sidebar-add-to-my-tags'), icon: Pin, onselect: () => void tags.create(id, 'grey') }];
     }
     const index = tags.defs.indexOf(def);
     const count = roomsStore.rooms.filter((r) => r.tags.includes(id)).length;
@@ -334,38 +276,24 @@
     if (pendingTagDelete) await tags.remove(pendingTagDelete.id);
   }
 
-  function inviteItems(r: RoomItem): MenuItem[] {
-    const busy = inviteBusy === r.id;
-    return [
-      { id: 'accept', label: t('sidebar-accept-invitation'), icon: Check, disabled: busy, onselect: () => void answerInvite(r.id, true) },
-      { id: 'decline', label: t('sidebar-decline-invitation'), icon: X, disabled: busy, onselect: () => void answerInvite(r.id, false) },
-    ];
-  }
-
-  const scopeSpace = $derived(ui.scope === 'home' ? null : (roomsStore.rooms.find((r) => r.id === ui.scope) ?? null));
-  const scopeTitle = $derived(scopeSpace ? roomTitle(scopeSpace) : t('sidebar-chats'));
   const filterLabel = $derived(ROOM_FILTERS.find((f) => f.value === roomsStore.filter)?.label ?? t('room-filter-all'));
   const moreFilterActive = $derived(!PRIMARY_FILTERS.some((f) => f.value === roomsStore.filter));
-  const unreadRoomsCount = $derived(
-    roomsStore.rooms.filter(
-      (r) => !r.is_space && r.membership !== 'Invited' && roomsStore.unreadOf(r) > 0,
-    ).length,
-  );
+  const unreadRoomsCount = $derived(roomsStore.rooms.filter((r) => !r.archived && roomsStore.unreadOf(r) > 0).length);
+  const multipleAccounts = $derived(roomsStore.accounts.length > 1);
 
-  const invites = $derived(roomsStore.visible.filter((r) => r.membership === 'Invited'));
-  const joined = $derived(roomsStore.visible.filter((r) => r.membership !== 'Invited'));
-  // Pinned chats (Matrix favourites) sit above everything else; the Archive view lists them in place.
-  const pinned = $derived(roomsStore.filter === 'archive' ? [] : joined.filter((r) => r.favourite));
-  const unpinned = $derived(roomsStore.filter === 'archive' ? joined : joined.filter((r) => !r.favourite));
+  const joined = $derived(roomsStore.visible);
+  // Pinned chats sit above everything else; the Archive view lists them in place.
+  const pinned = $derived(roomsStore.filter === 'archive' ? [] : joined.filter((r) => r.pinned));
+  const unpinned = $derived(roomsStore.filter === 'archive' ? joined : joined.filter((r) => !r.pinned));
   // With sections, direct messages get their own People section when roomListPeople is on; otherwise they sit with Rooms.
   const rooms = $derived(unpinned.filter((r) => !prefs.roomListPeople || !r.is_direct));
   const direct = $derived(prefs.roomListPeople ? unpinned.filter((r) => r.is_direct) : []);
-  // Without sections: invites first, then pinned chats, then every other joined room in the engine's activity order.
-  const flat = $derived([...invites, ...pinned, ...unpinned]);
+  // Without sections: pinned chats first, then every other room in the engine's activity order.
+  const flat = $derived([...pinned, ...unpinned]);
   const searching = $derived(isSearchable(roomsStore.query));
   const nothing = $derived(roomsStore.visible.length === 0 && !searching);
 
-  // Typing in the search box also searches message text across rooms.
+  // Typing in the search box also searches message text across chats.
   $effect(() => globalSearch.schedule(roomsStore.query));
   const tagDefs = $derived(displayTags(tags.defs, roomsStore.rooms));
   const tagById = $derived(new Map(tagDefs.map((d) => [d.id, d] as const)));
@@ -376,11 +304,11 @@
   // mode (flat, sections, tags). Phones keep every row a normal button (touch-first UI).
   let rovingId = $state<string | null>(null);
   function roomButtonIds(list: readonly RoomItem[]): string[] {
-    return list.filter((r) => r.membership !== 'Invited').map((r) => r.id);
+    return list.map((r) => r.id);
   }
   const rovingIds = $derived.by(() => {
     if (prefs.roomSort === 'tag') {
-      return roomButtonIds(groupRoomsByTag([...pinned, ...unpinned], tagDefs).flatMap((g) => g.rooms));
+      return roomButtonIds(groupRoomsByTag(flat, tagDefs).flatMap((g) => g.rooms));
     }
     if (prefs.roomListSections) return roomButtonIds([...pinned, ...rooms, ...direct]);
     return roomButtonIds(flat);
@@ -414,37 +342,42 @@
     if (filter !== null && !tagById.has(filter)) roomsStore.tagFilter = null;
   });
 
-  // The muted icon and the menu's current choice read these levels, so load them for the visible joined rooms.
+  // Chat pictures are stored media; resolve them for the rows that have one.
   $effect(() => {
-    const ids = roomsStore.visible.filter((r) => r.membership === 'Joined').map((r) => r.id);
-    untrack(() => {
-      for (const id of ids) void roomNotify.load(id);
-    });
+    for (const room of roomsStore.visible) {
+      if (!room.avatar || Object.hasOwn(avatars, room.id)) continue;
+      avatars = { ...avatars, [room.id]: null };
+      void resolveAvatar(room.avatar, 36).then((url) => (avatars = { ...avatars, [room.id]: url }));
+    }
   });
 
   // Drafts survive a restart: the list shows them once the rooms are known.
   $effect(() => {
     if (roomsStore.loaded) untrack(() => void draftsStore.loadAll());
   });
-  const leaveMessage = $derived(
-    pendingLeave ? `You will leave ${pendingLeave.title}. You need a new invitation to join again.` : '',
-  );
 
   const renameTag = $derived(tags.defs.find((d) => d.id === renameTagId) ?? null);
   const tagDeleteMessage = $derived(
     pendingTagDelete
-      ? `Remove tag ${pendingTagDelete.name} from ${pendingTagDelete.count} ${pendingTagDelete.count === 1 ? 'room' : 'rooms'}?`
+      ? `Remove tag ${pendingTagDelete.name} from ${pendingTagDelete.count} ${pendingTagDelete.count === 1 ? 'chat' : 'chats'}?`
       : '',
   );
 </script>
 
+{#snippet accountBadge(network: Network)}
+  <span class="net" aria-label={networkName(network)} title={networkName(network)}>{networkBadge(network)}</span>
+{/snippet}
+
 {#snippet roomRow(r: RoomItem)}
   {@const unread = roomsStore.unreadOf(r)}
   {@const active = r.id === roomsStore.activeRoomId}
-  {@const muted = roomNotify.isMuted(r.id)}
+  {@const muted = isRoomMuted(r)}
   {@const markedUnread = !!r.marked_unread && unread === 0}
-  {@const draft = active ? null : draftsStore.previewOf(r.id)}
-  {@const until = muteEndLabel(prefs.mutedUntil[r.id], Date.now(), (ms) => formatListTime(ms))}
+  {@const draft = active ? null : roomsStore.draftOf(r)}
+  {@const until =
+    r.muted_until !== null && r.muted_until < MUTE_FOREVER
+      ? muteEndLabel(r.muted_until, Date.now(), (ms) => formatListTime(ms))
+      : null}
   <div class="row-wrap">
     <button
       type="button"
@@ -462,10 +395,13 @@
       onkeydown={(e) => onRoomKeydown(e, r.id)}
     >
       <span class="pinned">
-        <Avatar userId={r.id} displayName={roomTitle(r)} src={r.avatar_url} size={36} shape={r.is_direct ? 'circle' : 'rounded'} />
+        <Avatar userId={r.id} displayName={roomTitle(r)} src={avatars[r.id] ?? null} size={36} shape={r.is_direct ? 'circle' : 'rounded'} />
       </span>
       <span class="text">
-        <span class="title">{roomTitle(r)}</span>
+        <span class="title">
+          {#if multipleAccounts}{@render accountBadge(r.network)}{/if}
+          {roomTitle(r)}
+        </span>
         {#if draft}
           <span class="preview"><span class="draft">{t('sidebar-draft')}</span> {draft}</span>
         {:else if prefs.roomListPreviews && r.latest_event}
@@ -484,11 +420,11 @@
               {/each}
             </span>
           {/if}
-          {#if r.favourite}
+          {#if r.pinned}
             <span class="pinned"><Icon icon={Pin} size={16} label={t('sidebar-pinned')} /></span>
           {/if}
-          {#if r.encrypted}
-            <span class="pinned"><Icon icon={Lock} size={16} label={t('sidebar-encrypted')} /></span>
+          {#if r.archived}
+            <span class="pinned"><Icon icon={Archive} size={16} label={t('room-swipe-archive')} /></span>
           {/if}
           {#if muted}
             <span class="pinned"><Icon icon={BellOff} size={16} label={until ?? t('sidebar-notifications-muted')} /></span>
@@ -512,7 +448,7 @@
         tabindex="-1"
         aria-label={t('sidebar-room-actions', { room: roomTitle(r) })}
         data-tooltip={t('common-more')}
-        onclick={(e) => openMenuFrom(e.currentTarget, roomItems(r), 'Room actions')}
+        onclick={(e) => openMenuFrom(e.currentTarget, roomItems(r), t('common-more'))}
       >
         <Icon icon={Ellipsis} size={16} />
       </button>
@@ -520,37 +456,17 @@
   </div>
 {/snippet}
 
-{#snippet inviteRow(r: RoomItem)}
-  <div class="row invite" use:contextmenu={() => inviteItems(r)}>
-    <span class="pinned">
-      <Avatar userId={r.id} displayName={roomTitle(r)} src={r.avatar_url} size={36} shape={r.is_direct ? 'circle' : 'rounded'} />
-    </span>
-    <div class="text">
-      <span class="title">{roomTitle(r)}</span>
-      <span class="sub">{t('sidebar-invitation')}</span>
-      <div class="invite-actions">
-        <button type="button" disabled={inviteBusy === r.id} onclick={() => answerInvite(r.id, true)}>{t('sidebar-accept')}</button>
-        <button type="button" class="decline" disabled={inviteBusy === r.id} onclick={() => answerInvite(r.id, false)}>{t('sidebar-decline')}</button>
-      </div>
-    </div>
-  </div>
-{/snippet}
-
 {#snippet listRow(r: RoomItem)}
-  {#if r.membership === 'Invited'}
-    {@render inviteRow(r)}
-  {:else}
-    <RoomSwipe
-      id={r.id}
-      enabled={viewport.isPhone}
-      archived={!!r.low_priority}
-      muted={roomNotify.isMuted(r.id)}
-      onarchive={() => void roomsStore.setArchived(r.id, !r.low_priority)}
-      onmute={() => void (roomNotify.isMuted(r.id) ? setRoomLevel(r.id, null) : muteRoom(r.id, null))}
-    >
-      {@render roomRow(r)}
-    </RoomSwipe>
-  {/if}
+  <RoomSwipe
+    id={r.id}
+    enabled={viewport.isPhone}
+    archived={r.archived}
+    muted={isRoomMuted(r)}
+    onarchive={() => void roomsStore.setArchived(r.id, !r.archived)}
+    onmute={() => void (isRoomMuted(r) ? unmuteRoom(r.id) : muteRoom(r.id, null))}
+  >
+    {@render roomRow(r)}
+  </RoomSwipe>
 {/snippet}
 
 {#snippet roomList(list: RoomItem[])}
@@ -579,13 +495,12 @@
 
 <section class="sidebar" aria-label={t('sidebar-rooms')}>
   <header class="head" use:contextmenu={paneItems}>
-    <!-- On phones the room list is a screen of its own, so its scope title is that view's h1; the
-         chat's h1 is `display: none` while the list shows. On desktop the conversation owns the h1
-         and this is a panel heading. -->
+    <!-- On phones the room list is a screen of its own, so its title is that view's h1; the chat's
+         h1 is `display: none` while the list shows. On desktop the conversation owns the h1. -->
     {#if viewport.isPhone}
-      <h1 class="scope" title={scopeTitle}>{scopeTitle}</h1>
+      <h1 class="scope">{t('sidebar-chats')}</h1>
     {:else}
-      <h2 class="scope" title={scopeTitle}>{scopeTitle}</h2>
+      <h2 class="scope">{t('sidebar-chats')}</h2>
     {/if}
     {#if unreadRoomsCount > 0}
       <span class="scope-meta">{unreadRoomsCount} {t('sidebar-unread')}</span>
@@ -600,17 +515,6 @@
         onclick={() => void refreshStore.run()}
       >
         <span class:spin={refreshStore.busy}><Icon icon={RefreshCw} size={20} /></span>
-      </button>
-      <button
-        type="button"
-        class="icon"
-        aria-label={t('sidebar-new-room-or-browse')}
-        aria-haspopup="menu"
-        data-tooltip={t('sidebar-new-room-or-browse')}
-        use:contextmenu={createItems}
-        onclick={(e) => openMenuFrom(e.currentTarget as HTMLElement, createItems(), 'Create or browse')}
-      >
-        <Icon icon={Plus} size={20} />
       </button>
     </div>
   </header>
@@ -694,36 +598,27 @@
 
   <div class="groups" use:contextmenu={paneItems} use:pullToRefresh={{ onrefresh: () => void refreshStore.run(), enabled: viewport.isPhone }}>
     {#if prefs.roomSort === 'tag'}
-      <!-- Tag groups are the sections. Splitting the same rooms into Pinned/Rooms/People first
-           repeated every tag heading once per outer section (a room tagged Work showed up under
-           "Work" twice), so grouping replaces those sections instead of nesting inside them. -->
-      {#if invites.length > 0}
-        <section class="group" aria-label={t('sidebar-invites')}>
-          <h3><span>{t('sidebar-invites')}</span><span class="section-count">{invites.length}</span></h3>
-          <ul>
-            {#each invites as r (r.id)}
-              <li>{@render inviteRow(r)}</li>
-            {/each}
-          </ul>
-        </section>
-      {/if}
-      {#if pinned.length + unpinned.length > 0}
+      <!-- Tag groups are the sections; grouping replaces Pinned/Chats/People instead of nesting. -->
+      {#if flat.length > 0}
         <section class="group" aria-label={t('sidebar-rooms-by-tag')}>
           {@render roomList([...pinned, ...unpinned])}
         </section>
       {/if}
-    {:else if prefs.roomListSections}
-      {#if invites.length > 0}
-        <section class="group" aria-label={t('sidebar-invites')}>
-          <h3><span>{t('sidebar-invites')}</span><span class="section-count">{invites.length}</span></h3>
-          <ul>
-            {#each invites as r (r.id)}
-              <li>{@render inviteRow(r)}</li>
-            {/each}
-          </ul>
+    {:else if multipleAccounts}
+      <!-- One section per account, so a chat from Telegram is never mistaken for one from Messenger. -->
+      {#each roomsStore.accountGroups as group (group.account?.id ?? 'orphan')}
+        <section class="group" aria-label={group.account ? `${group.account.display_name ?? networkName(group.account.network)}` : t('sidebar-rooms')}>
+          <h3>
+            <span>
+              {group.account ? (group.account.display_name ?? networkName(group.account.network)) : t('sidebar-rooms')}
+              {#if group.account}{@render accountBadge(group.account.network)}{/if}
+            </span>
+            <span class="section-count">{group.rooms.length}</span>
+          </h3>
+          {@render roomList(group.rooms)}
         </section>
-      {/if}
-
+      {/each}
+    {:else if prefs.roomListSections}
       {#if pinned.length > 0}
         <section class="group" aria-label={t('sidebar-pinned')}>
           <h3><span>{t('sidebar-pinned')}</span><span class="section-count">{pinned.length}</span></h3>
@@ -746,7 +641,7 @@
       {/if}
     {:else if flat.length > 0}
       <section class="group" aria-label={t('sidebar-room-list')}>
-        {@render roomList(flat)}
+        {@render roomList([...pinned, ...unpinned])}
       </section>
     {/if}
 
@@ -776,11 +671,7 @@
               </li>
             {/each}
           </ul>
-          {#if globalSearch.nextBatch}
-            <button type="button" class="more-hits" disabled={globalSearch.loading} onclick={() => void globalSearch.more()}>{t('sidebar-show-more')}</button>
-          {/if}
         {/if}
-        <p class="note">{t('sidebar-encrypted-rooms-are-not-included')}</p>
       </section>
     {/if}
 
@@ -793,20 +684,6 @@
 
   <UpdateNotice />
 </section>
-
-{#if renameRoomId}
-  <RenameRoomDialog roomId={renameRoomId} open onclose={() => (renameRoomId = null)} />
-{/if}
-
-<ConfirmDialog
-  open={pendingLeave !== null}
-  title={t('sidebar-leave-room')}
-  message={leaveMessage}
-  confirmLabel={t('sidebar-leave')}
-  danger
-  onconfirm={confirmLeave}
-  onclose={() => (pendingLeave = null)}
-/>
 
 {#if renameTag}
   <TagEditDialog open tag={renameTag} onclose={() => (renameTagId = null)} />
@@ -1055,6 +932,15 @@
   .group > h3:first-child {
     padding-top: var(--alloy-spacing-scale-1);
   }
+  .group h3 > span:first-child {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--alloy-spacing-scale-1);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .section-count {
     padding: 1px 6px; /* token-audit: kbd chip inset, set by the 10px meta text */
     border-radius: var(--alloy-radii-full);
@@ -1151,9 +1037,6 @@
   .row:not(.unread):not(.active) .title {
     font-weight: var(--alloy-typography-weight-medium);
   }
-  .row.invite {
-    align-items: flex-start;
-  }
   .text {
     display: flex;
     flex-direction: column;
@@ -1161,12 +1044,22 @@
     flex: 1;
     min-width: 0;
   }
-  .sub {
-    font-size: var(--alloy-typography-size-xs);
-    color: var(--alloy-color-text-muted);
-  }
   .text > .title {
     flex: none;
+  }
+  /* The network a chat belongs to, as text (ADR 0001: no decorative icons). */
+  .net {
+    flex: none;
+    margin-inline-end: var(--alloy-spacing-scale-1);
+    padding: 0 var(--alloy-spacing-scale-1);
+    border: 1px solid var(--alloy-chat-rim);
+    border-radius: var(--alloy-radii-sm);
+    color: var(--alloy-color-text-muted);
+    font-size: 10px;
+    font-weight: var(--alloy-typography-weight-semibold);
+    letter-spacing: 0;
+    line-height: 15px;
+    vertical-align: 1px;
   }
   .preview {
     overflow: hidden;
@@ -1249,15 +1142,6 @@
   .hit-sender {
     color: var(--alloy-color-text-primary);
   }
-  .more-hits {
-    width: 100%;
-    min-height: 36px;
-    border: 0;
-    background: transparent;
-    color: var(--alloy-color-accent-primary);
-    font: inherit;
-    cursor: pointer;
-  }
   .row-wrap {
     position: relative;
   }
@@ -1298,29 +1182,6 @@
     margin: 0 var(--alloy-spacing-scale-1);
     border-radius: var(--alloy-radii-full);
     background: var(--alloy-color-text-muted);
-  }
-  .invite-actions {
-    display: flex;
-    gap: var(--alloy-spacing-scale-2);
-    margin-top: var(--alloy-spacing-scale-1);
-  }
-  .invite-actions button {
-    padding: var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-3);
-    border: 0;
-    border-radius: var(--alloy-radii-md);
-    background: var(--alloy-color-accent-fill);
-    color: var(--alloy-color-text-on-accent);
-    font: inherit;
-    font-size: var(--alloy-typography-size-sm);
-    cursor: pointer;
-  }
-  .invite-actions button.decline {
-    background: var(--alloy-color-surface-hover);
-    color: var(--alloy-color-text-primary);
-  }
-  .invite-actions button:disabled {
-    opacity: 0.6;
-    cursor: default;
   }
   .refreshing {
     margin: 0;
@@ -1477,16 +1338,6 @@
     .marks :global(.alloy-badge) {
       min-width: 20px !important;
       height: 20px !important;
-    }
-    .invite-actions {
-      margin-top: var(--alloy-spacing-scale-2);
-    }
-    .invite-actions button {
-      flex: 1;
-      min-height: 44px;
-      padding: 0 var(--alloy-layout-row-pad-x);
-      border-radius: var(--alloy-radii-md);
-      font-size: var(--alloy-typography-size-base);
     }
   }
 </style>

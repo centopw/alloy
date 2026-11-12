@@ -53,10 +53,32 @@ describe('stores against the mock engine', () => {
     await timelineStore.close();
   });
 
-  it('session restores the mock account', async () => {
+  it('session lists the connected accounts and enters the app', async () => {
     await session.boot();
     expect(session.phase).toBe('ready');
-    expect(session.account?.user_id).toMatch(/^@/);
+    expect(session.accounts.length).toBeGreaterThan(0);
+    expect(session.accounts.map((a) => a.network)).toContain('telegram');
+  });
+
+  it('walks a Telegram login from phone number to Done and closes the overlay', async () => {
+    await session.boot();
+    session.openAddAccount();
+    expect(session.addingAccount).toBe(true);
+
+    await session.beginLogin('telegram');
+    expect(session.login?.step.type).toBe('phone_number');
+    await session.submitLogin({ type: 'phone_number', phone: '+15550100' });
+    expect(session.login?.step.type).toBe('code');
+    await session.submitLogin({ type: 'code', code: '12345' });
+    // The mock asks for the two-step password only for some numbers; answer it if it comes.
+    while (session.login?.step.type === 'password') {
+      await session.submitLogin({ type: 'password', password: 'alloy-test' });
+    }
+
+    expect(session.login).toBeNull();
+    expect(session.addingAccount).toBe(false);
+    expect(session.phase).toBe('ready');
+    expect(session.accounts.some((a) => a.network === 'telegram')).toBe(true);
   });
 
   it('room list streams rooms and filters by chip and query', async () => {
@@ -98,5 +120,28 @@ describe('stores against the mock engine', () => {
     await timelineStore.close();
     expect(timelineStore.items).toHaveLength(0);
     expect(timelineStore.roomId).toBeNull();
+  });
+});
+
+describe('session account state', () => {
+  it('needsRelogin follows the stored account state', async () => {
+    await session.boot();
+    const original = session.accounts;
+    const [first] = original;
+    session.accounts = [{ ...first, state: 'needs_relogin' }];
+    expect(session.needsRelogin).toBe(true);
+    session.accounts = [{ ...first, state: 'active' }];
+    expect(session.needsRelogin).toBe(false);
+    session.accounts = original;
+  });
+
+  it('logging out every account returns to onboarding', async () => {
+    await session.boot();
+    // The engine is authoritative; start from its list, not from a previous test's local upsert.
+    await session.refreshAccounts();
+    await session.logout();
+    expect(session.accounts).toHaveLength(0);
+    expect(session.phase).toBe('onboarding');
+    expect(session.needsRelogin).toBe(false);
   });
 });

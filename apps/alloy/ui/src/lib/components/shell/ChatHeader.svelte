@@ -1,17 +1,17 @@
 <script lang="ts">
   import type { RoomSummary } from '$lib/generated/protocol';
   import { Avatar } from '../common';
-  import { roomInfo } from '$lib/stores/roomInfo.svelte';
-  import { copyItems, openMenuFrom, roomPictureItems } from './roomMenus';
   import Icon from '$lib/icons/Icon.svelte';
-  import { CheckCheck, ChevronLeft, Info, Lock, Search, Users } from '$lib/icons';
+  import { CheckCheck, ChevronLeft, Info, Search, Users } from '$lib/icons';
   import { contextmenu } from '$lib/platform/contextmenu';
   import { shortcutLabel } from '$lib/platform/shortcuts';
   import type { MenuItem } from '$lib/stores/contextmenu.svelte';
   import { membersStore } from '$lib/stores/members.svelte';
-  import { roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
+  import { networkBadge, networkName, roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
+  import { resolveAvatar } from '$lib/stores/avatars.svelte';
   import { ui } from '$lib/stores/ui.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
+  import { copyItems } from './roomMenus';
 
   import { t } from '$lib/i18n';
   interface Props {
@@ -22,15 +22,29 @@
 
   const roomId = $derived(room.id);
   const title = $derived(roomTitle(room));
-  const topic = $derived(membersStore.detailsOf(roomId)?.topic?.trim() || null);
   const phone = $derived(viewport.isPhone);
-  const members = $derived(membersStore.detailsOf(roomId)?.joined_members ?? null);
-  const canSetPicture = $derived(roomInfo.details(roomId)?.can_set_avatar ?? false);
-  // Phones have no inline topic divider, so the second line carries the topic, else the member count.
+  const details = $derived(membersStore.detailsOf(roomId));
+  const memberCount = $derived(
+    details?.member_count ?? (membersStore.membersOf(roomId).length || null)
+  );
+  // Phones have no inline subtitle on the title row, so the second line carries the member count.
   const subtitle = $derived(
-    topic ?? (members === null ? null : t('chat-header-member-count', { count: members })),
+    memberCount === null ? null : t('chat-header-member-count', { count: memberCount })
   );
   const searchShortcut = shortcutLabel('F');
+  let avatarSrc = $state<string | null>(null);
+
+  $effect(() => {
+    const source = room.avatar;
+    let cancelled = false;
+    avatarSrc = null;
+    void resolveAvatar(source, 32).then((url) => {
+      if (!cancelled) avatarSrc = url;
+    });
+    return () => {
+      cancelled = true;
+    };
+  });
 
   function headerMenu(): MenuItem[] {
     return [
@@ -55,21 +69,16 @@
     ];
   }
 
-  // The topic lives in the room details, which may not have loaded yet.
+  // The member count and kind live in the room details, which may not have loaded yet.
   $effect(() => {
     void membersStore.loadDetails(roomId).catch(() => {
-      /* the header simply shows no topic */
+      /* the header simply shows no member count */
     });
-  });
-
-  // Picture permission comes from the room details, which the header loads for its picture menu.
-  $effect(() => {
-    void roomInfo.load(roomId);
   });
 </script>
 
 {#snippet avatarEl()}
-  <Avatar userId={roomId} displayName={title} src={room.avatar_url} size="sm" shape="rounded" />
+  <Avatar userId={roomId} displayName={title} src={avatarSrc} size="sm" shape="rounded" />
 {/snippet}
 
 <header class="head" use:contextmenu={headerMenu}>
@@ -78,21 +87,8 @@
   </button>
   <h1 class="heading" tabindex="-1" data-chat-entry>
     <div class="identity">
-      {#if canSetPicture}
-        <button
-          type="button"
-          class="picture-btn"
-          aria-label={t('chat-header-room-picture-options')}
-          title={t('chat-header-room-picture-options')}
-          onclick={(e) => openMenuFrom(e.currentTarget, roomPictureItems(roomId), t('chat-header-room-picture-options'))}
-        >
-          {@render avatarEl()}
-        </button>
-      {/if}
       <button type="button" class="info-btn" aria-label={t('chat-header-room-info', { room: title })} data-tooltip={t('chat-header-room-info-2')} onclick={() => ui.toggleRoomInfo()}>
-        {#if !canSetPicture}
-          <span class="avatar-slot">{@render avatarEl()}</span>
-        {/if}
+        <span class="avatar-slot">{@render avatarEl()}</span>
         {#if phone}
           <span class="stack">
             <span class="title">{title}</span>
@@ -102,14 +98,10 @@
           </span>
         {:else}
           <span class="title">{title}</span>
-          {#if room.encrypted}
-            <span class="lock" role="img" aria-label={t('chat-header-end-to-end-encrypted')} title={t('chat-header-end-to-end-encrypted')}>
-              <Icon icon={Lock} size={16} />
-            </span>
-          {/if}
-          {#if topic}
+          <span class="net" aria-label={networkName(room.network)} title={networkName(room.network)}>{networkBadge(room.network)}</span>
+          {#if subtitle}
             <span class="divider" aria-hidden="true"></span>
-            <span class="topic">{topic}</span>
+            <span class="topic">{subtitle}</span>
           {/if}
         {/if}
       </button>
@@ -194,25 +186,14 @@
     text-align: left;
     cursor: pointer;
   }
-  .avatar-slot,
-  .picture-btn {
+  .avatar-slot {
     display: inline-flex;
     flex: none;
-  }
-  .picture-btn {
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    border: 0;
-    border-radius: var(--alloy-radii-sm);
-    background: transparent;
-    cursor: pointer;
   }
   .info-btn:hover .title {
     text-decoration: underline;
   }
-  .info-btn:focus-visible,
-  .picture-btn:focus-visible {
+  .info-btn:focus-visible {
     outline: 2px solid var(--alloy-color-accent-primary);
     outline-offset: 2px;
   }
@@ -227,10 +208,16 @@
     letter-spacing: -0.01em;
     color: var(--alloy-color-text-primary);
   }
-  .lock {
-    display: inline-flex;
+  /* The network a chat belongs to, as text (ADR 0001: no decorative icons). */
+  .net {
     flex: none;
+    padding: 0 var(--alloy-spacing-scale-1);
+    border: 1px solid var(--alloy-chat-rim);
+    border-radius: var(--alloy-radii-sm);
     color: var(--alloy-color-text-muted);
+    font-size: 10px;
+    font-weight: var(--alloy-typography-weight-semibold);
+    line-height: 15px;
   }
   .divider {
     flex-shrink: 0;
@@ -307,10 +294,6 @@
     }
     .info-btn {
       gap: var(--alloy-spacing-scale-3);
-    }
-    .picture-btn {
-      width: 44px;
-      height: 44px;
     }
     .stack {
       display: flex;

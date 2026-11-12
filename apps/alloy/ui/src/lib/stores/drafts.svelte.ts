@@ -14,43 +14,49 @@ class DraftsStore {
   /** Loads the draft previews of every room (after sign-in or a restart). */
   async loadAll(): Promise<void> {
     try {
-      const res = expect(await client.listDrafts(), 'Drafts');
-      this.previews = Object.fromEntries(res.payload.items.map((d) => [d.room_id, d.text]));
+      const res = expect(await client.invoke({ action: 'ListDrafts' }), 'Drafts');
+      this.previews = Object.fromEntries(res.payload.drafts.map((d) => [d.room_id, d.text]));
     } catch {
       /* previews are a convenience; the composer still restores drafts per room */
     }
   }
 
   /** The room's saved draft, or null. */
-  async load(roomId: string): Promise<{ text: string; replyTo: string | null; editOf: string | null } | null> {
+  async load(roomId: string): Promise<{ text: string; replyTo: string | null } | null> {
     try {
-      const res = expect(await client.getDraft(roomId), 'Draft');
+      const res = expect(
+        await client.invoke({ action: 'GetDraft', params: { room_id: roomId } }),
+        'Draft'
+      );
       const draft = res.payload.draft;
-      return draft ? { text: draft.text, replyTo: draft.reply_to, editOf: draft.edit_of } : null;
+      return draft ? { text: draft.text, replyTo: draft.reply_to } : null;
     } catch {
       return null;
     }
   }
 
   /** Saves a room's draft 500 ms after the last change; an empty draft clears it. */
-  save(roomId: string, text: string, opts?: { replyTo?: string | null; editOf?: string | null }): void {
+  save(roomId: string, text: string, replyTo?: string | null): void {
     this.#setPreview(roomId, text);
     clearTimeout(this.timers.get(roomId));
-    this.timers.set(roomId, setTimeout(() => void this.flush(roomId, text, opts), 500));
+    this.timers.set(roomId, setTimeout(() => void this.flush(roomId, text, replyTo), 500));
   }
 
   /** Saves now when a save is still waiting for its timer (leaving a room, closing the app). */
-  flushPending(roomId: string, text: string, opts?: { replyTo?: string | null; editOf?: string | null }): void {
-    if (this.timers.has(roomId)) void this.flush(roomId, text, opts);
+  flushPending(roomId: string, text: string, replyTo?: string | null): void {
+    if (this.timers.has(roomId)) void this.flush(roomId, text, replyTo);
   }
 
   /** Saves at once, for leaving a room before the timer fires. */
-  async flush(roomId: string, text: string, opts?: { replyTo?: string | null; editOf?: string | null }): Promise<void> {
+  async flush(roomId: string, text: string, replyTo?: string | null): Promise<void> {
     this.#setPreview(roomId, text);
     clearTimeout(this.timers.get(roomId));
     this.timers.delete(roomId);
     try {
-      await client.saveDraft(roomId, text, { reply_to: opts?.replyTo ?? null, edit_of: opts?.editOf ?? null });
+      await client.invoke({
+        action: 'SaveDraft',
+        params: { room_id: roomId, text, reply_to: replyTo ?? null },
+      });
     } catch {
       /* a draft that cannot be stored is lost silently; the user keeps typing */
     }

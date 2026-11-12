@@ -3,21 +3,22 @@ import type { GlobalSearchHit } from '../generated/index.js';
 import { errorMessage, expect } from './errors.js';
 import { timelineStore } from './timeline.svelte.js';
 
-/** Queries shorter than this are not sent to the server. */
+/** Queries shorter than this are not searched for. */
 export const GLOBAL_SEARCH_MIN_CHARS = 3;
+/** Hits asked of the local full-text index per search. */
+export const GLOBAL_SEARCH_LIMIT = 100;
 const DEBOUNCE_MS = 400;
 
-/** Whether `query` is long enough to search all rooms for. */
+/** Whether `query` is long enough to search all chats for. */
 export function isSearchable(query: string): boolean {
   return query.trim().length >= GLOBAL_SEARCH_MIN_CHARS;
 }
 
-/** Search across every unencrypted room, shown under the room list while the user types in the sidebar search. */
+/** Search across every stored chat, shown under the room list while the user types in its search box. */
 class GlobalSearchStore {
   hits = $state<GlobalSearchHit[]>([]);
   loading = $state(false);
   error = $state<string | null>(null);
-  nextBatch = $state<string | null>(null);
   /** The query the shown hits belong to. */
   query = $state('');
 
@@ -34,21 +35,17 @@ class GlobalSearchStore {
     }
     this.loading = true;
     const seq = this.seq;
-    this.timer = setTimeout(() => void this.run(query.trim(), null, seq), DEBOUNCE_MS);
+    this.timer = setTimeout(() => void this.run(query.trim(), seq), DEBOUNCE_MS);
   }
 
-  async more() {
-    if (!this.nextBatch || this.loading) return;
-    this.loading = true;
-    await this.run(this.query, this.nextBatch, this.seq);
-  }
-
-  private async run(query: string, batch: string | null, seq: number) {
+  private async run(query: string, seq: number) {
     try {
-      const res = expect(await client.searchAllMessages(query, batch), 'AllMessagesFound');
+      const res = expect(
+        await client.invoke({ action: 'SearchAllMessages', params: { query, limit: GLOBAL_SEARCH_LIMIT } }),
+        'AllMessagesFound'
+      );
       if (seq !== this.seq) return;
-      this.hits = batch ? [...this.hits, ...res.payload.hits] : res.payload.hits;
-      this.nextBatch = res.payload.next_batch;
+      this.hits = res.payload.hits;
       this.query = query;
       this.error = null;
     } catch (e) {
@@ -66,7 +63,9 @@ class GlobalSearchStore {
         await timelineStore.jumpToEvent(hit.event_id);
         return;
       }
-      await new Promise((r) => setTimeout(r, 50));
+      const { promise, resolve } = Promise.withResolvers<void>();
+      setTimeout(resolve, 50);
+      await promise;
     }
   }
 
@@ -74,7 +73,6 @@ class GlobalSearchStore {
     clearTimeout(this.timer);
     this.seq++;
     this.hits = [];
-    this.nextBatch = null;
     this.query = '';
     this.loading = false;
     this.error = null;

@@ -1,159 +1,247 @@
 import { client } from '../ipc/index.js';
-import type { Account } from '../generated/index.js';
-import { errorCode, errorMessage, errorReason, expect } from './errors.js';
-import { membersStore } from './members.svelte.js';
-import { pinsStore } from './pins.svelte.js';
-import { draftsStore } from './drafts.svelte.js';
-import { roomInfo } from './roomInfo.svelte.js';
-import { prefs } from './prefs.svelte.js';
-import { liveLocation } from './liveLocation.svelte.js';
-import { pushStore } from './push.svelte.js';
-import { openExternal } from '../platform/links.js';
+import type {
+  Account,
+  AccountId,
+  ConnectionStatus,
+  LoginId,
+  LoginInputDto,
+  LoginStepDto,
+  Network
+} from '../generated/index.js';
+import { errorCode, errorMessage, expect } from './errors.js';
 
 import { t } from '$lib/i18n';
 
 export type Phase = 'booting' | 'onboarding' | 'ready' | 'no-engine';
 
-/** Why a browser sign-in stopped, keyed by the engine's stable reason. */
-export interface OidcFailure {
-  reason: string;
-  message: string;
+/** One in-progress login attempt: the id the engine assigned and the step the UI must show. */
+export interface LoginAttempt {
+  id: LoginId;
+  network: Network;
+  step: LoginStepDto;
 }
 
-/** The engine gives a started OIDC login ten minutes; the waiting screen stops waiting with it. */
-const OIDC_WAIT_TIMEOUT_MS = 10 * 60 * 1000;
-
-/** The host of a homeserver URL, as the sign-in copy names it. */
-function hostOf(url: string): string {
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
+/** The network's name as chrome; the wire ids never reach the user. */
+export function networkLabel(network: Network): string {
+  switch (network) {
+    case 'telegram':
+      return t('network-telegram');
+    case 'messenger':
+      return t('network-messenger');
+    case 'fake':
+      return t('network-fake');
   }
 }
 
-/** Account/session lifecycle: restore on start, login, logout. */
+/**
+ * Account and login lifecycle on protocol v2: the connected accounts, their live connection
+ * status, the onboarding overlay, and the login attempt being answered.
+ */
 class SessionStore {
   phase = $state<Phase>('booting');
-  account = $state<Account | null>(null);
-  busy = $state(false);
+  /** Every locally stored account, newest last, as `ListAccounts`/`AccountsChanged` give it. */
+  accounts = $state<Account[]>([]);
+  /** Live connector status per account; an account without an event has no entry yet. */
+  statuses = $state<Record<AccountId, ConnectionStatus>>({});
+  /** The networks this build can connect, from `ListNetworks`. */
+  networks = $state<Network[]>([]);
+  /** Engine-level failure of the last account or login call (not a `LoginStepDto::Failed`). */
   error = $state<string | null>(null);
-  /** True between opening the browser for an OIDC login and its completion, cancellation or expiry. */
-  oidcWaiting = $state(false);
-  /** Set when a browser sign-in stopped without an account, for the onboarding surface to explain. */
-  oidcFailure = $state<OidcFailure | null>(null);
-  /** A stored session that could not be restored, so onboarding can say why it is showing. */
-  restoreNotice = $state<string | null>(null);
-  /** The last server that had a session, kept in memory to prefill the server step. */
-  lastHomeserver = $state<string | null>(null);
+  /** True while an account or login command is in flight. */
+  busy = $state(false);
+  /** Onboarding shown over the signed-in app for "Add account" and "Reconnect". */
+  addingAccount = $state(false);
+  /** Network a reconnect starts with, so its first login step opens without picking it again. */
+  preferredNetwork = $state<Network | null>(null);
+  /** The attempt in progress, null when the user is choosing a network or no login runs. */
+  login = $state<LoginAttempt | null>(null);
+  /** Failure of `BeginLogin`/`SubmitLogin`/`CancelLogin`, shown above the step. */
+  loginError = $state<string | null>(null);
+  loginBusy = $state(false);
+
+  /** At least one stored account lost its session; the app offers Reconnect instead of a login wall. */
+  needsRelogin = $derived(this.accounts.some((a) => a.state === 'needs_relogin'));
 
   private started = false;
-  private oidcTimer: ReturnType<typeof setTimeout> | null = null;
 
-  /** Restore a previous session if one exists, else show onboarding. Idempotent. */
+  /** Load the stored accounts once and keep them current. Idempotent. */
   async boot() {
     if (this.started) return;
     this.started = true;
-    client.subscribe((e) => {
-      if (e.type === 'AuthFailed') {
-        // Only a browser sign-in the app started can be waiting; anything else has no surface.
-        if (this.oidcWaiting) {
-          this.stopOidcWait();
-          this.oidcFailure = { reason: e.payload.reason, message: e.payload.message };
-        }
+    client.subscribe((event) => {
+      if (event.type === 'AccountsChanged') {
+        this.applyAccounts(event.payload.accounts);
+        this.syncPhase();
         return;
       }
-      if (e.type !== 'AuthState') return;
-      this.account = e.payload.account;
-      if (e.payload.account) {
-        // An OIDC login finishes in the engine's loopback listener and only reaches the UI as this
-        // event, so it must bring the app to the signed-in shell.
-        this.stopOidcWait();
-        this.oidcFailure = null;
-        if (this.phase !== 'ready') {
-          prefs.beginAccount(e.payload.account.id);
-          this.phase = 'ready';
-        }
-      } else if (this.phase === 'ready') {
-        this.phase = 'onboarding';
+      if (event.type === 'ConnectionStatus') {
+        this.statuses[event.payload.account_id] = event.payload.status;
       }
     });
+    await this.refreshAccounts();
+  }
+
+  /** Re-reads the account list; also the retry path after an engine failure. */
+  async refreshAccounts() {
     try {
-      const accounts = expect(await client.listAccounts(), 'AccountsList').payload.accounts;
-      for (const a of accounts) {
-        try {
-          const res = expect(await client.restoreSession(a.id), 'SessionRestored');
-          this.account = res.payload.account;
-          // Bind the local preference copy to this account before the shell reads it.
-          prefs.beginAccount(res.payload.account.id);
-          this.phase = 'ready';
-          return;
-        } catch {
-          // Stored session is gone or invalid; try the next account, else fall through.
-          this.lastHomeserver = a.homeserver_url;
-          this.restoreNotice = `Your session ended. Sign in again to ${hostOf(a.homeserver_url)}.`;
-        }
-      }
+      const res = expect(await client.invoke({ action: 'ListAccounts' }), 'AccountsList');
+      this.applyAccounts(res.payload.accounts);
+      this.error = null;
+      this.syncPhase();
     } catch (e) {
-      // A browser build with no engine cannot log in to anything: say so instead of showing a form
+      // A browser build with no engine cannot hold accounts: say so instead of showing a picker
       // that can only fail, and never substitute demo data.
       if (errorCode(e) === 'no_engine') {
         this.phase = 'no-engine';
         return;
       }
       this.error = errorMessage(e);
+      if (!this.addingAccount) this.phase = 'onboarding';
     }
-    this.phase = 'onboarding';
   }
 
-  async discover(input: string) {
-    const res = expect(await client.discoverHomeserver(input), 'HomeserverInfo');
-    return res.payload;
+  /** The networks to offer, loaded once by onboarding. */
+  async loadNetworks(): Promise<Network[]> {
+    const res = expect(await client.invoke({ action: 'ListNetworks' }), 'Networks');
+    this.networks = res.payload.networks;
+    return this.networks;
   }
 
-  async login(homeserverUrl: string, username: string, password: string) {
-    this.busy = true;
-    this.error = null;
+  /** Opens onboarding over the app, keeping the current accounts on screen behind it. */
+  openAddAccount() {
+    this.preferredNetwork = null;
+    this.loginError = null;
+    this.addingAccount = true;
+  }
+
+  /** Opens onboarding over the app with the account's network already selected. */
+  openReconnect(network: Network) {
+    this.preferredNetwork = network;
+    this.loginError = null;
+    this.addingAccount = true;
+  }
+
+  /** Closes the overlay, abandoning any attempt it started; the signed-in app stays as it was. */
+  async closeAddAccount() {
+    const attempt = this.login;
+    if (attempt && attempt.step.type !== 'failed') await this.cancelLogin();
+    this.preferredNetwork = null;
+    this.login = null;
+    this.loginError = null;
+    this.addingAccount = false;
+    this.syncPhase();
+  }
+
+  /** Starts a fresh attempt on `network`; an attempt already running is abandoned first. */
+  async beginLogin(network: Network) {
+    if (this.login) await this.cancelLogin();
+    this.loginBusy = true;
+    this.loginError = null;
     try {
       const res = expect(
-        await client.loginPassword(homeserverUrl, username, password),
-        'LoggedIn'
+        await client.invoke({ action: 'BeginLogin', params: { network } }),
+        'LoginStep'
       );
-      this.account = res.payload.account;
-      // Bind the local preference copy to this account before the shell reads it.
-      prefs.beginAccount(res.payload.account.id);
-      this.phase = 'ready';
+      // The overlay may have closed while the engine was starting the attempt: nothing on screen
+      // can answer it any more, so drop it instead of keeping a step no one sees.
+      if (!this.addingAccount && this.phase === 'ready') {
+        await client
+          .invoke({ action: 'CancelLogin', params: { login_id: res.payload.login_id } })
+          .catch(() => {});
+        return;
+      }
+      this.login = { id: res.payload.login_id, network, step: res.payload.step };
+      this.reachStep(res.payload.step);
     } catch (e) {
-      this.error = errorMessage(e);
+      this.loginError = errorMessage(e);
       throw e;
     } finally {
-      this.busy = false;
+      this.loginBusy = false;
+    }
+  }
+
+  /** Answers the current step; a `Done` step stores the account and leaves onboarding. */
+  async submitLogin(input: LoginInputDto) {
+    const attempt = this.login;
+    if (!attempt) return;
+    this.loginBusy = true;
+    this.loginError = null;
+    try {
+      const res = expect(
+        await client.invoke({
+          action: 'SubmitLogin',
+          params: { login_id: attempt.id, input }
+        }),
+        'LoginStep'
+      );
+      this.login = { ...attempt, step: res.payload.step };
+      this.reachStep(res.payload.step);
+    } catch (e) {
+      this.loginError = errorMessage(e);
+      throw e;
+    } finally {
+      this.loginBusy = false;
+    }
+  }
+
+  /** Abandons the attempt in the engine and returns to the network list. */
+  async cancelLogin() {
+    const attempt = this.login;
+    this.login = null;
+    if (!attempt) return;
+    this.loginBusy = true;
+    this.loginError = null;
+    try {
+      expect(
+        await client.invoke({ action: 'CancelLogin', params: { login_id: attempt.id } }),
+        'LoginCancelled'
+      );
+    } catch (e) {
+      this.loginError = errorMessage(e);
+    } finally {
+      this.loginBusy = false;
     }
   }
 
   /**
-   * Starts an OIDC (MAS) login and opens the server's authorization page in the system browser.
-   * The engine receives the redirect on its loopback listener; a completion arrives as
-   * `AuthState`, a failure as `AuthFailed`, and both end the waiting state here.
+   * Drops a terminal `Failed` attempt locally. The engine already ended it, so no `CancelLogin`
+   * is sent: the protocol says retrying starts with `BeginLogin`.
    */
-  async startOidc(homeserverUrl: string) {
+  dismissLogin() {
+    this.login = null;
+    this.loginError = null;
+  }
+
+  /** Starts the attempt over on the same network after a `Failed` step. */
+  async retryLogin() {
+    const network = this.login?.network;
+    this.dismissLogin();
+    if (network) await this.beginLogin(network);
+  }
+
+  /** Moves login out of the UI: the engine emits `AccountsChanged`, this keeps the list honest. */
+  enterAccount(account: Account) {
+    this.upsert(account);
+    this.login = null;
+    this.loginError = null;
+    this.addingAccount = false;
+    this.preferredNetwork = null;
+    this.syncPhase();
+  }
+
+  /** Logs out one account, or every account when no id is given (the settings-wide sign-out). */
+  async logout(accountId?: AccountId) {
+    const ids = accountId ? [accountId] : this.accounts.map((a) => a.id);
+    if (ids.length === 0) return;
     this.busy = true;
     this.error = null;
-    this.oidcFailure = null;
-    let started = false;
     try {
-      const res = expect(await client.startOidcLogin(homeserverUrl), 'OidcUrl');
-      started = true;
-      await openExternal(res.payload.authorization_url);
-      this.oidcWaiting = true;
-      this.startOidcTimer();
+      for (const id of ids) {
+        expect(await client.invoke({ action: 'Logout', params: { account_id: id } }), 'LoggedOut');
+        this.dropAccount(id);
+      }
+      this.syncPhase();
     } catch (e) {
-      // Without a browser there is nothing that can finish this attempt; drop it in the engine.
-      if (started) await client.cancelOidcLogin().catch(() => {});
-      this.oidcFailure = {
-        reason: started ? 'launch_failed' : (errorReason(e) ?? 'exchange_failed'),
-        message: errorMessage(e),
-      };
       this.error = errorMessage(e);
       throw e;
     } finally {
@@ -161,57 +249,33 @@ class SessionStore {
     }
   }
 
-  /** Abandons the pending OIDC login, both on the waiting screen and in the engine. */
-  async cancelOidc() {
-    this.stopOidcWait();
-    this.oidcFailure = null;
-    await client.cancelOidcLogin().catch(() => {});
+  private reachStep(step: LoginStepDto) {
+    if (step.type === 'done') this.enterAccount(step.account);
   }
 
-  /** Drops the last failure, e.g. when the user moves to a different server. */
-  clearOidcFailure() {
-    this.oidcFailure = null;
-  }
-
-  private startOidcTimer() {
-    this.clearOidcTimer();
-    this.oidcTimer = setTimeout(() => {
-      this.oidcTimer = null;
-      this.oidcWaiting = false;
-      this.oidcFailure = { reason: 'expired', message: t('session-sign-in-window-timed-out') };
-      void client.cancelOidcLogin().catch(() => {});
-    }, OIDC_WAIT_TIMEOUT_MS);
-  }
-
-  private clearOidcTimer() {
-    if (this.oidcTimer !== null) {
-      clearTimeout(this.oidcTimer);
-      this.oidcTimer = null;
+  private applyAccounts(accounts: Account[]) {
+    this.accounts = accounts;
+    const present = new Set(accounts.map((a) => a.id));
+    for (const id of Object.keys(this.statuses)) {
+      if (!present.has(id)) delete this.statuses[id];
     }
   }
 
-  private stopOidcWait() {
-    this.clearOidcTimer();
-    this.oidcWaiting = false;
+  private upsert(account: Account) {
+    const index = this.accounts.findIndex((a) => a.id === account.id);
+    if (index === -1) this.accounts.push(account);
+    else this.accounts[index] = account;
   }
 
-  async logout() {
-    const acc = this.account;
-    if (!acc) return;
-    this.stopOidcWait();
-    // The share ends first: after logout the engine could no longer tell the room it stopped.
-    await liveLocation.stop();
-    // Disable background push before logging out so homeserver pusher is cleanly removed.
-    await pushStore.disableOnSignOut().catch(() => {});
-    // Drop this account's synced preferences and stamp before the engine session goes away.
-    await prefs.signOut().catch(() => {});
-    await client.logout(acc.id);
-    this.account = null;
-    membersStore.reset();
-    pinsStore.reset();
-    draftsStore.reset();
-    roomInfo.reset();
-    this.phase = 'onboarding';
+  private dropAccount(accountId: AccountId) {
+    this.accounts = this.accounts.filter((a) => a.id !== accountId);
+    delete this.statuses[accountId];
+  }
+
+  /** First sign-in is onboarding; with an account stored the app is the screen. */
+  private syncPhase() {
+    if (this.addingAccount) return;
+    this.phase = this.accounts.length > 0 ? 'ready' : 'onboarding';
   }
 }
 

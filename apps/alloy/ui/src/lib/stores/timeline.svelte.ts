@@ -1,11 +1,9 @@
 import { client, applyDiff } from '../ipc/index.js';
-import type { EngineEvent, TimelineItemDto } from '../generated/index.js';
+import type { CapabilitiesDto, EngineEvent, TimelineItemDto, UserId } from '../generated/index.js';
 import { FrameBatcher, Subscription } from './subscription.js';
 import { errorMessage, expect } from './errors.js';
 import { uploadsStore } from './uploads.svelte.js';
 import { roomsStore } from './rooms.svelte.js';
-import { prefs } from './prefs.svelte.js';
-import { lastOwnEventId, readersByEvent } from '../content/receipts.js';
 import { voiceExtension, writeTempFile } from '../platform/files.js';
 import type { VoiceClip } from '../platform/voiceRecorder.js';
 
@@ -20,8 +18,68 @@ interface CachedTimeline {
   scrollTop: number;
 }
 
+/** Delivery status of one row, narrowed from the protocol union. */
+export type SendStatus = TimelineItemDto['send_state']['status'];
+
+/** True while the message has not reached the network yet. */
+export function isPending(item: TimelineItemDto): boolean {
+  const status = item.send_state.status;
+  return status === 'Queued' || status === 'Sending';
+}
+
 /**
- * A `Reset` replaces the window the server sends, not necessarily everything the cache holds: the
+ * Whether the edit action applies: your own sent text, an account that allows editing, and inside
+ * the network's edit window when it has one.
+ */
+export function canEditItem(
+  item: TimelineItemDto,
+  capabilities: CapabilitiesDto | null,
+  now = Date.now()
+): boolean {
+  if (!capabilities?.edit || !item.is_own || !item.event_id) return false;
+  if (item.content.kind !== 'TextMessage' || item.send_state.status !== 'Sent') return false;
+  const windowSecs = capabilities.edit_window_secs;
+  if (windowSecs === null) return true;
+  return now - item.timestamp_millis <= windowSecs * 1000;
+}
+
+/** Whether "delete for everyone" applies to the row. */
+export function canDeleteForEveryone(
+  item: TimelineItemDto,
+  capabilities: CapabilitiesDto | null
+): boolean {
+  return !!item.event_id && item.send_state.status === 'Sent' && !!capabilities?.delete_for_everyone;
+}
+
+/**
+ * Who has read each of your messages: the engine reports, per message, the users that have read it,
+ * so a user who read a later message also read this one. Your own id is left out.
+ */
+export function readersByEvent(items: readonly TimelineItemDto[]): Map<EventIdKey, UserId[]> {
+  const me = items.find((i) => i.is_own)?.sender;
+  const result = new Map<EventIdKey, UserId[]>();
+  const seen = new Set<UserId>();
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i];
+    for (const user of item.read_by) if (user !== me) seen.add(user);
+    if (item.is_own && item.event_id) result.set(item.event_id, [...seen]);
+  }
+  return result;
+}
+
+type EventIdKey = string;
+
+/** Event id of your newest sent message, or null. */
+export function lastOwnEventId(items: readonly TimelineItemDto[]): string | null {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i];
+    if (item.is_own && item.event_id) return item.event_id;
+  }
+  return null;
+}
+
+/**
+ * A `Reset` replaces the window the engine sends, not necessarily everything the cache holds: the
  * cache can carry older history the reset does not cover. Keep cached items older than the reset
  * window, take the reset as authoritative for what it contains, and keep local echoes it has not
  * seen yet. Deduplicated by internal id, so reopening never doubles a row.
@@ -33,7 +91,7 @@ export function mergeTimelineReset(
   // A day divider carries no event id either, so the kind is what tells it apart from an unsent
   // message. Dividers belong to the window that generated them and the reset brings its own; an
   // echo has to keep its place at the end.
-  const isVirtual = (i: TimelineItemDto) => i.content.kind === 'DayDivider' || i.content.kind === 'Virtual';
+  const isVirtual = (i: TimelineItemDto) => i.content.kind === 'DayDivider';
   const resetIds = new Set(reset.map((i) => i.event_id).filter((id): id is string => !!id));
   // A reset normally opens with the day divider for its window, and virtual items carry no real
   // timestamp. Measuring the window from that divider would make every cached message look newer
@@ -53,7 +111,7 @@ export function mergeTimelineReset(
   return out;
 }
 
-/** The open room's timeline plus message-level actions (reply/edit/react/redact/retry). */
+/** The open room's timeline plus message-level actions (reply/edit/react/delete/retry). */
 class TimelineStore {
   roomId = $state<string | null>(null);
   items = $state<TimelineItemDto[]>([]);
@@ -70,19 +128,19 @@ class TimelineStore {
   selectedIds = $state<string[]>([]);
   /** Messages waiting for the "Delete for everyone?" confirmation. */
   pendingDelete = $state<TimelineItemDto[] | null>(null);
-  /** A message waiting for the "Report this message?" confirmation. */
-  pendingReport = $state<TimelineItemDto | null>(null);
 
-  /** Who has read each of your messages, by event id (see `readersByEvent`). */
+  /** Who has read each of your messages, by event id. */
   readers = $derived(readersByEvent(this.items));
   /** Your newest sent message; only it shows the "seen by" avatars. */
   lastOwnEventId = $derived(lastOwnEventId(this.items));
   /** The selected messages in timeline order. */
   selectedItems = $derived(this.items.filter((i) => !!i.event_id && this.selectedIds.includes(i.event_id)));
-  /** The newest event a read receipt was confirmed for; it is not published twice. */
+  /** The newest event a read position was confirmed for; it is not published twice. */
   lastReceiptEvent = $state<string | null>(null);
-  /** Why the last receipt could not be published, shown next to the timeline's other failures. */
+  /** Why the last read position could not be published, shown next to the timeline's other failures. */
   receiptError = $state<string | null>(null);
+  /** What the open chat's account allows; null until the account list has loaded. */
+  capabilities = $derived(roomsStore.activeCapabilities);
 
   private jumpSeq = 0;
   private highlightTimer: number | NodeJS.Timeout | null = null;
@@ -147,7 +205,10 @@ class TimelineStore {
       if (e.type === 'TimelineDiff' && e.payload.room_id === roomId) sub.push(e);
     });
     try {
-      const res = expect(await client.subscribeTimeline(roomId), 'TimelineSubscribed');
+      const res = expect(
+        await client.invoke({ action: 'SubscribeTimeline', params: { room_id: roomId } }),
+        'TimelineSubscribed'
+      );
       sub.attach(res.payload.subscription_id);
     } catch (e) {
       this.error = errorMessage(e);
@@ -185,8 +246,7 @@ class TimelineStore {
     this.selecting = false;
     this.selectedIds = [];
     this.pendingDelete = null;
-    this.pendingReport = null;
-    if (id) await client.unsubscribe(id).catch(() => {});
+    if (id) await client.invoke({ action: 'Unsubscribe', params: { subscription_id: id } }).catch(() => {});
   }
 
   /** The timeline reports its scroll offset, so reopening the room can put the reader back. */
@@ -211,7 +271,7 @@ class TimelineStore {
     while (this.cache.size > TIMELINE_CACHE_LIMIT) {
       const oldest = this.cache.keys().next().value as string;
       this.cache.delete(oldest);
-      // Best effort: the engine drops that room's timeline; opening it again rebuilds from the server.
+      // Best effort: the engine drops that room's timeline; opening it again rebuilds from the store.
       void client.invoke({ action: 'CloseTimeline', params: { room_id: oldest } }).catch(() => {});
     }
   }
@@ -222,7 +282,10 @@ class TimelineStore {
     if (!roomId || this.paginating || this.reachedStart) return;
     this.paginating = true;
     try {
-      const res = expect(await client.paginateBackwards(roomId, count), 'Paginated');
+      const res = expect(
+        await client.invoke({ action: 'PaginateBackwards', params: { room_id: roomId, count } }),
+        'Paginated'
+      );
       // The user may have switched rooms meanwhile: another room's start says nothing about this one.
       if (this.roomId === roomId) this.reachedStart = res.payload.reached_start;
     } catch (e) {
@@ -232,8 +295,8 @@ class TimelineStore {
     }
   }
 
-  /** Send text (markdown by default); honors a pending reply or edit. */
-  async send(body: string, mentions: string[] = [], mentionRoom = false) {
+  /** Send text; honors a pending reply or edit. */
+  async send(body: string) {
     if (!this.roomId) return;
     const roomId = this.roomId;
     const text = body.trim();
@@ -242,15 +305,16 @@ class TimelineStore {
       if (this.editing?.event_id) {
         const target = this.editing.event_id;
         this.editing = null;
-        await client.editMessage(roomId, target, text, true);
+        await client.invoke({
+          action: 'EditMessage',
+          params: { room_id: roomId, event_id: target, body: text },
+        });
       } else {
         const reply = this.replyTo?.event_id ?? null;
         this.replyTo = null;
-        await client.sendText(roomId, text, {
-          markdown: true,
-          reply_to: reply,
-          mentions: mentions.length ? mentions : null,
-          mention_room: mentionRoom,
+        await client.invoke({
+          action: 'SendText',
+          params: { room_id: roomId, body: text, reply_to: reply, txn_id: null },
         });
       }
     } catch (e) {
@@ -258,7 +322,10 @@ class TimelineStore {
     }
   }
 
-  /** Sends a recorded clip as a voice message: the shell writes it to a temp file, the engine uploads it. */
+  /**
+   * Sends a recorded clip as a voice message: the shell writes it to a temp file, the engine copies
+   * it into the store and hands it to the connector.
+   */
   async sendVoice(clip: VoiceClip) {
     const roomId = this.roomId;
     if (!roomId) return;
@@ -266,13 +333,10 @@ class TimelineStore {
     uploadsStore.begin({ txnId, roomId, name: 'Voice message' });
     try {
       const path = await writeTempFile(clip.blob, voiceExtension(clip.mimeType));
-      expect(
-        await client.invoke({
-          action: 'SendVoice',
-          params: { room_id: roomId, file_path: path, duration_ms: clip.durationMs, waveform: clip.waveform, txn_id: txnId },
-        }),
-        'AttachmentSent',
-      );
+      await client.invoke({
+        action: 'SendVoice',
+        params: { room_id: roomId, file_path: path, duration_ms: clip.durationMs, txn_id: txnId },
+      });
     } catch (e) {
       this.error = errorMessage(e);
     } finally {
@@ -286,7 +350,16 @@ class TimelineStore {
     const txnId = crypto.randomUUID();
     uploadsStore.begin({ txnId, roomId, name: path.split(/[\\/]/).pop() || path });
     try {
-      await client.sendAttachment(roomId, path, { mime_type: mime ?? null, body: body ?? null, txn_id: txnId });
+      await client.invoke({
+        action: 'SendAttachment',
+        params: {
+          room_id: roomId,
+          file_path: path,
+          mime_type: mime ?? null,
+          body: body ?? null,
+          txn_id: txnId,
+        },
+      });
     } catch (e) {
       this.error = errorMessage(e);
     } finally {
@@ -296,43 +369,31 @@ class TimelineStore {
 
   async toggleReaction(item: TimelineItemDto, key: string) {
     if (!this.roomId || !item.event_id) return;
-    await client.toggleReaction(this.roomId, item.event_id, key).catch((e) => {
-      this.error = errorMessage(e);
-    });
+    if (this.capabilities && !this.capabilities.reactions) return;
+    await client
+      .invoke({
+        action: 'ToggleReaction',
+        params: { room_id: this.roomId, event_id: item.event_id, key },
+      })
+      .catch((e) => {
+        this.error = errorMessage(e);
+      });
   }
 
-  /** Returns null when the poll was sent, otherwise the message the dialog should show. */
-  async sendPoll(question: string, answers: string[], disclosed: boolean, maxSelections: number): Promise<string | null> {
-    if (!this.roomId) return 'No room is selected.';
-    try {
-      await client.sendPoll(this.roomId, question, answers, disclosed, maxSelections);
-      return null;
-    } catch (e) {
-      return errorMessage(e);
-    }
-  }
-
-  async respondToPoll(item: TimelineItemDto, answerIds: string[]) {
-    if (!this.roomId || !item.event_id) return;
-    await client.respondToPoll(this.roomId, item.event_id, answerIds).catch((e) => {
-      this.error = errorMessage(e);
-    });
-  }
-
-  async endPoll(item: TimelineItemDto) {
-    if (!this.roomId || !item.event_id) return;
-    await client.endPoll(this.roomId, item.event_id).catch((e) => {
-      this.error = errorMessage(e);
-    });
-  }
-
-  /** Redact several messages (Matrix deletes for everyone). A reason is only sent when given. */
-  async redactItems(items: readonly TimelineItemDto[], reason: string | null = null) {
+  /** Deletes messages for everyone; the account has to allow it (checked by the caller's UI). */
+  async deleteItems(items: readonly TimelineItemDto[]) {
     const roomId = this.roomId;
     if (!roomId) return;
     for (const item of items) {
       if (!item.event_id) continue;
-      await client.redactEvent(roomId, item.event_id, reason?.trim() || null);
+      try {
+        await client.invoke({
+          action: 'DeleteMessage',
+          params: { room_id: roomId, event_id: item.event_id, for_everyone: true },
+        });
+      } catch (e) {
+        this.error = errorMessage(e);
+      }
     }
   }
 
@@ -353,37 +414,30 @@ class TimelineStore {
     this.selectedIds = [];
   }
 
-  /** Reports a message to the room's moderators and the homeserver. */
-  async report(item: TimelineItemDto) {
-    if (!this.roomId || !item.event_id) return;
-    expect(await client.reportEvent(this.roomId, item.event_id), 'EventReported');
-  }
-
-  async redact(item: TimelineItemDto) {
-    if (!this.roomId || !item.event_id) return;
-    await client.redactEvent(this.roomId, item.event_id, null).catch((e) => {
-      this.error = errorMessage(e);
-    });
-  }
-
   async retry(item: TimelineItemDto) {
-    if (!this.roomId || !item.transaction_id) return;
-    await client.retrySend(this.roomId, item.transaction_id).catch((e) => {
-      this.error = errorMessage(e);
-    });
+    const txnId = transactionIdOf(item);
+    if (!this.roomId || !txnId) return;
+    await client
+      .invoke({ action: 'RetrySend', params: { room_id: this.roomId, txn_id: txnId } })
+      .catch((e) => {
+        this.error = errorMessage(e);
+      });
   }
 
   async cancel(item: TimelineItemDto) {
-    if (!this.roomId || !item.transaction_id) return;
-    await client.cancelSend(this.roomId, item.transaction_id).catch((e) => {
-      this.error = errorMessage(e);
-    });
+    const txnId = transactionIdOf(item);
+    if (!this.roomId || !txnId) return;
+    await client
+      .invoke({ action: 'CancelSend', params: { room_id: this.roomId, txn_id: txnId } })
+      .catch((e) => {
+        this.error = errorMessage(e);
+      });
   }
 
   /**
-   * Publish a read receipt for the newest confirmed event.
+   * Publish a read position for the newest confirmed event.
    *
-   * The receipt is only remembered once the engine confirms it: a failed send is left retryable and
+   * The position is only remembered once the engine confirms it: a failed call is left retryable and
    * reported, instead of being swallowed while the event id was already marked as done.
    */
   async markRead() {
@@ -394,12 +448,6 @@ class TimelineStore {
 
     const eventId = this.newestEventId();
     if (!eventId) return;
-    // "Show who has read your messages" governs publishing as well as display: with it off the room
-    // still clears locally, but no read position leaves the device.
-    if (!prefs.showReadReceipts) {
-      roomsStore.markRead(roomId);
-      return;
-    }
     if (eventId === this.lastReceiptEvent || eventId === this.receiptPending) {
       roomsStore.markRead(roomId);
       return;
@@ -407,7 +455,7 @@ class TimelineStore {
 
     this.receiptPending = eventId;
     try {
-      await client.markRead(roomId, eventId);
+      await client.invoke({ action: 'MarkRead', params: { room_id: roomId, event_id: eventId } });
       this.lastReceiptEvent = eventId;
       this.receiptError = null;
       roomsStore.markRead(roomId);
@@ -434,6 +482,7 @@ class TimelineStore {
   }
 
   startEdit(item: TimelineItemDto) {
+    if (!canEditItem(item, this.capabilities)) return;
     this.replyTo = null;
     this.editing = item;
   }
@@ -483,6 +532,14 @@ class TimelineStore {
     if (!eventId) return false;
     return this.items.some((item) => item.event_id === eventId);
   }
+}
+
+/** Transaction id of a row that still has one, wherever the protocol put it. */
+export function transactionIdOf(item: TimelineItemDto): string | null {
+  if (item.transaction_id) return item.transaction_id;
+  const state = item.send_state;
+  if (state.status === 'Queued' || state.status === 'Sending') return state.data.transaction_id;
+  return null;
 }
 
 /**

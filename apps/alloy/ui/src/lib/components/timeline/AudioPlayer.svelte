@@ -21,15 +21,17 @@
 </script>
 
 <script lang="ts">
-  import { tick, untrack } from 'svelte';
+  import { tick } from 'svelte';
   import Icon from '$lib/icons/Icon.svelte';
   import { Pause, Play, Download } from '$lib/icons';
   import { prefs, type VoiceSpeed } from '$lib/stores/prefs.svelte';
   import { barIndexAt, downsample, fallbackBars } from '$lib/content/waveform';
   import { fetchMediaFile } from '$lib/content/mediaFetch';
+  import type { MediaSource } from '$lib/generated';
 
   interface Props {
-    uri: string;
+    /** The stored media object; its bytes are fetched through `GetMedia`. */
+    source: MediaSource;
     mimeType: string;
     body: string;
     sizeBytes: number;
@@ -44,12 +46,12 @@
   let src = $state<string | null>(null);
   let isPlaying = $state(false);
   let loading = $state(false);
-  let error = $state<string | null>(null);
+  let error = $state(false);
   let currentTime = $state(0);
   let audioDuration = $state(0);
   let isDragging = false;
   let pendingSeekTime: number | null = null;
-  let prevUri = '';
+  let prevMediaId = '';
 
   const effectiveDuration = $derived.by(() => {
     if (audioDuration > 0 && Number.isFinite(audioDuration)) {
@@ -65,7 +67,7 @@
     if (props.waveform && props.waveform.length > 0) {
       return downsample(props.waveform, 64);
     }
-    return fallbackBars(props.uri, 64);
+    return fallbackBars(props.source.media_id, 64);
   });
 
   const activeBarIndex = $derived.by(() => {
@@ -83,18 +85,18 @@
     }
   });
 
-  // Reset playback if uri changes
+  // Reset playback if the stored media object changes
   $effect(() => {
-    const currentUri = props.uri;
-    if (prevUri !== '' && currentUri !== prevUri) {
+    const currentId = props.source.media_id;
+    if (prevMediaId !== '' && currentId !== prevMediaId) {
       pause();
       src = null;
       currentTime = 0;
       audioDuration = 0;
-      error = null;
+      error = false;
       pendingSeekTime = null;
     }
-    prevUri = currentUri;
+    prevMediaId = currentId;
   });
 
   // Cleanup on unmount
@@ -119,12 +121,12 @@
     }
     if (loading) return;
 
-    error = null;
+    error = false;
 
     if (!src) {
       loading = true;
       try {
-        const url = await fetchMediaFile(props.uri, props.mimeType);
+        const url = await fetchMediaFile(props.source, props.mimeType);
         src = url;
         await tick();
         if (audioEl) {
@@ -135,7 +137,7 @@
           await audioEl.play();
         }
       } catch {
-        error = 'Could not load audio';
+        error = true;
       } finally {
         loading = false;
       }
@@ -148,7 +150,7 @@
         }
         await audioEl.play();
       } catch {
-        error = 'Could not load audio';
+        error = true;
       } finally {
         loading = false;
       }
@@ -263,7 +265,7 @@
   }
 
   function handleAudioError(): void {
-    error = 'Could not load audio';
+    error = true;
     isPlaying = false;
     loading = false;
   }
@@ -343,7 +345,7 @@
       <div class="meta-row">
         {#if error}
           <button type="button" class="error-notice" onclick={togglePlay} aria-label={t('audio-player-retry-loading-audio')}>
-            <span class="error-text">{error}</span>
+            <span class="error-text">{t('audio-player-could-not-load')}</span>
             <span class="retry-hint">{t('common-retry')}</span>
           </button>
         {:else}

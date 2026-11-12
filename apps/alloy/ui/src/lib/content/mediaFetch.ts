@@ -1,7 +1,8 @@
 import { localFileUrl } from '$lib/platform/files';
 import { fetchMediaPath } from '$lib/platform/saveFile';
+import type { MediaSource } from '$lib/generated';
 
-/** Fetch the full file into the local media cache. Returns a URL the webview can load. */
-export async function fetchMediaFile(uri: string, mimeType: string): Promise<string> {
-  return localFileUrl(await fetchMediaPath(uri, mimeType));
+/** Fetch a stored media object's full file into the local cache. Returns a URL the webview can load. */
+export async function fetchMediaFile(source: MediaSource, mimeType: string): Promise<string> {
+  return localFileUrl(await fetchMediaPath(source, mimeType));
 }

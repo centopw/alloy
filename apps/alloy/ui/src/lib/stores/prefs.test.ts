@@ -1,27 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const invoke = vi.fn();
-const subscribe = vi.fn();
 
 vi.mock('../ipc/index.js', () => ({
   client: {
     invoke: (...args: unknown[]) => invoke(...args),
-    subscribe: (...args: unknown[]) => subscribe(...args),
+    subscribe: () => () => {},
   },
 }));
 
 import {
   DEFAULT_PREFS,
-  DEVICE_PREF_KEYS,
-  PREFS_ACCOUNT_STORAGE_KEY,
   PREFS_ENGINE_DEBOUNCE_MS,
   PREFS_ENGINE_KEY,
   PREFS_STORAGE_KEY,
-  PREFS_SYNCED_AT_STORAGE_KEY,
-  SYNCED_PREF_KEYS,
   PrefsStore,
-  deviceSubset,
   isValidPref,
+  registerFlushHandler,
   sanitizePrefs,
   type PrefsStorage,
 } from './prefs.svelte.js';
@@ -56,43 +51,23 @@ function storedPrefs(storage: MemoryStorage): unknown {
 /** A request the store sent to the engine through `client.invoke`. */
 interface SentRequest {
   action: string;
-  params?: { json?: string; key?: string; value_json?: string };
+  params?: { key?: string; value_json?: string };
 }
 
 function sentRequests(action: string): SentRequest[] {
   return (invoke.mock.calls as [SentRequest][]).map(([req]) => req).filter((req) => req.action === action);
 }
 
-function saveCalls(): SentRequest[] {
-  return sentRequests('SetSetting');
+function savedPrefs(): unknown[] {
+  return sentRequests('SetSetting').map((req) => JSON.parse(req.params?.value_json ?? 'null'));
 }
-
-/** Documents pushed to the account, in order, including attempts that failed. */
-function pushedAccountDocs(): unknown[] {
-  return sentRequests('SetAccountPrefs').map((req) => JSON.parse(req.params?.json ?? 'null'));
-}
-
-let remoteDoc: unknown = null;
-let accountSaveFails = false;
 
 beforeEach(() => {
   vi.useFakeTimers();
   invoke.mockReset();
-  subscribe.mockReset();
-  remoteDoc = null;
-  accountSaveFails = false;
   invoke.mockImplementation(async (req: { action: string }) => {
-    switch (req.action) {
-      case 'GetSettings':
-        return settingsResponse({});
-      case 'GetAccountPrefs':
-        return { type: 'AccountPrefs', payload: { json: remoteDoc === null ? null : JSON.stringify(remoteDoc) } };
-      case 'SetAccountPrefs':
-        if (accountSaveFails) throw new Error('offline');
-        return { type: 'Unit' };
-      default:
-        return { type: 'SettingSet', payload: { key: PREFS_ENGINE_KEY } };
-    }
+    if (req.action === 'GetSettings') return settingsResponse({});
+    return { type: 'SettingSet', payload: { key: PREFS_ENGINE_KEY } };
   });
 });
 
@@ -116,17 +91,13 @@ describe('defaults', () => {
       roomListPreviews: true,
       roomListSections: true,
       roomListPeople: true,
-      homeShowAllRooms: true,
       showTyping: true,
       sendTyping: true,
       announceMessages: true,
       showRemovedPlaceholder: true,
       showMembershipEvents: true,
-      showProfileChanges: true,
-      showRoomUpdates: true,
       jumpToBottomOnSend: true,
       autoplayMedia: false,
-      linkPreviews: 'unencrypted',
       enterToSend: true,
       launchAtLogin: false,
       autoCheckUpdates: true,
@@ -135,7 +106,6 @@ describe('defaults', () => {
       quickReactions: ['\u{1F44D}', '\u2764\uFE0F', '\u{1F602}', '\u{1F62E}', '\u{1F622}', '\u{1F64F}'],
       voiceSpeed: '1',
       permissionsPromptDismissed: false,
-      mutedUntil: {},
     });
   });
 
@@ -149,7 +119,6 @@ describe('defaults', () => {
     expect(store.fontScale).toBe(100);
     expect(store.timeFormat).toBe('auto');
     expect(store.autoplayMedia).toBe(false);
-    expect(store.linkPreviews).toBe('unencrypted');
     expect(store.launchAtLogin).toBe(false);
     expect(store.autoCheckUpdates).toBe(true);
     expect(store.autoDownloadUpdates).toBe(false);
@@ -159,19 +128,6 @@ describe('defaults', () => {
     expect(store.get('notifyDesktop')).toBe(true);
     expect(store.voiceSpeed).toBe('1');
     expect(store.ready).toBe(false);
-  });
-
-  it('keeps message announcements on by default and mutes them through the store', () => {
-    const storage = memoryStorage();
-    const store = new PrefsStore(storage);
-    expect(store.announceMessages).toBe(true);
-    expect(isValidPref('announceMessages', false)).toBe(true);
-    store.set('announceMessages', false);
-    expect(store.announceMessages).toBe(false);
-    // A screen-reader preference is per device, so it is stored in the local copy only.
-    expect(storedPrefs(storage)).toEqual({ ...DEFAULT_PREFS, announceMessages: false });
-    expect(DEVICE_PREF_KEYS).toContain('announceMessages');
-    expect(SYNCED_PREF_KEYS).not.toContain('announceMessages');
   });
 });
 
@@ -184,8 +140,6 @@ describe('validation', () => {
     expect(isValidPref('fontScale', '100')).toBe(false);
     expect(isValidPref('timeFormat', '24h')).toBe(true);
     expect(isValidPref('timeFormat', 'iso')).toBe(false);
-    expect(isValidPref('linkPreviews', 'always')).toBe(true);
-    expect(isValidPref('linkPreviews', 'yes')).toBe(false);
     expect(isValidPref('voiceSpeed', '1.5')).toBe(true);
     expect(isValidPref('voiceSpeed', '3')).toBe(false);
   });
@@ -300,7 +254,7 @@ describe('local persistence', () => {
   });
 });
 
-describe('engine sync', () => {
+describe('engine copy', () => {
   it('debounces engine saves and sends the last value once', async () => {
     const store = new PrefsStore(memoryStorage());
     store.set('fontScale', 110);
@@ -308,18 +262,10 @@ describe('engine sync', () => {
     store.set('timeFormat', '24h');
 
     await vi.advanceTimersByTimeAsync(PREFS_ENGINE_DEBOUNCE_MS - 1);
-    expect(saveCalls()).toHaveLength(0);
+    expect(sentRequests('SetSetting')).toHaveLength(0);
 
     await vi.advanceTimersByTimeAsync(1);
-    expect(saveCalls()).toHaveLength(1);
-    expect(saveCalls()[0]).toEqual({
-      action: 'SetSetting',
-      params: {
-        key: PREFS_ENGINE_KEY,
-        // The engine file is install-wide: only device-scoped values go into it.
-        value_json: JSON.stringify(deviceSubset({ ...DEFAULT_PREFS, fontScale: 120 })),
-      },
-    });
+    expect(savedPrefs()).toEqual([{ ...DEFAULT_PREFS, fontScale: 120, timeFormat: '24h' }]);
   });
 
   it('swallows engine save errors with a warning', async () => {
@@ -339,7 +285,6 @@ describe('engine sync', () => {
     const storage = memoryStorage();
     const store = new PrefsStore(storage);
     await store.load();
-    await vi.advanceTimersByTimeAsync(PREFS_ENGINE_DEBOUNCE_MS);
 
     expect(store.fontScale).toBe(130);
     expect(store.notifySound).toBe(false);
@@ -356,7 +301,7 @@ describe('engine sync', () => {
     await vi.advanceTimersByTimeAsync(PREFS_ENGINE_DEBOUNCE_MS);
 
     expect(store.timeFormat).toBe('12h');
-    expect(saveCalls()).toHaveLength(1);
+    expect(savedPrefs()).toEqual([{ ...DEFAULT_PREFS, timeFormat: '12h' }]);
   });
 
   it('keeps local values and becomes ready when the load fails', async () => {
@@ -387,7 +332,7 @@ describe('engine sync', () => {
     expect(store.ready).toBe(true);
   });
 
-  it('does not overwrite engine settings with defaults when engine load fails', async () => {
+  it('does not overwrite engine settings with defaults when the load fails', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     invoke.mockRejectedValue(new Error('no engine'));
     const store = new PrefsStore(memoryStorage(), [10, 20]);
@@ -396,23 +341,9 @@ describe('engine sync', () => {
     await pending;
     await vi.advanceTimersByTimeAsync(PREFS_ENGINE_DEBOUNCE_MS);
 
-    expect(saveCalls()).toHaveLength(0);
+    expect(sentRequests('SetSetting')).toHaveLength(0);
   });
 
-  it('recovers device settings from the engine even when localStorage is empty', async () => {
-    invoke.mockResolvedValueOnce(
-      settingsResponse({ [PREFS_ENGINE_KEY]: { fontScale: 120, timeFormat: '24h' } }),
-    );
-    const storage = memoryStorage();
-    const store = new PrefsStore(storage);
-    expect(store.fontScale).toBe(DEFAULT_PREFS.fontScale);
-
-    await store.load();
-    // `fontScale` is device-scoped and comes back; `timeFormat` is synced and must come from the
-    // account, never from the install-wide engine file (another account may have written it).
-    expect(store.fontScale).toBe(120);
-    expect(store.timeFormat).toBe(DEFAULT_PREFS.timeFormat);
-  });
   it('keeps a change made while the load is in flight', async () => {
     const response = Promise.withResolvers<unknown>();
     invoke.mockReturnValueOnce(response.promise);
@@ -423,241 +354,31 @@ describe('engine sync', () => {
     await pending;
 
     expect(store.fontScale).toBe(120);
-    await vi.advanceTimersByTimeAsync(PREFS_ENGINE_DEBOUNCE_MS);
-    expect(saveCalls()).toHaveLength(1);
   });
 });
 
-describe('sign-out and flush', () => {
-  it('drops synced values and the sync stamp on sign-out but keeps device settings', () => {
-    const storage = memoryStorage();
-    const store = new PrefsStore(storage);
-    store.set('timeFormat', '24h');
-    store.set('fontScale', 120);
-    store.signOut();
-
-    expect(store.timeFormat).toBe(DEFAULT_PREFS.timeFormat);
-    expect(store.fontScale).toBe(120);
-    expect(storage.getItem(PREFS_SYNCED_AT_STORAGE_KEY)).toBe('0');
-  });
-
-  it('clears synced values from the engine on sign-out', async () => {
-    const storage = memoryStorage();
-    const store = new PrefsStore(storage);
-    store.set('timeFormat', '24h');
-    store.set('fontScale', 120);
-
-    await store.signOut();
-    await vi.advanceTimersByTimeAsync(PREFS_ENGINE_DEBOUNCE_MS);
-
-    expect(store.fontScale).toBe(120);
-    expect(store.timeFormat).toBe(DEFAULT_PREFS.timeFormat);
-    expect(saveCalls()).toHaveLength(1);
-    const [savedPrefs] = saveCalls();
-    const prefs = JSON.parse(savedPrefs.params?.value_json ?? '{}');
-    expect(prefs).toHaveProperty('fontScale', 120);
-    expect(prefs).not.toHaveProperty('timeFormat');
-  });
-
-  it('awaits flush before returning', async () => {
+describe('flush', () => {
+  it('writes the pending engine save before returning', async () => {
     const store = new PrefsStore(memoryStorage());
     store.set('fontScale', 110);
-    expect(saveCalls()).toHaveLength(0);
+    expect(sentRequests('SetSetting')).toHaveLength(0);
 
     await store.flush();
 
-    expect(saveCalls()).toHaveLength(1);
+    expect(savedPrefs()).toEqual([{ ...DEFAULT_PREFS, fontScale: 110 }]);
   });
 
-  it('awaits signOut persistence before returning', async () => {
-    const storage = memoryStorage();
-    const store = new PrefsStore(storage);
-    store.set('timeFormat', '24h');
-    store.set('fontScale', 120);
-
-    await store.signOut();
-
-    expect(store.fontScale).toBe(120);
-    expect(store.timeFormat).toBe(DEFAULT_PREFS.timeFormat);
-    expect(saveCalls()).toHaveLength(1);
-    const [savedPrefs] = saveCalls();
-    const prefs = JSON.parse(savedPrefs.params?.value_json ?? '{}');
-    expect(prefs).not.toHaveProperty('timeFormat');
-  });
-});
-
-
-describe('account sync', () => {
-  const REMOTE_STAMP = 1_700_000_000_000;
-
-  it('keeps the device and synced scopes disjoint and complete', () => {
-    expect([...DEVICE_PREF_KEYS, ...SYNCED_PREF_KEYS].sort()).toEqual(Object.keys(DEFAULT_PREFS).sort());
-  });
-
-  it('adopts a newer account document on load without pushing it back', async () => {
-    remoteDoc = { updated_at: REMOTE_STAMP, timeFormat: '24h', bigEmoji: false };
-    const storage = memoryStorage();
-    const store = new PrefsStore(storage);
-    await store.load();
-    await vi.advanceTimersByTimeAsync(PREFS_ENGINE_DEBOUNCE_MS);
-
-    expect(store.timeFormat).toBe('24h');
-    expect(store.bigEmoji).toBe(false);
-    expect(storage.data.get(PREFS_SYNCED_AT_STORAGE_KEY)).toBe(String(REMOTE_STAMP));
-    expect(pushedAccountDocs()).toEqual([]);
-  });
-
-  it('pushes local synced values, not device values, when the account has no document', async () => {
+  it('runs every registered flush handler and drops it when unregistered', async () => {
+    const handler = vi.fn();
+    const off = registerFlushHandler(handler);
     const store = new PrefsStore(memoryStorage());
-    store.set('bigEmoji', false);
-    store.set('fontScale', 120);
-    await store.load();
-    await vi.advanceTimersByTimeAsync(PREFS_ENGINE_DEBOUNCE_MS);
 
-    const [doc] = pushedAccountDocs();
-    expect(doc).toMatchObject({ bigEmoji: false });
-    expect(doc).not.toHaveProperty('fontScale');
-    expect(doc).toHaveProperty('updated_at', expect.any(Number));
-  });
+    await store.flush();
+    expect(handler).toHaveBeenCalledOnce();
 
-  it('does not push to the account when only device preferences change', async () => {
-    const store = new PrefsStore(memoryStorage());
-    store.set('fontScale', 110);
-    store.set('notifySound', false);
-    await vi.advanceTimersByTimeAsync(PREFS_ENGINE_DEBOUNCE_MS);
-
-    expect(sentRequests('SetAccountPrefs')).toEqual([]);
-    expect(saveCalls()).toHaveLength(1);
-  });
-
-  it('pushes one document per debounced change and ignores the echo of its own write', async () => {
-    const store = new PrefsStore(memoryStorage());
-    await store.load();
-    store.set('showTyping', false);
-    await vi.advanceTimersByTimeAsync(PREFS_ENGINE_DEBOUNCE_MS);
-
-    const pushed = pushedAccountDocs();
-    expect(pushed).toHaveLength(1);
-    const [onEvent] = subscribe.mock.calls[0];
-    onEvent({ type: 'AccountPrefsChanged', payload: { json: JSON.stringify(pushed[0]) } });
-    await vi.advanceTimersByTimeAsync(PREFS_ENGINE_DEBOUNCE_MS);
-
-    expect(pushedAccountDocs()).toHaveLength(1);
-    expect(store.showTyping).toBe(false);
-  });
-
-  it('drops invalid values from a remote document', async () => {
-    remoteDoc = { updated_at: REMOTE_STAMP, timeFormat: 'bogus', bigEmoji: 'no', showTyping: false };
-    const store = new PrefsStore(memoryStorage());
-    await store.load();
-
-    expect(store.timeFormat).toBe(DEFAULT_PREFS.timeFormat);
-    expect(store.bigEmoji).toBe(DEFAULT_PREFS.bigEmoji);
-    expect(store.showTyping).toBe(false);
-  });
-
-  it('keeps the local values and retries on the next change when the account save fails', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const store = new PrefsStore(memoryStorage());
-    await store.load();
-    accountSaveFails = true;
-    await vi.advanceTimersByTimeAsync(PREFS_ENGINE_DEBOUNCE_MS);
-    expect(warn).toHaveBeenCalled();
-
-    accountSaveFails = false;
-    store.set('bigEmoji', false);
-    await vi.advanceTimersByTimeAsync(PREFS_ENGINE_DEBOUNCE_MS);
-
-    expect(pushedAccountDocs()).toHaveLength(2);
-    expect(pushedAccountDocs()[1]).toMatchObject({ bigEmoji: false });
-  });
-
-  it('adopts a newer change from another device while running', async () => {
-    const store = new PrefsStore(memoryStorage());
-    await store.load();
-    const [onEvent] = subscribe.mock.calls[0];
-    onEvent({
-      type: 'AccountPrefsChanged',
-      payload: { json: JSON.stringify({ updated_at: Date.now() + 60_000, timeFormat: '24h' }) },
-    });
-
-    expect(store.timeFormat).toBe('24h');
-  });
-
-  it('ignores an older change from another device while a local change is pending', async () => {
-    const store = new PrefsStore(memoryStorage());
-    await store.load();
-    store.set('timeFormat', '12h');
-    const [onEvent] = subscribe.mock.calls[0];
-    onEvent({
-      type: 'AccountPrefsChanged',
-      payload: { json: JSON.stringify({ updated_at: REMOTE_STAMP, timeFormat: '24h' }) },
-    });
-
-    expect(store.timeFormat).toBe('12h');
-  });
-
-  it('stamps a reset of every key as a synced change', async () => {
-    remoteDoc = { updated_at: REMOTE_STAMP, bigEmoji: false };
-    const store = new PrefsStore(memoryStorage());
-    await store.load();
-    store.reset();
-    await vi.advanceTimersByTimeAsync(PREFS_ENGINE_DEBOUNCE_MS);
-
-    expect(pushedAccountDocs()).toHaveLength(1);
-    expect(pushedAccountDocs()[0]).toMatchObject({ bigEmoji: store.bigEmoji });
-  });
-});
-
-describe('account isolation', () => {
-  it('never takes synced values from the install-wide engine file', async () => {
-    invoke.mockResolvedValueOnce(
-      settingsResponse({ [PREFS_ENGINE_KEY]: { fontScale: 120, timeFormat: '24h' } }),
-    );
-    const store = new PrefsStore(memoryStorage());
-    await store.load();
-
-    expect(store.fontScale).toBe(120);
-    expect(store.timeFormat).toBe(DEFAULT_PREFS.timeFormat);
-  });
-
-  it('drops the previous account synced values when another account signs in', () => {
-    const storage = memoryStorage();
-    const first = new PrefsStore(storage);
-    first.beginAccount('@alice:alloy.chat');
-    first.set('timeFormat', '24h');
-    first.set('fontScale', 120);
-
-    // A different account starts from the same install without a clean sign-out.
-    const second = new PrefsStore(storage);
-    second.beginAccount('@bob:alloy.chat');
-
-    expect(second.timeFormat).toBe(DEFAULT_PREFS.timeFormat);
-    expect(second.fontScale).toBe(120);
-    expect(storage.getItem(PREFS_ACCOUNT_STORAGE_KEY)).toBe('@bob:alloy.chat');
-  });
-
-  it('keeps synced values when the same account signs in again', () => {
-    const storage = memoryStorage();
-    const first = new PrefsStore(storage);
-    first.beginAccount('@alice:alloy.chat');
-    first.set('timeFormat', '24h');
-
-    const again = new PrefsStore(storage);
-    again.beginAccount('@alice:alloy.chat');
-
-    expect(again.timeFormat).toBe('24h');
-  });
-
-  it('forgets the account marker on sign-out', () => {
-    const storage = memoryStorage();
-    const store = new PrefsStore(storage);
-    store.beginAccount('@alice:alloy.chat');
-    expect(storage.getItem(PREFS_ACCOUNT_STORAGE_KEY)).toBe('@alice:alloy.chat');
-
-    void store.signOut();
-
-    expect(storage.getItem(PREFS_ACCOUNT_STORAGE_KEY)).toBeNull();
+    off();
+    await store.flush();
+    expect(handler).toHaveBeenCalledOnce();
   });
 });
 
@@ -669,12 +390,13 @@ describe('quickReactions', () => {
     expect(isValidPref('quickReactions', 'x')).toBe(false);
   });
 
-  it('syncs with the account and ignores a set with the same content', () => {
-    expect(SYNCED_PREF_KEYS).toContain('quickReactions');
-    const store = new PrefsStore(memoryStorage());
+  it('ignores a set with the same content', () => {
+    const storage = memoryStorage();
+    const store = new PrefsStore(storage);
     const before = store.quickReactions;
     store.set('quickReactions', [...before]);
     expect(store.quickReactions).toBe(before);
+    expect(storage.data.has(PREFS_STORAGE_KEY)).toBe(false);
     store.set('quickReactions', ['\u{1F525}']);
     expect(store.quickReactions).toEqual(['\u{1F525}']);
   });

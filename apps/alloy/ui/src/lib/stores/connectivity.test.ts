@@ -70,6 +70,19 @@ describe('connectivity', () => {
     stop();
   });
 
+  it('tracks one connector state per account and lists the ones that are not live', () => {
+    connectivity.noteStatus('acc-1', 'Connected');
+    connectivity.noteStatus('acc-2', { Reconnecting: { attempt: 2, next_retry_millis: 1500 } });
+    expect(connectivity.statusOf('acc-1')).toBe('Connected');
+    expect(connectivity.disconnectedAccounts).toEqual(['acc-2']);
+
+    connectivity.noteStatus('acc-2', 'Connected');
+    expect(connectivity.disconnectedAccounts).toEqual([]);
+
+    connectivity.forgetAccount('acc-1');
+    expect(connectivity.statusOf('acc-1')).toBeUndefined();
+  });
+
   it('follows the browser online and offline events', async () => {
     const hook = vi.fn();
     const stop = connectivity.start(() => Promise.resolve());

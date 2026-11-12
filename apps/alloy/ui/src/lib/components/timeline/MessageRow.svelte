@@ -1,14 +1,18 @@
 <script lang="ts">
   import { tick as flush } from 'svelte';
-  import type { TimelineItemDto } from '$lib/generated';
+  import type { MediaSource, TimelineItemDto } from '$lib/generated';
   import { Avatar, QuickReactions, UserName } from '../common';
   import Icon from '$lib/icons/Icon.svelte';
-  import { Reply, Pencil, Trash2, Copy, MessageSquare, Download, Check, CheckCheck, Users, Forward, Pin, PinOff, Flag, Ellipsis } from '$lib/icons';
-  import { timelineStore } from '$lib/stores/timeline.svelte';
-  import { threadStore } from '$lib/stores/thread.svelte';
+  import { Reply, Pencil, Trash2, Copy, Download, Check, CheckCheck, Users, Forward, Ellipsis } from '$lib/icons';
+  import {
+    canDeleteForEveryone,
+    canEditItem,
+    isPending,
+    timelineStore,
+    transactionIdOf,
+  } from '$lib/stores/timeline.svelte';
   import { sanitizeHtml, SPOILER_SELECTOR } from '$lib/content/html';
   import { formatDay, formatTime, isEmojiOnly, isFileName } from '$lib/content/format';
-  import { isHiddenState, stateEventSummary } from '$lib/content/stateEvents';
   import { prefs } from '$lib/stores/prefs.svelte';
   import { themeStore } from '$lib/theme/theme.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
@@ -22,22 +26,18 @@
   import { displayNameFor } from '$lib/platform/names';
   import { joinNames } from '$lib/content/reactors';
   import { membersStore } from '$lib/stores/members.svelte';
-  import { pinsStore } from '$lib/stores/pins.svelte';
   import { forwardStore } from '$lib/stores/forward.svelte';
-  import { canDownloadMedia, downloadMedia } from '$lib/platform/saveFile';
-  import { firstPreviewUrl } from '$lib/content/urls';
+  import { resolveAvatar } from '$lib/stores/avatars.svelte';
   import { errorMessage } from '$lib/stores/errors';
   import { profileCard } from '$lib/stores/profileCard.svelte';
-  import { canCopyImage, copyImageFromUrl } from '$lib/platform/clipboard';
-  import { fetchMediaFile } from '$lib/content/mediaFetch';
   import { contextMenu, type MenuItem, type MenuOptions } from '$lib/stores/contextmenu.svelte';
+  import { client } from '$lib/ipc';
+  import { localFileUrl } from '$lib/platform/files';
+  import { canCopyImage, copyImageFromUrl } from '$lib/platform/clipboard';
+  import { canDownloadMedia, fetchMediaPath, saveMediaFile } from '$lib/platform/saveFile';
   import MediaView from './MediaView.svelte';
   import AudioPlayer from './AudioPlayer.svelte';
-  import AlbumGrid from './AlbumGrid.svelte';
-  import LocationCard from './LocationCard.svelte';
-  import PollView from './PollView.svelte';
   import ReplyQuote, { quote } from './ReplyQuote.svelte';
-  import LinkPreview from './LinkPreview.svelte';
   import ReactionsSheet from './ReactionsSheet.svelte';
   import { timelineActionForKey, type CursorMove } from './a11y';
 
@@ -45,8 +45,6 @@
   interface Props {
     item: TimelineItemDto;
     prev: TimelineItemDto | null;
-    /** Rendered inside the thread panel: room-level reply and thread actions are hidden. */
-    inThread?: boolean;
     /** Every picture of the album this row leads; the row then renders them as one grid. */
     album?: readonly TimelineItemDto[] | null;
     /** The row is folded into the album of an earlier row and renders nothing. */
@@ -70,7 +68,6 @@
   let {
     item,
     prev,
-    inThread = false,
     album = null,
     albumHidden = false,
     cursorable = false,
@@ -83,21 +80,12 @@
 
   // Same sender within this window continues the previous message as a compact row.
   const GROUP_MS = 7 * 60_000;
-  // A removed placeholder hidden by prefs neither joins nor breaks a group.
   const isMessage = (i: TimelineItemDto | null) =>
-    !!i &&
-    ['TextMessage', 'Media', 'Poll', 'Location', 'Redacted', 'UnableToDecrypt'].includes(i.content.kind) &&
-    !(i.content.kind === 'Redacted' && !prefs.showRemovedPlaceholder);
+    !!i && ['TextMessage', 'Media', 'Location', 'Deleted'].includes(i.content.kind);
 
   const kind = $derived(item.content.kind);
-  /** First plain URL in a text message; drives the link preview card. */
-  const previewUrl = $derived(item.content.kind === 'TextMessage' ? firstPreviewUrl(item.content.data.body) : null);
-  /** Rows the prefs hide entirely: removed placeholders and state events switched off. */
-  const hidden = $derived(
-    albumHidden ||
-      (item.content.kind === 'Redacted' && !prefs.showRemovedPlaceholder) ||
-      (item.content.kind === 'RoomState' && isHiddenState(item.content.data.state_type, prefs))
-  );
+  const capabilities = $derived(timelineStore.capabilities);
+  const hidden = $derived(albumHidden);
   const grouped = $derived(
     isMessage(item) &&
       isMessage(prev) &&
@@ -119,43 +107,64 @@
   );
   /** IRC always shows the name column; bubbles omit the head on your own messages. */
   const showHead = $derived(layout === 'irc' || (!grouped && !(layout === 'bubbles' && item.is_own)));
-  /** A short run of emoji renders large when the pref is on. */  const jumbo = $derived(
+  /** A short run of emoji renders large when the pref is on. */
+  const jumbo = $derived(
     item.content.kind === 'TextMessage' && prefs.bigEmoji && isEmojiOnly(item.content.data.body)
   );
   /** A picture, video or sticker sent without a caption sits straight on the timeline, with no bubble behind it. */
   const bareMedia = $derived(
-    !!album ||
-    (item.content.kind === 'Media' &&
-      ['image', 'video', 'sticker'].includes(item.content.data.media_kind ?? '') &&
+    item.content.kind === 'Media' &&
+      ['image', 'video', 'sticker'].includes(item.content.data.media_kind) &&
       !item.reply_to &&
-      !(item.content.data.body && !isFileName(item.content.data.body)))
+      !(item.content.data.body && !isFileName(item.content.data.body))
   );
   /** A file attachment renders as a titled tile, which needs room for its name on one line. */
   const fileMessage = $derived(
-    item.content.kind === 'Media' && (item.content.data.media_kind ?? 'file') === 'file'
+    item.content.kind === 'Media' && item.content.data.media_kind === 'file'
   );
-  const stateSummary = $derived(item.content.kind === 'RoomState' ? stateEventSummary(item.content.data) : null);
   const senderName = $derived(item.sender_display_name ?? item.sender);
   const failed = $derived(item.send_state.status === 'Failed');
-  const sending = $derived(item.send_state.status === 'Sending');
-  const canEdit = $derived(item.is_own && kind === 'TextMessage' && !!item.event_id);
+  const sending = $derived(isPending(item));
+  const canReply = $derived(capabilities?.replies === true);
+  const canReact = $derived(capabilities?.reactions === true);
+  const canEdit = $derived(canEditItem(item, capabilities));
+  const canDelete = $derived(canDeleteForEveryone(item, capabilities));
   const canAct = $derived(!!item.event_id && (kind === 'TextMessage' || kind === 'Media' || kind === 'Location'));
   const canCopy = $derived(kind === 'TextMessage');
+  /** A failed send can be retried when the engine says so; queued or sending rows can be cancelled. */
+  const canRetry = $derived(item.send_state.status === 'Failed' && item.send_state.data.can_retry);
+  const canCancel = $derived(isPending(item) && transactionIdOf(item) !== null);
   const isImageMedia = $derived(
     item.content.kind === 'Media' &&
-      (['image', 'sticker'].includes(item.content.data.media_kind ?? '') ||
-        (item.content.data.mime_type && item.content.data.mime_type.startsWith('image/')))
+      ['image', 'sticker'].includes(item.content.data.media_kind)
+  );
+  /** Audio and voice notes render the waveform player instead of a generic file tile. */
+  const audioMedia = $derived(
+    item.content.kind === 'Media' &&
+      (item.content.data.voice ||
+        item.content.data.media_kind === 'audio' ||
+        item.content.data.media_kind === 'voice')
   );
   const canCopyPicture = $derived(isImageMedia && canCopyImage());
-  const canDownload = $derived(kind === 'Media' && canDownloadMedia());
   const highlighted = $derived(!!item.event_id && timelineStore.highlightedEventId === item.event_id);
-  const roomDetails = $derived(membersStore.detailsOf(timelineStore.roomId));
-  const canPin = $derived(canAct && (roomDetails?.can_pin ?? false));
-  const pinned = $derived(pinsStore.isPinned(timelineStore.roomId, item.event_id));
-  const canDelete = $derived(!!item.event_id && !sending && (item.is_own || (roomDetails?.can_redact_others ?? false)));
   const selected = $derived(!!item.event_id && timelineStore.selectedIds.includes(item.event_id));
 
   let rowEl = $state<HTMLElement | undefined>();
+  let senderAvatarSrc = $state<string | null>(null);
+
+  // Sender avatars are stored media: resolve them to a local file URL at the rendered size.
+  $effect(() => {
+    const source = item.sender_avatar;
+    const px = avatarSize;
+    let cancelled = false;
+    senderAvatarSrc = null;
+    void resolveAvatar(source, px).then((url) => {
+      if (!cancelled) senderAvatarSrc = url;
+    });
+    return () => {
+      cancelled = true;
+    };
+  });
 
   /**
    * Places the action bar against the message itself, not against its containing box: a wrapped
@@ -322,9 +331,10 @@
   }
 
   /** Emoji this user already reacted with on the message; shown pressed in the quick bar. */
-  const myReactions = $derived((item.reactions ?? []).filter((r) => r.by_me).map((r) => r.key));
+  const myReactions = $derived(item.reactions.filter((r) => r.by_me).map((r) => r.key));
 
   function reactWith(emoji: string) {
+    if (!canReact) return;
     void timelineStore.toggleReaction(item, emoji);
   }
 
@@ -334,9 +344,11 @@
     return displayNameFor(userId, null, m?.display_name ?? null);
   }
 
-  /** Other people who have read this message of yours (their receipt is on it or on a later event). */
+  /** Other people who have read this message of yours (the engine reports per-message readers). */
   const readers = $derived(item.is_own && item.event_id ? (timelineStore.readers.get(item.event_id) ?? []) : []);
-  const showTick = $derived(prefs.showReadReceipts && item.is_own && !!item.event_id && !sending && !failed);
+  const showTick = $derived(
+    !!capabilities?.read_receipts && prefs.showReadReceipts && item.is_own && !!item.event_id && !sending && !failed
+  );
   const readByOthers = $derived(readers.length > 0);
   const readerNames = $derived(readers.map(nameOf));
   /** Stacked avatars of readers, only under your newest message and only in small rooms. */
@@ -344,7 +356,7 @@
     showTick &&
       readByOthers &&
       item.event_id === timelineStore.lastOwnEventId &&
-      (membersStore.detailsOf(timelineStore.roomId)?.joined_members ?? membersStore.membersOf(timelineStore.roomId).length) <= 20
+      membersStore.membersOf(timelineStore.roomId).length <= 20
   );
 
   // Who reacted: the sheet lists every reactor per emoji.
@@ -361,7 +373,7 @@
   const swipeOptions = $derived({
     direction: 'right' as const,
     threshold: 64,
-    enabled: viewport.isPhone && canAct && !inThread && !timelineStore.selecting,
+    enabled: viewport.isPhone && canReply && canAct && !timelineStore.selecting,
     edgeGuard: 24,
     onmove: (offset: number) => {
       swiping = true;
@@ -381,7 +393,7 @@
   let burstSeq = 0;
   function onDoubleTap(point: { x: number; y: number }) {
     const emoji = prefs.quickReactions[0];
-    if (!viewport.isPhone || !canAct || !emoji) return;
+    if (!viewport.isPhone || !canReact || !canAct || !emoji) return;
     const removing = myReactions.includes(emoji);
     reactWith(emoji);
     if (removing || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
@@ -428,52 +440,37 @@
       : undefined;
 
     const phoneBar: MenuItem[] = [];
-    if (canAct && !inThread) {
+    if (canReply) {
       phoneBar.push({ id: 'reply', label: t('message-row-reply'), icon: Reply, onselect: () => timelineStore.startReply(item) });
     }
-
     if (canCopy) {
       phoneBar.push({ id: 'copy', label: t('common-copy'), icon: Copy, onselect: () => void navigator.clipboard.writeText(quote(item)) });
     } else if (canCopyPicture) {
       phoneBar.push({ id: 'copy-picture', label: t('common-copy'), icon: Copy, onselect: () => void copyPictureItem() });
-    } else if (canPin && item.event_id && timelineStore.roomId) {
-      const roomId = timelineStore.roomId;
-      const eventId = item.event_id;
-      phoneBar.push(
-        pinned
-          ? { id: 'unpin', label: t('pinned-bar-unpin'), icon: PinOff, onselect: () => void pinsStore.setPinned(roomId, eventId, false) }
-          : { id: 'pin', label: t('common-pin'), icon: Pin, onselect: () => void pinsStore.setPinned(roomId, eventId, true) },
-      );
-    } else if (canDownload) {
+    } else if (item.content.kind === 'Media' && canDownloadMedia()) {
       phoneBar.push({ id: 'download', label: t('media-view-download'), icon: Download, onselect: downloadMediaItem });
     }
-
-    if (canAct && !inThread) {
-      phoneBar.push({
-        id: 'forward',
-        label: t('selection-bar-forward'),
-        icon: Forward,
-        onselect: () => item.event_id && timelineStore.roomId && forwardStore.begin(timelineStore.roomId, [item.event_id]),
-      });
-    }
+    phoneBar.push({
+      id: 'forward',
+      label: t('selection-bar-forward'),
+      icon: Forward,
+      onselect: () => item.event_id && timelineStore.roomId && forwardStore.begin(timelineStore.roomId, [item.event_id]),
+    });
 
     return {
-      reactions: {
-        emojis: prefs.quickReactions,
-        active: myReactions,
-        onpick: reactWith,
-        onmore: () => rowEl && openReactions(rowEl.getBoundingClientRect()),
-        anchor,
-      },
+      reactions: canReact
+        ? {
+            emojis: prefs.quickReactions,
+            active: myReactions,
+            onpick: reactWith,
+            onmore: () => rowEl && openReactions(rowEl.getBoundingClientRect()),
+            anchor,
+          }
+        : undefined,
       anchor,
       spotlight,
       phoneBar,
     };
-  }
-
-  function openThread() {
-    const roomId = timelineStore.roomId;
-    if (roomId && item.event_id) void threadStore.open(roomId, item.event_id);
   }
 
   /** Opens the sender's profile card at the pointer, or centred on the avatar when activated from the keyboard. */
@@ -500,21 +497,32 @@
       : null
   );
 
-  /** Saves a media message's file through the native save dialog; failures show in the timeline toast. */
+  /** Local file URL of a stored media object, fetched through the engine's media cache. */
+  async function mediaFileUrl(source: MediaSource, mime: string | null): Promise<string> {
+    const res = await client.invoke({
+      action: 'GetMedia',
+      params: { source, kind: 'file', mime_type: mime },
+    });
+    if (res.type !== 'Media') throw new Error(`unexpected response: ${res.type}`);
+    return await localFileUrl(res.payload.path);
+  }
+
+  /** Saves a media message's file: native save dialog on desktop, Downloads on Android, a download in the browser. */
   function downloadMediaItem() {
     if (item.content.kind !== 'Media') return;
-    const { uri, mime_type, body } = item.content.data;
-    downloadMedia(uri, mime_type, body || 'media').catch((err: unknown) => {
-      timelineStore.error = errorMessage(err);
-    });
+    const { source, mime_type, body } = item.content.data;
+    void fetchMediaPath(source, mime_type)
+      .then((path) => saveMediaFile(path, body || 'media', mime_type))
+      .catch((err: unknown) => {
+        timelineStore.error = errorMessage(err);
+      });
   }
 
   async function copyPictureItem() {
     if (item.content.kind !== 'Media') return;
     try {
-      const { uri, mime_type } = item.content.data;
-      const url = await fetchMediaFile(uri, mime_type);
-      await copyImageFromUrl(url);
+      const { source, mime_type } = item.content.data;
+      await copyImageFromUrl(await mediaFileUrl(source, mime_type));
     } catch (err: unknown) {
       timelineStore.error = errorMessage(err);
     }
@@ -524,18 +532,14 @@
   function menuItems(): MenuItem[] {
     const actions: MenuItem[] = [];
 
-    // 1. Reply
-    if (canAct && !inThread) {
+    if (canAct && canReply) {
       actions.push({ id: 'reply', label: t('message-row-reply'), icon: Reply, onselect: () => timelineStore.startReply(item) });
-      actions.push({ id: 'thread', label: t('message-row-reply-in-thread'), icon: MessageSquare, onselect: openThread });
     }
 
-    // 2. Edit (own text)
     if (canEdit) {
       actions.push({ id: 'edit', label: t('common-edit'), icon: Pencil, onselect: () => timelineStore.startEdit(item) });
     }
 
-    // 3. Copy text / Copy picture
     if (canCopy) {
       actions.push({ id: 'copy-text', label: t('common-copy-text'), icon: Copy, onselect: () => void navigator.clipboard.writeText(quote(item)) });
     }
@@ -544,24 +548,11 @@
     }
     actions.push({ id: 'copy-sender', label: t('message-row-copy-sender-id'), icon: Copy, onselect: () => void navigator.clipboard.writeText(item.sender) });
 
-    // 4. Pin/Unpin
-    if (canPin && item.event_id && timelineStore.roomId) {
-      const roomId = timelineStore.roomId;
-      const eventId = item.event_id;
-      actions.push(
-        pinned
-          ? { id: 'unpin', label: t('pinned-bar-unpin'), icon: PinOff, onselect: () => void pinsStore.setPinned(roomId, eventId, false) }
-          : { id: 'pin', label: t('common-pin'), icon: Pin, onselect: () => void pinsStore.setPinned(roomId, eventId, true) },
-      );
-    }
-
-    // 5. Download (media)
-    if (canDownload) {
+    if (item.content.kind === 'Media' && canDownloadMedia()) {
       actions.push({ id: 'download', label: t('media-view-download'), icon: Download, onselect: downloadMediaItem });
     }
 
-    // 6. Forward
-    if (canAct && !inThread) {
+    if (canAct) {
       actions.push({
         id: 'forward',
         label: t('selection-bar-forward'),
@@ -570,24 +561,14 @@
       });
     }
 
-    // 7. Select
     if (canAct && item.event_id) {
       const eventId = item.event_id;
       actions.push({ id: 'select', label: t('message-row-select'), icon: Check, onselect: () => timelineStore.beginSelect(eventId) });
     }
 
-    // 8. Destructive (Delete, Report)
-    const destructive: MenuItem[] = [];
     if (canDelete) {
-      destructive.push({ id: 'delete', label: t('common-delete'), icon: Trash2, danger: true, onselect: () => (timelineStore.pendingDelete = [item]) });
-    }
-    if (!item.is_own && canAct) {
-      destructive.push({ id: 'report', label: t('report-confirm-report'), icon: Flag, danger: true, onselect: () => (timelineStore.pendingReport = item) });
-    }
-
-    if (destructive.length > 0) {
-      if (actions.length > 0) actions.push({ separator: true });
-      actions.push(...destructive);
+      actions.push({ separator: true });
+      actions.push({ id: 'delete', label: t('common-delete'), icon: Trash2, danger: true, onselect: () => (timelineStore.pendingDelete = [item]) });
     }
 
     return actions;
@@ -611,12 +592,8 @@
 {#if !hidden}
   {#if item.content.kind === 'DayDivider'}
   <div class="divider"><span>{formatDay(item.content.data.timestamp_millis)}</span></div>
-{:else if item.content.kind === 'RoomState'}
-  <div class="system">
-    {stateSummary ?? (item.content.data.state_type === 'membership' ? t('message-row-membership-changed') : t('message-row-room-updated'))}
-  </div>
-{:else if item.content.kind === 'Virtual'}
-  <div class="spacer"></div>
+{:else if item.content.kind === 'System'}
+  <div class="system">{item.content.data.text}</div>
 {:else}
   <div
     class="row"
@@ -631,7 +608,6 @@
     class:selecting={timelineStore.selecting && canAct}
     class:selected
     onclickcapture={onRowClickCapture}
-    class:mention={item.mentions_me && !item.is_own}
     role={cursorable ? 'article' : undefined}
     tabindex="-1"
     aria-label={cursorable ? (cursorLabel ?? undefined) : undefined}
@@ -668,7 +644,7 @@
           <Avatar
             userId={item.sender}
             displayName={senderName}
-            src={item.sender_avatar_url ?? null}
+            src={senderAvatarSrc}
             size={avatarSize}
           />
         </button>
@@ -689,7 +665,7 @@
           <ReplyQuote replyTo={item.reply_to} stacked own={item.is_own} />
         {/if}
 
-        <div class="bubble" class:has-reactions={(item.reactions ?? []).length > 0}>
+        <div class="bubble" class:has-reactions={canReact && item.reactions.length > 0}>
           {#if item.reply_to && !stackedReply}
             <div class="reply-slot">
               <ReplyQuote replyTo={item.reply_to} inOwnBubble={layout === 'bubbles' && item.is_own} />
@@ -703,80 +679,81 @@
             {:else}
               <div class="body">{item.content.data.body}{#if item.edited}<span class="edited">{t('message-row-edited')}</span>{/if}</div>
             {/if}
-            {#if previewUrl && timelineStore.roomId}
-              <LinkPreview url={previewUrl} roomId={timelineStore.roomId} />
-            {/if}
           {:else if item.content.kind === 'Media'}
             <div class="block">
+              {#if !album}
+                {#if audioMedia}
+                  <AudioPlayer
+                    source={item.content.data.source}
+                    mimeType={item.content.data.mime_type}
+                    body={item.content.data.body}
+                    sizeBytes={item.content.data.size_bytes}
+                    durationMs={item.content.data.duration_ms}
+                    voice={item.content.data.voice}
+                    ondownload={downloadMediaItem}
+                  />
+                {:else}
+                  <MediaView
+                    eventId={item.event_id}
+                    source={item.content.data.source}
+                    mimeType={item.content.data.mime_type}
+                    body={item.content.data.body}
+                    mediaKind={item.content.data.media_kind}
+                    sizeBytes={item.content.data.size_bytes}
+                    width={item.content.data.width}
+                    height={item.content.data.height}
+                    ondownload={downloadMediaItem}
+                  />
+                {/if}
+              {/if}
               {#if album}
-                <AlbumGrid items={album} />
-              {:else if item.content.data.media_kind === 'audio'}
-                <AudioPlayer
-                  uri={item.content.data.uri}
-                  mimeType={item.content.data.mime_type}
-                  body={item.content.data.body ?? ''}
-                  sizeBytes={item.content.data.size_bytes}
-                  durationMs={item.content.data.duration_ms ?? null}
-                  waveform={item.content.data.waveform ?? null}
-                  voice={item.content.data.voice ?? false}
-                  ondownload={downloadMediaItem}
-                />
-              {:else}
-                <MediaView
-                  eventId={item.event_id}
-                  uri={item.content.data.uri}
-                  mimeType={item.content.data.mime_type}
-                  body={item.content.data.body ?? ''}
-                  mediaKind={item.content.data.media_kind ?? 'file'}
-                  sizeBytes={item.content.data.size_bytes}
-                  width={item.content.data.width}
-                  height={item.content.data.height}
-                  thumbnailUri={item.content.data.thumbnail_uri}
-                  ondownload={downloadMediaItem}
-                />
+                <div class="album-grid">
+                  {#each album as picture (picture.internal_id)}
+                    {@const p = picture.content}
+                    {#if p.kind === 'Media'}
+                      <MediaView
+                        source={p.data.source}
+                        mimeType={p.data.mime_type}
+                        body={p.data.body}
+                        mediaKind={p.data.media_kind}
+                        sizeBytes={p.data.size_bytes}
+                        width={p.data.width}
+                        height={p.data.height}
+                      />
+                    {/if}
+                  {/each}
+                </div>
               {/if}
               {#if item.content.data.media_kind === 'image' && item.content.data.body && !isFileName(item.content.data.body)}
                 <div class="body caption">{item.content.data.body}{#if item.edited}<span class="edited">{t('message-row-edited')}</span>{/if}</div>
               {/if}
             </div>
-          {:else if item.content.kind === 'Redacted'}
+          {:else if item.content.kind === 'Deleted'}
             <div class="body muted">{t('message-row-message-deleted')}</div>
-          {:else if item.content.kind === 'UnableToDecrypt'}
-            <div class="body muted">{t('message-row-waiting-for-this-message-verify-this-device-to-r')}</div>
-          {:else if item.content.kind === 'Poll'}
-            <div class="block"><PollView {item} poll={item.content.data} /></div>
           {:else if item.content.kind === 'Location'}
-            <div class="block">
-              <LocationCard
-                geoUri={item.content.data.geo_uri}
-                description={item.content.data.description}
-                live={item.content.data.live ?? false}
-                liveUntil={item.content.data.live_until_millis ?? null}
-              />
-            </div>
+            <div class="body muted">{item.content.data.description || t('chat-location')}</div>
           {:else}
             <div class="body muted">{t('message-row-this-message-type-is-not-supported-yet')}</div>
           {/if}
 
           {#if item.is_own && sending}
-            <div class="state sending" role="status" aria-label={t('message-row-sending')}>{t('message-row-sending')}</div>
+            <div class="state sending" role="status" aria-label={t('message-row-sending')}>
+              <span>{t('message-row-sending')}</span>
+              {#if canCancel}
+                <button type="button" class="state-cancel" onclick={() => timelineStore.cancel(item)}>{t('message-row-discard')}</button>
+              {/if}
+            </div>
           {:else if failed}
             <div class="failed-actions">
               <span class="err">{t('message-row-failed-to-send')}</span>
-              <button type="button" onclick={() => timelineStore.retry(item)}>{t('common-retry')}</button>
-              <button type="button" onclick={() => timelineStore.cancel(item)}>{t('message-row-discard')}</button>
+              {#if canRetry}<button type="button" onclick={() => timelineStore.retry(item)}>{t('common-retry')}</button>{/if}
+              {#if transactionIdOf(item)}<button type="button" onclick={() => timelineStore.cancel(item)}>{t('message-row-discard')}</button>{/if}
             </div>
           {/if}
 
-          {#if item.thread_summary && !inThread}
-            <button type="button" class="thread-chip" onclick={openThread} aria-label={t('message-row-open-thread', { count: item.thread_summary.reply_count })}>
-              <Icon icon={MessageSquare} size={16} />
-              <span>{t('message-row-thread-replies', { count: item.thread_summary.reply_count })}</span>
-            </button>
-          {/if}
-          {#if (item.reactions ?? []).length > 0}
+          {#if canReact && item.reactions.length > 0}
             <div class="reactions">
-              {#each item.reactions ?? [] as r (r.key)}
+              {#each item.reactions as r (r.key)}
                 <button
                   type="button"
                   class="chip"
@@ -800,27 +777,24 @@
         <div class="toolbar" class:hidden={contextMenu.isOpen} role="toolbar" aria-label={t('message-row-message-actions')}>
           <!-- Reactions lead in both states. Compact narrows them to the three the user put first and
                keeps the picker chevron, so the full emoji set is never more than one click away. -->
-          <span class="quick">
-            <QuickReactions
-              emojis={prefs.quickReactions}
-              limit={compact ? COMPACT_REACTIONS : undefined}
-              active={myReactions}
-              onpick={reactWith}
-              onmore={() => rowEl && openReactions(rowEl.getBoundingClientRect())}
-            />
-            <span class="tool-sep" aria-hidden="true"></span>
-          </span>
-          {#if !inThread}
+          {#if canReact}
+            <span class="quick">
+              <QuickReactions
+                emojis={prefs.quickReactions}
+                limit={compact ? COMPACT_REACTIONS : undefined}
+                active={myReactions}
+                onpick={reactWith}
+                onmore={() => rowEl && openReactions(rowEl.getBoundingClientRect())}
+              />
+              <span class="tool-sep" aria-hidden="true"></span>
+            </span>
+          {/if}
+          {#if canReply}
             <button type="button" aria-label={t('message-row-reply')} title={t('message-row-reply')} onclick={() => timelineStore.startReply(item)}>
               <Icon icon={Reply} size={16} />
             </button>
           {/if}
           {#if !compact}
-            {#if item.event_id && !inThread}
-              <button type="button" aria-label={t('message-row-reply-in-thread')} title={t('message-row-reply-in-thread')} onclick={openThread}>
-                <Icon icon={MessageSquare} size={16} />
-              </button>
-            {/if}
             {#if canEdit}
               <button type="button" aria-label={t('common-edit')} title={t('common-edit')} onclick={() => timelineStore.startEdit(item)}>
                 <Icon icon={Pencil} size={16} />
@@ -832,7 +806,7 @@
               </button>
             {/if}
           {:else}
-            <!-- Compact folds thread, edit and delete into the menu right-click already offers. -->
+            <!-- Compact folds edit and delete into the menu right-click already offers. -->
             <button
               type="button"
               aria-label={t('message-row-more-actions')}
@@ -851,7 +825,7 @@
         <div class="seen" data-tooltip={t('message-row-seen-by', { names: joinNames(readerNames) })}>
           {#each readers.slice(0, 3) as userId (userId)}
             {@const m = membersStore.membersOf(timelineStore.roomId).find((x) => x.user_id === userId)}
-            <Avatar {userId} displayName={m?.display_name ?? null} src={m?.avatar_url ?? null} size={16} />
+            <Avatar {userId} displayName={m?.display_name ?? null} size={16} />
           {/each}
           {#if readers.length > 3}<span class="seen-more">+{readers.length - 3}</span>{/if}
         </div>
@@ -901,9 +875,6 @@
     background: var(--alloy-color-accent-subtle);
   }
   /* A message that mentions you carries an accent edge. */
-  .row.mention {
-    box-shadow: inset 3px 0 0 var(--alloy-color-accent-primary);
-  }
   /* Multi-select: a round check sits at the left edge and a tap anywhere on the message toggles it. */
   .row.selecting {
     cursor: pointer;
@@ -1128,8 +1099,20 @@
     white-space: nowrap;
   }
   .state {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--alloy-spacing-scale-2);
     font-size: var(--alloy-typography-size-xs);
     color: var(--alloy-color-text-muted);
+  }
+  .state-cancel {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--alloy-color-text-secondary);
+    font: inherit;
+    text-decoration: underline;
+    cursor: pointer;
   }
   /* A pending echo has no byte progress to show, so the label breathes to prove the row is alive. */
   .state.sending {
@@ -1167,29 +1150,6 @@
     padding: 2px 0;
     font: inherit;
     text-decoration: underline;
-  }
-  .thread-chip {
-    display: inline-flex;
-    gap: var(--alloy-spacing-scale-1);
-    align-items: center;
-    margin-top: var(--alloy-spacing-scale-1);
-    padding: 2px var(--alloy-spacing-scale-2);
-    border: 0;
-    border-radius: var(--alloy-radii-md);
-    background: transparent;
-    color: var(--alloy-color-accent-primary);
-    font: inherit;
-    font-size: var(--alloy-typography-size-sm);
-    cursor: pointer;
-  }
-  @media (hover: hover) {
-    .thread-chip:hover {
-      background: var(--alloy-color-surface-hover);
-    }
-  }
-  .thread-chip:focus-visible {
-    outline: 2px solid var(--alloy-color-accent-primary);
-    outline-offset: 1px;
   }
   .reactions {
     /* Height of one chip's tap area; the pill inside is smaller on phones. */
@@ -1447,9 +1407,6 @@
     font-size: var(--alloy-typography-size-sm);
     color: var(--alloy-color-text-muted);
   }
-  .spacer {
-    height: 1px;
-  }
 
   /* Message layouts. Bubbles is the default (ADR 0013); modern and IRC stay available in prefs. */
   .bubble {
@@ -1498,7 +1455,6 @@
   .row[data-layout='irc'] .block,
   .row[data-layout='irc'] .state,
   .row[data-layout='irc'] .failed-actions,
-  .row[data-layout='irc'] .thread-chip,
   .row[data-layout='irc'] .reactions {
     flex: 0 0 calc(100% - var(--irc-name-width));
     margin-left: var(--irc-name-width);
@@ -1554,6 +1510,12 @@
     font-size: var(--alloy-typography-size-sm);
     line-height: var(--alloy-typography-line-height-tight);
   }
+  .album-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 2px;
+    max-width: min(400px, 100%);
+  }
   .row[data-layout='bubbles'] .bubble {
     position: relative;
     display: flex;
@@ -1595,9 +1557,6 @@
   .row[data-layout='bubbles'] .bubble .edited,
   .row[data-layout='bubbles'] .bubble .muted,
   .row[data-layout='bubbles'] .bubble .state,
-  .row.own[data-layout='bubbles'] .thread-chip {
-    color: inherit;
-  }
   .row[data-layout='bubbles'] .bubble .edited,
   .row[data-layout='bubbles'] .bubble .muted {
     opacity: 0.82;
@@ -1754,10 +1713,6 @@
       content: '';
       position: absolute;
       inset: -8px;
-    }
-    .thread-chip {
-      min-height: 44px;
-      padding: 0 var(--alloy-spacing-scale-3);
     }
     .reactions {
       --chip-box: 44px;

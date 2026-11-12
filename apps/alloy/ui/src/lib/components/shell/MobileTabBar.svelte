@@ -2,8 +2,8 @@
   import { Icon, MessageSquare, Settings } from '$lib/icons';
 
   import { t } from '$lib/i18n';
-  // Two destinations: public-room browsing lives in the room list's menu, so the bar is the two
-  // places a phone actually switches between.
+  // Two destinations: the two places a phone actually switches between. A phone shows one pane at a
+  // time, so the bar carries the chat list and the settings menu, never a third surface.
   type Tab = 'chats' | 'settings';
 
   let {
@@ -19,7 +19,9 @@
   } = $props();
 
   const badge = $derived(unread > 99 ? '99+' : String(unread));
-  const chatsLabel = $derived(unread > 0 ? `Chats, ${unread} unread` : 'Chats');
+  const chatsLabel = $derived(
+    unread > 0 ? t('mobile-tab-bar-chats-with-unread', { count: badge }) : t('mobile-tab-bar-chats')
+  );
 </script>
 
 <nav class="tabbar" aria-label={t('mobile-tab-bar-primary')}>

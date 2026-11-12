@@ -1,12 +1,11 @@
 <script lang="ts">
   import { timelineStore } from '$lib/stores/timeline.svelte';
   import { draftsStore } from '$lib/stores/drafts.svelte';
-  import { threadStore } from '$lib/stores/thread.svelte';
   import { roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
   import { client } from '$lib/ipc';
   import { prefs } from '$lib/stores/prefs.svelte';
   import Icon from '$lib/icons/Icon.svelte';
-  import { ChartBar, Ellipsis, File, Image, ImagePlus, MapPin, Navigation, Play, Plus, Send, Smile, Type, X } from '$lib/icons';
+  import { File, Image, ImagePlus, Play, Plus, Send, Smile, Type, X } from '$lib/icons';
   import {
     canPickFiles,
     importPastedImagePath,
@@ -23,9 +22,6 @@
   import { stageFile, stagePictureFromPath, type StagedPicture } from './stageHelper';
   import { errorMessage } from '$lib/stores/errors';
   import { isVoiceMessagesSupported } from '$lib/platform/capabilities';
-  import { canLocate } from '$lib/platform/geolocation';
-  import { liveLocation } from '$lib/stores/liveLocation.svelte';
-  import LocationDialog from './LocationDialog.svelte';
   import VoiceRecorder from './VoiceRecorder.svelte';
   import { contextmenu } from '$lib/platform/contextmenu';
   import { composerFieldAria } from '$lib/platform/composerA11y';
@@ -40,16 +36,10 @@
     MENTION_LIMIT,
     mentionOptionId,
     rankMembers,
-    reconcileMentions,
-    roomMentionOption,
-    containsRoomMention,
-    ROOM_MENTION_ID,
-    type ActiveMention,
-    type MentionRecord
+    type ActiveMention
   } from '$lib/stores/mentions';
   import MentionPicker from './MentionPicker.svelte';
   import AttachmentPreview from './AttachmentPreview.svelte';
-  import PollDialog from './PollDialog.svelte';
   import FormatToolbar from './FormatToolbar.svelte';
   import { wrapKindForKey, wrapSelection, type WrapKind } from '$lib/content/markdownWrap';
   import { Button, Modal, TextField } from '../common';
@@ -57,27 +47,25 @@
   import { t } from '$lib/i18n';
   interface Props {
     roomId: string;
-    /** Set inside a thread panel: sends go into that thread and room reply/edit state is ignored. */
-    threadRoot?: string | null;
   }
-  let { roomId, threadRoot = null }: Props = $props();
+  let { roomId }: Props = $props();
   const pickerId = $props.id();
+
+  const capabilities = $derived(
+    roomsStore.capabilitiesFor(roomsStore.rooms.find((r) => r.id === roomId)?.account_id ?? '')
+  );
 
   let text = $state('');
   let field: HTMLTextAreaElement | undefined = $state();
   let mention = $state<ActiveMention | null>(null);
-  let pollOpen = $state(false);
-  let locationOpen = $state(false);
   // Key (`start:query`) of a mention dismissed with Escape; it reopens once the query changes.
   let mentionDismissed = $state<string | null>(null);
   let mentionIndex = $state(0);
-  // Mentions picked for the current draft, checked against the text on send.
-  let mentionRecords: MentionRecord[] = [];
   let typing = false;
   let typingTimer: ReturnType<typeof setTimeout> | undefined;
 
-  const replying = $derived(threadRoot ? null : timelineStore.replyTo);
-  const editing = $derived(threadRoot ? null : timelineStore.editing);
+  const replying = $derived(capabilities?.replies === true ? timelineStore.replyTo : null);
+  const editing = $derived(capabilities?.edit === true ? timelineStore.editing : null);
   const composing = $derived(!!(replying || editing));
 
   // Picked, dropped or pasted files wait here until the user sends them, and the composer text
@@ -87,9 +75,11 @@
   let previewOpen = $state(false);
   // Staged attachments are sendable on their own.
   const canSend = $derived(text.trim().length > 0 || staged.length > 0);
-  /** The microphone stands in for Send while there is nothing to send (not while editing or in a thread). */
+  /** The microphone stands in for Send while there is nothing to send (not while editing). */
   let recording = $state(false);
-  const canRecord = $derived(!threadRoot && !editing && !canSend && isTauriRuntime() && isVoiceMessagesSupported());
+  const canRecord = $derived(
+    capabilities?.voice === true && !editing && !canSend && isTauriRuntime() && isVoiceMessagesSupported()
+  );
 
   // Formatting: a floating toolbar over a selection on desktop, an "Aa" row on phones, plus shortcuts.
   let selected = $state(false);
@@ -97,7 +87,7 @@
   let linkOpen = $state(false);
   let linkUrl = $state('');
   let linkRange = { start: 0, end: 0 };
-  const showFormat = $derived(!threadRoot && !recording && (viewport.isPhone ? formatOpen : selected));
+  const showFormat = $derived(!recording && (viewport.isPhone ? formatOpen : selected));
 
   function syncSelection() {
     selected = !!field && field.selectionEnd > field.selectionStart;
@@ -131,24 +121,19 @@
     const active = roomsStore.active;
     return active && active.id === roomId ? roomTitle(active) : null;
   });
-  // Textarea placeholders wrap instead of truncating, so long room names are cut here.
   // Desktop with Enter as newline states the send shortcut; phones have a Send button and need no hint.
   const hintSend = $derived(!viewport.isPhone && !prefs.enterToSend);
-  // Phones: the placeholder must stay on one line, so only the room name fits when the whole string is short.
-  // The full name stays in aria-label.
-  const phoneName = $derived(roomName ? `Message ${roomName}` : 'Message');
   const placeholder = $derived.by(() => {
-    if (viewport.isPhone) return phoneName.length < 18 ? phoneName : 'Message';
-    const base = roomName ? `Message ${roomName.length > 28 ? `${roomName.slice(0, 27)}…` : roomName}` : 'Message';
-    return hintSend ? `${base}. Ctrl+Enter or Cmd+Enter to send` : base;
+    const base = roomName
+      ? t('chat-composer-placeholder-room', { room: roomName })
+      : t('chat-composer-placeholder');
+    return hintSend ? t('chat-composer-placeholder-shortcut', { base }) : base;
   });
+  const fieldLabel = $derived(hintSend ? t('composer-message-press-ctrl-enter-or-cmd-enter-to-send') : t('composer-message'));
   const mentionKey = (m: ActiveMention) => `${m.start}:${m.query}`;
-  const canMentionRoom = $derived(membersStore.detailsOf(roomId)?.can_mention_room ?? false);
   const candidates = $derived(
     mention
-      ? [roomMentionOption(mention.query, canMentionRoom), ...rankMembers(membersStore.membersOf(roomId), mention.query, MENTION_LIMIT)]
-          .filter((m): m is RoomMemberDto => m !== null)
-          .slice(0, MENTION_LIMIT)
+      ? rankMembers(membersStore.membersOf(roomId), mention.query, MENTION_LIMIT).slice(0, MENTION_LIMIT)
       : []
   );
   const pickerOpen = $derived(
@@ -156,7 +141,6 @@
   );
   const highlighted = $derived(Math.min(mentionIndex, Math.max(candidates.length - 1, 0)));
   // A plain multi-line text field until the mention listbox opens; then the full combobox contract.
-  // A permanently collapsed `role="combobox"` made the field announce as a combo box at all times.
   const fieldAria = $derived(
     composerFieldAria({
       open: pickerOpen,
@@ -181,7 +165,7 @@
   async function restoreDraft(id: string) {
     const draft = await draftsStore.load(id);
     if (roomId !== id) return;
-    if (draft && !draft.editOf && text === '') {
+    if (draft && text === '') {
       text = draft.text;
       void tickResize();
     }
@@ -192,29 +176,28 @@
   // Leaving a room saves its draft at once.
   $effect(() => {
     const id = roomId;
-    const inThread = !!threadRoot;
     text = '';
+    staged = [];
     draftReady = false;
     untrack(() => emojiPicker.close());
     mention = null;
     mentionDismissed = null;
-    mentionRecords = [];
     // Without loaded members the picker stays empty; sending is unaffected.
     // Untracked: the cache read inside must not make members arriving later wipe the draft.
     untrack(() => void membersStore.loadMembers(roomId).catch(() => {}));
-    if (!inThread) untrack(() => void restoreDraft(id));
+    untrack(() => void restoreDraft(id));
     return () => {
-      if (inThread || untrack(() => editing)) return;
+      if (untrack(() => editing)) return;
       const typed = untrack(() => text);
       const replyTo = untrack(() => replying?.event_id ?? null);
       // Typed before the stored draft finished loading, the debounce never saw a ready draft;
       // flush it directly so leaving the room at once does not lose it. An empty field still
       // leaves an unloaded draft alone.
       if (!untrack(() => draftReady)) {
-        if (typed) void draftsStore.flush(id, typed, { replyTo });
+        if (typed) void draftsStore.flush(id, typed, replyTo);
         return;
       }
-      draftsStore.flushPending(id, typed, { replyTo });
+      draftsStore.flushPending(id, typed, replyTo);
     };
   });
 
@@ -222,17 +205,19 @@
   $effect(() => {
     const current = text;
     const id = roomId;
-    if (threadRoot || editing || !draftReady) return;
-    untrack(() => draftsStore.save(id, current, { replyTo: replying?.event_id ?? null }));
+    if (editing || !draftReady) return;
+    untrack(() => draftsStore.save(id, current, replying?.event_id ?? null));
   });
 
-  // Typing notices follow the sendTyping preference. When it is off nothing is sent, and any
-  // local typing timer or flag is dropped without a network call.
+  // Typing notices follow the account's capability and the sendTyping preference. When either is
+  // off nothing is sent, and any local typing timer or flag is dropped without a network call.
+  const typingEnabled = $derived(capabilities?.typing === true && prefs.sendTyping);
+
   function setTyping(on: boolean) {
-    if (!prefs.sendTyping) return;
+    if (!typingEnabled) return;
     if (typing === on) return;
     typing = on;
-    void client.setTyping(roomId, on).catch(() => {});
+    void client.invoke({ action: 'SetTyping', params: { room_id: roomId, typing: on } }).catch(() => {});
   }
 
   function cancelTypingLocal() {
@@ -242,12 +227,12 @@
   }
 
   $effect(() => {
-    if (!prefs.sendTyping) cancelTypingLocal();
+    if (!typingEnabled) cancelTypingLocal();
   });
 
   function onInput() {
     resize();
-    if (!prefs.sendTyping) return;
+    if (!typingEnabled) return;
     if (!text.trim()) return setTyping(false);
     setTyping(true);
     clearTimeout(typingTimer);
@@ -281,18 +266,9 @@
     const active = activeMention(text, caret);
     mention = null;
     if (!active) return;
-    if (member.user_id === ROOM_MENTION_ID) {
-      const insertRoom = '@room ';
-      text = text.slice(0, active.start) + insertRoom + text.slice(caret);
-      await tick();
-      field?.setSelectionRange(active.start + insertRoom.length, active.start + insertRoom.length);
-      onInput();
-      return;
-    }
     const label = memberLabel(member);
     const insert = `@${label} `;
     text = text.slice(0, active.start) + insert + text.slice(caret);
-    mentionRecords = [...mentionRecords, { userId: member.user_id, label }];
     await tick();
     const next = active.start + insert.length;
     field?.setSelectionRange(next, next);
@@ -313,16 +289,12 @@
     }
     if (!canSend) return;
     const body = text;
-    const mentions = reconcileMentions(body, mentionRecords);
-    const mentionRoom = canMentionRoom && containsRoomMention(body);
     text = '';
-    mentionRecords = [];
     mention = null;
     clearTimeout(typingTimer);
     setTyping(false);
     await tickResize();
-    if (threadRoot) await threadStore.send(body, mentions, mentionRoom);
-    else await timelineStore.send(body, mentions, mentionRoom);
+    await timelineStore.send(body);
   }
 
   async function tickResize() {
@@ -352,7 +324,6 @@
     if (captionOverride === undefined && caption) {
       text = '';
       mention = null;
-      mentionRecords = [];
       void tickResize();
     }
     for (const [index, item] of items.entries()) {
@@ -403,7 +374,7 @@
   // the page. They join the same preview strip as picked files, so nothing is sent without a Send.
   let dropActive = $state(false);
   $effect(() => {
-    if (!isTauriRuntime() || threadRoot) return;
+    if (!isTauriRuntime()) return;
     let dispose: (() => void) | undefined;
     let cancelled = false;
     void (async () => {
@@ -429,6 +400,7 @@
       dispose?.();
     };
   });
+
   async function stageFromClipboard() {
     const rawPath = nativeClipboardImage();
     if (!rawPath) return;
@@ -443,9 +415,8 @@
     }
   }
 
-
   async function onPaste(e: ClipboardEvent) {
-    if (!canPickFiles() || threadRoot) return;
+    if (!canPickFiles()) return;
     const pictures = pastedImageFiles(e.clipboardData);
     if (pictures.length > 0) {
       e.preventDefault();
@@ -491,6 +462,7 @@
       document.execCommand('insertText', false, pasted);
     }
   }
+
   function onKeydown(e: KeyboardEvent) {
     // Staged attachments take Enter (phones keep Enter for newlines and use the Send button).
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && staged.length > 0 && !pickerOpen && !viewport.isPhone) {
@@ -499,7 +471,7 @@
       return;
     }
     // Ctrl/Cmd shortcuts for formatting the selection.
-    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.isComposing && !threadRoot) {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.isComposing) {
       const kind = wrapKindForKey(e.key, e.shiftKey);
       if (kind) {
         e.preventDefault();
@@ -529,9 +501,19 @@
       }
     }
     // Up arrow in an empty field edits your newest message (Telegram, Slack).
-    if (e.key === 'ArrowUp' && !e.isComposing && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey && !threadRoot && !composing && text === '') {
-      const last = timelineStore.items.findLast((i) => i.is_own && i.content.kind === 'TextMessage' && !!i.event_id);
-      if (last) {
+    if (
+      e.key === 'ArrowUp' &&
+      !e.isComposing &&
+      !e.shiftKey &&
+      !e.altKey &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !composing &&
+      text === '' &&
+      capabilities?.edit === true
+    ) {
+      const last = timelineStore.items.findLast((i) => i.is_own && i.content.kind === 'TextMessage' && !!i.event_id && i.send_state.status === 'Sent');
+      if (last && timelineStore.items.some((i) => i.internal_id === last.internal_id)) {
         e.preventDefault();
         timelineStore.startEdit(last);
         return;
@@ -562,33 +544,15 @@
   }
 
   /**
-   * Picks pictures or videos and sends them in the order chosen. On Android and iOS this opens the
-   * system media chooser, so the user lands in the gallery instead of a file browser.
+   * Picks pictures or videos and sends them in the order chosen. On Android this opens the system
+   * media chooser, so the user lands in the gallery instead of a file browser.
    */
   async function attachMedia() {
     await stagePaths(await pickMediaFiles());
   }
 
-  // Location choices: send where you are now, or share it live for a while.
-  function locationItems(): MenuItem[] {
-    const live: MenuItem = {
-      id: 'live-location',
-      label: t('composer-share-live-location'),
-      icon: Navigation,
-      submenu: {
-        items: [
-          { id: 'live-15', label: t('composer-for-15-minutes'), onselect: () => void liveLocation.start(roomId, 15 * 60_000) },
-          { id: 'live-60', label: t('composer-for-1-hour'), onselect: () => void liveLocation.start(roomId, 60 * 60_000) },
-          { id: 'live-480', label: t('composer-for-8-hours'), onselect: () => void liveLocation.start(roomId, 8 * 60 * 60_000) },
-        ],
-      },
-    };
-    return [{ id: 'send-location', label: t('composer-send-my-location'), icon: MapPin, onselect: () => (locationOpen = true) }, live];
-  }
-
   // The attach menu leads with media: a picture or a video is the main thing to send, a plain file is
-  // second, and the poll and the location stay reachable one level down under More (ADR 0007 tiers
-  // menus instead of growing flat lists).
+  // second, and a clipboard picture joins them when the shell can read one.
   function attachItems(): MenuItem[] {
     const items: MenuItem[] = [];
     if (canPickFiles()) {
@@ -603,23 +567,7 @@
         onselect: () => void stageFromClipboard(),
       });
     }
-    items.push(moreItem());
     return items;
-  }
-
-  /** Poll and location: the secondary ways to send something, behind one More row. */
-  function moreItem(): MenuItem {
-    return {
-      id: 'more',
-      label: t('common-more'),
-      icon: Ellipsis,
-      submenu: {
-        items: [
-          { id: 'poll', label: t('timeline-preview-poll'), icon: ChartBar, onselect: () => (pollOpen = true) },
-          ...(canLocate() ? locationItems() : []),
-        ],
-      },
-    };
   }
 
   function openAttachMenu(e: MouseEvent) {
@@ -673,7 +621,7 @@
     const it = replying ?? editing;
     if (!it) return '';
     const c = it.content;
-    return c.kind === 'TextMessage' ? c.data.body : c.kind === 'Media' ? c.data.body || t('media-attachment') : '';
+    return c.kind === 'TextMessage' ? c.data.body : c.kind === 'Media' ? c.data.body : '';
   }
 </script>
 
@@ -760,7 +708,6 @@
       if (text.trim()) {
         text = '';
         mention = null;
-        mentionRecords = [];
         void tickResize();
       }
       void sendStaged(caption);
@@ -769,21 +716,17 @@
   />
 
   <div class="field" class:recording>
-    {#if !threadRoot}
-      <button
-        type="button"
-        class="round"
-        aria-label={t('composer-add-attachment-poll-or-location')}
-        data-tooltip={t('common-add')}
-        aria-haspopup="menu"
-        onclick={openAttachMenu}
-        use:contextmenu={attachItems}
-      >
-        <Icon icon={Plus} size={20} />
-      </button>
-      <PollDialog open={pollOpen} onclose={() => (pollOpen = false)} />
-      <LocationDialog open={locationOpen} {roomId} onclose={() => (locationOpen = false)} />
-    {/if}
+    <button
+      type="button"
+      class="round"
+      aria-label={t('composer-add-attachment')}
+      data-tooltip={t('common-add')}
+      aria-haspopup="menu"
+      onclick={openAttachMenu}
+      use:contextmenu={attachItems}
+    >
+      <Icon icon={Plus} size={20} />
+    </button>
 
     <textarea
       bind:this={field}
@@ -791,7 +734,7 @@
       rows="1"
       data-composer-field
       {placeholder}
-      aria-label={viewport.isPhone ? phoneName : hintSend ? t('composer-message-press-ctrl-enter-or-cmd-enter-to-send') : t('composer-message')}
+      aria-label={fieldLabel}
       data-shortcut="Enter"
       {...fieldAria}
       oninput={onFieldInput}
@@ -807,7 +750,7 @@
       }}
     ></textarea>
 
-    {#if viewport.isPhone && !threadRoot}
+    {#if viewport.isPhone}
       <button
         type="button"
         class="round"

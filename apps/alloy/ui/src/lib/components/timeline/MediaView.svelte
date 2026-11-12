@@ -1,123 +1,81 @@
 <script lang="ts">
-  import { timelineStore } from '$lib/stores/timeline.svelte';
   import { client } from '$lib/ipc';
+  import type { MediaSource } from '$lib/generated';
   import { formatBytes } from '$lib/content/format';
   import { localFileUrl } from '$lib/platform/files';
+  import { openExternal } from '$lib/platform/links';
   import { prefs } from '$lib/stores/prefs.svelte';
-  import { viewerItemsFrom, indexOfEvent } from '$lib/content/mediaItems';
-  import { fetchMediaFile } from '$lib/content/mediaFetch';
-  import MediaViewer from './MediaViewer.svelte';
   import Icon from '$lib/icons/Icon.svelte';
-  import { Download } from '$lib/icons';
+  import { Download, Play } from '$lib/icons';
 
   import { t } from '$lib/i18n';
   interface Props {
-    uri: string;
+    /** The stored media object; its bytes are fetched through `GetMedia`. */
+    source: MediaSource;
     mimeType: string;
+    /** Caption, or the file name for attachments. */
     body: string;
+    /** `image`, `video`, `file` or `sticker`; audio and voice notes use `AudioPlayer`. */
     mediaKind: string;
     sizeBytes: number;
     width?: number | null;
     height?: number | null;
-    /** Server-provided poster for videos. */
-    thumbnailUri?: string | null;
-    /** Optional event ID for gallery building. */
+    /** Optional event ID for the caller's own bookkeeping. */
     eventId?: string | null;
     /** Saves a file row through the caller's download path; omitted for callers that cannot save. */
     ondownload?: (() => void) | null;
   }
 
   let {
-    uri,
+    source,
     mimeType,
     body,
     mediaKind,
     sizeBytes,
     width = null,
     height = null,
-    thumbnailUri = null,
-    eventId = null,
     ondownload = null,
   }: Props = $props();
 
-  let src = $state<string | null>(null);
+  let thumbSrc = $state<string | null>(null);
+  let fileSrc = $state<string | null>(null);
   let failed = $state(false);
-  let viewerOpen = $state(false);
-  let viewerItems = $state<ReturnType<typeof viewerItemsFrom>>([]);
-  let viewerIndex = $state(0);
+  let loadingFile = $state(false);
+  // Bumped by Retry: the fetch effect re-runs for the same source.
+  let attempt = $state(0);
 
   const visual = $derived(mediaKind === 'image' || mediaKind === 'sticker');
   const video = $derived(mediaKind === 'video');
-  // Audio and file items do NOT open the viewer
-  const openable = $derived(mediaKind === 'image' || video);
-  // Bumped by Retry: the fetch effect re-runs for the same source.
-  let attempt = $state(0);
+  const loadFailed = $derived((visual || video) && failed);
+  const aspect = $derived(width && height ? `${width} / ${height}` : '4 / 3');
+  /** A caption that is only the file name belongs to the attachment row, not to the picture. */
+  const caption = $derived(body || t('media-view-attachment'));
+
   function retryLoad() {
     attempt += 1;
   }
-  // Only a picture or a video gets the visible retry: an audio or file row already names its item.
-  const loadFailed = $derived(openable && failed);
-  // Images thumbnail their own media; videos use their poster when one exists.
-  const thumbSource = $derived(visual ? uri : video ? thumbnailUri : null);
-  const thumbMime = $derived(visual ? mimeType : 'image/jpeg');
-  const hasThumb = $derived(thumbSource !== null && !failed);
-  const aspect = $derived(width && height ? `${width} / ${height}` : '4 / 3');
 
-  /** GIFs stay on their first frame unless autoplay is on; the viewer still plays them. */
-  const still = $derived(visual && mimeType === 'image/gif' && !prefs.autoplayMedia);
-  let playUrl = $state<string | null>(null);
-  let canvasEl = $state<HTMLCanvasElement | undefined>();
-  const inlineVideo = $derived(video && prefs.autoplayMedia && playUrl !== null);
+  async function fetchPath(kind: 'thumbnail' | 'file', mime: string | null): Promise<string> {
+    const res = await client.invoke({
+      action: 'GetMedia',
+      params: { source, kind, mime_type: mime },
+    });
+    if (res.type !== 'Media') throw new Error(`unexpected response: ${res.type}`);
+    return await localFileUrl(res.payload.path);
+  }
 
-  // Autoplay is best-effort: if the file cannot be fetched, the poster stays and the viewer still opens.
+  // Pictures and videos show a cached thumbnail; autoplay videos fetch the file itself.
   $effect(() => {
-    if (!video || !prefs.autoplayMedia) return;
-    let cancelled = false;
-    playUrl = null;
-    fetchMediaFile(uri, mimeType)
-      .then((url) => {
-        if (!cancelled) playUrl = url;
-      })
-      .catch(() => {
-        if (!cancelled) playUrl = null;
-      });
-    return () => {
-      cancelled = true;
-    };
-  });
-
-  $effect(() => {
-    const source = src;
-    const canvas = canvasEl;
-    if (!still || source === null || !canvas) return;
-    const frame = new Image();
-    frame.onload = () => {
-      canvas.width = frame.naturalWidth;
-      canvas.height = frame.naturalHeight;
-      canvas.getContext('2d')?.drawImage(frame, 0, 0);
-    };
-    frame.src = source;
-  });
-
-  $effect(() => {
-    const source = thumbSource;
+    const mime = visual ? mimeType : video ? 'image/jpeg' : null;
     // Reading `attempt` makes a retry re-run the fetch for the same source.
-    const generation = attempt;
-    void generation;
-    if (source === null) return;
+    void attempt;
+    if (mime === null) return;
     let cancelled = false;
-    src = null;
+    thumbSrc = null;
     failed = false;
-    client
-      .getMedia({ kind: 'Remote', data: { uri: source } }, 'thumbnail', {
-        width: 480,
-        height: 360,
-        mime_type: thumbMime,
-      })
-      .then(async (res) => {
-        if (res.type !== 'MediaRetrieved') throw new Error('unexpected response');
-        const url = await localFileUrl(res.payload.local_path);
-        if (!cancelled) src = url;
+    fetchPath('thumbnail', mime)
+      .then((url) => {
+        if (!cancelled) thumbSrc = url;
       })
       .catch(() => {
         if (!cancelled) failed = true;
@@ -127,40 +85,51 @@
     };
   });
 
-  function openViewer() {
-    // Build gallery from timeline when opening
-    viewerItems = viewerItemsFrom(timelineStore.items);
-    viewerIndex = indexOfEvent(viewerItems, eventId, uri);
+  // Autoplay is best-effort: if the file cannot be fetched, the poster stays and Play still opens it.
+  $effect(() => {
+    if (!video || !prefs.autoplayMedia) return;
+    let cancelled = false;
+    fileSrc = null;
+    void fetchPath('file', mimeType)
+      .then((url) => {
+        if (!cancelled) fileSrc = url;
+      })
+      .catch(() => {
+        if (!cancelled) fileSrc = null;
+      });
+    return () => {
+      cancelled = true;
+    };
+  });
 
-    // If not found in gallery, fall back to single-item mode
-    if (viewerIndex < 0) {
-      viewerItems = [
-        {
-          eventId: eventId || null,
-          uri,
-          mimeType,
-          body,
-          mediaKind,
-          sender: '',
-          senderName: null,
-          timestampMillis: Date.now(),
-        },
-      ];
-      viewerIndex = 0;
+  /** Images open full size; videos play in place when the file is already cached. */
+  async function openFullSize() {
+    if (visual) {
+      try {
+        await openExternal(await fetchPath('file', mimeType));
+      } catch {
+        failed = true;
+      }
+      return;
     }
-
-    viewerOpen = true;
+    if (fileSrc) return;
+    loadingFile = true;
+    try {
+      fileSrc = await fetchPath('file', mimeType);
+    } catch {
+      failed = true;
+    } finally {
+      loadingFile = false;
+    }
   }
 </script>
 
 {#snippet frameContent()}
-  {#if inlineVideo}
+  {#if video && fileSrc}
     <!-- svelte-ignore a11y_media_has_caption -->
-    <video src={playUrl} autoplay muted loop playsinline aria-label={body || t('media-view-video')}></video>
-  {:else if src && still}
-    <canvas bind:this={canvasEl} aria-label={body || t('media-view-animated-image-paused')}></canvas>
-  {:else if src}
-    <img {src} alt={body} loading="lazy" onerror={() => (failed = true)} />
+    <video src={fileSrc} controls autoplay={prefs.autoplayMedia} playsinline aria-label={body || t('media-view-video')}></video>
+  {:else if thumbSrc}
+    <img src={thumbSrc} alt={body} loading="lazy" onerror={() => (failed = true)} />
   {:else}
     <div class="placeholder" aria-busy="true"></div>
   {/if}
@@ -171,60 +140,42 @@
     <span class="error-text">{t('media-view-couldnt-load-this')} {mediaKind}.</span>
     <button type="button" class="retry" onclick={retryLoad}>{t('common-retry')}</button>
   </div>
-{:else if hasThumb || inlineVideo}
-  {#if openable}
-    <button
-      class="frame frame-open"
-      type="button"
-      style="aspect-ratio: {aspect};"
-      aria-label={t('media-open', { name: body || mediaKind })}
-      onclick={openViewer}
-    >
-      {@render frameContent()}
-    </button>
-  {:else}
-    <div class="frame" style="aspect-ratio: {aspect};">
-      {@render frameContent()}
-    </div>
-  {/if}
+{:else if visual || video}
+  <button
+    class="frame frame-open"
+    type="button"
+    style="aspect-ratio: {aspect};"
+    aria-label={t('media-open', { name: body || mediaKind })}
+    onclick={() => void openFullSize()}
+    disabled={loadingFile}
+  >
+    {#if video && !fileSrc}
+      <span class="play" aria-hidden="true"><Icon icon={Play} size={24} /></span>
+    {/if}
+    {@render frameContent()}
+  </button>
 {:else}
-  {#if openable}
-    <button class="file" type="button" onclick={openViewer}>
-      <span class="file-name" title={body || t('media-view-attachment')}>{body || t('media-view-attachment')}</span>
+  <div class="file">
+    <span class="file-copy">
+      <span class="file-name" title={caption}>{caption}</span>
       <span class="file-meta">{formatBytes(sizeBytes)}</span>
-    </button>
-  {:else}
-    <div class="file">
-      <span class="file-copy">
-        <span class="file-name" title={body || t('media-view-attachment')}>{body || t('media-view-attachment')}</span>
-        <span class="file-meta">{formatBytes(sizeBytes)}</span>
-      </span>
-      {#if ondownload}
-        <button
-          type="button"
-          class="file-download"
-          aria-label={t('media-download', { name: body || t('media-attachment') })}
-          title={t('media-view-download')}
-          onclick={ondownload}
-        >
-          <Icon icon={Download} size={16} />
-        </button>
-      {/if}
-    </div>
-  {/if}
+    </span>
+    {#if ondownload}
+      <button
+        type="button"
+        class="file-download"
+        aria-label={t('media-download', { name: body || t('media-attachment') })}
+        title={t('media-view-download')}
+        onclick={ondownload}
+      >
+        <Icon icon={Download} size={16} />
+      </button>
+    {/if}
+  </div>
 {/if}
-
-{#if openable}
-  <MediaViewer
-    open={viewerOpen}
-    onclose={() => (viewerOpen = false)}
-    items={viewerItems}
-    index={viewerIndex}
-  />
-{/if}
-
 <style>
   .frame {
+    position: relative;
     max-width: min(400px, 100%);
     min-width: 120px;
     max-height: 360px;
@@ -249,9 +200,18 @@
     border-radius: var(--alloy-bubble-radius-nested);
   }
 
-  canvas {
-    width: 100%;
-    height: 100%;
+  /* A video that has not been fetched yet shows its poster under a play badge. */
+  .play {
+    position: absolute;
+    inset: 50% auto auto 50%;
+    display: grid;
+    place-items: center;
+    width: 48px;
+    height: 48px;
+    border-radius: var(--alloy-radii-full);
+    background: var(--alloy-color-scrim);
+    color: var(--alloy-color-text-on-accent);
+    translate: -50% -50%;
   }
 
   img,
@@ -312,20 +272,10 @@
     outline-offset: 1px;
   }
 
-  button.file {
-    cursor: pointer;
-    text-align: left;
-  }
-
-  button.file:hover {
-    /* A hover lifts the plate above its resting surface; on an own bubble the owner supplies a
-       brighter tint because the resting plate is already 12% of the bubble text. */
+  /* A hover lifts the plate above its resting surface; on an own bubble the owner supplies a
+     brighter tint because the resting plate is already 12% of the bubble text. */
+  .file:hover {
     background: var(--file-surface-hover, color-mix(in srgb, currentColor 6%, var(--alloy-color-surface-elevated)));
-  }
-
-  button.file:focus-visible {
-    outline: 2px solid var(--alloy-color-accent-primary);
-    outline-offset: -2px;
   }
 
   .file-name {

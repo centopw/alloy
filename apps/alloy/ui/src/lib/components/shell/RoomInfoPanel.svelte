@@ -1,53 +1,26 @@
-<script module lang="ts">
-  import { client } from '$lib/ipc';
-  import { expect } from '$lib/stores/errors';
-  import { MediaThumbCache } from '$lib/content/mediaThumbs';
-
-  import { t } from '$lib/i18n';
-  /**
-   * One cache per panel instance: closing and reopening Room info drops it, which is how a media
-   * request that failed earlier (offline, engine restart) gets another chance.
-   */
-  export function createThumbCache(): MediaThumbCache {
-    return new MediaThumbCache(async (uri, kind, mimeType) => {
-      const res = await client.getMedia({ kind: 'Remote', data: { uri } }, kind, {
-        width: kind === 'thumbnail' ? 480 : null,
-        height: kind === 'thumbnail' ? 360 : null,
-        mime_type: mimeType,
-      });
-      return expect(res, 'MediaRetrieved').payload.local_path;
-    });
-  }
-</script>
-
 <script lang="ts">
-  import { tick, untrack } from 'svelte';
-  import { Icon, X, ChevronLeft, Play, File, ExternalLink, Image, Download, Copy, Link, MessageSquare, User, Search, Lock, Bell, BellOff, Ban, ShieldAlert, UserMinus, Pencil } from '$lib/icons';
+  import { untrack } from 'svelte';
+  import { Icon, X, ChevronLeft, File, ExternalLink, Download } from '$lib/icons';
   import { formatBytes, formatDay } from '$lib/content/format';
   import { viewport } from '$lib/stores/viewport.svelte';
-  import { copyText } from '$lib/platform/clipboard';
   import { openExternal } from '$lib/platform/links';
+  import { localFileUrl } from '$lib/platform/files';
   import { pushBack } from '$lib/platform/backstack';
+  import { client } from '$lib/ipc';
   import { roomInfo } from '$lib/stores/roomInfo.svelte';
   import { roomMedia } from '$lib/stores/roomMedia.svelte';
-  import { roomNotify } from '$lib/stores/roomNotify.svelte';
   import { membersStore, memberLabel } from '$lib/stores/members.svelte';
+  import { networkName, roomsStore } from '$lib/stores/rooms.svelte';
   import { profileCard } from '$lib/stores/profileCard.svelte';
   import { errorMessage } from '$lib/stores/errors';
-  import { session } from '$lib/stores/session.svelte';
-  import { moderationOptions } from '$lib/content/moderation';
   import type { RoomInfoTab } from '$lib/stores/ui.svelte';
-  import type { RoomMediaItem, RoomMediaKind } from '$lib/generated/protocol';
-  import { contextmenu } from '$lib/platform/contextmenu';
-  import { roomsStore } from '$lib/stores/rooms.svelte';
-  import { timelineStore } from '$lib/stores/timeline.svelte';
-  import { userProfile } from '$lib/stores/userProfile.svelte';
-  import type { MenuItem } from '$lib/stores/contextmenu.svelte';
+  import type { MediaSource, RoomMediaItem, RoomMediaKind } from '$lib/generated/protocol';
   import type { RoomMemberDto } from '$lib/generated';
-  import { Avatar, Button, ConfirmDialog, SegmentedControl, TextArea, TextField, UserName } from '../common';
-  import { copyItems, notifyItems, notifyLabel, openMenuFrom, roomPictureItems } from './roomMenus';
-  import { fetchMediaFile } from '$lib/content/mediaFetch';
-  import MediaViewer from '../timeline/MediaViewer.svelte';
+  import type { MenuItem } from '$lib/stores/contextmenu.svelte';
+  import { contextmenu } from '$lib/platform/contextmenu';
+  import { Avatar, Button, SegmentedControl, TextArea } from '../common';
+
+  import { t } from '$lib/i18n';
 
   type MediaView = 'media' | 'files' | 'links';
   type View = 'overview' | MediaView | 'members';
@@ -61,43 +34,6 @@
   }
 
   let { roomId, onclose, onsearch, initialTab = 'info' }: Props = $props();
-
-  const thumbs = createThumbCache();
-  /** Tiles that had to fall back to the original file, keyed by event id. */
-  let fileSrc = $state<Record<string, string>>({});
-  /** Tiles whose picture cannot be shown at all; they keep their kind icon instead of a broken image. */
-  let imageFailed = $state<Record<string, boolean>>({});
-  /** One retry per tile per panel; not reactive, so the retry itself does not rerender the grid. */
-  const retried = new Set<string>();
-
-  /** A video tile shows its poster; every other tile shows the item itself. */
-  function tileSource(item: RoomMediaItem): { uri: string; mimeType: string | null } | null {
-    const uri = item.kind === 'video' ? item.thumbnail_uri : item.uri;
-    if (!uri) return null;
-    return { uri, mimeType: item.kind === 'video' ? 'image/jpeg' : item.mime_type };
-  }
-
-  function thumbFor(item: RoomMediaItem): Promise<string | null> {
-    const source = tileSource(item);
-    return source ? thumbs.thumbnail(source.uri, source.mimeType) : Promise.resolve(null);
-  }
-
-  /** An <img> the webview rejected: try the original file once, then settle on the kind icon. */
-  async function imageRejected(item: RoomMediaItem, shown: string) {
-    if (retried.has(item.event_id)) {
-      imageFailed[item.event_id] = true;
-      return;
-    }
-    retried.add(item.event_id);
-    // A video's original file is not a picture, so a rejected poster simply stays missing.
-    const source = item.kind === 'video' || !item.uri ? null : { uri: item.uri, mimeType: item.mime_type };
-    const url = source ? await thumbs.fullFile(source.uri, source.mimeType) : null;
-    if (!url || url === shown) {
-      imageFailed[item.event_id] = true;
-      return;
-    }
-    fileSrc[item.event_id] = url;
-  }
 
   const MEDIA_KIND: Record<MediaView, RoomMediaKind> = {
     media: 'Media',
@@ -148,51 +84,49 @@
     return pushBack(() => (view = 'overview'));
   });
 
-  const title = $derived(view === 'overview' ? t('room-info-panel-details') : view === 'members' ? t('room-info-panel-members-2') : MEDIA_TITLE[view]);
+  const title = $derived(
+    view === 'overview'
+      ? t('room-info-panel-details')
+      : view === 'members'
+        ? t('room-info-panel-members-2')
+        : MEDIA_TITLE[view]
+  );
 
-  // Details and note state
   const details = $derived(roomInfo.details(roomId));
-  let nameDraft = $state('');
-  let topicDraft = $state('');
+  const room = $derived(roomsStore.rooms.find((r) => r.id === roomId) ?? null);
+  const account = $derived(
+    room ? (roomsStore.accounts.find((a) => a.id === room.account_id) ?? null) : null
+  );
+
+  // Thumbnails resolved per item; a failed picture keeps its kind icon.
+  let thumbSrc = $state<Record<string, string>>({});
+  const thumbRequested = new Set<string>();
+
+  async function resolveMedia(source: MediaSource, kind: 'thumbnail' | 'file', mime: string | null) {
+    const res = await client.invoke({
+      action: 'GetMedia',
+      params: { source, kind, mime_type: mime },
+    });
+    if (res.type !== 'Media') throw new Error(`unexpected response: ${res.type}`);
+    return await localFileUrl(res.payload.path);
+  }
+
+  function ensureThumb(item: RoomMediaItem) {
+    if (!item.source || item.kind === 'link' || item.kind === 'audio' || thumbRequested.has(item.event_id)) return;
+    thumbRequested.add(item.event_id);
+    void resolveMedia(item.source, 'thumbnail', item.kind === 'video' ? 'image/jpeg' : item.mime_type)
+      .then((url) => (thumbSrc = { ...thumbSrc, [item.event_id]: url }))
+      .catch(() => {
+        /* the tile keeps its kind icon */
+      });
+  }
+
+  // Note state.
   let noteDraft = $state('');
   let noteDirty = $state(false);
   let noteSaving = $state(false);
   let noteSaved = $state(false);
   let noteTimer: ReturnType<typeof setTimeout> | undefined;
-
-  // Name and topic are read as text; the pencil opens the field that edits them.
-  let editingName = $state(false);
-  let editingTopic = $state(false);
-  let editingNote = $state(false);
-  let nameInput = $state<HTMLInputElement | null>(null);
-  let topicInput = $state<HTMLTextAreaElement | null>(null);
-  let noteInput = $state<HTMLTextAreaElement | null>(null);
-  let nameEditBtn = $state<HTMLButtonElement | null>(null);
-  let topicEditBtn = $state<HTMLButtonElement | null>(null);
-  let noteEditBtn = $state<HTMLButtonElement | null>(null);
-
-  // Drafts follow the room while their field is closed, so an edit is never overwritten mid-typing.
-  $effect(() => {
-    if (!editingName) nameDraft = details?.name ?? '';
-    if (!editingTopic) topicDraft = details?.topic ?? '';
-  });
-
-  $effect(() => {
-    if (editingName) nameInput?.focus();
-  });
-
-  $effect(() => {
-    if (editingTopic) topicInput?.focus();
-  });
-
-  $effect(() => {
-    if (editingNote) noteInput?.focus();
-  });
-
-  /** Keyboard edits swap the field back for the pencil; focus follows so the tab order stays put. */
-  function refocus(button: () => HTMLElement | null) {
-    void tick().then(() => button()?.focus());
-  }
 
   $effect(() => {
     const stored = roomInfo.note(roomId);
@@ -234,90 +168,6 @@
     noteTimer = setTimeout(() => void flushNote(id), 800);
   }
 
-  function editNote() {
-    noteDraft = roomInfo.note(roomId);
-    noteDirty = false;
-    editingNote = true;
-  }
-
-  function cancelNoteEdit() {
-    if (noteTimer !== undefined) {
-      clearTimeout(noteTimer);
-      noteTimer = undefined;
-    }
-    noteDirty = false;
-    noteDraft = roomInfo.note(roomId);
-    editingNote = false;
-  }
-
-  async function saveNoteEdit() {
-    if (!editingNote) return;
-    editingNote = false;
-    await flushNote(roomId);
-  }
-
-  async function commitName() {
-    const d = details;
-    if (!d) return;
-    const next = nameDraft.trim();
-    if (!next) {
-      nameDraft = d.name ?? '';
-      return;
-    }
-    if (next === (d.name ?? '')) return;
-    await roomInfo.rename(roomId, next);
-  }
-
-  async function commitTopic() {
-    const d = details;
-    if (!d) return;
-    const next = topicDraft.trim();
-    if (next === (d.topic ?? '').trim()) return;
-    await roomInfo.setTopic(roomId, next);
-  }
-
-  function editName() {
-    if (!details?.can_set_name) return;
-    nameDraft = details.name ?? '';
-    editingName = true;
-  }
-
-  function cancelNameEdit() {
-    nameDraft = details?.name ?? '';
-    editingName = false;
-  }
-
-  async function saveName() {
-    if (!editingName) return;
-    editingName = false;
-    await commitName();
-  }
-
-  function editTopic() {
-    if (!details?.can_set_topic) return;
-    topicDraft = details.topic ?? '';
-    editingTopic = true;
-  }
-
-  function cancelTopicEdit() {
-    topicDraft = details?.topic ?? '';
-    editingTopic = false;
-  }
-
-  async function saveTopic() {
-    if (!editingTopic) return;
-    editingTopic = false;
-    await commitTopic();
-  }
-
-  // Room notifications load so the bell shows the current level.
-  $effect(() => {
-    const id = roomId;
-    untrack(() => void roomNotify.load(id));
-  });
-
-  const room = $derived(roomsStore.rooms.find((r) => r.id === roomId));
-
   // Media state. The overview previews all three kinds; a sub-view loads only its own kind.
   const mediaState = $derived({
     media: roomMedia.view(roomId, 'Media'),
@@ -325,18 +175,13 @@
     links: roomMedia.view(roomId, 'Links'),
   });
   let sharedTab = $state<MediaView>('media');
-  const sharedCurrent = $derived(mediaState[sharedTab]);
   const sharedHasItems = $derived(SHARED_TABS.some(({ value }) => mediaState[value].items.length > 0));
   const current = $derived(isMediaView(view) ? mediaState[view] : null);
+  /** Empty-state copy for the media sub-view that is open. */
+  const emptyText = $derived(isMediaView(view) ? EMPTY_TEXT[view] : '');
   let sentinel = $state<HTMLElement | null>(null);
-  let viewer = $state<{
-    uri: string;
-    mimeType: string;
-    body: string;
-    mediaKind: 'image' | 'video' | 'audio';
-  } | null>(null);
-  let fileBusy = $state<string | null>(null);
-  let fileError = $state<string | null>(null);
+  let busyItem = $state<string | null>(null);
+  let mediaError = $state<string | null>(null);
 
   $effect(() => {
     const id = roomId;
@@ -348,12 +193,12 @@
   });
 
   // A picture sent while the panel is open has to appear without reopening it. The lists are read
-  // from the server once, so watch the room's newest event and refresh the visible kind; the delay
+  // from the store once, so watch the room's newest event and refresh the visible kind; the delay
   // collapses a burst into one read, and a failed refresh keeps the list it already has.
   $effect(() => {
     const id = roomId;
     const v = view;
-    const newest = timelineStore.roomId === id ? (timelineStore.items.at(-1)?.event_id ?? null) : null;
+    const newest = roomsStore.rooms.find((r) => r.id === id)?.latest_event?.timestamp_millis ?? null;
     void newest;
     if (newest === null) return;
     const timer = window.setTimeout(() => {
@@ -361,6 +206,13 @@
       for (const k of kinds) void roomMedia.refresh(id, MEDIA_KIND[k]);
     }, 350);
     return () => window.clearTimeout(timer);
+  });
+
+  // Resolve a thumbnail for every picture tile the current view shows.
+  $effect(() => {
+    const v = view;
+    const kinds: MediaView[] = v === 'overview' ? ['media', 'files', 'links'] : isMediaView(v) ? [v] : [];
+    for (const k of kinds) for (const item of mediaState[k].items) ensureThumb(item);
   });
 
   // Infinite scroll: load the next page when the sentinel at the bottom becomes visible.
@@ -378,27 +230,26 @@
     return () => io.disconnect();
   });
 
-  function openMedia(item: RoomMediaItem) {
-    if (item.uri === null) return;
-    viewer = {
-      uri: item.uri,
-      mimeType: item.mime_type ?? '',
-      body: item.body,
-      mediaKind: item.kind === 'video' ? 'video' : item.kind === 'audio' ? 'audio' : 'image',
-    };
+  /** Retries the kind the media sub-view is showing. */
+  function reloadCurrent() {
+    if (isMediaView(view)) void roomMedia.load(roomId, MEDIA_KIND[view]);
   }
 
-  async function openFile(item: RoomMediaItem) {
-    if (item.uri === null) return;
-    fileBusy = item.event_id;
-    fileError = null;
+  async function openMedia(item: RoomMediaItem) {
+    if (!item.source) {
+      const link = linkOf(item);
+      await openExternal(link).catch(() => undefined);
+      return;
+    }
+    busyItem = item.event_id;
+    mediaError = null;
     try {
-      const url = await fetchMediaFile(item.uri, item.mime_type ?? 'application/octet-stream');
+      const url = await resolveMedia(item.source, 'file', item.mime_type ?? null);
       await openExternal(url);
     } catch (e) {
-      fileError = errorMessage(e);
+      mediaError = errorMessage(e);
     } finally {
-      fileBusy = null;
+      busyItem = null;
     }
   }
 
@@ -414,30 +265,33 @@
     }
   }
 
-  // Members state. The roster reloads on every open (forced, so never stale) and on retry;
-  // cached rows stay visible until the reply lands.
+  // Members. The roster reloads on every open (forced, so never stale) and on retry.
   const members = $derived(membersStore.membersOf(roomId));
   let membersLoading = $state(true);
   let membersError = $state<string | null>(null);
-  let membersActionError = $state<string | null>(null);
-  // Bumping this re-runs the roster load (the retry button).
   let membersAttempt = $state(0);
 
   function byName(a: RoomMemberDto, b: RoomMemberDto): number {
     return memberLabel(a).localeCompare(memberLabel(b));
   }
 
-  const joined = $derived(members.filter((m) => m.membership === 'Joined'));
-  const groups = $derived(
-    [
-      { title: t('room-info-panel-admin'), members: joined.filter((m) => m.power_level >= 100).sort(byName) },
-      { title: t('room-info-panel-moderator'), members: joined.filter((m) => m.power_level >= 50 && m.power_level < 100).sort(byName) },
-      { title: t('room-info-panel-members-2'), members: joined.filter((m) => m.power_level < 50).sort(byName) },
-      { title: t('mention-picker-invited'), members: members.filter((m) => m.membership === 'Invited').sort(byName) },
-      { title: t('room-info-panel-banned'), members: members.filter((m) => m.membership === 'Banned').sort(byName) },
-    ].filter((g) => g.members.length > 0),
-  );
-  const ordered = $derived(groups.flatMap((g) => g.members));
+  const groups = $derived.by(() => {
+    const byRole = new Map<string, RoomMemberDto[]>();
+    for (const m of members) {
+      const key = m.role ?? '';
+      const bucket = byRole.get(key);
+      if (bucket) bucket.push(m);
+      else byRole.set(key, [m]);
+    }
+    const rank = (role: string) =>
+      role === 'owner' ? 0 : role === 'admin' || role === 'moderator' ? 1 : 2;
+    return [...byRole.entries()]
+      .sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b))
+      .map(([role, list]) => ({
+        title: role === '' ? t('room-info-panel-member') : role.charAt(0).toUpperCase() + role.slice(1),
+        members: [...list].sort(byName),
+      }));
+  });
 
   $effect(() => {
     const id = roomId;
@@ -469,17 +323,7 @@
       const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
       at = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
     }
-    membersActionError = null;
     profileCard.open(userId, roomId, at);
-  }
-
-  async function messageMember(userId: string) {
-    membersActionError = null;
-    try {
-      roomsStore.select(await userProfile.startDirectMessage(userId));
-    } catch (e) {
-      membersActionError = errorMessage(e);
-    }
   }
 
   let panel = $state<HTMLElement | null>(null);
@@ -492,534 +336,221 @@
     return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
   }
 
-  /** A moderation action waiting for confirmation. */
-  type PendingAction = { kind: 'kick' | 'ban' | 'unban' | 'block'; member: RoomMemberDto };
-  let pendingAction = $state<PendingAction | null>(null);
-
-  const ACTION_COPY: Record<PendingAction['kind'], { title: string; confirm: string; message: (name: string) => string }> = {
-    kick: { title: t('room-info-panel-remove-from-room'), confirm: t('common-remove'), message: (n) => t('room-info-panel-kick-confirm-message', { name: n }) },
-    ban: { title: t('room-info-panel-ban-from-room'), confirm: t('room-info-panel-ban'), message: (n) => t('room-info-panel-ban-confirm-message', { name: n }) },
-    unban: { title: t('room-info-panel-unban'), confirm: t('room-info-panel-unban'), message: (n) => t('room-info-panel-unban-confirm-message', { name: n }) },
-    block: { title: t('room-info-panel-block-user'), confirm: t('room-info-panel-block'), message: (n) => t('room-info-panel-block-confirm-message', { name: n }) },
-  };
-
-  async function runAction() {
-    const action = pendingAction;
-    if (!action) return;
-    const id = action.member.user_id;
-    if (action.kind === 'kick') expect(await client.kickUser(roomId, id), 'UserKicked');
-    else if (action.kind === 'ban') expect(await client.banUser(roomId, id), 'UserBanned');
-    else if (action.kind === 'unban') expect(await client.unbanUser(roomId, id), 'UserUnbanned');
-    else expect(await client.ignoreUser(id), 'UserIgnored');
-    if (action.kind !== 'block') await membersStore.loadMembers(roomId, true);
-  }
-
-  async function setLevel(m: RoomMemberDto, level: number) {
-    membersActionError = null;
-    try {
-      expect(await client.setPowerLevel(roomId, m.user_id, level), 'PowerLevelSet');
-      await membersStore.loadMembers(roomId, true);
-    } catch (e) {
-      membersActionError = errorMessage(e);
-    }
-  }
-
-  function memberMenu(m: RoomMemberDto): MenuItem[] {
-    const mod = moderationOptions(membersStore.detailsOf(roomId), m, session.account?.user_id ?? null);
-    const moderation: MenuItem[] = [];
-    if (mod.levels.length > 0) {
-      moderation.push({
-        id: 'power',
-        label: t('room-info-panel-change-role'),
-        icon: ShieldAlert,
-        submenu: {
-          items: mod.levels.map((l): MenuItem => ({ id: `role-${l.level}`, label: t('room-info-panel-make-role', { role: l.label.toLowerCase() }), onselect: () => void setLevel(m, l.level) })),
-        },
-      });
-    }
-    if (mod.kick) moderation.push({ id: 'kick', label: t('room-info-panel-remove-from-room'), icon: UserMinus, danger: true, onselect: () => (pendingAction = { kind: 'kick', member: m }) });
-    if (mod.ban) moderation.push({ id: 'ban', label: t('room-info-panel-ban-from-room'), icon: Ban, danger: true, onselect: () => (pendingAction = { kind: 'ban', member: m }) });
-    if (mod.unban) moderation.push({ id: 'unban', label: t('room-info-panel-unban'), icon: Ban, onselect: () => (pendingAction = { kind: 'unban', member: m }) });
-    const isSelf = m.user_id === session.account?.user_id;
+  function memberItems(m: RoomMemberDto): MenuItem[] {
     return [
       {
-        id: 'view-profile',
+        id: 'profile',
         label: t('room-info-panel-view-profile'),
-        icon: User,
         onselect: () => {
           const at = memberRowCentre(m.user_id);
           if (at) profileCard.open(m.user_id, roomId, at);
         },
       },
-      { id: 'message', label: t('user-profile-card-message'), icon: MessageSquare, onselect: () => void messageMember(m.user_id) },
-      { separator: true },
-      { id: 'copy-user-id', label: t('user-profile-card-copy-user-id'), icon: Copy, onselect: () => void copyText(m.user_id).catch(() => undefined) },
-      ...(isSelf ? [] : [{ id: 'block', label: t('room-info-panel-block-user'), icon: Ban, danger: true, onselect: () => (pendingAction = { kind: 'block' as const, member: m }) }]),
-      ...(moderation.length > 0 ? [{ separator: true } as MenuItem, ...moderation] : []),
+      {
+        id: 'copy-id',
+        label: t('user-profile-card-copy-user-id'),
+        onselect: () => void navigator.clipboard.writeText(m.user_id).catch(() => undefined),
+      },
     ];
   }
+
+  function previewRows(kind: MediaView): RoomMediaItem[] {
+    return mediaState[kind].items.slice(0, PREVIEW[kind]);
+  }
+
+  async function copyRoomId() {
+    await navigator.clipboard.writeText(roomId).catch(() => undefined);
+  }
+
 </script>
 
-{#snippet mediaGrid(items: RoomMediaItem[])}
-  <div class="media-grid">
-    {#each items as item (item.event_id)}
-      <button
-        type="button"
-        class="media-cell"
-        aria-label={t('room-info-panel-open-attachment', { name: item.body || item.kind })}
-        title={item.body || item.kind}
-        onclick={() => openMedia(item)}
-      >
-        {#await thumbFor(item)}
-          <span class="media-fallback"></span>
-        {:then src}
-          {@const url = fileSrc[item.event_id] ?? src}
-          <span class="media-fallback">
-            {#if imageFailed[item.event_id]}<Icon icon={File} size={20} />{:else}<Icon icon={Image} size={20} />{/if}
-          </span>
-          {#if url && !imageFailed[item.event_id]}
-            <img
-              class="media-img"
-              src={url}
-              alt=""
-              loading="lazy"
-              onerror={() => void imageRejected(item, url)}
-            />
-          {/if}
-        {/await}
-        {#if item.kind === 'video'}
-          <span class="play-badge" aria-hidden="true"><Icon icon={Play} size={16} /></span>
-        {/if}
-      </button>
-    {/each}
-  </div>
-{/snippet}
-
-{#snippet fileRow(item: RoomMediaItem)}
-  <li>
-    <button
-      type="button"
-      class="row"
-      aria-label={t('room-info-panel-download-attachment', { name: item.body })}
-      title={t('room-info-panel-download-attachment', { name: item.body })}
-      disabled={fileBusy === item.event_id}
-      onclick={() => openFile(item)}
-    >
-      <span class="row-icon"><Icon icon={File} size={20} /></span>
-      <span class="row-main">
-        <span class="row-title">{item.body}</span>
-        <span class="row-meta">
-          {formatBytes(item.size_bytes ?? 0)} · {item.sender_display_name || item.sender} · {formatDay(item.timestamp_millis)}
-        </span>
-      </span>
-      <Icon icon={Download} size={16} />
-    </button>
-  </li>
-{/snippet}
-
-{#snippet linkRow(item: RoomMediaItem)}
-  {@const url = linkOf(item)}
-  <li>
-    <button type="button" class="row" aria-label={t('room-info-panel-open-link', { url: url })} title={url} onclick={() => void openExternal(url)}>
-      <span class="row-icon"><Icon icon={Link} size={20} /></span>
-      <span class="row-main">
-        <span class="row-title link">{hostOf(url)}</span>
-        <span class="row-meta">{url}</span>
-        <span class="row-meta">{item.sender_display_name || item.sender} · {formatDay(item.timestamp_millis)}</span>
-      </span>
-      <Icon icon={ExternalLink} size={16} />
-    </button>
-  </li>
-{/snippet}
-
-{#snippet memberRow(m: RoomMemberDto)}
-  <li>
-    <button
-      type="button"
-      class="row"
-      aria-label={t('room-info-panel-open-profile', { name: memberLabel(m) })}
-      data-user-id={m.user_id}
-      onclick={(e) => openMemberProfile(e, m.user_id)}
-      use:contextmenu={() => memberMenu(m)}
-    >
-      <Avatar userId={m.user_id} displayName={memberLabel(m)} src={m.avatar_url} size="md" shape="circle" />
-      <span class="row-main">
-        <UserName userId={m.user_id} displayName={memberLabel(m)} roomId={roomId} />
-      </span>
-    </button>
-  </li>
-{/snippet}
-
-{#snippet sharedItems(kind: MediaView, items: RoomMediaItem[])}
-  {#if kind === 'media'}
-    {@render mediaGrid(items)}
-  {:else}
-    <ul class="list">
-      {#each items as item (item.event_id)}
-        {#if kind === 'files'}
-          {@render fileRow(item)}
-        {:else}
-          {@render linkRow(item)}
-        {/if}
-      {/each}
-    </ul>
-  {/if}
-{/snippet}
-
-<section class="details" aria-label={t('room-info-panel-room-info')} bind:this={panel}>
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+<aside class="panel" bind:this={panel} aria-label={t('room-info-panel-room-info')} onkeydown={(e) => e.key === 'Escape' && onclose()}>
   <header class="bar">
-    {#if view !== 'overview'}
-      <button type="button" class="icon-btn" aria-label={t('room-info-panel-back-to-details')} title={t('room-info-panel-back-to-details')} onclick={() => (view = 'overview')}>
-        <Icon icon={ChevronLeft} size={20} />
-      </button>
-    {/if}
+    <button
+      type="button"
+      class="icon-btn"
+      aria-label={view === 'overview' ? t('room-info-panel-close-room-info') : t('room-info-panel-back-to-details')}
+      title={view === 'overview' ? t('room-info-panel-close-room-info') : t('room-info-panel-back-to-details')}
+      onclick={() => (view === 'overview' ? onclose() : (view = 'overview'))}
+    >
+      <Icon icon={view === 'overview' ? X : ChevronLeft} size={20} />
+    </button>
     <h2 class="title">{title}</h2>
-    {#if view === 'overview' || !viewport.isPhone}
-      <button type="button" class="icon-btn close" aria-label={t('room-info-panel-close-room-info')} title={t('room-info-panel-close-room-info')} onclick={onclose}>
-        <Icon icon={viewport.isPhone ? ChevronLeft : X} size={20} />
-      </button>
+    {#if onsearch && view === 'overview'}
+      <Button variant="ghost" size="sm" onclick={onsearch}>{t('chat-header-search-in-room')}</Button>
     {/if}
   </header>
 
   <div class="body">
-    {#if fileError}
-      <p class="notice" role="alert">{fileError}</p>
-    {/if}
-    {#if roomInfo.error(roomId)}
-      <p class="notice" role="alert">{roomInfo.error(roomId)}</p>
-    {/if}
-
     {#if view === 'overview'}
-      <div class="identity">
-        {#snippet avatarView()}
-          <Avatar userId={roomId} displayName={details?.name ?? ''} src={details?.avatar_url ?? null} size={56} shape="rounded" />
-        {/snippet}
-        {#if details?.can_set_avatar}
-          <button
-            type="button"
-            class="picture-btn"
-            aria-label={t('room-info-panel-room-picture-options')}
-            title={t('room-info-panel-room-picture-options')}
-            onclick={(e) => openMenuFrom(e.currentTarget, roomPictureItems(roomId), 'Room picture')}
-          >
-            {@render avatarView()}
-          </button>
+      <section class="block" aria-label={t('room-info-panel-about')}>
+        <dl class="facts">
+          <div class="fact"><dt>{t('chat-info-network')}</dt><dd>{details ? networkName(details.network) : room ? networkName(room.network) : ''}</dd></div>
+          {#if account}
+            <div class="fact"><dt>{t('chat-info-account')}</dt><dd>{account.display_name ?? networkName(account.network)}</dd></div>
+          {/if}
+          <div class="fact"><dt>{t('chat-info-kind')}</dt><dd>{details ? t(`chat-info-kind-${details.kind}`) : ''}</dd></div>
+          <div class="fact"><dt>{t('chat-info-members')}</dt><dd>{details?.member_count ?? members.length}</dd></div>
+        </dl>
+        <Button variant="ghost" size="sm" onclick={() => void copyRoomId()}>{t('room-menu-copy-room-id')}</Button>
+      </section>
+
+      <section class="block" aria-label={t('room-info-panel-private-note')}>
+        <h3>{t('room-info-panel-private-note')}</h3>
+        <p class="hint">{t('room-info-panel-a-note-only-you-can-see')}</p>
+        <TextArea
+          value={noteDraft}
+          placeholder={t('room-info-panel-edit-private-note')}
+          aria-label={t('room-info-panel-private-note')}
+          oninput={(e: Event) => onNoteInput((e.currentTarget as HTMLTextAreaElement).value)}
+        />
+        <p class="hint" role="status">
+          {#if noteSaving}{t('room-info-panel-saving')}{:else if noteSaved}{t('room-info-panel-saved')}{/if}
+        </p>
+        {#if roomInfo.error(roomId)}<p class="notice" role="alert">{roomInfo.error(roomId)}</p>{/if}
+      </section>
+
+      <section class="block" aria-label={t('room-info-panel-shared-content')}>
+        <h3>{t('room-info-panel-shared-content')}</h3>
+        {#if !sharedHasItems}
+          <p class="hint">{t('room-info-panel-no-shared-media-yet')}</p>
         {:else}
-          {@render avatarView()}
-        {/if}
-        <div class="identity-main">
-          {#if editingName}
-            <div class="editor">
-              <TextField
-                bind:value={nameDraft}
-                bind:el={nameInput}
-                maxlength={255}
-                aria-label={t('room-info-panel-room-name')}
-                onkeydown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    void saveName();
-                    refocus(() => nameEditBtn);
-                  } else if (e.key === 'Escape') {
-                    e.preventDefault();
-                    cancelNameEdit();
-                    refocus(() => nameEditBtn);
-                  }
-                }}
-                onblur={() => void saveName()}
-              />
-              <p class="hint">{t('room-info-panel-enter-to-save-esc-to-cancel')}</p>
-            </div>
-          {:else}
-            <div class="editable">
-              <h3 class="name">{details?.name || t('room-info-panel-unnamed-room')}</h3>
-              {#if details?.can_set_name}
-                <button
-                  type="button"
-                  class="edit-btn"
-                  aria-label={t('room-info-panel-edit-room-name')}
-                  title={t('room-info-panel-edit-room-name')}
-                  bind:this={nameEditBtn}
-                  onclick={editName}
-                >
-                  <Icon icon={Pencil} size={16} />
+          <div class="tabs">
+            <SegmentedControl
+              label={t('room-info-panel-shared-content')}
+              options={SHARED_TABS.map((tab) => ({ value: tab.value, label: tab.label }))}
+              value={sharedTab}
+              onchange={(v) => (sharedTab = v as MediaView)}
+            />
+          </div>
+          <ul class="tiles">
+            {#each previewRows(sharedTab) as item (item.event_id)}
+              <li>
+                <button type="button" class="tile" disabled={busyItem === item.event_id} onclick={() => void openMedia(item)} aria-label={t('room-info-panel-open-attachment', { name: item.body })}>
+                  {#if thumbSrc[item.event_id]}
+                    <img src={thumbSrc[item.event_id]} alt="" loading="lazy" />
+                  {:else}
+                    <span class="tile-icon"><Icon icon={item.kind === 'link' ? ExternalLink : File} size={20} /></span>
+                  {/if}
+                  <span class="tile-name">{item.kind === 'link' ? hostOf(linkOf(item)) : item.body}</span>
+                  <span class="tile-meta">{formatDay(item.timestamp_millis)}{#if item.size_bytes} · {formatBytes(item.size_bytes)}{/if}</span>
                 </button>
-              {/if}
-            </div>
-          {/if}
-          {#if details?.canonical_alias}<p class="id">{details.canonical_alias}</p>{/if}
-          {#if details}
-            <p class="meta">
-              {#if details.encrypted}<Icon icon={Lock} size={16} />{/if}
-              {details.encrypted ? t('room-info-panel-end-to-end-encrypted') : t('room-info-panel-not-encrypted')} · {details.joined_members} {t('room-info-panel-members')}
-            </p>
-          {/if}
-        </div>
-      </div>
-
-      <div class="actions">
-        {#if onsearch}
-          <Button variant="ghost" size="sm" icon={Search} onclick={onsearch}>
-            {#snippet children()}{t('common-search')}{/snippet}
-          </Button>
-        {/if}
-        {#if room}
-          <Button variant="ghost" size="sm" icon={Copy} onclick={(e) => openMenuFrom(e.currentTarget, copyItems(room), 'Copy ID')}>
-            {#snippet children()}{t('room-info-panel-copy-id')}{/snippet}
-          </Button>
-        {/if}
-        <button
-          type="button"
-          class="icon-btn"
-          aria-label={notifyLabel(roomId)}
-          title={notifyLabel(roomId)}
-          onclick={(e) => openMenuFrom(e.currentTarget, notifyItems(roomId), 'Notifications')}
-        >
-          <Icon icon={roomNotify.isMuted(roomId) ? BellOff : Bell} size={20} />
-        </button>
-      </div>
-
-      <section class="section" aria-labelledby="room-info-about">
-        <h3 class="heading" id="room-info-about">{t('room-info-panel-about')}</h3>
-        {#if editingTopic}
-          <div class="editor">
-            <TextArea
-              rows={3}
-              bind:value={topicDraft}
-              bind:el={topicInput}
-              aria-label={t('room-info-panel-room-topic')}
-              onkeydown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  void saveTopic();
-                  refocus(() => topicEditBtn);
-                } else if (e.key === 'Escape') {
-                  e.preventDefault();
-                  cancelTopicEdit();
-                  refocus(() => topicEditBtn);
-                }
-              }}
-              onblur={() => void saveTopic()}
-            />
-            <p class="hint">{t('room-info-panel-enter-to-save-shift-enter-for-a-new-line-esc-to-')}</p>
-          </div>
-        {:else}
-          <div class="editable" class:is-empty={!details?.topic}>
-            {#if details?.topic}
-              <p class="value">{details.topic}</p>
-            {:else}
-              <p class="value empty-value">{details?.can_set_topic ? t('room-info-panel-no-topic-yet') : t('room-info-panel-no-topic')}</p>
-            {/if}
-            {#if details?.can_set_topic}
-              <button
-                type="button"
-                class="edit-btn"
-                aria-label={t('room-info-panel-edit-room-topic')}
-                title={t('room-info-panel-edit-room-topic')}
-                bind:this={topicEditBtn}
-                onclick={editTopic}
-              >
-                <Icon icon={Pencil} size={16} />
-              </button>
-            {/if}
-          </div>
-        {/if}
-        {#if roomInfo.saving(roomId)}
-          <p class="status" role="status">{t('room-info-panel-saving')}</p>
-        {/if}
-      </section>
-
-      <section class="card" aria-label={t('room-info-panel-private-note')}>
-        <div class="card-head">
-          <h3 class="heading">{t('room-info-panel-private-note')}</h3>
-          <span class="pill">{t('room-info-panel-only-you')}</span>
-        </div>
-        {#if editingNote}
-          <div class="editor">
-            <TextArea
-              rows={3}
-              bind:value={noteDraft}
-              bind:el={noteInput}
-              aria-label={t('room-info-panel-private-note')}
-              oninput={(e) => onNoteInput(e.currentTarget.value)}
-              onkeydown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  void saveNoteEdit();
-                  refocus(() => noteEditBtn);
-                } else if (e.key === 'Escape') {
-                  e.preventDefault();
-                  cancelNoteEdit();
-                  refocus(() => noteEditBtn);
-                }
-              }}
-              onblur={() => void saveNoteEdit()}
-            />
-            <p class="hint">{t('room-info-panel-enter-to-save-shift-enter-for-a-new-line-esc-to-')}</p>
-          </div>
-        {:else}
-          <div class="editable" class:is-empty={!roomInfo.note(roomId)}>
-            {#if roomInfo.note(roomId)}
-              <p class="value">{roomInfo.note(roomId)}</p>
-            {:else}
-              <p class="value empty-value">{t('room-info-panel-a-note-only-you-can-see')}</p>
-            {/if}
-            <button
-              type="button"
-              class="edit-btn"
-              aria-label={t('room-info-panel-edit-private-note')}
-              title={t('room-info-panel-edit-private-note')}
-              bind:this={noteEditBtn}
-              onclick={editNote}
-            >
-              <Icon icon={Pencil} size={16} />
-            </button>
-          </div>
-        {/if}
-        {#if noteSaving}
-          <p class="status" role="status">{t('room-info-panel-saving')}</p>
-        {:else if noteSaved}
-          <p class="status" role="status">{t('room-info-panel-saved')}</p>
-        {/if}
-      </section>
-
-      {#if sharedHasItems}
-        <section class="section" aria-labelledby="room-info-shared">
-          <div class="section-head">
-            <h3 class="heading" id="room-info-shared">{t('room-info-panel-shared')}</h3>
-            {#if sharedCurrent.items.length > 0}
-              <Button variant="ghost" size="sm" onclick={() => (view = sharedTab)}>
-                {#snippet children()}{viewAll(sharedCurrent.items.length, sharedCurrent.done)}{/snippet}
-              </Button>
-            {/if}
-          </div>
-          <SegmentedControl options={SHARED_TABS} value={sharedTab} label={t('room-info-panel-shared-content')} onchange={(v) => (sharedTab = v as MediaView)} />
-          {#if sharedCurrent.items.length > 0}
-            {@render sharedItems(sharedTab, sharedCurrent.items.slice(0, PREVIEW[sharedTab]))}
-          {:else}
-            <p class="empty">{EMPTY_TEXT[sharedTab]}</p>
-          {/if}
-        </section>
-      {/if}
-
-      {#if ordered.length > 0}
-        <section class="section">
-          <div class="section-head">
-            <h3 class="heading">{t('room-info-panel-members-2')}</h3>
-            <Button variant="ghost" size="sm" onclick={() => (view = 'members')}>
-              {#snippet children()}{viewAll(ordered.length, true)}{/snippet}
-            </Button>
-          </div>
-          <ul class="list">
-            {#each ordered.slice(0, PREVIEW.members) as m (m.user_id)}
-              {@render memberRow(m)}
+              </li>
             {/each}
           </ul>
-        </section>
-      {/if}
-    {:else if isMediaView(view) && current}
-      {#if current.error}
-        <p class="notice" role="alert">{current.error}</p>
-      {/if}
+          <Button variant="ghost" size="sm" onclick={() => (view = sharedTab)}>
+            {viewAll(mediaState[sharedTab].items.length, mediaState[sharedTab].done)}
+          </Button>
+        {/if}
+        {#if mediaError}<p class="notice" role="alert">{mediaError}</p>{/if}
+      </section>
 
-      {@const kind = view as MediaView}
-      {#if current.items.length > 0}
-        {@render sharedItems(kind, current.items)}
-      {:else if current.done && !current.loading}
-        <p class="empty">{EMPTY_TEXT[kind]}</p>
-      {/if}
-
-      {#if current.loading}
-        <p class="status" role="status">{t('room-info-panel-loading')}</p>
-      {:else if !current.done && current.items.length > 0}
-        <Button variant="ghost" size="sm" onclick={() => roomMedia.loadMore(roomId, MEDIA_KIND[view as MediaView])}>
-          {#snippet children()}{t('room-info-panel-load-more')}{/snippet}
+      <section class="block" aria-label={t('room-info-panel-members-2')}>
+        <h3>{t('room-info-panel-members-2')}</h3>
+        {#each groups.slice(0, 1) as group (group.title)}
+          <ul class="members">
+            {#each group.members.slice(0, PREVIEW.members) as m (m.user_id)}
+              <li>
+                <button type="button" class="member" data-user-id={m.user_id} onclick={(e) => openMemberProfile(e, m.user_id)} use:contextmenu={{ items: () => memberItems(m), options: () => ({ ariaLabel: t('room-info-panel-open-profile', { name: memberLabel(m) }) }) }}>
+                  <Avatar userId={m.user_id} displayName={m.display_name} size="sm" />
+                  <span class="member-name">{memberLabel(m)}</span>
+                  {#if m.role}<span class="role">{m.role}</span>{/if}
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/each}
+        <Button variant="ghost" size="sm" onclick={() => (view = 'members')}>
+          {t('room-info-panel-view-all')}
         </Button>
-      {/if}
-      <div class="sentinel" bind:this={sentinel} aria-hidden="true"></div>
-    {:else}
+      </section>
+    {:else if view === 'members'}
       {#if membersError}
         <div class="notice" role="alert">
           <p>{t('room-info-panel-could-not-load-members')} {membersError}</p>
-          <Button variant="ghost" size="sm" onclick={() => (membersAttempt += 1)}>
-            {#snippet children()}{t('room-info-panel-try-again')}{/snippet}
-          </Button>
+          <Button variant="ghost" size="sm" onclick={() => (membersAttempt += 1)}>{t('room-info-panel-try-again')}</Button>
         </div>
-      {/if}
-      {#if membersActionError}
-        <p class="notice" role="alert">{membersActionError}</p>
-      {/if}
-      {#if membersLoading && members.length === 0}
-        <p class="status" role="status">{t('room-info-panel-loading-members')}</p>
+      {:else if membersLoading && members.length === 0}
+        <p class="hint" role="status">{t('room-info-panel-loading-members')}</p>
       {:else}
         {#each groups as group (group.title)}
-          <section class="section">
-            <h3 class="heading">{group.title} ({group.members.length})</h3>
-            <ul class="list">
+          <section class="block" aria-label={group.title}>
+            <h3>{group.title}<span class="section-count">{group.members.length}</span></h3>
+            <ul class="members">
               {#each group.members as m (m.user_id)}
-                {@render memberRow(m)}
+                <li>
+                  <button type="button" class="member" data-user-id={m.user_id} onclick={(e) => openMemberProfile(e, m.user_id)} use:contextmenu={{ items: () => memberItems(m), options: () => ({ ariaLabel: t('room-info-panel-open-profile', { name: memberLabel(m) }) }) }}>
+                    <Avatar userId={m.user_id} displayName={m.display_name} size="sm" />
+                    <span class="member-name">{memberLabel(m)}</span>
+                    {#if m.role}<span class="role">{m.role}</span>{/if}
+                  </button>
+                </li>
               {/each}
             </ul>
           </section>
         {/each}
       {/if}
+    {:else if current}
+      {#if current.error}
+        <div class="notice" role="alert">
+          <p>{current.error}</p>
+          <Button variant="ghost" size="sm" onclick={reloadCurrent}>{t('room-info-panel-try-again')}</Button>
+        </div>
+      {/if}
+      {#if current.items.length === 0 && !current.loading}
+        <p class="hint">{emptyText}</p>
+      {:else}
+        <ul class="tiles full">
+          {#each current.items as item (item.event_id)}
+            <li>
+              <button type="button" class="tile" disabled={busyItem === item.event_id} onclick={() => void openMedia(item)} aria-label={t('room-info-panel-open-attachment', { name: item.body })}>
+                {#if thumbSrc[item.event_id]}
+                  <img src={thumbSrc[item.event_id]} alt="" loading="lazy" />
+                {:else}
+                  <span class="tile-icon"><Icon icon={item.kind === 'link' ? ExternalLink : item.kind === 'audio' ? Download : File} size={20} /></span>
+                {/if}
+                <span class="tile-name">{item.kind === 'link' ? hostOf(linkOf(item)) : item.body}</span>
+                <span class="tile-meta">{formatDay(item.timestamp_millis)}{#if item.size_bytes} · {formatBytes(item.size_bytes)}{/if}</span>
+              </button>
+            </li>
+          {/each}
+        </ul>
+        {#if current.loading}<p class="hint" role="status">{t('room-info-panel-loading')}</p>{/if}
+        <div bind:this={sentinel}></div>
+      {/if}
+      {#if mediaError}<p class="notice" role="alert">{mediaError}</p>{/if}
     {/if}
   </div>
-</section>
-
-{#if pendingAction}
-  {@const copy = ACTION_COPY[pendingAction.kind]}
-  <ConfirmDialog
-    open
-    title={copy.title}
-    message={copy.message(memberLabel(pendingAction.member))}
-    confirmLabel={copy.confirm}
-    danger={pendingAction.kind !== 'unban'}
-    onconfirm={runAction}
-    onclose={() => (pendingAction = null)}
-  />
-{/if}
-
-{#if viewer}
-  <MediaViewer
-    open={true}
-    onclose={() => (viewer = null)}
-    items={[{ eventId: null, uri: viewer.uri, mimeType: viewer.mimeType, body: viewer.body, mediaKind: viewer.mediaKind, sender: '', senderName: null, timestampMillis: 0 }]}
-    index={0}
-  />
-{/if}
+</aside>
 
 <style>
-  .details {
+  .panel {
     display: flex;
     flex-direction: column;
     height: 100%;
     min-height: 0;
-    background: transparent;
     color: var(--alloy-color-text-primary);
   }
-
   .bar {
     display: flex;
     align-items: center;
     gap: var(--alloy-spacing-scale-2);
     height: var(--alloy-layout-header-height);
     padding: 0 var(--alloy-layout-gutter);
-    border-bottom: 1px solid var(--alloy-chat-rim);
+    border-bottom: 1px solid var(--alloy-glass-rim);
     flex-shrink: 0;
   }
-
   .title {
     flex: 1;
     min-width: 0;
     margin: 0;
     overflow: hidden;
-    font-size: var(--alloy-font-size-title);
-    font-weight: var(--alloy-typography-weight-semibold);
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-size: var(--alloy-typography-size-lg);
+    font-weight: var(--alloy-typography-weight-semibold);
   }
-
   .icon-btn {
     display: inline-flex;
     align-items: center;
@@ -1032,414 +563,202 @@
     background: transparent;
     color: var(--alloy-color-text-secondary);
     cursor: pointer;
-    transition: background-color var(--alloy-motion-duration-fast) ease, color var(--alloy-motion-duration-fast) ease;
   }
-
   .icon-btn:hover {
     background: var(--alloy-glass-control);
     color: var(--alloy-color-text-primary);
   }
-
   .body {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-layout-section-gap);
-    padding: var(--alloy-layout-gutter);
-  }
-
-  .identity {
-    display: flex;
-    flex-direction: row;
-    align-items: center;
     gap: var(--alloy-spacing-scale-3);
-    min-width: 0;
+    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-gutter);
   }
-
-  .identity-main {
+  .block {
     display: flex;
-    flex: 1;
     flex-direction: column;
-    gap: var(--alloy-spacing-scale-1);
-    min-width: 0;
+    gap: var(--alloy-spacing-scale-2);
   }
-
-  .name {
+  .block h3 {
+    display: flex;
+    align-items: center;
+    gap: var(--alloy-spacing-scale-2);
     margin: 0;
-    font-size: var(--alloy-typography-size-xl);
+    font-size: var(--alloy-font-size-meta);
     font-weight: var(--alloy-typography-weight-semibold);
-    line-height: var(--alloy-typography-line-height-tight);
-    overflow-wrap: anywhere;
-  }
-
-  .id {
-    margin: 0;
-    font-family: var(--alloy-typography-font-family-mono);
-    font-size: var(--alloy-font-size-preview);
+    letter-spacing: var(--alloy-letter-spacing-caps);
+    text-transform: uppercase;
     color: var(--alloy-color-text-muted);
-    overflow-wrap: anywhere;
   }
-
-  .meta {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--alloy-spacing-scale-1);
-    margin: 0;
-    font-size: var(--alloy-font-size-preview);
+  .section-count {
+    padding: 1px 6px; /* token-audit: kbd chip inset, set by the 10px meta text */
+    border-radius: var(--alloy-radii-full);
+    background: var(--alloy-glass-control);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
     color: var(--alloy-color-text-secondary);
   }
-
-  /* A value is text until the pencil is used, so the panel reads as a summary, not a form. */
-  .editable {
-    display: flex;
-    align-items: flex-start;
-    gap: var(--alloy-spacing-scale-1);
-    width: 100%;
-    min-width: 0;
-  }
-
-  .editable .name,
-  .editable .value {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .value {
-    margin: 0;
-    font-size: var(--alloy-font-size-row);
-    line-height: var(--alloy-typography-line-height-normal);
-    color: var(--alloy-color-text-secondary);
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-  }
-
-  .empty-value {
-    color: var(--alloy-color-text-muted);
-  }
-
-  .edit-btn {
-    position: relative;
-    display: inline-flex;
-    flex-shrink: 0;
-    align-items: center;
-    justify-content: center;
-    width: 24px;
-    height: 24px;
-    margin-top: -2px;
-    padding: 0;
-    border: 0;
-    border-radius: var(--alloy-radii-sm);
-    background: transparent;
-    color: var(--alloy-color-text-muted);
-    opacity: 0;
-    cursor: pointer;
-    transition:
-      opacity var(--alloy-motion-duration-fast) ease,
-      background-color var(--alloy-motion-duration-fast) ease,
-      color var(--alloy-motion-duration-fast) ease;
-  }
-
-  .editable:hover .edit-btn,
-  .editable:focus-within .edit-btn,
-  .editable.is-empty .edit-btn {
-    opacity: 1;
-  }
-
-  .edit-btn:hover {
-    background: var(--alloy-glass-control-hover);
-    color: var(--alloy-color-text-primary);
-  }
-
-  .edit-btn:focus-visible {
-    opacity: 1;
-    outline: 2px solid var(--alloy-color-accent-primary);
-    outline-offset: 1px;
-  }
-
-  /* Touch has no hover state, so the affordance is always visible there. The icon stays 24px but
-     the box itself grows to the 44px minimum: the negative margins keep the text line unchanged. */
-  @media (hover: none) {
-    .edit-btn {
-      width: 44px;
-      height: 44px;
-      margin: -10px; /* token-audit: grows the 24px pencil to a 44px touch target */
-      opacity: 1;
-    }
-  }
-
-  .editor {
+  .facts {
     display: flex;
     flex-direction: column;
     gap: var(--alloy-spacing-scale-1);
-    width: 100%;
-    min-width: 0;
+    margin: 0;
   }
-
+  .fact {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--alloy-spacing-scale-2);
+    font-size: var(--alloy-typography-size-sm);
+  }
+  .fact dt {
+    color: var(--alloy-color-text-secondary);
+  }
+  .fact dd {
+    margin: 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .hint {
     margin: 0;
-    font-size: var(--alloy-font-size-meta);
     color: var(--alloy-color-text-muted);
+    font-size: var(--alloy-typography-size-sm);
   }
-
-  .actions {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--alloy-spacing-scale-2);
-  }
-
-  .section {
-    display: flex;
-    flex-direction: column;
-    gap: var(--alloy-spacing-scale-3);
-    padding-top: var(--alloy-layout-section-gap);
-    border-top: 1px solid var(--alloy-chat-rim);
-  }
-
-  /* The shared-media switch hugs its labels instead of stretching to the panel width, which left a
-     dead segment of empty track to the right of Files. */
-  .section > :global(.alloy-segmented-control) {
-    align-self: flex-start;
-    max-width: 100%;
-  }
-
-  /* A sub-view opens on its first section; the header already draws the line above it. */
-  .body > .section:first-child {
-    padding-top: 0;
-    border-top: 0;
-  }
-
-  .section-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--alloy-spacing-scale-2);
-  }
-
-  .heading {
-    margin: 0;
-    font-size: var(--alloy-font-size-meta);
-    font-weight: var(--alloy-typography-weight-semibold);
-    text-transform: uppercase;
-    letter-spacing: var(--alloy-letter-spacing-caps);
-    color: var(--alloy-color-text-muted);
-  }
-
-  .picture-btn {
-    display: inline-flex;
-    padding: 0;
-    border: 0;
-    border-radius: var(--alloy-radii-sm);
-    background: none;
-    cursor: pointer;
-  }
-
-  .picture-btn:focus-visible {
-    outline: 2px solid var(--alloy-color-accent-primary);
-    outline-offset: 2px;
-  }
-
-  .card {
-    display: flex;
-    flex-direction: column;
-    gap: var(--alloy-spacing-scale-2);
-    padding: var(--alloy-spacing-scale-3);
-    border: 1px solid var(--alloy-chat-rim);
-    border-radius: var(--alloy-radii-lg);
-    background: var(--alloy-glass-control);
-  }
-  /* The 7% control plate over the pane drops muted 10.5-13px text to 4.03-4.34:1 on dark and
-     phones. Secondary keeps the plate and clears 5:1 on every theme. */
-  .card .heading,
-  .card .empty-value,
-  .card .status {
-    color: var(--alloy-color-text-secondary);
-  }
-
-  .card-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--alloy-spacing-scale-2);
-  }
-
-  .pill {
-    padding: 0 var(--alloy-spacing-scale-2);
-    border-radius: var(--alloy-radii-full);
-    background: var(--alloy-color-surface-hover);
-    color: var(--alloy-color-text-secondary);
-    font-size: var(--alloy-font-size-meta);
-  }
-
-  .status,
-  .empty {
-    margin: 0;
-    font-size: var(--alloy-font-size-preview);
-    color: var(--alloy-color-text-muted);
-  }
-
   .notice {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--alloy-spacing-scale-2);
     margin: 0;
-    padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
-    border: 1px solid var(--alloy-color-border-subtle);
-    border-radius: var(--alloy-radii-lg);
+    padding: var(--alloy-spacing-scale-2);
+    border-radius: var(--alloy-radii-sm);
     background: var(--alloy-color-surface-subtle);
     color: var(--alloy-color-status-error);
-    font-size: var(--alloy-font-size-preview);
+    font-size: var(--alloy-typography-size-xs);
   }
-
-  .media-grid {
+  .notice p {
+    margin: 0;
+  }
+  .tabs {
+    display: flex;
+  }
+  .tiles {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: var(--alloy-spacing-scale-1);
-  }
-
-  .media-cell {
-    position: relative;
-    aspect-ratio: 1;
-    padding: 0;
-    border: 0;
-    border-radius: var(--alloy-radii-lg);
-    overflow: hidden;
-    background: var(--alloy-color-surface-subtle);
-    cursor: pointer;
-    transition: opacity var(--alloy-motion-duration-fast) ease;
-  }
-
-  .media-cell:hover {
-    opacity: 0.85;
-  }
-
-  /* Both layers fill the cell: in normal flow a 100%-height fallback pushes the picture out of the
-     clipped cell, so the tile showed only the placeholder even when the URL loaded. */
-  .media-img {
-    position: absolute;
-    inset: 0;
-    display: block;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-
-  .media-fallback {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-    height: 100%;
-    color: var(--alloy-color-text-muted);
-  }
-
-  .play-badge {
-    position: absolute;
-    right: var(--alloy-spacing-scale-1);
-    bottom: var(--alloy-spacing-scale-1);
-    display: inline-flex;
-    padding: var(--alloy-spacing-scale-1);
-    border-radius: var(--alloy-radii-full);
-    background: var(--alloy-color-surface-elevated);
-    color: var(--alloy-color-text-primary);
-  }
-
-  .list {
-    display: flex;
-    flex-direction: column;
-    gap: var(--alloy-spacing-scale-1);
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    gap: var(--alloy-spacing-scale-2);
     margin: 0;
     padding: 0;
     list-style: none;
   }
-
-  .row {
+  .tiles.full {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  }
+  .tile {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    width: 100%;
+    min-width: 0;
+    padding: var(--alloy-spacing-scale-1);
+    border: 1px solid var(--alloy-glass-rim);
+    border-radius: var(--alloy-radii-md);
+    background: var(--alloy-glass-control);
+    color: var(--alloy-color-text-secondary);
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+  }
+  .tile img {
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    object-fit: cover;
+    border-radius: var(--alloy-radii-sm);
+    background: var(--alloy-color-surface-hover);
+  }
+  .tile-icon {
+    display: grid;
+    place-items: center;
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    border-radius: var(--alloy-radii-sm);
+    background: var(--alloy-color-surface-hover);
+    color: var(--alloy-color-text-muted);
+  }
+  .tile-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--alloy-typography-size-xs);
+    color: var(--alloy-color-text-primary);
+  }
+  .tile-meta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--alloy-typography-size-xs);
+    color: var(--alloy-color-text-muted);
+  }
+  .members {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .member {
     display: flex;
     align-items: center;
     gap: var(--alloy-spacing-scale-2);
     width: 100%;
-    min-width: 0;
-    min-height: 44px;
+    min-height: 40px;
     padding: var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-2);
     border: 0;
-    border-radius: var(--alloy-radii-lg);
+    border-radius: var(--alloy-radii-md);
     background: transparent;
     color: inherit;
-    text-align: left;
+    font: inherit;
+    text-align: start;
     cursor: pointer;
-    transition: background-color var(--alloy-motion-duration-fast) ease;
   }
-
-  .row:hover:not(:disabled) {
-    background: var(--alloy-color-surface-hover);
+  .member:hover {
+    background: var(--alloy-glass-control);
   }
-
-  .row:disabled {
-    opacity: 0.6;
-    cursor: progress;
-  }
-
-  .row-icon {
-    display: inline-flex;
-    flex-shrink: 0;
-    color: var(--alloy-color-text-muted);
-  }
-
-  .row-main {
-    display: flex;
+  .member-name {
     flex: 1;
-    flex-direction: column;
     min-width: 0;
-  }
-
-  .row-title {
     overflow: hidden;
-    font-size: var(--alloy-font-size-row);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-
-  .row-title.link {
-    color: var(--alloy-color-text-link);
-  }
-
-  .row-meta {
-    overflow: hidden;
-    font-size: var(--alloy-font-size-meta);
+  .role {
+    flex: none;
+    padding: 0 6px; /* token-audit: role chip inset, 10px meta text */
+    border: 1px solid var(--alloy-glass-rim);
+    border-radius: var(--alloy-radii-full);
     color: var(--alloy-color-text-muted);
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    font-size: 10px;
+    letter-spacing: 0;
+    text-transform: none;
   }
-
-  .sentinel {
-    height: 1px;
+  .member,
+  .tile {
+    transition: background var(--alloy-motion-duration-fast) ease;
   }
-
+  .tile:hover {
+    background: var(--alloy-glass-control-hover);
+  }
   @media (max-width: 899px) {
-    .details {
-      position: fixed;
-      inset: 0;
-      z-index: 50;
-      padding-top: var(--alloy-safe-area-top);
-      padding-bottom: var(--alloy-safe-area-bottom);
+    .member {
+      min-height: 44px;
     }
-
-    .close {
-      order: -1;
-    }
-
     .icon-btn {
-      width: var(--alloy-touch-target);
-      height: var(--alloy-touch-target);
-    }
-
-    .body {
-      padding: var(--alloy-layout-gutter);
-    }
-
-    .row {
-      min-height: 56px;
+      width: 44px;
+      height: 44px;
     }
   }
 </style>

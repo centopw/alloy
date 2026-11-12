@@ -41,10 +41,7 @@
   );
 
   const isUnavailable = $derived(
-    !replyTo ||
-      replyTo.content.kind === 'Redacted' ||
-      replyTo.content.kind === 'UnableToDecrypt' ||
-      quote(replyTo).trim().length === 0
+    !replyTo || replyTo.content.kind === 'Deleted' || quote(replyTo).trim().length === 0
   );
 
   const excerptText = $derived(
@@ -83,8 +80,9 @@
     if (!it) return '';
     const c = it.content;
     if (c.kind === 'TextMessage') return c.data.body;
-    if (c.kind === 'Media') return c.data.body || 'Attachment';
-    if (c.kind === 'Location') return c.data.description || 'Location';
+    if (c.kind === 'Media') return c.data.body;
+    if (c.kind === 'Location') return c.data.description ?? '';
+    if (c.kind === 'System') return c.data.text;
     return '';
   }
 </script>

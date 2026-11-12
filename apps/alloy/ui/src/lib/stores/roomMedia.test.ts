@@ -6,18 +6,17 @@ vi.mock('../ipc/index.js', () => ({
   client: { invoke: (...args: unknown[]) => invoke(...args) },
 }));
 
-const ROOM = '!general:alloy.chat';
+const ROOM = 'chat-1';
 
 function item(id: string) {
   return {
     event_id: id,
-    sender: '@alice:alloy.chat',
+    sender: 'alice',
     sender_display_name: 'Alice',
     timestamp_millis: 0,
     kind: 'image',
     body: id,
-    uri: null,
-    thumbnail_uri: null,
+    source: { media_id: `media-${id}` },
     mime_type: null,
     size_bytes: null,
     width: null,
@@ -26,15 +25,11 @@ function item(id: string) {
 }
 
 function page(ids: string[], next: string | null) {
-  return {
-    type: 'RoomMedia',
-    payload: { room_id: ROOM, items: ids.map(item), next_batch: next },
-  };
+  return { type: 'RoomMedia', payload: { items: ids.map(item), next } };
 }
 
 function deferred<T>() {
-  let resolve!: (v: T) => void;
-  const promise = new Promise<T>((r) => (resolve = r));
+  const { promise, resolve } = Promise.withResolvers<T>();
   return { promise, resolve };
 }
 
@@ -56,7 +51,7 @@ describe('RoomMediaStore', () => {
 
     expect(invoke).toHaveBeenCalledWith({
       action: 'GetRoomMedia',
-      params: { room_id: ROOM, kind: 'Media', from: null, limit: ROOM_MEDIA_PAGE_SIZE },
+      params: { room_id: ROOM, kind: 'Media', before: null, limit: ROOM_MEDIA_PAGE_SIZE },
     });
     expect(ROOM_MEDIA_PAGE_SIZE).toBe(40);
     const view = store.view(ROOM, 'Media');
@@ -69,7 +64,6 @@ describe('RoomMediaStore', () => {
     invoke.mockResolvedValueOnce(page(['a'], null));
     await store.load(ROOM, 'Media');
     await store.load(ROOM, 'Media');
-
     expect(invoke).toHaveBeenCalledTimes(1);
   });
 
@@ -96,7 +90,7 @@ describe('RoomMediaStore', () => {
     expect(store.view(ROOM, 'Links').items.map((i) => i.event_id)).toEqual(['l1']);
   });
 
-  it('appends the next page using next_batch as the cursor', async () => {
+  it('appends the next page using the engine cursor', async () => {
     invoke.mockResolvedValueOnce(page(['a'], 'cursor-1'));
     await store.load(ROOM, 'Media');
     expect(store.view(ROOM, 'Media').done).toBe(false);
@@ -106,7 +100,7 @@ describe('RoomMediaStore', () => {
 
     expect(invoke).toHaveBeenLastCalledWith({
       action: 'GetRoomMedia',
-      params: { room_id: ROOM, kind: 'Media', from: 'cursor-1', limit: ROOM_MEDIA_PAGE_SIZE },
+      params: { room_id: ROOM, kind: 'Media', before: 'cursor-1', limit: ROOM_MEDIA_PAGE_SIZE },
     });
     expect(store.view(ROOM, 'Media').items.map((i) => i.event_id)).toEqual(['a', 'b']);
     expect(store.view(ROOM, 'Media').done).toBe(true);
@@ -147,12 +141,12 @@ describe('RoomMediaStore', () => {
   it('reset clears only the given room', async () => {
     invoke.mockResolvedValueOnce(page(['a'], null)).mockResolvedValueOnce(page(['b'], null));
     await store.load(ROOM, 'Media');
-    await store.load('!other:alloy.chat', 'Media');
+    await store.load('other-chat', 'Media');
 
     store.reset(ROOM);
 
     expect(store.view(ROOM, 'Media').items).toEqual([]);
-    expect(store.view('!other:alloy.chat', 'Media').items).toHaveLength(1);
+    expect(store.view('other-chat', 'Media').items).toHaveLength(1);
   });
 
   it('prepends media that arrived since the first read, keeping the pages already loaded', async () => {

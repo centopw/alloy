@@ -15,9 +15,6 @@ const platform = vi.hoisted(() => ({
 }));
 
 vi.mock('../platform/capabilities', () => ({ isAndroid: () => platform.android }));
-vi.mock('./push.svelte', () => ({
-  pushStore: { supported: false, distributors: [], registered: false, pick: vi.fn() },
-}));
 vi.mock('../platform/permissions', async (importOriginal) => {
   const actual = await importOriginal<typeof PermissionsModule>();
   return {

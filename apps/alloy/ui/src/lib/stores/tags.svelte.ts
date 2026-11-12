@@ -98,13 +98,10 @@ class TagStore {
     }
     return this.#track(async () => {
       try {
-        expect(
-          await client.invoke({
-            action: 'RenameRoomTag',
-            params: { id, name: name ?? null, colour: patch.colour ?? null },
-          }),
-          'Unit',
-        );
+        await client.invoke({
+          action: 'RenameRoomTag',
+          params: { id, name: name ?? null, colour: patch.colour ?? null },
+        });
         this.defs = this.defs.map((d) =>
           d.id === id ? { ...d, name: name ?? d.name, colour: patch.colour ?? d.colour } : d,
         );
@@ -131,7 +128,7 @@ class TagStore {
     [ids[from], ids[to]] = [ids[to], ids[from]];
     return this.#track(async () => {
       try {
-        expect(await client.invoke({ action: 'ReorderRoomTags', params: { ids } }), 'Unit');
+        await client.invoke({ action: 'ReorderRoomTags', params: { ids } });
         const byId = new Map(this.defs.map((d) => [d.id, d] as const));
         this.defs = ids.map((tagId) => byId.get(tagId)!);
         this.error = null;
@@ -153,7 +150,7 @@ class TagStore {
     }
     return this.#track(async () => {
       try {
-        expect(await client.invoke({ action: 'DeleteRoomTag', params: { tag_id: id } }), 'Unit');
+        await client.invoke({ action: 'DeleteRoomTag', params: { tag_id: id } });
         this.defs = this.defs.filter((d) => d.id !== id);
         this.error = null;
         return true;
@@ -168,13 +165,10 @@ class TagStore {
   setForRoom(roomId: string, tagId: string, enabled: boolean): Promise<boolean> {
     return this.#track(async () => {
       try {
-        expect(
-          await client.invoke({
-            action: 'SetRoomTag',
-            params: { room_id: roomId, tag_id: tagId, enabled },
-          }),
-          'Unit',
-        );
+        await client.invoke({
+          action: 'SetRoomTag',
+          params: { room_id: roomId, tag_id: tagId, enabled },
+        });
         this.error = null;
         return true;
       } catch (e) {

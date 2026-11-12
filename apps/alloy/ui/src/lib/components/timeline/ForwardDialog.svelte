@@ -2,22 +2,33 @@
   import { Avatar, Button, Modal, TextField } from '../common';
   import { Search } from '$lib/icons';
   import { forwardStore } from '$lib/stores/forward.svelte';
+  import { resolveAvatar } from '$lib/stores/avatars.svelte';
   import { roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
 
   import { t } from '$lib/i18n';
   let query = $state('');
+  /** Resolved avatar URLs by room id; null while a lookup runs. */
+  let avatars = $state<Record<string, string | null>>({});
 
   $effect(() => {
     if (forwardStore.open) query = '';
   });
 
-  // Rooms you can send to, most recently active first.
+  // Chats you can send to, most recently active first.
   const targets = $derived(
     roomsStore.rooms
-      .filter((r) => r.membership === 'Joined' && !r.is_space)
+      .filter((r) => !r.archived)
       .filter((r) => !query.trim() || roomTitle(r).toLowerCase().includes(query.trim().toLowerCase()))
       .toSorted((a, b) => (b.latest_event?.timestamp_millis ?? 0) - (a.latest_event?.timestamp_millis ?? 0)),
   );
+
+  $effect(() => {
+    for (const room of targets) {
+      if (Object.hasOwn(avatars, room.id)) continue;
+      avatars = { ...avatars, [room.id]: null };
+      void resolveAvatar(room.avatar, 36).then((url) => (avatars = { ...avatars, [room.id]: url }));
+    }
+  });
 
   const count = $derived(forwardStore.eventIds.length);
 </script>
@@ -36,7 +47,7 @@
     {#each targets as room (room.id)}
       {@const state = forwardStore.results[room.id]}
       <li class="room">
-        <Avatar userId={room.id} displayName={roomTitle(room)} src={room.avatar_url} size={36} shape={room.is_direct ? 'circle' : 'rounded'} />
+        <Avatar userId={room.id} displayName={roomTitle(room)} src={avatars[room.id] ?? null} size={36} shape={room.is_direct ? 'circle' : 'rounded'} />
         <span class="name">
           {roomTitle(room)}
           {#if typeof state === 'object'}<span class="err" role="alert">{state.error}</span>{/if}

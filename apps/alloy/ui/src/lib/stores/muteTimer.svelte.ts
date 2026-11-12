@@ -1,29 +1,26 @@
-import { expiredMutes, withMute } from '../content/mute.js';
-import { prefs } from './prefs.svelte.js';
-import { roomNotify } from './roomNotify.svelte.js';
+import { MUTE_FOREVER, roomsStore } from './rooms.svelte.js';
 
 const SWEEP_MS = 60_000;
 
-/** Mutes a room, for `ms` milliseconds or (null) until the user turns notifications back on. */
+/** Mutes a chat for `ms` milliseconds, or (null) until the user turns notifications back on. */
 export async function muteRoom(roomId: string, ms: number | null): Promise<void> {
-  prefs.set('mutedUntil', withMute(prefs.mutedUntil, roomId, ms === null ? null : Date.now() + ms));
-  await roomNotify.set(roomId, 'Mute');
+  await roomsStore.setMuted(roomId, ms === null ? MUTE_FOREVER : Date.now() + ms);
 }
 
-/** Sets a level other than mute (or the default with `null`) and forgets any mute timer of the room. */
-export async function setRoomLevel(roomId: string, level: 'All' | 'Mentions' | null): Promise<void> {
-  if (roomId in prefs.mutedUntil) prefs.set('mutedUntil', withMute(prefs.mutedUntil, roomId, null));
-  await roomNotify.set(roomId, level);
+/** Turns notifications for a chat back on. */
+export async function unmuteRoom(roomId: string): Promise<void> {
+  await roomsStore.setMuted(roomId, null);
 }
 
-/** Restores rooms whose timed mute has ended to the account default. */
+/**
+ * Restores chats whose timed mute has ended to the network default. A mute set to "forever" is left
+ * alone; the engine reports the end of a timed mute as a past timestamp.
+ */
 export async function sweepMutes(now = Date.now()): Promise<void> {
-  const ended = expiredMutes(prefs.mutedUntil, now);
-  if (ended.length === 0) return;
-  let next = prefs.mutedUntil;
-  for (const id of ended) next = withMute(next, id, null);
-  prefs.set('mutedUntil', next);
-  await Promise.all(ended.map((id) => roomNotify.set(id, null)));
+  const ended = roomsStore.rooms.filter(
+    (room) => room.muted_until !== null && room.muted_until < MUTE_FOREVER && room.muted_until <= now
+  );
+  await Promise.all(ended.map((room) => roomsStore.setMuted(room.id, null)));
 }
 
 /** Runs `sweepMutes` now and every minute. Returns a function that stops it. */

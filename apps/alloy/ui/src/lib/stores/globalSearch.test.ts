@@ -1,20 +1,36 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({
-  searchAllMessages: vi.fn(),
+const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
+
+vi.mock('../ipc/index.js', () => ({ client: { invoke: mocks.invoke } }));
+vi.mock('./timeline.svelte.js', () => ({
+  timelineStore: { roomId: null, loading: false, jumpToEvent: vi.fn() },
 }));
 
-vi.mock('../ipc/index.js', () => ({ client: { searchAllMessages: mocks.searchAllMessages } }));
-vi.mock('./timeline.svelte.js', () => ({ timelineStore: { roomId: null, loading: false, jumpToEvent: vi.fn() } }));
+import { globalSearch, isSearchable, GLOBAL_SEARCH_LIMIT } from './globalSearch.svelte';
+import { timelineStore } from './timeline.svelte';
+import type { GlobalSearchHit } from '../generated/index.js';
 
-import { globalSearch, isSearchable } from './globalSearch.svelte';
+const hit = (id: string): GlobalSearchHit => ({
+  room_id: 'r1',
+  room_name: 'R',
+  event_id: id,
+  sender: 'u1',
+  sender_display_name: null,
+  timestamp_millis: 1,
+  body: id,
+});
 
-const hit = (id: string) => ({ room_id: '!r:hs', room_name: 'R', event_id: id, sender: '@a:hs', sender_display_name: null, timestamp_millis: 1, body: id });
+const found = (...ids: string[]) => ({
+  type: 'AllMessagesFound' as const,
+  payload: { hits: ids.map(hit) },
+});
 
 beforeEach(() => {
   vi.useFakeTimers();
   globalSearch.reset();
-  mocks.searchAllMessages.mockReset();
+  mocks.invoke.mockReset();
+  vi.mocked(timelineStore.jumpToEvent).mockReset();
 });
 afterEach(() => vi.useRealTimers());
 
@@ -28,37 +44,58 @@ describe('isSearchable', () => {
 
 describe('globalSearch', () => {
   it('waits for a pause in typing and searches once for the last query', async () => {
-    mocks.searchAllMessages.mockResolvedValue({ type: 'AllMessagesFound', payload: { hits: [hit('$1')], next_batch: null } });
+    mocks.invoke.mockResolvedValue(found('$1'));
     globalSearch.schedule('hel');
     globalSearch.schedule('hello');
-    expect(mocks.searchAllMessages).not.toHaveBeenCalled();
+    expect(mocks.invoke).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(450);
-    expect(mocks.searchAllMessages).toHaveBeenCalledTimes(1);
-    expect(mocks.searchAllMessages).toHaveBeenCalledWith('hello', null);
+    expect(mocks.invoke).toHaveBeenCalledTimes(1);
+    expect(mocks.invoke).toHaveBeenCalledWith({
+      action: 'SearchAllMessages',
+      params: { query: 'hello', limit: GLOBAL_SEARCH_LIMIT },
+    });
     expect(globalSearch.hits.map((h) => h.event_id)).toEqual(['$1']);
+    expect(globalSearch.query).toBe('hello');
+    expect(globalSearch.loading).toBe(false);
   });
 
   it('clears results for a short query and ignores a slower earlier answer', async () => {
-    let finishFirst: (v: unknown) => void = () => {};
-    mocks.searchAllMessages.mockReturnValueOnce(new Promise((r) => (finishFirst = r)));
+    const first = Promise.withResolvers<unknown>();
+    mocks.invoke.mockReturnValueOnce(first.promise);
     globalSearch.schedule('first');
     await vi.advanceTimersByTimeAsync(450);
     globalSearch.schedule('ab');
-    finishFirst({ type: 'AllMessagesFound', payload: { hits: [hit('$late')], next_batch: null } });
+    first.resolve(found('$late'));
     await vi.advanceTimersByTimeAsync(0);
     expect(globalSearch.hits).toEqual([]);
     expect(globalSearch.loading).toBe(false);
   });
 
-  it('appends the next page', async () => {
-    mocks.searchAllMessages
-      .mockResolvedValueOnce({ type: 'AllMessagesFound', payload: { hits: [hit('$1')], next_batch: 'b2' } })
-      .mockResolvedValueOnce({ type: 'AllMessagesFound', payload: { hits: [hit('$2')], next_batch: null } });
-    globalSearch.schedule('query');
+  it('reports a failed search and stops loading', async () => {
+    mocks.invoke.mockRejectedValue(new Error('index unavailable'));
+    globalSearch.schedule('hello');
     await vi.advanceTimersByTimeAsync(450);
-    await globalSearch.more();
-    expect(mocks.searchAllMessages).toHaveBeenLastCalledWith('query', 'b2');
-    expect(globalSearch.hits.map((h) => h.event_id)).toEqual(['$1', '$2']);
-    expect(globalSearch.nextBatch).toBeNull();
+    expect(globalSearch.error).toBe('index unavailable');
+    expect(globalSearch.loading).toBe(false);
+  });
+
+  it('opens the hit’s chat and jumps to the message once its timeline is open', async () => {
+    const openRoom = vi.fn();
+    timelineStore.roomId = 'r1';
+
+    await globalSearch.open(hit('$9'), openRoom);
+
+    expect(openRoom).toHaveBeenCalledWith('r1');
+    expect(timelineStore.jumpToEvent).toHaveBeenCalledWith('$9');
+  });
+
+  it('forgets the query and the results on reset', async () => {
+    mocks.invoke.mockResolvedValue(found('$1'));
+    globalSearch.schedule('hello');
+    await vi.advanceTimersByTimeAsync(450);
+    globalSearch.reset();
+    expect(globalSearch.hits).toEqual([]);
+    expect(globalSearch.query).toBe('');
+    expect(globalSearch.error).toBeNull();
   });
 });

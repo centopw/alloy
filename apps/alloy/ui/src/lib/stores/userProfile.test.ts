@@ -6,18 +6,18 @@ vi.mock('../ipc/index.js', () => ({
   client: { invoke: (...args: unknown[]) => invoke(...args) },
 }));
 
-const USER = '@bob:alloy.chat';
-const ROOM = '!general:alloy.chat';
+const USER = 'user-42';
+const ACCOUNT = 'acc-1';
+const OTHER_ACCOUNT = 'acc-2';
 
 function profile(dm: string | null = null) {
   return {
     user_id: USER,
+    account_id: ACCOUNT,
     display_name: 'Bob',
-    avatar_url: null,
-    membership: 'join',
-    power_level: 50,
-    dm_room_id: dm,
+    avatar: null,
     is_me: false,
+    dm_room_id: dm,
   };
 }
 
@@ -27,8 +27,7 @@ const profileRes = (dm: string | null = null) => ({
 });
 
 function deferred<T>() {
-  let resolve!: (v: T) => void;
-  const promise = new Promise<T>((r) => (resolve = r));
+  const { promise, resolve } = Promise.withResolvers<T>();
   return { promise, resolve };
 }
 
@@ -44,127 +43,75 @@ afterEach(() => {
 });
 
 describe('UserProfileStore.get', () => {
-  it('fetches the profile for a room and returns it', async () => {
+  it('asks the account that knows the user', async () => {
     invoke.mockResolvedValueOnce(profileRes());
-    const result = await store.get(USER, ROOM);
+    const result = await store.get(ACCOUNT, USER);
 
     expect(invoke).toHaveBeenCalledWith({
       action: 'GetUserProfile',
-      params: { user_id: USER, room_id: ROOM },
+      params: { account_id: ACCOUNT, user_id: USER },
     });
     expect(result.display_name).toBe('Bob');
   });
 
-  it('passes a null room id through for profiles outside a room', async () => {
-    invoke.mockResolvedValueOnce(profileRes());
-    await store.get(USER, null);
+  it('shares one in-flight request for the same account and user', async () => {
+    const answer = deferred<unknown>();
+    invoke.mockReturnValueOnce(answer.promise);
 
-    expect(invoke).toHaveBeenCalledWith({
-      action: 'GetUserProfile',
-      params: { user_id: USER, room_id: null },
-    });
+    const a = store.get(ACCOUNT, USER);
+    const b = store.get(ACCOUNT, USER);
+    expect(invoke).toHaveBeenCalledTimes(1);
+
+    answer.resolve(profileRes());
+    await expect(Promise.all([a, b])).resolves.toEqual([profile(), profile()]);
   });
 
-  it('serves a repeat lookup from cache within the TTL', async () => {
-    invoke.mockResolvedValueOnce(profileRes());
-    await store.get(USER, ROOM);
-    await store.get(USER, ROOM);
-
+  it('serves a fresh answer from cache', async () => {
+    invoke.mockResolvedValue(profileRes());
+    await store.get(ACCOUNT, USER);
+    await store.get(ACCOUNT, USER);
     expect(invoke).toHaveBeenCalledTimes(1);
   });
 
-  it('refetches once the TTL has passed', async () => {
+  it('refetches after the cache expires', async () => {
     vi.useFakeTimers();
-    invoke.mockResolvedValueOnce(profileRes()).mockResolvedValueOnce(profileRes());
-    await store.get(USER, ROOM);
-
-    vi.advanceTimersByTime(PROFILE_TTL_MS + 1);
-    await store.get(USER, ROOM);
-
+    invoke.mockResolvedValue(profileRes());
+    await store.get(ACCOUNT, USER);
+    vi.advanceTimersByTime(PROFILE_TTL_MS);
+    await store.get(ACCOUNT, USER);
     expect(invoke).toHaveBeenCalledTimes(2);
   });
 
-  it('caches per room, so the same user in another room is fetched again', async () => {
-    invoke.mockResolvedValueOnce(profileRes()).mockResolvedValueOnce(profileRes());
-    await store.get(USER, ROOM);
-    await store.get(USER, null);
-
+  it('does not let one account answer for another', async () => {
+    invoke.mockResolvedValue(profileRes());
+    await store.get(ACCOUNT, USER);
+    await store.get(OTHER_ACCOUNT, USER);
     expect(invoke).toHaveBeenCalledTimes(2);
-  });
-
-  it('shares one request between concurrent lookups', async () => {
-    const d = deferred<unknown>();
-    invoke.mockReturnValueOnce(d.promise);
-
-    const a = store.get(USER, ROOM);
-    const b = store.get(USER, ROOM);
-    expect(invoke).toHaveBeenCalledTimes(1);
-
-    d.resolve(profileRes());
-    await expect(Promise.all([a, b])).resolves.toHaveLength(2);
-  });
-
-  it('rejects when the reply is not a UserProfile and does not cache it', async () => {
-    invoke.mockResolvedValueOnce({ type: 'Unit' });
-    await expect(store.get(USER, ROOM)).rejects.toThrow('Expected UserProfile, got Unit');
-
-    invoke.mockResolvedValueOnce(profileRes());
-    await store.get(USER, ROOM);
-    expect(invoke).toHaveBeenCalledTimes(2);
-  });
-});
-
-describe('UserProfileStore.startDirectMessage', () => {
-  it('returns the room id of the opened direct message', async () => {
-    invoke.mockResolvedValueOnce({
-      type: 'DirectMessageRoom',
-      payload: { room_id: '!dm:alloy.chat', created: true },
-    });
-
-    await expect(store.startDirectMessage(USER)).resolves.toBe('!dm:alloy.chat');
-    expect(invoke).toHaveBeenCalledWith({
-      action: 'StartDirectMessage',
-      params: { user_id: USER },
+    expect(invoke).toHaveBeenLastCalledWith({
+      action: 'GetUserProfile',
+      params: { account_id: OTHER_ACCOUNT, user_id: USER },
     });
   });
 
-  it('shares one request between concurrent calls for the same user', async () => {
-    const d = deferred<unknown>();
-    invoke.mockReturnValueOnce(d.promise);
-
-    const a = store.startDirectMessage(USER);
-    const b = store.startDirectMessage(USER);
-    expect(invoke).toHaveBeenCalledTimes(1);
-
-    d.resolve({ type: 'DirectMessageRoom', payload: { room_id: '!dm:alloy.chat', created: false } });
-    await expect(Promise.all([a, b])).resolves.toEqual(['!dm:alloy.chat', '!dm:alloy.chat']);
+  it('reports the direct chat the account already has, without inventing one', async () => {
+    invoke.mockResolvedValueOnce(profileRes('dm-7'));
+    const result = await store.get(ACCOUNT, USER);
+    expect(result.dm_room_id).toBe('dm-7');
   });
 
-  it('drops the cached profile so its dm_room_id is re-read', async () => {
-    invoke.mockResolvedValueOnce(profileRes(null));
-    await store.get(USER, ROOM);
+  it('forgets one account on sign-out and keeps the other', async () => {
+    invoke.mockResolvedValue(profileRes());
+    await store.get(ACCOUNT, USER);
+    await store.get(OTHER_ACCOUNT, USER);
 
-    invoke.mockResolvedValueOnce({
-      type: 'DirectMessageRoom',
-      payload: { room_id: '!dm:alloy.chat', created: true },
-    });
-    await store.startDirectMessage(USER);
-
-    invoke.mockResolvedValueOnce(profileRes('!dm:alloy.chat'));
-    const refreshed = await store.get(USER, ROOM);
-
+    store.forgetAccount(ACCOUNT);
+    await store.get(ACCOUNT, USER);
+    await store.get(OTHER_ACCOUNT, USER);
     expect(invoke).toHaveBeenCalledTimes(3);
-    expect(refreshed.dm_room_id).toBe('!dm:alloy.chat');
   });
 
-  it('rejects on failure and leaves the cached profile in place', async () => {
-    invoke.mockResolvedValueOnce(profileRes(null));
-    await store.get(USER, ROOM);
-
-    invoke.mockRejectedValueOnce(new Error('denied'));
-    await expect(store.startDirectMessage(USER)).rejects.toThrow('denied');
-
-    await store.get(USER, ROOM);
-    expect(invoke).toHaveBeenCalledTimes(2);
+  it('rejects when the engine cannot answer', async () => {
+    invoke.mockRejectedValueOnce({ code: 'not_found', message: 'Unknown user' });
+    await expect(store.get(ACCOUNT, USER)).rejects.toMatchObject({ code: 'not_found' });
   });
 });

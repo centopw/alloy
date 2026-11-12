@@ -1,16 +1,20 @@
 import type {
+  AccountId,
   EngineCommand,
   EngineResponse,
-  EngineEvent,
-  VectorDiffDto,
-  RoomId,
   EventId,
-  UserId,
-  AccountId,
-  SubscriptionId,
+  LoginId,
+  LoginInputDto,
   MediaSource,
+  Network,
+  RoomId,
+  RoomMediaKind,
+  SubscriptionId,
+  TagColour,
+  UserId,
+  VectorDiffDto,
 } from '../generated/index.js';
-import type { Transport, EventHandler, Unsubscribe } from './transport.js';
+import type { EventHandler, Transport, Unsubscribe } from './transport.js';
 
 /**
  * Apply an eyeball-im VectorDiffDto operation to an array in-place.
@@ -65,6 +69,10 @@ export function applyDiff<T>(target: T[], diff: VectorDiffDto<T>): T[] {
 
 /**
  * High-level typed client wrapping the low-level Transport.
+ *
+ * One method per v2 `EngineCommand`, named after the action in camelCase, with the command's
+ * parameters as positional arguments in protocol order. Nullable parameters default to `null`, so
+ * a caller that does not need them keeps the call short.
  */
 export class AlloyClient {
   constructor(private transport: Transport) {}
@@ -83,582 +91,272 @@ export class AlloyClient {
     return this.transport.invoke(cmd);
   }
 
-  // === Auth ===
-
-  async discoverHomeserver(input: string) {
-    return this.transport.invoke({
-      action: 'DiscoverHomeserver',
-      params: { input },
-    });
-  }
-
-  async loginPassword(homeserver_url: string, username: string, password: string) {
-    return this.transport.invoke({
-      action: 'LoginPassword',
-      params: { homeserver_url, username, password },
-    });
-  }
-
-  async startOidcLogin(homeserver_url: string) {
-    return this.transport.invoke({
-      action: 'StartOidcLogin',
-      params: { homeserver_url },
-    });
-  }
-
-  async completeOidcLogin(redirect_url: string) {
-    return this.transport.invoke({
-      action: 'CompleteOidcLogin',
-      params: { redirect_url },
-    });
-  }
-
-  async cancelOidcLogin() {
-    return this.transport.invoke({ action: 'CancelOidcLogin' });
-  }
-
-  async restoreSession(account_id: AccountId) {
-    return this.transport.invoke({
-      action: 'RestoreSession',
-      params: { account_id },
-    });
-  }
-
-  async logout(account_id: AccountId) {
-    return this.transport.invoke({
-      action: 'Logout',
-      params: { account_id },
-    });
-  }
+  // === Accounts and login ===
 
   async listAccounts() {
-    return this.transport.invoke({
-      action: 'ListAccounts',
-    });
+    return this.transport.invoke({ action: 'ListAccounts' });
   }
 
-  // === Rooms ===
-
-  async subscribeRoomList(filter?: string | null) {
-    return this.transport.invoke({
-      action: 'SubscribeRoomList',
-      params: { filter: filter ?? null },
-    });
+  async listNetworks() {
+    return this.transport.invoke({ action: 'ListNetworks' });
   }
 
+  /** Starts a login attempt and returns its first step. */
+  async beginLogin(network: Network) {
+    return this.transport.invoke({ action: 'BeginLogin', params: { network } });
+  }
+
+  /** Answers the step the engine last returned. */
+  async submitLogin(login_id: LoginId, input: LoginInputDto) {
+    return this.transport.invoke({ action: 'SubmitLogin', params: { login_id, input } });
+  }
+
+  /** Abandons an attempt; nothing is stored. */
+  async cancelLogin(login_id: LoginId) {
+    return this.transport.invoke({ action: 'CancelLogin', params: { login_id } });
+  }
+
+  /** Removes the account and its local data after revoking the session on the network. */
+  async logout(account_id: AccountId) {
+    return this.transport.invoke({ action: 'Logout', params: { account_id } });
+  }
+
+  // === Chats ===
+
+  /** Starts the room-list stream; `filter` narrows the projection by chat name. */
+  async subscribeRoomList(filter: string | null = null) {
+    return this.transport.invoke({ action: 'SubscribeRoomList', params: { filter } });
+  }
+
+  /** Aborts any subscription (room list or timeline). */
   async unsubscribe(subscription_id: SubscriptionId) {
-    return this.transport.invoke({
-      action: 'Unsubscribe',
-      params: { subscription_id },
-    });
+    return this.transport.invoke({ action: 'Unsubscribe', params: { subscription_id } });
   }
 
-  async joinRoom(room_id_or_alias: string) {
-    return this.transport.invoke({
-      action: 'JoinRoom',
-      params: { room_id_or_alias },
-    });
+  async getRoomMembers(room_id: RoomId) {
+    return this.transport.invoke({ action: 'GetRoomMembers', params: { room_id } });
   }
 
-  async leaveRoom(room_id: RoomId) {
-    return this.transport.invoke({
-      action: 'LeaveRoom',
-      params: { room_id },
-    });
+  async getRoomDetails(room_id: RoomId) {
+    return this.transport.invoke({ action: 'GetRoomDetails', params: { room_id } });
   }
 
-  async createRoom(name: string, encrypted: boolean, invite?: UserId[] | null) {
-    return this.transport.invoke({
-      action: 'CreateRoom',
-      params: { name, encrypted, invite: invite ?? null },
-    });
+  async getUserProfile(account_id: AccountId, user_id: UserId) {
+    return this.transport.invoke({ action: 'GetUserProfile', params: { account_id, user_id } });
+  }
+
+  /** The private note the user keeps about a chat; local, never sent to the network. */
+  async getRoomNote(room_id: RoomId) {
+    return this.transport.invoke({ action: 'GetRoomNote', params: { room_id } });
+  }
+
+  /** Stores the private note; an empty note deletes it. */
+  async setRoomNote(room_id: RoomId, note: string) {
+    return this.transport.invoke({ action: 'SetRoomNote', params: { room_id, note } });
+  }
+
+  async getTagCatalog() {
+    return this.transport.invoke({ action: 'GetTagCatalog' });
+  }
+
+  async createRoomTag(name: string, colour: TagColour) {
+    return this.transport.invoke({ action: 'CreateRoomTag', params: { name, colour } });
+  }
+
+  /** Renames and/or recolours one tag; at least one of `name`/`colour` must be set. */
+  async renameRoomTag(id: string, name: string | null = null, colour: TagColour | null = null) {
+    return this.transport.invoke({ action: 'RenameRoomTag', params: { id, name, colour } });
+  }
+
+  /** Sets the catalogue's display order; `ids` must list every tag exactly once. */
+  async reorderRoomTags(ids: string[]) {
+    return this.transport.invoke({ action: 'ReorderRoomTags', params: { ids } });
+  }
+
+  async setRoomTag(room_id: RoomId, tag_id: string, enabled: boolean) {
+    return this.transport.invoke({ action: 'SetRoomTag', params: { room_id, tag_id, enabled } });
+  }
+
+  async deleteRoomTag(tag_id: string) {
+    return this.transport.invoke({ action: 'DeleteRoomTag', params: { tag_id } });
+  }
+
+  // === Chat flags ===
+
+  async markRoomRead(room_id: RoomId) {
+    return this.transport.invoke({ action: 'MarkRoomRead', params: { room_id } });
+  }
+
+  async setRoomPinned(room_id: RoomId, pinned: boolean) {
+    return this.transport.invoke({ action: 'SetRoomPinned', params: { room_id, pinned } });
+  }
+
+  async setRoomArchived(room_id: RoomId, archived: boolean) {
+    return this.transport.invoke({ action: 'SetRoomArchived', params: { room_id, archived } });
+  }
+
+  async setRoomMarkedUnread(room_id: RoomId, unread: boolean) {
+    return this.transport.invoke({ action: 'SetRoomMarkedUnread', params: { room_id, unread } });
+  }
+
+  /** Mutes until `muted_until` (ms since the Unix epoch); `null` unmutes. */
+  async setRoomMuted(room_id: RoomId, muted_until: number | null = null) {
+    return this.transport.invoke({ action: 'SetRoomMuted', params: { room_id, muted_until } });
+  }
+
+  // === Local search and shared media ===
+
+  /** Shared media, files or links of a chat, newest first; `before` is the previous `next` cursor. */
+  async getRoomMedia(
+    room_id: RoomId,
+    kind: RoomMediaKind,
+    before: string | null = null,
+    limit = 50
+  ) {
+    return this.transport.invoke({ action: 'GetRoomMedia', params: { room_id, kind, before, limit } });
+  }
+
+  async searchRoomMessages(room_id: RoomId, query: string, limit = 50) {
+    return this.transport.invoke({ action: 'SearchRoomMessages', params: { room_id, query, limit } });
+  }
+
+  async searchAllMessages(query: string, limit: number | null = null) {
+    return this.transport.invoke({ action: 'SearchAllMessages', params: { query, limit } });
+  }
+
+  async clearMediaCache() {
+    return this.transport.invoke({ action: 'ClearMediaCache' });
+  }
+
+  /** Reconnects every account's connector; live updates resume as they catch up. */
+  async refreshSync() {
+    return this.transport.invoke({ action: 'RefreshSync' });
   }
 
   // === Timeline ===
 
   async subscribeTimeline(room_id: RoomId) {
-    return this.transport.invoke({
-      action: 'SubscribeTimeline',
-      params: { room_id },
-    });
+    return this.transport.invoke({ action: 'SubscribeTimeline', params: { room_id } });
   }
 
-  /** Streams one thread (root plus replies) as diffs under the returned subscription id. */
-  async subscribeThread(room_id: RoomId, thread_root_event_id: EventId) {
-    return this.transport.invoke({
-      action: 'SubscribeThread',
-      params: { room_id, thread_root_event_id },
-    });
+  /** Aborts the timeline subscription of one chat and drops its cached timeline. */
+  async closeTimeline(room_id: RoomId) {
+    return this.transport.invoke({ action: 'CloseTimeline', params: { room_id } });
   }
 
   async paginateBackwards(room_id: RoomId, count: number) {
-    return this.transport.invoke({
-      action: 'PaginateBackwards',
-      params: { room_id, count },
-    });
+    return this.transport.invoke({ action: 'PaginateBackwards', params: { room_id, count } });
   }
 
+  /** Queues a text message; the local echo arrives through `TimelineDiff`. */
   async sendText(
     room_id: RoomId,
     body: string,
-    opts?: {
-      markdown?: boolean | null;
-      reply_to?: EventId | null;
-      mentions?: UserId[] | null;
-      txn_id?: string | null;
-      in_thread_root?: EventId | null;
-      mention_room?: boolean;
-    }
+    reply_to: EventId | null = null,
+    txn_id: string | null = null
   ) {
+    return this.transport.invoke({ action: 'SendText', params: { room_id, body, reply_to, txn_id } });
+  }
+
+  async editMessage(room_id: RoomId, event_id: EventId, body: string) {
+    return this.transport.invoke({ action: 'EditMessage', params: { room_id, event_id, body } });
+  }
+
+  async deleteMessage(room_id: RoomId, event_id: EventId, for_everyone: boolean) {
     return this.transport.invoke({
-      action: 'SendText',
-      params: {
-        room_id,
-        body,
-        markdown: opts?.markdown ?? null,
-        reply_to: opts?.reply_to ?? null,
-        mentions: opts?.mentions ?? null,
-        txn_id: opts?.txn_id ?? null,
-        in_thread_root: opts?.in_thread_root ?? null,
-        mention_room: opts?.mention_room ?? false,
-      },
+      action: 'DeleteMessage',
+      params: { room_id, event_id, for_everyone },
     });
   }
 
-  async editMessage(room_id: RoomId, event_id: EventId, body: string, markdown?: boolean | null) {
-    return this.transport.invoke({
-      action: 'EditMessage',
-      params: {
-        room_id,
-        event_id,
-        body,
-        markdown: markdown ?? null,
-      },
-    });
-  }
-
-  async redactEvent(room_id: RoomId, event_id: EventId, reason?: string | null) {
-    return this.transport.invoke({
-      action: 'RedactEvent',
-      params: { room_id, event_id, reason: reason ?? null },
-    });
-  }
-
+  /** Adds the reaction `key`, or removes it when the user already reacted with it. */
   async toggleReaction(room_id: RoomId, event_id: EventId, key: string) {
-    return this.transport.invoke({
-      action: 'ToggleReaction',
-      params: { room_id, event_id, key },
-    });
+    return this.transport.invoke({ action: 'ToggleReaction', params: { room_id, event_id, key } });
   }
 
-  async sendPoll(
-    room_id: RoomId,
-    question: string,
-    answers: string[],
-    disclosed: boolean,
-    max_selections: number
-  ) {
-    return this.transport.invoke({
-      action: 'SendPoll',
-      params: { room_id, question, answers, disclosed, max_selections },
-    });
+  /** Forwards messages to one or more target chats, dropping replies and reactions. */
+  async forwardEvents(room_id: RoomId, event_ids: EventId[], targets: RoomId[]) {
+    return this.transport.invoke({ action: 'ForwardEvents', params: { room_id, event_ids, targets } });
   }
 
-  async respondToPoll(room_id: RoomId, poll_event_id: EventId, answer_ids: string[]) {
-    return this.transport.invoke({
-      action: 'RespondToPoll',
-      params: { room_id, poll_event_id, answer_ids },
-    });
+  /** Saves a draft; empty text without a reply clears it. */
+  async saveDraft(room_id: RoomId, text: string, reply_to: EventId | null = null) {
+    return this.transport.invoke({ action: 'SaveDraft', params: { room_id, text, reply_to } });
   }
 
-  async endPoll(room_id: RoomId, poll_event_id: EventId) {
-    return this.transport.invoke({
-      action: 'EndPoll',
-      params: { room_id, poll_event_id },
-    });
+  async getDraft(room_id: RoomId) {
+    return this.transport.invoke({ action: 'GetDraft', params: { room_id } });
+  }
+
+  async listDrafts() {
+    return this.transport.invoke({ action: 'ListDrafts' });
   }
 
   async retrySend(room_id: RoomId, txn_id: string) {
-    return this.transport.invoke({
-      action: 'RetrySend',
-      params: { room_id, txn_id },
-    });
+    return this.transport.invoke({ action: 'RetrySend', params: { room_id, txn_id } });
   }
 
   async cancelSend(room_id: RoomId, txn_id: string) {
-    return this.transport.invoke({
-      action: 'CancelSend',
-      params: { room_id, txn_id },
-    });
+    return this.transport.invoke({ action: 'CancelSend', params: { room_id, txn_id } });
   }
 
   async sendAttachment(
     room_id: RoomId,
     file_path: string,
-    opts?: { mime_type?: string | null; body?: string | null; txn_id?: string | null }
+    mime_type: string | null = null,
+    body: string | null = null,
+    txn_id: string | null = null
   ) {
     return this.transport.invoke({
       action: 'SendAttachment',
-      params: {
-        room_id,
-        file_path,
-        mime_type: opts?.mime_type ?? null,
-        body: opts?.body ?? null,
-        txn_id: opts?.txn_id ?? null,
-      },
+      params: { room_id, file_path, mime_type, body, txn_id },
     });
   }
 
-  async sendVoice(
-    room_id: RoomId,
-    file_path: string,
-    duration_ms: number,
-    waveform: number[],
-    txn_id?: string | null
-  ) {
+  /** Sends a voice note; the file stays the user's, the engine copies it into the store. */
+  async sendVoice(room_id: RoomId, file_path: string, duration_ms: number, txn_id: string | null = null) {
     return this.transport.invoke({
       action: 'SendVoice',
-      params: {
-        room_id,
-        file_path,
-        duration_ms,
-        waveform,
-        txn_id: txn_id ?? null,
-      },
+      params: { room_id, file_path, duration_ms, txn_id },
     });
   }
 
-  async sendLocation(
-    room_id: RoomId,
-    latitude: number,
-    longitude: number,
-    opts?: {
-      accuracy_m?: number | null;
-      description?: string | null;
-    }
-  ) {
-    return this.transport.invoke({
-      action: 'SendLocation',
-      params: {
-        room_id,
-        latitude,
-        longitude,
-        accuracy_m: opts?.accuracy_m ?? null,
-        description: opts?.description ?? null,
-      },
-    });
-  }
-
-  async startLiveLocation(room_id: RoomId, duration_ms: number) {
-    return this.transport.invoke({
-      action: 'StartLiveLocation',
-      params: { room_id, duration_ms },
-    });
-  }
-
-  async sendLocationBeacon(room_id: RoomId, geo_uri: string) {
-    return this.transport.invoke({
-      action: 'SendLocationBeacon',
-      params: { room_id, geo_uri },
-    });
-  }
-
-  async stopLiveLocation(room_id: RoomId) {
-    return this.transport.invoke({
-      action: 'StopLiveLocation',
-      params: { room_id },
-    });
-  }
-
-  async setEventPinned(room_id: RoomId, event_id: EventId, pinned: boolean) {
-    return this.transport.invoke({
-      action: 'SetEventPinned',
-      params: { room_id, event_id, pinned },
-    });
-  }
-
-  async getPinnedEvents(room_id: RoomId) {
-    return this.transport.invoke({
-      action: 'GetPinnedEvents',
-      params: { room_id },
-    });
-  }
-
-  async forwardEvents(room_id: RoomId, event_ids: EventId[], targets: RoomId[]) {
-    return this.transport.invoke({
-      action: 'ForwardEvents',
-      params: { room_id, event_ids, targets },
-    });
-  }
-
-  /** Restart background sync and rebuild open timelines (the manual Refresh). */
-  async refreshSync() {
-    return this.transport.invoke({ action: 'RefreshSync' });
-  }
-
-  async setRoomFavourite(room_id: RoomId, favourite: boolean) {
-    return this.transport.invoke({
-      action: 'SetRoomFavourite',
-      params: { room_id, favourite },
-    });
-  }
-
-  async setRoomLowPriority(room_id: RoomId, low_priority: boolean) {
-    return this.transport.invoke({
-      action: 'SetRoomLowPriority',
-      params: { room_id, low_priority },
-    });
-  }
-
-  async setRoomMarkedUnread(room_id: RoomId, unread: boolean) {
-    return this.transport.invoke({
-      action: 'SetRoomMarkedUnread',
-      params: { room_id, unread },
-    });
-  }
-
-  async saveDraft(
-    room_id: RoomId,
-    text: string,
-    opts?: {
-      reply_to?: EventId | null;
-      edit_of?: EventId | null;
-    }
-  ) {
-    return this.transport.invoke({
-      action: 'SaveDraft',
-      params: {
-        room_id,
-        text,
-        reply_to: opts?.reply_to ?? null,
-        edit_of: opts?.edit_of ?? null,
-      },
-    });
-  }
-
-  async getDraft(room_id: RoomId) {
-    return this.transport.invoke({
-      action: 'GetDraft',
-      params: { room_id },
-    });
-  }
-
-  async listDrafts() {
-    return this.transport.invoke({
-      action: 'ListDrafts',
-    });
-  }
+  /** Reports that the user read the chat up to `event_id`. */
   async markRead(room_id: RoomId, event_id: EventId) {
-    return this.transport.invoke({
-      action: 'MarkRead',
-      params: { room_id, event_id },
-    });
+    return this.transport.invoke({ action: 'MarkRead', params: { room_id, event_id } });
   }
 
   async setTyping(room_id: RoomId, typing: boolean) {
-    return this.transport.invoke({
-      action: 'SetTyping',
-      params: { room_id, typing },
-    });
+    return this.transport.invoke({ action: 'SetTyping', params: { room_id, typing } });
   }
 
   // === Media ===
 
-  async getMedia(
-    source: MediaSource,
-    kind: 'thumbnail' | 'file',
-    opts?: { width?: number | null; height?: number | null; mime_type?: string | null }
-  ) {
-    return this.transport.invoke({
-      action: 'GetMedia',
-      params: {
-        source,
-        kind,
-        width: opts?.width ?? null,
-        height: opts?.height ?? null,
-        mime_type: opts?.mime_type ?? null,
-      },
-    });
+  /** Fetches a stored media object into the local file cache and returns its path. */
+  async getMedia(source: MediaSource, kind: 'thumbnail' | 'file', mime_type: string | null = null) {
+    return this.transport.invoke({ action: 'GetMedia', params: { source, kind, mime_type } });
   }
 
-  // === Crypto ===
-
-  async requestSelfVerification() {
-    return this.transport.invoke({
-      action: 'RequestSelfVerification',
-    });
-  }
-
-  async acceptVerification(user_id: UserId, device_id: string) {
-    return this.transport.invoke({
-      action: 'AcceptVerification',
-      params: { user_id, device_id },
-    });
-  }
-
-  async startSas(user_id: UserId, device_id: string) {
-    return this.transport.invoke({
-      action: 'StartSas',
-      params: { user_id, device_id },
-    });
-  }
-
-  async confirmSas(user_id: UserId, device_id: string) {
-    return this.transport.invoke({
-      action: 'ConfirmSas',
-      params: { user_id, device_id },
-    });
-  }
-
-  async cancelVerification(user_id: UserId, device_id: string) {
-    return this.transport.invoke({
-      action: 'CancelVerification',
-      params: { user_id, device_id },
-    });
-  }
-
-  async getRecoveryStatus() {
-    return this.transport.invoke({
-      action: 'GetRecoveryStatus',
-    });
-  }
-
-  /** Returns the recovery key in the response payload; show it once. */
-  async enableRecovery(password: string | null = null) {
-    return this.transport.invoke({
-      action: 'EnableRecovery',
-      params: { password },
-    });
-  }
-
-  async recoverWithKey(recovery_key: string) {
-    return this.transport.invoke({
-      action: 'RecoverWithKey',
-      params: { recovery_key },
-    });
-  }
-
-  async resetRecovery(password: string | null = null) {
-    return this.transport.invoke({
-      action: 'ResetRecovery',
-      params: { password },
-    });
-  }
-
-  // === Spaces ===
-
-  async getSpaceParents() {
-    return this.transport.invoke({
-      action: 'GetSpaceParents',
-    });
-  }
-
-  // === Settings & Themes ===
+  // === Settings and themes ===
 
   async listThemes() {
-    return this.transport.invoke({
-      action: 'ListThemes',
-    });
+    return this.transport.invoke({ action: 'ListThemes' });
   }
 
   async getTheme(id: string) {
-    return this.transport.invoke({
-      action: 'GetTheme',
-      params: { id },
-    });
+    return this.transport.invoke({ action: 'GetTheme', params: { id } });
   }
 
   async setActiveTheme(id: string) {
-    return this.transport.invoke({
-      action: 'SetActiveTheme',
-      params: { id },
-    });
+    return this.transport.invoke({ action: 'SetActiveTheme', params: { id } });
   }
 
   async getSettings() {
-    return this.transport.invoke({
-      action: 'GetSettings',
-    });
+    return this.transport.invoke({ action: 'GetSettings' });
   }
 
-  async setSetting(key: string, value: unknown) {
-    return this.transport.invoke({
-      action: 'SetSetting',
-      params: {
-        key,
-        value_json: JSON.stringify(value),
-      },
-    });
-  }
-
-  // === Account & Safety ===
-
-  async deleteDevices(device_ids: string[], password: string | null = null) {
-    return this.transport.invoke({
-      action: 'DeleteDevices',
-      params: { device_ids, password },
-    });
-  }
-
-  async kickUser(room_id: RoomId, user_id: UserId, reason: string | null = null) {
-    return this.transport.invoke({
-      action: 'KickUser',
-      params: { room_id, user_id, reason },
-    });
-  }
-
-  async banUser(room_id: RoomId, user_id: UserId, reason: string | null = null) {
-    return this.transport.invoke({
-      action: 'BanUser',
-      params: { room_id, user_id, reason },
-    });
-  }
-
-  async unbanUser(room_id: RoomId, user_id: UserId, reason: string | null = null) {
-    return this.transport.invoke({
-      action: 'UnbanUser',
-      params: { room_id, user_id, reason },
-    });
-  }
-
-  async setPowerLevel(room_id: RoomId, user_id: UserId, level: number) {
-    return this.transport.invoke({
-      action: 'SetPowerLevel',
-      params: { room_id, user_id, level },
-    });
-  }
-
-  async ignoreUser(user_id: UserId) {
-    return this.transport.invoke({
-      action: 'IgnoreUser',
-      params: { user_id },
-    });
-  }
-
-  async unignoreUser(user_id: UserId) {
-    return this.transport.invoke({
-      action: 'UnignoreUser',
-      params: { user_id },
-    });
-  }
-
-  async listIgnoredUsers() {
-    return this.transport.invoke({
-      action: 'ListIgnoredUsers',
-    });
-  }
-
-  async reportEvent(room_id: RoomId, event_id: EventId, reason: string | null = null) {
-    return this.transport.invoke({
-      action: 'ReportEvent',
-      params: { room_id, event_id, reason },
-    });
-  }
-
-  async searchAllMessages(query: string, next_batch: string | null = null, limit?: number) {
-    return this.transport.invoke({
-      action: 'SearchAllMessages',
-      params: { query, next_batch, limit },
-    });
+  /** Stores one setting; `value_json` is the JSON text the engine persists. */
+  async setSetting(key: string, value_json: string) {
+    return this.transport.invoke({ action: 'SetSetting', params: { key, value_json } });
   }
 }

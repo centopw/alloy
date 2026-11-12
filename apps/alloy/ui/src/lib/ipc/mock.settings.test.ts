@@ -1,170 +1,137 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { MockTransport } from './mock.js';
+import { DEMO_ROOM } from '../mock/seed.js';
+import type { EngineEvent, EngineResponse } from '../generated/index.js';
 
-async function ownProfile(mock: MockTransport) {
-  const res = await mock.invoke({ action: 'GetOwnProfile' });
-  if (res.type !== 'OwnProfile') throw new Error(`unexpected response ${res.type}`);
-  return res.payload.profile;
+function expectResponse<T extends EngineResponse['type']>(
+  res: EngineResponse,
+  type: T
+): Extract<EngineResponse, { type: T }> {
+  if (res.type !== type) throw new Error(`expected ${type}, got ${res.type}`);
+  return res as Extract<EngineResponse, { type: T }>;
 }
 
-async function listDevices(mock: MockTransport) {
-  const res = await mock.invoke({ action: 'ListDevices' });
-  if (res.type !== 'Devices') throw new Error(`unexpected response ${res.type}`);
-  return res.payload.devices;
+async function settings(mock: MockTransport): Promise<Record<string, unknown>> {
+  const res = expectResponse(await mock.invoke({ action: 'GetSettings' }), 'SettingsRetrieved');
+  return JSON.parse(res.payload.settings_json) as Record<string, unknown>;
 }
 
-async function sessionInfo(mock: MockTransport) {
-  const res = await mock.invoke({ action: 'GetSessionInfo' });
-  if (res.type !== 'SessionInfo') throw new Error(`unexpected response ${res.type}`);
-  return res.payload.info;
-}
-
-async function clearMediaCache(mock: MockTransport) {
-  const res = await mock.invoke({ action: 'ClearMediaCache' });
-  if (res.type !== 'MediaCacheCleared') throw new Error(`unexpected response ${res.type}`);
-  return res.payload.freed_bytes;
-}
-
-describe('MockTransport settings commands', () => {
-  it('starts with the default notification rules', async () => {
+describe('MockTransport settings and themes', () => {
+  it('starts with the seeded settings and stores a new key as JSON', async () => {
     const mock = new MockTransport();
-    const res = await mock.invoke({ action: 'GetNotificationSettings' });
-    expect(res).toEqual({
-      type: 'NotificationSettings',
-      payload: {
-        settings: {
-          one_to_one: 'All',
-          group: 'Mentions',
-          room_mention: true,
-          user_mention: true,
-          invite: true,
-        },
-      },
-    });
+    expect(await settings(mock)).toEqual({ notificationLevel: 'all', compactRows: false });
+
+    const set = expectResponse(
+      await mock.invoke({ action: 'SetSetting', params: { key: 'fontScale', value_json: '120' } }),
+      'SettingSet'
+    );
+    expect(set.payload.key).toBe('fontScale');
+    expect(await settings(mock)).toEqual({ notificationLevel: 'all', compactRows: false, fontScale: 120 });
   });
 
-  it('updates the account-wide default and mention rules', async () => {
+  it('refuses a setting value that is not JSON', async () => {
     const mock = new MockTransport();
-    await mock.invoke({
-      action: 'SetDefaultNotificationLevel',
-      params: { one_to_one: false, level: 'Mute' },
-    });
-    await mock.invoke({
-      action: 'SetMentionRules',
-      params: { room_mention: false, user_mention: null, invite: null },
-    });
-    const res = await mock.invoke({ action: 'GetNotificationSettings' });
-    expect(res).toEqual({
-      type: 'NotificationSettings',
-      payload: {
-        settings: {
-          one_to_one: 'All',
-          group: 'Mute',
-          room_mention: false,
-          user_mention: true,
-          invite: true,
-        },
-      },
-    });
-  });
-
-  it('room level follows its category default until overridden', async () => {
-    const mock = new MockTransport();
-    const group = '!general:alloy.chat';
-    const dm = '!bob:alloy.chat';
-    const read = (roomId: string) =>
-      mock.invoke({ action: 'GetRoomNotificationLevel', params: { room_id: roomId } });
-
-    expect(await read(group)).toEqual({
-      type: 'RoomNotificationLevel',
-      payload: { room_id: group, level: 'Mentions', is_default: true },
-    });
-    expect(await read(dm)).toEqual({
-      type: 'RoomNotificationLevel',
-      payload: { room_id: dm, level: 'All', is_default: true },
-    });
-
-    await mock.invoke({
-      action: 'SetRoomNotificationLevel',
-      params: { room_id: group, level: 'Mute' },
-    });
-    expect(await read(group)).toEqual({
-      type: 'RoomNotificationLevel',
-      payload: { room_id: group, level: 'Mute', is_default: false },
-    });
-
-    await mock.invoke({
-      action: 'SetDefaultNotificationLevel',
-      params: { one_to_one: false, level: 'All' },
-    });
-    expect(await read(group)).toEqual({
-      type: 'RoomNotificationLevel',
-      payload: { room_id: group, level: 'Mute', is_default: false },
-    });
-
-    await mock.invoke({
-      action: 'SetRoomNotificationLevel',
-      params: { room_id: group, level: null },
-    });
-    expect(await read(group)).toEqual({
-      type: 'RoomNotificationLevel',
-      payload: { room_id: group, level: 'All', is_default: true },
-    });
-  });
-
-  it('trims the display name and rejects an empty one', async () => {
-    const mock = new MockTransport();
-    await mock.invoke({ action: 'SetDisplayName', params: { name: '  Alicia  ' } });
-    expect((await ownProfile(mock)).display_name).toBe('Alicia');
-
     await expect(
-      mock.invoke({ action: 'SetDisplayName', params: { name: '   ' } }),
+      mock.invoke({ action: 'SetSetting', params: { key: 'fontScale', value_json: '120%' } })
     ).rejects.toMatchObject({ code: 'invalid_argument' });
-
-    expect((await ownProfile(mock)).display_name).toBe('Alicia');
+    expect(await settings(mock)).toEqual({ notificationLevel: 'all', compactRows: false });
   });
 
-  it('sets and clears the own avatar', async () => {
+  it('lists the themes and returns the CSS of one', async () => {
     const mock = new MockTransport();
-    expect((await ownProfile(mock)).avatar_url).toBeNull();
 
-    await mock.invoke({ action: 'SetOwnAvatar', params: { file_path: '/tmp/avatar.png' } });
-    expect((await ownProfile(mock)).avatar_url).toBe('mxc://alloy.chat/mock-own-avatar');
+    const themes = expectResponse(await mock.invoke({ action: 'ListThemes' }), 'ThemesList').payload.themes;
+    expect(themes).toEqual([
+      ['dark', 'Dark'],
+      ['light', 'Light'],
+      ['amoled', 'AMOLED'],
+    ]);
 
-    await mock.invoke({ action: 'SetOwnAvatar', params: { file_path: null } });
-    expect((await ownProfile(mock)).avatar_url).toBeNull();
-  });
+    const css = expectResponse(await mock.invoke({ action: 'GetTheme', params: { id: 'amoled' } }), 'ThemeCss');
+    expect(css.payload.css).toContain('--alloy-theme-id: "amoled"');
 
-  it('lists the current verified device first, with one current session', async () => {
-    const mock = new MockTransport();
-    const profile = await ownProfile(mock);
-    const devices = await listDevices(mock);
-
-    expect(devices).toHaveLength(3);
-    expect(devices.filter((d) => d.is_current)).toHaveLength(1);
-    expect(devices[0]).toMatchObject({
-      device_id: profile.device_id,
-      is_current: true,
-      verified: true,
+    await expect(mock.invoke({ action: 'GetTheme', params: { id: 'sepia' } })).rejects.toMatchObject({
+      code: 'not_found',
     });
-    expect(devices.some((d) => !d.verified)).toBe(true);
   });
 
-  it('reports this session keys with cross-signing and backup ready', async () => {
+  it('activates a known theme and rejects an unknown one', async () => {
     const mock = new MockTransport();
-    const profile = await ownProfile(mock);
-    const info = await sessionInfo(mock);
 
-    expect(info.device_id).toBe(profile.device_id);
-    expect(info.ed25519_key).not.toBeNull();
-    expect(info.curve25519_key).not.toBeNull();
-    expect(info.cross_signing_ready).toBe(true);
-    expect(info.backup_enabled).toBe(true);
+    expect((await mock.invoke({ action: 'SetActiveTheme', params: { id: 'light' } })).type).toBe('ThemeSetActive');
+    await expect(mock.invoke({ action: 'SetActiveTheme', params: { id: 'sepia' } })).rejects.toMatchObject({
+      code: 'not_found',
+    });
   });
 
-  it('frees the media cache once and reports zero afterwards', async () => {
+  it('answers the media-cache clear and the manual sync refresh', async () => {
     const mock = new MockTransport();
-    expect(await clearMediaCache(mock)).toBeGreaterThan(0);
-    expect(await clearMediaCache(mock)).toBe(0);
+    expect((await mock.invoke({ action: 'ClearMediaCache' })).type).toBe('MediaCacheCleared');
+    expect((await mock.invoke({ action: 'RefreshSync' })).type).toBe('SyncRefreshed');
+  });
+
+  it('reconnects every account on refresh and reports each transition', async () => {
+    const mock = new MockTransport();
+    const events: EngineEvent[] = [];
+    mock.subscribe((event) => events.push(event));
+    const accounts = expectResponse(await mock.invoke({ action: 'ListAccounts' }), 'AccountsList').payload.accounts;
+
+    await mock.invoke({ action: 'RefreshSync' });
+
+    await vi.waitFor(() => {
+      const connecting = events.filter(
+        (event) => event.type === 'ConnectionStatus' && event.payload.status === 'Connecting'
+      );
+      expect(connecting).toHaveLength(accounts.length);
+    });
+    await vi.waitFor(() => {
+      const connected = events.filter(
+        (event) => event.type === 'ConnectionStatus' && event.payload.status === 'Connected'
+      );
+      expect(new Set(connected.map((event) => (event.type === 'ConnectionStatus' ? event.payload.account_id : '')))).toEqual(
+        new Set(accounts.map((account) => account.id))
+      );
+    });
+  });
+
+  it('announces the connectors to the first subscriber', async () => {
+    const mock = new MockTransport();
+    const events: EngineEvent[] = [];
+    mock.subscribe((event) => events.push(event));
+
+    await vi.waitFor(() => {
+      const syncing = events.filter(
+        (event) => event.type === 'ConnectionStatus' && event.payload.status === 'Syncing'
+      );
+      expect(syncing).toHaveLength(2);
+    });
+    await vi.waitFor(() => {
+      const connected = events.filter(
+        (event) => event.type === 'ConnectionStatus' && event.payload.status === 'Connected'
+      );
+      expect(connected).toHaveLength(2);
+    });
+  });
+
+  it('stops streaming room-list diffs once the subscription is unsubscribed', async () => {
+    const mock = new MockTransport();
+    const diffs: EngineEvent[] = [];
+    const subscribed = expectResponse(
+      await mock.invoke({ action: 'SubscribeRoomList', params: { filter: null } }),
+      'RoomListSubscribed'
+    );
+    const subscriptionId = subscribed.payload.subscription_id;
+    mock.subscribe((event) => {
+      if (event.type === 'RoomListDiff' && event.payload.subscription_id === subscriptionId) {
+        diffs.push(event);
+      }
+    });
+    await vi.waitFor(() => expect(diffs).toHaveLength(1));
+
+    expect((await mock.invoke({ action: 'Unsubscribe', params: { subscription_id: subscriptionId } })).type).toBe(
+      'Unsubscribed'
+    );
+    await mock.invoke({ action: 'SetRoomPinned', params: { room_id: DEMO_ROOM.telegramSam, pinned: true } });
+    expect(diffs).toHaveLength(1);
   });
 });

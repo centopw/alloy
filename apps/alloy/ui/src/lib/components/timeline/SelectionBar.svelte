@@ -3,15 +3,18 @@
   import { Copy, Forward, Trash2, X } from '$lib/icons';
   import { pushBack } from '$lib/platform/backstack';
   import { forwardStore } from '$lib/stores/forward.svelte';
-  import { membersStore } from '$lib/stores/members.svelte';
   import { timelineStore } from '$lib/stores/timeline.svelte';
   import { quote } from './ReplyQuote.svelte';
 
   import { t } from '$lib/i18n';
   const items = $derived(timelineStore.selectedItems);
   const count = $derived(timelineStore.selectedIds.length);
-  const canRedactOthers = $derived(membersStore.detailsOf(timelineStore.roomId)?.can_redact_others ?? false);
-  const canDelete = $derived(items.length > 0 && items.every((i) => i.is_own || canRedactOthers));
+  /** Deleting is only offered when the account may delete for everyone and the rows are sent. */
+  const canDelete = $derived(
+    timelineStore.capabilities?.delete_for_everyone === true &&
+      items.length > 0 &&
+      items.every((i) => !!i.event_id && i.send_state.status === 'Sent')
+  );
   const copyable = $derived(items.some((i) => quote(i) !== ''));
 
   // Android Back and Escape leave selection mode.

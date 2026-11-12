@@ -1,12 +1,11 @@
 import { SvelteMap } from 'svelte/reactivity';
 import { client } from '../ipc/index.js';
 import type { UserId } from '../generated/index.js';
-import { session } from './session.svelte.js';
 
 /**
- * Matrix sends the full set of users typing in a room with each notice, so a notice replaces
- * the previous one. Matrix expires typing after at most 30 s; this fallback drops a room whose
- * final empty notice never arrived (for example across a reconnect).
+ * The engine sends the full set of users typing in a room with each notice, so a notice replaces
+ * the previous one. Connectors expire typing on their own; this fallback drops a room whose final
+ * empty notice never arrived (for example across a reconnect).
  */
 export const TYPING_EXPIRY_MS = 30_000;
 
@@ -41,11 +40,10 @@ class TypingStore {
     );
   }
 
-  /** Users typing in a room, excluding the signed-in user. */
+  /** Users typing in a room; the engine leaves the signed-in user out of the notice. */
   usersIn(roomId: string | null): UserId[] {
     if (!roomId) return [];
-    const me = session.account?.user_id;
-    return (this.rooms.get(roomId) ?? []).filter((id) => id !== me);
+    return [...(this.rooms.get(roomId) ?? [])];
   }
 
   private cancelExpiry(roomId: string) {

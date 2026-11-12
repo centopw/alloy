@@ -6,8 +6,8 @@
   import type { TimelineItemDto } from '$lib/generated';
   import { timelineStore, findRowIndexByEventId } from '$lib/stores/timeline.svelte';
   import { membersStore } from '$lib/stores/members.svelte';
+  import { roomsStore } from '$lib/stores/rooms.svelte';
   import { prefs } from '$lib/stores/prefs.svelte';
-  import { isHiddenState } from '$lib/content/stateEvents';
   import TypingIndicator from './TypingIndicator.svelte';
   import Icon from '$lib/icons/Icon.svelte';
   import { ArrowDown, AtSign } from '$lib/icons';
@@ -38,9 +38,8 @@
     roomId: string;
     title: string;
     isDirect: boolean;
-    encrypted: boolean;
   }
-  let { roomId, title, isDirect, encrypted }: Props = $props();
+  let { roomId, title, isDirect }: Props = $props();
 
   let vlist: VListHandle | undefined = $state();
   let viewportEl = $state<HTMLElement | undefined>();
@@ -50,23 +49,18 @@
   /** Messages from others that arrived while scrolled up, and which of them mention the user. */
   let unseen = $state(0);
   let mentionIds = $state<string[]>([]);
+  /** The signed-in user's display name: a mention is the plain `@Label` token in the message text. */
+  const mentionLabels = $derived(
+    roomsStore.activeAccount?.display_name ? [roomsStore.activeAccount.display_name] : []
+  );
   /** The one polite live region of the conversation; a settled arrival batch writes its text. */
   let announcement = $state('');
   /** Coalesces incoming messages, so a chatty room speaks once per burst instead of once per row. */
   const announcer = new AnnouncementBatcher();
   let announceTimer: ReturnType<typeof setTimeout> | undefined;
 
-  // Virtual items (read marker, timeline start) carry no content worth a row. Hidden state events
-  // and removed messages are dropped here, before virtualization, so VList indices match rows.
-  const rows = $derived(
-    timelineStore.items.filter((i) => {
-      const c = i.content;
-      if (c.kind === 'Virtual') return false;
-      if (c.kind === 'RoomState') return !isHiddenState(c.data.state_type, prefs);
-      if (c.kind === 'Redacted') return prefs.showRemovedPlaceholder;
-      return true;
-    }),
-  );
+  // Every stored item is a row: day dividers separate days and system lines render as neutral text.
+  const rows = $derived(timelineStore.items);
   /** Runs of captionless pictures fold into one grid row. */
   const albums = $derived(groupAlbums(rows));
 
@@ -89,7 +83,7 @@
     switch (item.content.kind) {
       case 'Media': {
         if (item.content.data.voice) return t('timeline-preview-voice-message');
-        switch (item.content.data.media_kind ?? 'file') {
+        switch (item.content.data.media_kind) {
           case 'image':
             return t('timeline-preview-photo');
           case 'video':
@@ -102,14 +96,12 @@
             return t('timeline-preview-file');
         }
       }
-      case 'Poll':
-        return t('timeline-preview-poll');
       case 'Location':
-        return t('location-card-location');
-      case 'Redacted':
+        return t('chat-location');
+      case 'Deleted':
         return t('message-row-message-deleted');
-      case 'UnableToDecrypt':
-        return t('timeline-preview-unreadable-message');
+      case 'System':
+        return t('chat-system-message');
       default:
         return t('timeline-preview-message');
     }
@@ -206,7 +198,7 @@
     const id = roomId;
     untrack(() => {
       void membersStore.loadMembers(id).catch(() => {
-        // Rows fall back to the Matrix ID localpart until the list loads.
+        // Rows fall back to the opaque network user id until the list loads.
       });
     });
   });
@@ -249,7 +241,7 @@
       // Only rows after the old last row are new messages; history loaded above, or rows inserted in the
       // middle, must not raise the "jump to latest" count.
       if (appended && !ownSend && !atBottom && !sticky) {
-        const arrived = countArrivals(change.arrived);
+        const arrived = countArrivals(change.arrived, mentionLabels);
         unseen += arrived.count;
         mentionIds = [...mentionIds, ...arrived.mentions];
       }
@@ -532,7 +524,7 @@
   }
 </script>
 
-<section class="timeline" aria-label={t('timeline-conversation', { title: title, kind: isDirect ? 'direct' : 'room', privacy: encrypted ? 'encrypted' : 'plain' })}>
+<section class="timeline" aria-label={t('chat-timeline-label', { title, kind: isDirect ? t('chat-kind-direct') : t('chat-kind-group') })}>
   <!-- A layout and scroll-input wrapper only: the accessible structure lives on the `feed` inside. -->
   <div class="viewport" role="presentation" bind:this={viewportEl} bind:clientHeight={viewportHeight} onpointerdown={onViewportPointerDown} onwheel={onUserScroll} ontouchstart={onUserScroll} onfocusin={onViewportFocus} use:contextmenu={backgroundItems}>
     {#if timelineStore.loading && rows.length === 0}

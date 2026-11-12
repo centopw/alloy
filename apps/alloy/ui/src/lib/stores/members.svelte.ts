@@ -37,9 +37,9 @@ class MembersStore {
     this.details[roomId] = expect(res, 'RoomDetailsRetrieved').payload.details;
   }
 
-  /** Display name for mentions and lists: display name, else the localpart. */
+  /** Display name for mentions and lists: display name, else the opaque network user id. */
   static label(m: RoomMemberDto): string {
-    return m.display_name?.trim() || m.user_id.replace(/^@/, '').split(':')[0];
+    return m.display_name?.trim() || m.user_id;
   }
 
   reset() {

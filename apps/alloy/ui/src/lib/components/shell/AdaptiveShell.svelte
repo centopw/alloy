@@ -1,30 +1,21 @@
 <script lang="ts">
   import { onMount, tick, untrack } from 'svelte';
-  import SpaceRail from './SpaceRail.svelte';
   import Sidebar from './Sidebar.svelte';
   import ChatHeader from './ChatHeader.svelte';
-  import SpaceChips from './SpaceChips.svelte';
   import MobileTabBar from './MobileTabBar.svelte';
   import RoomInfoPanel from './RoomInfoPanel.svelte';
   import RoomSearchPanel from './RoomSearchPanel.svelte';
   import CommandPalette from './CommandPalette.svelte';
   import Timeline from '../timeline/Timeline.svelte';
-  import ThreadPanel from '../timeline/ThreadPanel.svelte';
   import Composer from '../composer/Composer.svelte';
   import UploadStrip from '../composer/UploadStrip.svelte';
-  import PinnedBar from '../timeline/PinnedBar.svelte';
   import SelectionBar from '../timeline/SelectionBar.svelte';
   import ForwardDialog from '../timeline/ForwardDialog.svelte';
   import DeleteConfirm from '../timeline/DeleteConfirm.svelte';
-  import ReportConfirm from '../timeline/ReportConfirm.svelte';
-  import LiveLocationBanner from '../timeline/LiveLocationBanner.svelte';
   import { timelineStore } from '$lib/stores/timeline.svelte';
   import { startMuteTimer } from '$lib/stores/muteTimer.svelte';
   import ResizeHandle from '../common/ResizeHandle.svelte';
-  import NewRoomDialog from './NewRoomDialog.svelte';
-  import DirectoryDialog from './DirectoryDialog.svelte';
   import SettingsDialog from '../settings/SettingsDialog.svelte';
-  import VerificationDialog from '../settings/VerificationDialog.svelte';
   import Hud from '../dev/Hud.svelte';
   import ConnectionBanner from './ConnectionBanner.svelte';
   import { connectivity } from '$lib/stores/connectivity.svelte';
@@ -36,16 +27,12 @@
   import { roomInfo } from '$lib/stores/roomInfo.svelte';
   import { layout, LAYOUT_LIMITS } from '$lib/stores/layout.svelte';
   import { ui } from '$lib/stores/ui.svelte';
-  import { threadStore } from '$lib/stores/thread.svelte';
-  import { verification } from '$lib/stores/verification.svelte';
   import { prefs, installPrefsEffects } from '$lib/stores/prefs.svelte';
   import { notifier } from '$lib/stores/notifier.svelte';
-  import { notificationSettings } from '$lib/stores/notificationSettings.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
   import { updatesStore } from '$lib/stores/updates.svelte';
   import { focusComposer, shouldFocusComposer } from '$lib/platform/typeToFocus';
-  import { extractOpenRoomId, setPushPreview, takePendingRoom } from '$lib/platform/push';
-  import { pushStore } from '$lib/stores/push.svelte';
+  import { extractOpenRoomId, takePendingRoom } from '$lib/platform/push';
   import { refreshStore } from '$lib/stores/refresh.svelte';
   import ChangelogDialog from '$lib/components/updates/ChangelogDialog.svelte';
   import { listen } from '@tauri-apps/api/event';
@@ -65,8 +52,6 @@
     settingsSection = section;
     settingsOpen = true;
   }
-  let newRoomOpen = $state(false);
-  let directoryOpen = $state(false);
   let pane = $state<'list' | 'chat'>('list');
   // Focus bookkeeping for the phone's one-screen-at-a-time layout: the room the chat was opened
   // from (so Back can return to its row) and whether the window is focused (the window title only
@@ -83,16 +68,10 @@
 
   const active = $derived(roomsStore.active);
   const activeId = $derived(roomsStore.active?.id ?? null);
-  // An open thread takes the side column (wide) or the full overlay (below 1100) and hides the
-  // room info panel while it is open.
-  const threadOpen = $derived(Boolean(threadStore.roomId && threadStore.rootEventId));
-  const threadMode = $derived<'column' | 'overlay' | 'none'>(
-    !threadOpen ? 'none' : breakpoint === 'wide' ? 'column' : 'overlay'
-  );
 
   // Room search and room info share the side slot. Opening one closes the other in the ui store.
   const infoPanel = $derived<'room-search' | 'room-info' | 'none'>(
-    !activeId || threadOpen ? 'none' : ui.roomSearchOpen ? 'room-search' : ui.roomInfoOpen ? 'room-info' : 'none'
+    !activeId ? 'none' : ui.roomSearchOpen ? 'room-search' : ui.roomInfoOpen ? 'room-info' : 'none'
   );
   // Wide: a side column. Medium: a rounded overlay over the chat. Narrow: the same overlay, shown
   // only while a chat is open (the list pane has no chat).
@@ -106,19 +85,11 @@
           : 'none'
   );
 
-  // The thread and the info slot are mutually exclusive, so at most one of them is the side panel.
-  const sideLayout = $derived<'column' | 'overlay' | 'none'>(threadMode !== 'none' ? threadMode : infoMode);
-
-  // Phones (<= 899px) swap the rail for a space strip and add a bottom tab bar.
+  // Phones (<= 899px) show one pane at a time and add a bottom tab bar.
   const phone = $derived(viewport.isPhone);
   const caps = $derived(capabilities(currentEnv(viewport.isPhone)));
   const tabActive = $derived<'chats' | 'settings'>(settingsOpen ? 'settings' : 'chats');
-  const unreadTotal = $derived(
-    roomsStore.rooms.reduce(
-      (sum, r) => sum + (r.is_space ? 0 : roomsStore.unreadOf(r)),
-      0
-    )
-  );
+  const unreadTotal = $derived(roomsStore.rooms.reduce((sum, r) => sum + roomsStore.unreadOf(r), 0));
 
   // Skip links: only offer a pane that is actually on screen. On phones the list and the
   // conversation replace each other, so the link to the hidden pane is not rendered at all. The
@@ -139,7 +110,6 @@
   });
 
   function showChats() {
-    directoryOpen = false;
     settingsOpen = false;
   }
 
@@ -154,14 +124,10 @@
     document.addEventListener('visibilitychange', syncWindowFocus);
     const teardownPrefs = installPrefsEffects();
     void prefs.load();
-    verification.listen();
     void roomsStore.start();
     const stopUpdates = updatesStore.start();
     void tags.load();
-    void verification.refreshRecovery();
-    void notificationSettings.load();
     notifier.start();
-    pushStore.start();
     const pendingRoom = takePendingRoom();
     if (pendingRoom) {
       pick(pendingRoom);
@@ -195,7 +161,6 @@
     const stopReconnect = connectivity.onReconnect(() => {
       void tags.load();
       void prefs.load();
-      void notificationSettings.load();
     });
     return () => {
       window.removeEventListener('focus', syncWindowFocus);
@@ -204,55 +169,29 @@
       window.removeEventListener('alloy-open-room', onOpenRoom);
       disposed = true;
       unlistenNativeRoom?.();
-      pushStore.stop();
       notifier.stop();
       stopConnectivity();
       void roomsStore.stop();
       stopUpdates();
       tags.reset();
       roomInfo.reset();
-      // Cached room timelines belong to the signed-in account, not to the install.
+      // Cached chat timelines belong to the signed-in account, not to the install.
       timelineStore.clearCache();
       roomsStore.clearReadMarks();
-      void prefs.signOut();
       teardownPrefs();
     };
   });
 
-  // The notifications Android posts while Alloy is closed follow "Show message preview" too.
-  $effect(() => {
-    if (pushStore.supported) setPushPreview(prefs.notifyPreview);
-  });
-
-  // Timed mutes end on their own; this restores the room's notifications.
+  // Timed mutes end on their own; this restores the chat's notifications.
   $effect(() => startMuteTimer());
 
-  // A thread belongs to the room it was opened in. Untracked so the effect runs only when the
-  // active room changes, not on every thread state update.
-  $effect(() => {
-    const roomId = activeId;
-    untrack(() => {
-      if (threadStore.roomId !== null && threadStore.roomId !== roomId) void threadStore.close();
-    });
-  });
-
-  // Room info and room search belong to the room they were opened for, the same way a thread does.
+  // Room info and room search belong to the room they were opened for.
   $effect(() => {
     void activeId;
     untrack(() => {
       if (ui.roomInfoOpen) ui.closeRoomInfo();
       if (ui.roomSearchOpen) ui.closeRoomSearch();
     });
-  });
-  // An open thread takes the side slot, so room search closes when a thread opens.
-  $effect(() => {
-    if (threadOpen && ui.roomSearchOpen) ui.closeRoomSearch();
-  });
-
-  // On phones an open thread takes a Back entry, so Back closes the thread before the chat.
-  $effect(() => {
-    if (!threadOpen || breakpoint !== 'narrow') return;
-    return pushBack(() => threadStore.close());
   });
 
   // On phones an open room info or room search overlay takes a Back entry, so Back closes it before the chat.
@@ -363,49 +302,31 @@
 <ChangelogDialog />
 <ForwardDialog />
 <DeleteConfirm />
-<ReportConfirm />
 <div
   class="shell"
   data-layout={breakpoint}
   data-pane={pane}
-  data-side={sideLayout}
-  data-thread={threadMode}
+  data-side={infoMode}
   data-sidebar={layout.sidebarCollapsed ? 'collapsed' : 'expanded'}
   style:--sidebar-width="{layout.sidebarWidth}px"
   style:--details-width="{layout.detailsWidth}px"
 >
   <div class="nav">
+    <div class="list-body" id="room-list" tabindex="-1">
+      <Sidebar onselect={pick} onsettings={openSettings} />
+    </div>
     {#if phone}
-      <SpaceChips onnew={() => (newRoomOpen = true)} />
-      <div class="list-body" id="room-list" tabindex="-1">
-        <Sidebar onselect={pick} onnew={() => (newRoomOpen = true)} onbrowse={() => (directoryOpen = true)} onsettings={openSettings} />
-      </div>
       <MobileTabBar
         active={tabActive}
         onchats={showChats}
         onsettings={() => openSettings()}
         unread={unreadTotal}
       />
-    {:else}
-      <SpaceRail
-        onsettings={openSettings}
-        collapsed={layout.sidebarCollapsed}
-        onexpand={() => layout.setSidebarCollapsed(false)}
-        oncollapse={() => layout.setSidebarCollapsed(true)}
-      />
-      <div class="list-body" id="room-list" tabindex="-1">
-        <Sidebar
-          onselect={pick}
-          onnew={() => (newRoomOpen = true)}
-          onbrowse={() => (directoryOpen = true)}
-          onsettings={openSettings}
-        />
-      </div>
     {/if}
   </div>
 
   {#if breakpoint !== 'narrow'}
-    <!-- The handle stays mounted while the list is hidden: dragging the rail's edge opens the
+    <!-- The handle stays mounted while the list is hidden: dragging the left edge opens the
          list again, so collapsing is never a one-way door. -->
     <div class="split split-sidebar">
       <ResizeHandle
@@ -436,9 +357,7 @@
       {:else}
         <ChatHeader room={active} onback={backToList} />
       {/if}
-      <PinnedBar roomId={activeId} />
-      <LiveLocationBanner />
-      <Timeline roomId={activeId} title={roomTitle(active)} isDirect={active.is_direct} encrypted={active.encrypted} />
+      <Timeline roomId={activeId} title={roomTitle(active)} isDirect={active.is_direct} />
       <UploadStrip roomId={activeId} />
       <Composer roomId={activeId} />
     {:else}
@@ -455,7 +374,7 @@
     {/if}
   </main>
 
-  {#if sideLayout === 'column'}
+  {#if infoMode === 'column'}
     <div class="split split-details">
       <ResizeHandle
         value={layout.detailsWidth}
@@ -478,20 +397,12 @@
       {/if}
     </div>
   {/if}
-  {#if threadMode !== 'none'}
-    <div class="thread-host">
-      <ThreadPanel onclose={() => void threadStore.close()} />
-    </div>
-  {/if}
 </div>
 </div>
 
 <CommandPalette open={paletteOpen} onclose={() => (paletteOpen = false)} onpick={pick} />
-<NewRoomDialog open={newRoomOpen} onclose={() => (newRoomOpen = false)} onopened={pick} />
-<DirectoryDialog open={directoryOpen} onclose={() => (directoryOpen = false)} onjoined={pick} />
 <SettingsDialog open={settingsOpen} initialSection={settingsSection} onclose={() => (settingsOpen = false)} />
 <PermissionsGate onopensettings={() => openSettings('permissions')} />
-<VerificationDialog />
 {#if import.meta.env.DEV}<Hud bind:visible={hudVisible} />{/if}
 
 <style>
@@ -578,8 +489,7 @@
     min-height: 0;
     display: grid;
     /* Chrome and conversation sit side by side between hairlines, so the chat keeps the pixels. */
-    grid-template-columns: calc(var(--alloy-layout-rail-width) + var(--sidebar-width, 240px))
-      minmax(0, 1fr);
+    grid-template-columns: var(--sidebar-width, 240px) minmax(0, 1fr);
     box-sizing: border-box;
     overflow: hidden;
     /* Keep content clear of the status bar, gesture bar and display cutouts on phones. */
@@ -588,24 +498,19 @@
     color: var(--alloy-color-text-primary);
   }
   .shell[data-side='column'] {
-    grid-template-columns: calc(var(--alloy-layout-rail-width) + var(--sidebar-width, 240px))
-      minmax(0, 1fr) var(--details-width, 320px);
+    grid-template-columns: var(--sidebar-width, 240px) minmax(0, 1fr) var(--details-width, 320px);
   }
-  /* The room list collapsed to the rail: the conversation takes the freed pixels. */
+  /* The chat list collapsed: the conversation takes the freed pixels. */
   .shell[data-layout='wide'][data-sidebar='collapsed'],
   .shell[data-layout='medium'][data-sidebar='collapsed'] {
-    grid-template-columns: var(--alloy-layout-rail-width) minmax(0, 1fr);
+    grid-template-columns: 0 minmax(0, 1fr);
   }
   .shell[data-layout='wide'][data-sidebar='collapsed'][data-side='column'],
   .shell[data-layout='medium'][data-sidebar='collapsed'][data-side='column'] {
-    grid-template-columns: var(--alloy-layout-rail-width) minmax(0, 1fr) var(--details-width, 320px);
+    grid-template-columns: 0 minmax(0, 1fr) var(--details-width, 320px);
   }
   .shell[data-layout='wide'][data-sidebar='collapsed'] .nav,
   .shell[data-layout='medium'][data-sidebar='collapsed'] .nav {
-    grid-template-columns: var(--alloy-layout-rail-width);
-  }
-  .shell[data-layout='wide'][data-sidebar='collapsed'] .nav .list-body,
-  .shell[data-layout='medium'][data-sidebar='collapsed'] .nav .list-body {
     display: none;
   }
   /* Handles straddle the hairline; the wrapper gives them a hit area without a gutter between panes. */
@@ -618,22 +523,22 @@
     z-index: 8;
   }
   .split-sidebar {
-    left: calc(var(--alloy-layout-rail-width) + var(--sidebar-width, 240px) - 5px);
+    left: calc(var(--sidebar-width, 240px) - 5px);
   }
-  /* Hidden list: the handle sits on the rail's edge, the boundary the drag collapsed to, so the
+  /* Hidden list: the handle sits on the left edge, the boundary the drag collapsed to, so the
      same edge that closed the list is the one that opens it. */
   .shell[data-layout='wide'][data-sidebar='collapsed'] .split-sidebar,
   .shell[data-layout='medium'][data-sidebar='collapsed'] .split-sidebar {
-    left: calc(var(--alloy-layout-rail-width) - 5px);
+    left: 0;
   }
   .split-details {
     right: calc(var(--details-width, 320px) - 5px);
   }
 
-  /* Navigation chrome: the rail and the room list share one lightly transparent surface. */
+  /* Navigation chrome: the chat list surface. */
   .nav {
     display: grid;
-    grid-template-columns: var(--alloy-layout-rail-width) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
     min-width: 0;
     min-height: 0;
     overflow: visible;
@@ -684,29 +589,6 @@
     border: 1px solid var(--alloy-glass-rim);
     border-radius: var(--alloy-glass-radius-panel);
     box-shadow: var(--alloy-glass-shadow);
-  }
-
-  .thread-host {
-    display: grid;
-    grid-template-rows: minmax(0, 1fr);
-    min-width: 0;
-    min-height: 0;
-    overflow: hidden;
-  }
-  /* The thread is a third pane between hairlines, not a card floating over the conversation. */
-  .shell[data-thread='column'] .thread-host {
-    border-left: 1px solid var(--alloy-chat-rim);
-    background: var(--alloy-chrome-surface-strong);
-    -webkit-backdrop-filter: var(--alloy-chrome-filter);
-    backdrop-filter: var(--alloy-chrome-filter);
-  }
-  .shell[data-thread='overlay'] .thread-host {
-    position: fixed;
-    inset: 0;
-    z-index: 20;
-    padding: var(--alloy-safe-area-top) var(--alloy-safe-area-right) var(--alloy-safe-area-bottom)
-      var(--alloy-safe-area-left);
-    background: var(--alloy-canvas-art);
   }
 
   .empty {
@@ -782,8 +664,8 @@
     color: var(--alloy-color-text-muted);
   }
 
-  /* Phone (narrow): one screen at a time. The list screen is the space strip, the room list and the
-     bottom tab bar; the chat screen is the conversation. Only inner lists scroll. */
+  /* Phone (narrow): one screen at a time. The list screen is the chat list and the bottom tab bar;
+     the chat screen is the conversation. Only inner lists scroll. */
   .shell[data-layout='narrow'] {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr);
@@ -841,9 +723,6 @@
     box-shadow: none;
     padding: var(--alloy-safe-area-top) var(--alloy-safe-area-right) var(--alloy-safe-area-bottom)
       var(--alloy-safe-area-left);
-    animation: alloy-panel-in var(--alloy-motion-duration-normal) ease-out;
-  }
-  .shell[data-layout='narrow'][data-thread='overlay'] .thread-host {
     animation: alloy-panel-in var(--alloy-motion-duration-normal) ease-out;
   }
   @keyframes alloy-panel-in {

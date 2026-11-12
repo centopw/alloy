@@ -50,8 +50,8 @@
         <UserName userId={member.user_id} displayName={memberLabel(member)} />
       </span>
       <span class="meta id">{member.user_id}</span>
-      {#if member.membership === 'Invited'}
-        <span class="meta">{t('mention-picker-invited')}</span>
+      {#if member.role}
+        <span class="meta">{member.role}</span>
       {/if}
     </div>
   {/each}

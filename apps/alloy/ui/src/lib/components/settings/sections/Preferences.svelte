@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { SettingGroup, SettingQuickReactions, SettingSelect, SettingToggle } from '$lib/components/settings/controls';
+  import { SettingGroup, SettingQuickReactions, SettingToggle } from '$lib/components/settings/controls';
   import { getAutostart, setAutostart } from '$lib/platform/autostart';
-  import { prefs, type LinkPreviewMode } from '$lib/stores/prefs.svelte';
+  import { prefs } from '$lib/stores/prefs.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
   import { capabilities, currentEnv } from '$lib/platform/capabilities';
 
@@ -10,12 +10,6 @@
   const caps = $derived(capabilities(currentEnv(viewport.isPhone)));
   let autostartBusy = $state(false);
   let autostartError = $state<string | null>(null);
-
-  const LINK_PREVIEW_OPTIONS = [
-    { value: 'off', label: t('preferences-off') },
-    { value: 'unencrypted', label: t('preferences-unencrypted-rooms') },
-    { value: 'always', label: t('preferences-all-rooms') },
-  ];
 
   function describe(err: unknown): string {
     return err instanceof Error ? err.message : String(err);
@@ -77,18 +71,9 @@
     />
     <SettingToggle
       label={t('preferences-show-join-and-leave-messages')}
+      description={t('preferences-show-join-and-leave-messages-description')}
       checked={prefs.showMembershipEvents}
       onchange={(v) => prefs.set('showMembershipEvents', v)}
-    />
-    <SettingToggle
-      label={t('preferences-show-display-name-and-profile-picture-changes')}
-      checked={prefs.showProfileChanges}
-      onchange={(v) => prefs.set('showProfileChanges', v)}
-    />
-    <SettingToggle
-      label={t('preferences-show-room-name-topic-and-settings-changes')}
-      checked={prefs.showRoomUpdates}
-      onchange={(v) => prefs.set('showRoomUpdates', v)}
     />
     <SettingToggle
       label={t('preferences-jump-to-the-newest-message-when-you-send')}
@@ -99,13 +84,6 @@
       label={t('preferences-autoplay-gifs-and-videos')}
       checked={prefs.autoplayMedia}
       onchange={(v) => prefs.set('autoplayMedia', v)}
-    />
-    <SettingSelect
-      label={t('preferences-link-previews')}
-      description="Your homeserver fetches the page to build the preview."
-      value={prefs.linkPreviews}
-      options={LINK_PREVIEW_OPTIONS}
-      onchange={(v) => prefs.set('linkPreviews', v as LinkPreviewMode)}
     />
   </SettingGroup>
 

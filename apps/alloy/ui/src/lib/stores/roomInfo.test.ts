@@ -5,24 +5,39 @@ const invoke = vi.fn();
 vi.mock('../ipc/index.js', () => ({
   client: { invoke: (...args: unknown[]) => invoke(...args) },
 }));
+vi.mock('./prefs.svelte.js', () => ({ registerFlushHandler: vi.fn() }));
 
-const ROOM = '!general:alloy.chat';
-const UNIT = { type: 'Unit' };
+const ROOM = 'chat-1';
+const NOTE_SET = { type: 'RoomNoteSet' };
 
 function details(name: string | null) {
   return {
     room_id: ROOM,
+    account_id: 'acc-1',
+    network: 'telegram',
     name,
-    topic: 'Welcome',
-    canonical_alias: null,
-    avatar_url: null,
+    avatar: null,
+    kind: 'group',
     is_direct: false,
-    encrypted: false,
-    joined_members: 2,
-    invited_members: 0,
-    can_set_name: true,
-    can_set_topic: true,
-    can_set_avatar: true,
+    member_count: 2,
+    note: null,
+    capabilities: {
+      edit: true,
+      edit_window_secs: null,
+      delete_for_everyone: true,
+      reactions: true,
+      max_reactions_per_user: null,
+      replies: true,
+      threads: false,
+      typing: true,
+      read_receipts: true,
+      delivered_receipts: false,
+      voice: true,
+      polls: false,
+      location: false,
+      max_upload_bytes: null,
+      formatted_text: false,
+    },
   };
 }
 
@@ -30,11 +45,10 @@ const detailsRes = (name: string | null) => ({
   type: 'RoomDetailsRetrieved',
   payload: { details: details(name) },
 });
-const noteRes = (note: string) => ({ type: 'RoomNote', payload: { room_id: ROOM, note } });
+const noteRes = (note: string | null) => ({ type: 'RoomNote', payload: { note } });
 
 function deferred<T>() {
-  let resolve!: (v: T) => void;
-  const promise = new Promise<T>((r) => (resolve = r));
+  const { promise, resolve } = Promise.withResolvers<T>();
   return { promise, resolve };
 }
 
@@ -72,140 +86,51 @@ describe('RoomInfoStore', () => {
     expect(invoke).toHaveBeenCalledTimes(2);
 
     d.resolve(detailsRes('General'));
-    n.resolve(noteRes(''));
+    n.resolve(noteRes(null));
     await Promise.all([a, b]);
 
     await store.load(ROOM);
     expect(invoke).toHaveBeenCalledTimes(2);
   });
 
-  it('renames through SetRoomName, expects Unit, then re-reads details', async () => {
-    invoke.mockResolvedValueOnce(detailsRes('General')).mockResolvedValueOnce(noteRes(''));
-    await store.load(ROOM);
-
-    invoke
-      .mockResolvedValueOnce(UNIT)
-      .mockResolvedValueOnce(detailsRes('Lounge'))
-      .mockResolvedValueOnce(noteRes(''));
-    await store.rename(ROOM, 'Lounge');
-
-    expect(invoke).toHaveBeenNthCalledWith(3, {
-      action: 'SetRoomName',
-      params: { room_id: ROOM, name: 'Lounge' },
-    });
-    expect(store.details(ROOM)?.name).toBe('Lounge');
-    expect(store.saving(ROOM)).toBe(false);
-  });
-
-  it('sends a null file_path to remove the avatar', async () => {
-    invoke.mockResolvedValueOnce(detailsRes('General')).mockResolvedValueOnce(noteRes(''));
-    await store.load(ROOM);
-
-    invoke
-      .mockResolvedValueOnce(UNIT)
-      .mockResolvedValueOnce(detailsRes('General'))
-      .mockResolvedValueOnce(noteRes(''));
-    await store.setAvatar(ROOM, null);
-
-    expect(invoke).toHaveBeenNthCalledWith(3, {
-      action: 'SetRoomAvatar',
-      params: { room_id: ROOM, file_path: null },
-    });
-  });
-
   it('saves the note through SetRoomNote and shows the re-read note', async () => {
-    invoke.mockResolvedValueOnce(detailsRes('General')).mockResolvedValueOnce(noteRes(''));
+    invoke.mockResolvedValueOnce(detailsRes('General')).mockResolvedValueOnce(noteRes(null));
     await store.load(ROOM);
 
     invoke
-      .mockResolvedValueOnce(UNIT)
+      .mockResolvedValueOnce(NOTE_SET)
       .mockResolvedValueOnce(detailsRes('General'))
-      .mockResolvedValueOnce(noteRes('buy milk'));
-    await store.saveNote(ROOM, 'buy milk');
+      .mockResolvedValueOnce(noteRes('kept'));
+    await store.saveNote(ROOM, 'kept');
 
     expect(invoke).toHaveBeenNthCalledWith(3, {
       action: 'SetRoomNote',
-      params: { room_id: ROOM, note: 'buy milk' },
+      params: { room_id: ROOM, note: 'kept' },
     });
-    expect(store.note(ROOM)).toBe('buy milk');
-  });
-
-  it('reports saving while a write is in flight', async () => {
-    invoke.mockResolvedValueOnce(detailsRes('General')).mockResolvedValueOnce(noteRes(''));
-    await store.load(ROOM);
-
-    const write = deferred<unknown>();
-    invoke.mockReturnValueOnce(write.promise);
-    const pending = store.setTopic(ROOM, 'New topic');
-    expect(store.saving(ROOM)).toBe(true);
-
-    invoke.mockResolvedValueOnce(detailsRes('General')).mockResolvedValueOnce(noteRes(''));
-    write.resolve(UNIT);
-    await pending;
+    expect(store.note(ROOM)).toBe('kept');
     expect(store.saving(ROOM)).toBe(false);
   });
 
-  it('stores a rejected write as the room error without throwing', async () => {
-    invoke.mockResolvedValueOnce(detailsRes('General')).mockResolvedValueOnce(noteRes(''));
+  it('stores a write failure instead of rejecting', async () => {
+    invoke.mockResolvedValueOnce(detailsRes('General')).mockResolvedValueOnce(noteRes(null));
     await store.load(ROOM);
 
-    invoke.mockRejectedValueOnce(new Error('forbidden'));
-    await expect(store.setTopic(ROOM, 'x')).resolves.toBeUndefined();
+    invoke.mockRejectedValueOnce({ code: 'internal_error', message: 'write failed' });
+    await store.saveNote(ROOM, 'x');
 
-    expect(store.error(ROOM)).toBe('forbidden');
+    expect(store.error(ROOM)).toBe('write failed');
     expect(store.saving(ROOM)).toBe(false);
-    expect(store.details(ROOM)?.name).toBe('General');
   });
 
-  it('treats a reply that is not Unit as an error', async () => {
-    invoke.mockResolvedValueOnce(detailsRes('General')).mockResolvedValueOnce(noteRes(''));
-    await store.load(ROOM);
-
-    invoke.mockResolvedValueOnce(noteRes('unexpected'));
-    await store.rename(ROOM, 'Lounge');
-
-    expect(store.error(ROOM)).toBe('Expected Unit, got RoomNote');
-  });
-
-  it('records a load failure and retries on the next load', async () => {
-    invoke.mockRejectedValue(new Error('offline'));
-    await store.load(ROOM);
-    expect(store.error(ROOM)).toBe('offline');
-    expect(store.details(ROOM)).toBeNull();
-
-    invoke.mockReset();
-    invoke.mockResolvedValueOnce(detailsRes('General')).mockResolvedValueOnce(noteRes(''));
-    await store.load(ROOM);
-
-    expect(invoke).toHaveBeenCalledTimes(2);
-    expect(store.error(ROOM)).toBeNull();
-    expect(store.details(ROOM)?.name).toBe('General');
-  });
-
-  it('forgets cached notes on reset so another account cannot read them', async () => {
-    invoke.mockResolvedValueOnce(detailsRes('General')).mockResolvedValueOnce(noteRes('private to A'));
-    await store.load(ROOM);
-    expect(store.note(ROOM)).toBe('private to A');
-
-    store.reset();
-    expect(store.note(ROOM)).toBe('');
-    expect(store.details(ROOM)).toBeNull();
-
-    invoke.mockResolvedValueOnce(detailsRes('General')).mockResolvedValueOnce(noteRes('private to B'));
-    await store.load(ROOM);
-
-    expect(store.note(ROOM)).toBe('private to B');
-  });
-
-  it('drops a read that was in flight when the account changed', async () => {
-    const detailsPending = deferred<unknown>();
-    const notePending = deferred<unknown>();
-    invoke.mockReturnValueOnce(detailsPending.promise).mockReturnValueOnce(notePending.promise);
+  it('drops a response that belongs to an account that was signed out meanwhile', async () => {
+    const d = deferred<unknown>();
+    const n = deferred<unknown>();
+    invoke.mockReturnValueOnce(d.promise).mockReturnValueOnce(n.promise);
 
     const loading = store.load(ROOM);
     store.reset();
-    detailsPending.resolve(detailsRes('General'));
-    notePending.resolve(noteRes('private to A'));
+    d.resolve(detailsRes('Old account'));
+    n.resolve(noteRes('old note'));
     await loading;
 
     expect(store.details(ROOM)).toBeNull();

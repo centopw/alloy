@@ -1,351 +1,178 @@
 <script lang="ts">
-  import { Button, TextField } from '../common';
-  import {
-    ChevronDown,
-    ChevronLeft,
-    ChevronUp,
-    ExternalLink,
-    Icon,
-    MessageSquare,
-    ShieldCheck,
-    Smartphone
-  } from '$lib/icons';
-  import { session } from '$lib/stores/session.svelte';
-  import { errorMessage, oidcErrorMessage } from '$lib/stores/errors';
+  import { onMount, onDestroy } from 'svelte';
+  import { Button } from '../common';
+  import LoginStep from './LoginStep.svelte';
+  import { session, networkLabel } from '$lib/stores/session.svelte';
+  import { errorMessage } from '$lib/stores/errors';
+  import { openExternal } from '$lib/platform/links';
+  import type { LoginInputDto, Network } from '$lib/generated/index.js';
 
   import { t } from '$lib/i18n';
-  type Step = 'welcome' | 'server' | 'login';
 
-  /** The host a server URL names, as the copy shows it. */
-  function hostOf(url: string): string {
-    try {
-      return new URL(url).host;
-    } catch {
-      return url;
-    }
-  }
+  const TELEGRAM_TERMS = 'https://core.telegram.org/api/terms';
+  const MESSENGER_LOCKS = 'https://github.com/mautrix/meta/issues/44';
 
-  let step = $state<Step>('welcome');
-  // A session that could not be restored leaves its server here, so the user retypes the password, not the address.
-  let serverInput = $state(session.lastHomeserver ? hostOf(session.lastHomeserver) : 'matrix.org');
-  let homeserverUrl = $state('');
-  let homeserverName = $state('');
-  let supportsOidc = $state(false);
-  let username = $state('');
-  let password = $state('');
-  let localError = $state<string | null>(null);
-  let checking = $state(false);
-  /** The password form sits behind a disclosure when the server offers browser sign-in. */
-  let passwordOpen = $state(false);
-  let waitingTitle: HTMLElement | undefined = $state();
+  /** True while this instance is the "Add account" overlay above the signed-in app. */
+  const overlay = $derived(session.phase === 'ready');
+  const attempt = $derived(session.login);
 
-  const serverHost = $derived.by(() => {
-    try {
-      return new URL(homeserverUrl).host;
-    } catch {
-      return homeserverName;
-    }
+  let loadingNetworks = $state(true);
+  let networksError = $state<string | null>(null);
+  let live = true;
+
+  onMount(() => {
+    void start();
   });
 
-  // The waiting panel is a new context; a screen reader should hear what the app is waiting for.
-  $effect(() => {
-    if (session.oidcWaiting) waitingTitle?.focus();
+  onDestroy(() => {
+    live = false;
+    // Any unmount path (window closed, settings dismissed, shell swapped) must not leave the
+    // engine holding an attempt nothing can answer.
+    void session.closeAddAccount();
   });
 
-  function go(next: Step) {
-    localError = null;
-    step = next;
-  }
-
-  async function continueServer(e: Event) {
-    e.preventDefault();
-    localError = null;
-    session.clearOidcFailure();
-    checking = true;
+  async function start() {
+    loadingNetworks = true;
+    networksError = null;
     try {
-      const info = await session.discover(serverInput.trim());
-      homeserverUrl = info.url;
-      homeserverName = info.name;
-      supportsOidc = info.supports_oidc;
-      passwordOpen = false;
-      step = 'login';
-    } catch (err) {
-      localError = `Couldn't reach that server. ${errorMessage(err)}`;
+      const networks = await session.loadNetworks();
+      // Reconnect opens onboarding already knowing the network; start its login straight away.
+      const preferred = session.preferredNetwork;
+      if (!live) return;
+      if (preferred && networks.includes(preferred)) {
+        session.preferredNetwork = null;
+        await session.beginLogin(preferred).catch(() => {});
+      }
+    } catch (e) {
+      if (live) networksError = errorMessage(e);
     } finally {
-      checking = false;
+      if (live) loadingNetworks = false;
     }
   }
 
-  /** Starts (or retries) the browser sign-in; the store reports any failure for the panel below. */
-  async function startOidc() {
-    await session.startOidc(homeserverUrl).catch(() => {});
+  async function choose(network: Network) {
+    if (session.loginBusy) return;
+    await session.beginLogin(network).catch(() => {});
   }
 
-  async function cancelOidc() {
-    await session.cancelOidc();
+  function submit(input: LoginInputDto) {
+    void session.submitLogin(input).catch(() => {});
   }
 
-  function differentServer() {
-    session.clearOidcFailure();
-    go('server');
-  }
-
-  async function signIn(e: Event) {
-    e.preventDefault();
-    localError = null;
-    try {
-      await session.login(homeserverUrl, username.trim(), password);
-    } catch (err) {
-      localError = errorMessage(err);
+  function networkDetail(network: Network): string {
+    switch (network) {
+      case 'telegram':
+        return t('onboarding-network-telegram-detail');
+      case 'messenger':
+        return t('onboarding-network-messenger-detail');
+      case 'fake':
+        return t('onboarding-network-fake-detail');
     }
   }
 </script>
 
-<main class="onboarding">
-  <section class="panel" data-step={step}>
+<svelte:element
+  this={overlay ? 'div' : 'main'}
+  class="onboarding"
+  role={overlay ? 'dialog' : undefined}
+  aria-modal={overlay ? 'true' : undefined}
+  aria-label={overlay ? t('onboarding-connect-account') : undefined}
+>
+  <section class="panel" data-step={attempt ? 'login' : 'network'}>
     <div class="story">
       <div class="lockup">
         <span class="brand-mark" aria-hidden="true">A</span>
         <span class="wordmark">{t('brand-name')}</span>
       </div>
       <div class="pitch">
-        <h1>{t('onboarding-your-conversations')}<br />{t('onboarding-without-the-noise')}</h1>
-        <p class="lede">
-          {t('onboarding-alloy-is-a-calm-private-chat-client-for-matrix-n')}
-        </p>
+        <h1>{t('onboarding-connect-to-your-accounts')}</h1>
+        <p class="lede">{t('onboarding-on-device-lede')}</p>
       </div>
       <ul class="points">
-        <li>
-          <Icon icon={ShieldCheck} size={20} strokeWidth={1.5} />
-          <span><strong>{t('onboarding-end-to-end-encrypted')}</strong> {t('onboarding-by-default-with-device-verification-built-in')}</span>
-        </li>
-        <li>
-          <Icon icon={MessageSquare} size={20} strokeWidth={1.5} />
-          <span><strong>{t('onboarding-rooms-threads-and-spaces')}</strong> {t('onboarding-that-stay-in-order-and-out-of-your-way')}</span>
-        </li>
-        <li>
-          <Icon icon={Smartphone} size={20} strokeWidth={1.5} />
-          <span><strong>{t('onboarding-your-account-anywhere')}</strong> {t('onboarding-sign-in-on-desktop-or-phone-synced-live')}</span>
-        </li>
+        <li><strong>{t('onboarding-point-direct-title')}</strong> {t('onboarding-point-direct')}</li>
+        <li><strong>{t('onboarding-point-local-title')}</strong> {t('onboarding-point-local')}</li>
+        <li><strong>{t('onboarding-point-leave-title')}</strong> {t('onboarding-point-leave')}</li>
       </ul>
       <p class="footnote">{t('onboarding-open-source-apache-2-0')}</p>
     </div>
 
     <div class="step">
-      {#if step === 'welcome'}
-        <div class="intro">
-          <p class="eyebrow">{t('onboarding-welcome-to-alloy')}</p>
-          <h2>{t('onboarding-sign-in-to-matrix')}</h2>
-          {#if session.restoreNotice}
-            <p class="notice" role="status">{session.restoreNotice}</p>
-          {/if}
-          <p class="hint">
-            {t('onboarding-youll-pick-your-homeserver-then-your-account-it-')}
-          </p>
-        </div>
-        <div class="cta">
-          <Button size="lg" onclick={() => go('server')}>{t('onboarding-get-started')}</Button>
-        </div>
+      {#if overlay}
+        <button type="button" class="panel-close" onclick={() => void session.closeAddAccount()}>
+          {t('common-close')}
+        </button>
+      {/if}
+
+      {#if attempt}
+        <p class="eyebrow">{networkLabel(attempt.network)}</p>
+        {#key attempt.step}
+          <LoginStep
+            step={attempt.step}
+            networkName={networkLabel(attempt.network)}
+            busy={session.loginBusy}
+            error={session.loginError}
+            onsubmit={submit}
+            oncancel={() => void session.cancelLogin()}
+            onretry={() => void session.retryLogin().catch(() => {})}
+            onback={() => session.dismissLogin()}
+          />
+        {/key}
       {:else}
-        <div class="progress" aria-hidden="true">
-          <span class="bar" class:on={step === 'server' || step === 'login'}></span>
-          <span class="bar" class:on={step === 'login'}></span>
+        <div class="step-head">
+          <p class="eyebrow">{t('onboarding-connect-account')}</p>
+          <h2>{t('onboarding-choose-network')}</h2>
+          <p class="hint">{t('onboarding-choose-network-hint')}</p>
         </div>
 
-        {#if step === 'server'}
-          <div class="step-head">
-            <p class="eyebrow">{t('onboarding-step-1-of-2')}</p>
-            <h2>{t('onboarding-where-is-your-account')}</h2>
-            <p class="hint">{t('onboarding-your-homeserver-hosts-your-rooms-and-messages-yo')}</p>
+        <p class="notice">
+          {t('onboarding-unofficial-notice')}
+          <button type="button" class="link" onclick={() => void openExternal(TELEGRAM_TERMS)}>
+            {t('onboarding-unofficial-telegram')}
+          </button>
+          <button type="button" class="link" onclick={() => void openExternal(MESSENGER_LOCKS)}>
+            {t('onboarding-unofficial-messenger')}
+          </button>
+        </p>
+
+        {#if networksError || session.error}
+          <p class="error" role="alert">{networksError ?? session.error}</p>
+        {/if}
+
+        {#if loadingNetworks}
+          <p class="hint" role="status">{t('onboarding-loading-networks')}</p>
+        {:else if session.networks.length === 0}
+          <div class="actions">
+            <Button variant="ghost" onclick={() => void start()}>{t('common-retry')}</Button>
           </div>
-          <form onsubmit={continueServer}>
-            <label>
-              <span>{t('onboarding-homeserver')}</span>
-              <TextField
-                type="text"
-                bind:value={serverInput}
-                placeholder={t('onboarding-matrix-org')}
-                autocomplete="off"
-                autocapitalize="off"
-                spellcheck={false}
-                autofocus
-                required
-              />
-            </label>
-            {#if localError}<p class="error" role="alert">{localError}</p>{/if}
-            <div class="actions">
-              <Button variant="ghost" type="button" onclick={() => go('welcome')}>
-                <Icon icon={ChevronLeft} size={16} strokeWidth={1.5} />
-                {t('common-back')}
-              </Button>
-              <Button type="submit" disabled={checking || !serverInput.trim()}>
-                {checking ? t('onboarding-checking') : t('common-continue')}
-              </Button>
-            </div>
-          </form>
         {:else}
-          {#if session.oidcWaiting}
-            <div class="step-head">
-              <p class="eyebrow">{t('onboarding-step-2-of-2')} {homeserverName}</p>
-              <h2 class="waiting-title" tabindex="-1" bind:this={waitingTitle}>
-                {t('onboarding-waiting-for-your-browser')}
-              </h2>
-              <p class="hint">
-                {t('onboarding-we-opened-a-browser-window-approve-the-sign-in-f')} {serverHost}{t('onboarding-then-come-back-here')}
-              </p>
-            </div>
-            <p class="waiting" role="status">
-              <span class="pulse" aria-hidden="true"></span>
-              {t('onboarding-waiting-for-approval')}
-            </p>
-            <div class="actions waiting-actions">
-              <Button variant="ghost" type="button" onclick={startOidc} disabled={session.busy}>
-                <Icon icon={ExternalLink} size={16} strokeWidth={1.5} />
-                {session.busy ? t('onboarding-opening') : t('onboarding-open-browser-again')}
-              </Button>
-              <Button variant="ghost" type="button" onclick={cancelOidc}>{t('common-cancel')}</Button>
-            </div>
-            <p class="footnote-inline">
-              {t('onboarding-nothing-happened-you-can-close-the-browser-tab-a')}
-            </p>
-          {:else if supportsOidc}
-            <div class="step-head">
-              <p class="eyebrow">{t('onboarding-step-2-of-2')} {homeserverName}</p>
-              <h2>{t('onboarding-sign-in')}</h2>
-              <p class="hint">{t('onboarding-youll-approve-sign-in-on')} {serverHost} {t('onboarding-and-come-back-here')}</p>
-            </div>
-            {#if session.oidcFailure}
-              <p class="error" role="alert">
-                {oidcErrorMessage(session.oidcFailure, serverHost)}
-              </p>
-              <div class="actions">
-                <Button variant="ghost" type="button" onclick={differentServer}>
-                  {t('onboarding-use-a-different-server')}
-                </Button>
-                <Button type="button" onclick={startOidc} disabled={session.busy}>
-                  {session.busy ? t('onboarding-opening') : t('onboarding-try-again')}
-                </Button>
-              </div>
-            {:else}
-              <div class="browser-path">
-                <div class="browser-cta">
-                  <Button size="lg" type="button" onclick={startOidc} disabled={session.busy}>
-                    <Icon icon={ExternalLink} size={16} strokeWidth={1.5} />
-                    {session.busy ? t('onboarding-opening-browser') : t('onboarding-continue-in-browser')}
-                  </Button>
-                </div>
-                <p class="trust">
-                  <Icon icon={ShieldCheck} size={16} strokeWidth={1.5} />
-                  {t('onboarding-your-password-stays-on')} {serverHost}{t('onboarding-never-in-alloy')}
-                </p>
-              </div>
-              <div class="divider" aria-hidden="true"></div>
-              <button
-                class="disclosure"
-                type="button"
-                aria-expanded={passwordOpen}
-                onclick={() => (passwordOpen = !passwordOpen)}
-              >
-                {t('onboarding-use-a-password-instead')}
-                <Icon icon={passwordOpen ? ChevronUp : ChevronDown} size={16} strokeWidth={1.5} />
-              </button>
-              {#if passwordOpen}
-                <form onsubmit={signIn}>
-                  <label>
-                    <span>{t('onboarding-username')}</span>
-                    <TextField
-                      type="text"
-                      bind:value={username}
-                      placeholder={t('onboarding-alice')}
-                      autocomplete="username"
-                      autocapitalize="off"
-                      spellcheck={false}
-                      required
-                    />
-                  </label>
-                  <label>
-                    <span>{t('onboarding-password')}</span>
-                    <TextField
-                      type="password"
-                      bind:value={password}
-                      autocomplete="current-password"
-                      required
-                    />
-                  </label>
-                  {#if localError}<p class="error" role="alert">{localError}</p>{/if}
-                  <div class="actions">
-                    <Button variant="ghost" type="button" onclick={() => go('server')}>
-                      <Icon icon={ChevronLeft} size={16} strokeWidth={1.5} />
-                      {t('common-back')}
-                    </Button>
-                    <Button type="submit" disabled={session.busy || !username || !password}>
-                      {session.busy ? t('onboarding-signing-in') : t('onboarding-sign-in')}
-                    </Button>
-                  </div>
-                </form>
-              {/if}
-            {/if}
-            {#if !passwordOpen && !session.oidcFailure}
-              <div class="back-row">
-                <Button variant="ghost" type="button" onclick={() => go('server')}>
-                  <Icon icon={ChevronLeft} size={16} strokeWidth={1.5} />
-                  {t('common-back')}
-                </Button>
-              </div>
-            {/if}
-          {:else}
-            <div class="step-head">
-              <p class="eyebrow">{t('onboarding-step-2-of-2')} {homeserverName}</p>
-              <h2>{t('onboarding-sign-in')}</h2>
-              <p class="hint">
-                {t('onboarding-this-server-doesnt-support-browser-sign-in-use-y')}
-              </p>
-            </div>
-            <form onsubmit={signIn}>
-              <label>
-                <span>{t('onboarding-username')}</span>
-                <TextField
-                  type="text"
-                  bind:value={username}
-                  placeholder={t('onboarding-alice')}
-                  autocomplete="username"
-                  autocapitalize="off"
-                  spellcheck={false}
-                  autofocus
-                  required
-                />
-              </label>
-              <label>
-                <span>{t('onboarding-password')}</span>
-                <TextField
-                  type="password"
-                  bind:value={password}
-                  autocomplete="current-password"
-                  required
-                />
-              </label>
-              {#if localError}<p class="error" role="alert">{localError}</p>{/if}
-              <div class="actions">
-                <Button variant="ghost" type="button" onclick={() => go('server')}>
-                  <Icon icon={ChevronLeft} size={16} strokeWidth={1.5} />
-                  {t('common-back')}
-                </Button>
-                <Button type="submit" disabled={session.busy || !username || !password}>
-                  {session.busy ? t('onboarding-signing-in') : t('onboarding-sign-in')}
-                </Button>
-              </div>
-            </form>
-          {/if}
+          <ul class="networks">
+            {#each session.networks as network (network)}
+              <li>
+                <button
+                  type="button"
+                  class="network"
+                  disabled={session.loginBusy}
+                  onclick={() => void choose(network)}
+                >
+                  <span class="network-name">{networkLabel(network)}</span>
+                  <span class="network-detail">{networkDetail(network)}</span>
+                </button>
+              </li>
+            {/each}
+          </ul>
         {/if}
       {/if}
     </div>
   </section>
-</main>
+</svelte:element>
 
 <style>
   .onboarding {
     box-sizing: border-box;
-    min-height: 100dvh;
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    overflow-y: auto;
     display: grid;
     place-items: center;
     padding: calc(var(--alloy-spacing-scale-6) + var(--alloy-safe-area-top))
@@ -354,7 +181,7 @@
     background: var(--alloy-canvas-art);
   }
 
-  /* One floating sheet over the aurora; the story column anchors the brand, the step column does the work. */
+  /* One floating sheet; the story column anchors the brand, the step column does the work. */
   .panel {
     box-sizing: border-box;
     width: min(940px, 100%);
@@ -429,16 +256,9 @@
     gap: var(--alloy-spacing-scale-4);
   }
   .points li {
-    display: flex;
-    gap: var(--alloy-spacing-scale-3);
     color: var(--alloy-color-text-secondary);
     font-size: var(--alloy-typography-size-sm);
     line-height: var(--alloy-typography-line-height-normal, 1.45);
-  }
-  .points :global(svg) {
-    flex: none;
-    margin-top: 2px;
-    color: var(--alloy-color-accent-primary);
   }
   .points strong {
     display: block;
@@ -454,17 +274,32 @@
 
   .step {
     box-sizing: border-box;
+    position: relative;
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-spacing-scale-6);
+    gap: var(--alloy-spacing-scale-5);
     padding: var(--alloy-spacing-scale-8);
     background: color-mix(in srgb, var(--alloy-color-surface-panel) 55%, transparent);
   }
-  /* The welcome step is only a heading and one action; centre it against the taller story. */
-  .panel[data-step='welcome'] .step {
-    justify-content: center;
+  .panel-close {
+    align-self: flex-end;
+    padding: var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-2);
+    border: 0;
+    border-radius: var(--alloy-radii-md);
+    background: none;
+    color: var(--alloy-color-text-secondary);
+    font: inherit;
+    font-size: var(--alloy-typography-size-sm);
+    cursor: pointer;
   }
-  .intro,
+  .panel-close:hover {
+    background: var(--alloy-color-surface-hover);
+    color: var(--alloy-color-text-primary);
+  }
+  .panel-close:focus-visible {
+    outline: 2px solid var(--alloy-color-accent-primary);
+    outline-offset: 2px;
+  }
   .step-head {
     display: flex;
     flex-direction: column;
@@ -491,138 +326,10 @@
     font-size: var(--alloy-typography-size-sm);
     line-height: var(--alloy-typography-line-height-normal, 1.45);
   }
-
-  .progress {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: var(--alloy-spacing-scale-1);
-  }
-  .bar {
-    height: 3px;
-    border-radius: var(--alloy-radii-full);
-    background: color-mix(in srgb, var(--alloy-color-text-primary) 12%, transparent);
-    transition: background-color 160ms ease;
-  }
-  .bar.on {
-    background: var(--alloy-color-accent-primary);
-  }
-
-  form {
-    display: flex;
-    flex-direction: column;
-    gap: var(--alloy-spacing-scale-4);
-  }
-  label {
-    display: flex;
-    flex-direction: column;
-    gap: var(--alloy-spacing-scale-1);
-    font-size: var(--alloy-typography-size-sm);
-    font-weight: var(--alloy-typography-weight-medium, 500);
-    color: var(--alloy-color-text-secondary);
-  }
-  .actions {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--alloy-spacing-scale-3);
-    margin-top: var(--alloy-spacing-scale-2);
-  }
-  .cta {
-    width: 100%;
-  }
-  .cta :global(button) {
-    width: 100%;
-  }
   .error {
     margin: 0;
     color: var(--alloy-color-status-error);
     font-size: var(--alloy-typography-size-sm);
-  }
-
-  /* Waiting for the browser: quiet, but alive. */
-  .waiting {
-    display: flex;
-    align-items: center;
-    gap: var(--alloy-spacing-scale-2);
-    margin: 0;
-    font-size: var(--alloy-typography-size-sm);
-    color: var(--alloy-color-text-secondary);
-  }
-  .pulse {
-    flex: none;
-    width: 8px;
-    height: 8px;
-    border-radius: var(--alloy-radii-full);
-    background: var(--alloy-color-accent-primary);
-    animation: pulse 1.4s ease-in-out infinite;
-  }
-  @keyframes pulse {
-    0%,
-    100% {
-      opacity: 0.3;
-    }
-    50% {
-      opacity: 1;
-    }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .pulse {
-      animation: none;
-    }
-  }
-  /* The heading receives focus so a screen reader hears the new state; it is not an input. */
-  .waiting-title:focus {
-    outline: none;
-  }
-  .footnote-inline {
-    margin: 0;
-    font-size: var(--alloy-typography-size-xs);
-    color: var(--alloy-color-text-secondary);
-  }
-
-  /* Browser sign-in: one primary action, the trust note, then the password fallback. */
-  .browser-path {
-    display: flex;
-    flex-direction: column;
-    gap: var(--alloy-spacing-scale-2);
-  }
-  .browser-cta :global(button) {
-    width: 100%;
-  }
-  .trust {
-    display: flex;
-    align-items: center;
-    gap: var(--alloy-spacing-scale-2);
-    margin: 0;
-    font-size: var(--alloy-typography-size-xs);
-    color: var(--alloy-color-text-secondary);
-  }
-  .trust :global(svg) {
-    flex: none;
-    color: var(--alloy-color-accent-primary);
-  }
-  .divider {
-    height: 1px;
-    background: var(--alloy-glass-rim);
-  }
-  .disclosure {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    width: 100%;
-    padding: var(--alloy-spacing-scale-2) 0;
-    border: 0;
-    background: none;
-    color: var(--alloy-color-text-secondary);
-    font: inherit;
-    font-size: var(--alloy-typography-size-sm);
-    cursor: pointer;
-  }
-  .disclosure:hover {
-    color: var(--alloy-color-text-primary);
-  }
-  .back-row {
-    display: flex;
   }
   .notice {
     margin: 0;
@@ -632,9 +339,72 @@
     background: var(--alloy-color-accent-subtle);
     color: var(--alloy-color-text-secondary);
     font-size: var(--alloy-typography-size-sm);
+    line-height: var(--alloy-typography-line-height-normal, 1.45);
+  }
+  .link {
+    display: inline;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--alloy-color-accent-primary);
+    font: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+  .link:focus-visible {
+    outline: 2px solid var(--alloy-color-accent-primary);
+    outline-offset: 2px;
+  }
+  .networks {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--alloy-spacing-scale-2);
+  }
+  .network {
+    box-sizing: border-box;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: var(--alloy-spacing-scale-1);
+    padding: var(--alloy-spacing-scale-3) var(--alloy-spacing-scale-4);
+    border: 1px solid var(--alloy-color-border-subtle);
+    border-radius: var(--alloy-radii-md);
+    background: var(--alloy-color-surface-elevated);
+    color: var(--alloy-color-text-primary);
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+  }
+  .network:not(:disabled):hover {
+    border-color: var(--alloy-color-border-prominent);
+    background: var(--alloy-color-surface-hover);
+  }
+  .network:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+  .network:focus-visible {
+    outline: 2px solid var(--alloy-color-accent-primary);
+    outline-offset: 2px;
+  }
+  .network-name {
+    font-size: var(--alloy-typography-size-base);
+    font-weight: var(--alloy-typography-weight-semibold);
+  }
+  .network-detail {
+    font-size: var(--alloy-typography-size-sm);
+    color: var(--alloy-color-text-secondary);
+  }
+  .actions {
+    display: flex;
+    align-items: center;
+    gap: var(--alloy-spacing-scale-3);
   }
 
-  /* Phone: the sheet becomes the screen. The pitch only stays on the welcome step, so forms get the room. */
+  /* Phone: the sheet becomes the screen and the story column steps aside. */
   @media (max-width: 899px) {
     .onboarding {
       padding: 0;
@@ -656,32 +426,7 @@
       padding: calc(var(--alloy-spacing-scale-6) + var(--alloy-safe-area-top))
         var(--alloy-spacing-scale-5) var(--alloy-spacing-scale-6);
     }
-    .panel:not([data-step='welcome']) .story {
-      display: none;
-    }
-    .panel:not([data-step='welcome']) .step {
-      min-height: 100dvh;
-    }
-    /* Hero fills the space above the action, which stays at thumb height. */
-    .panel[data-step='welcome'] .story {
-      flex: 1 1 auto;
-      justify-content: center;
-    }
-    .panel[data-step='welcome'] .step {
-      flex: none;
-      justify-content: flex-start;
-    }
-    .step h2 {
-      font-size: 1.5rem;
-    }
-    .hint,
-    label {
-      font-size: var(--alloy-typography-size-base);
-    }
-    .pitch h1 {
-      font-size: 1.6rem;
-    }
-    .footnote {
+    .panel[data-step='login'] .story {
       display: none;
     }
     .step {
@@ -690,22 +435,27 @@
         calc(var(--alloy-spacing-scale-6) + var(--alloy-safe-area-bottom));
       background: none;
     }
-    form :global(button[type='submit']) {
-      min-height: 48px;
+    .step h2 {
+      font-size: 1.5rem;
     }
-    .actions {
-      flex-direction: column-reverse;
-      align-items: stretch;
+    .hint,
+    .network-detail {
+      font-size: var(--alloy-typography-size-base);
     }
-    /* Waiting actions stack in reading order with Cancel at thumb height, per the sign-in spec. */
-    .waiting-actions {
-      flex-direction: column;
+    h1 {
+      font-size: 1.6rem;
     }
-    .disclosure {
+    .footnote {
+      display: none;
+    }
+    .network {
+      min-height: 56px;
+    }
+    .panel-close,
+    .link {
       min-height: 44px;
-    }
-    .actions :global(button) {
-      width: 100%;
+      display: inline-flex;
+      align-items: center;
     }
   }
 </style>

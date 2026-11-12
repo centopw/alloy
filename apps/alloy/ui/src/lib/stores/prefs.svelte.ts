@@ -1,27 +1,24 @@
 /**
- * User preferences that drive real behaviour (message layout, notifications, room list, typing, ...).
+ * User preferences that drive real behaviour (message layout, notifications, chat list, typing, ...).
  *
- * localStorage holds the local copy and is read synchronously at construction so the first paint is
- * correct. `load()` reconciles with the engine's device copy and the account's synced document. Synced
- * preferences (see `SYNCED_PREF_KEYS`) travel with the Matrix account; device preferences stay local.
- * Every change is written to localStorage immediately and to the engine and account after a short debounce.
+ * Every preference is device-local: it describes this install (screen, input method, OS
+ * notification permission, login item, updater) or how the user wants to read their own chats, and
+ * none of it is sent to Telegram or Messenger. localStorage is read synchronously at construction
+ * so the first paint is correct; `load()` reconciles with the copy the engine keeps in its local
+ * settings file, so a webview that lost its storage still shows the user's choices. Every change is
+ * written to localStorage immediately and to the engine after a short debounce.
  */
 import { client } from '../ipc/index.js';
 import { ROOM_SORTS, type RoomSort } from './roomSort.js';
 import { DEFAULT_QUICK_REACTIONS, isQuickReactions } from '../content/quickReactions.js';
-import { NO_MUTES, isMutedUntil, sameMutedUntil, type MutedUntil } from '../content/mute.js';
 
 export const PREFS_STORAGE_KEY = 'alloy.prefs.v1';
 export const PREFS_ENGINE_KEY = 'prefs';
 export const PREFS_ENGINE_DEBOUNCE_MS = 300;
-export const PREFS_SYNCED_AT_STORAGE_KEY = 'alloy.prefs.syncedAt.v1';
-/** The account the local synced copy belongs to, so a different account never inherits it. */
-export const PREFS_ACCOUNT_STORAGE_KEY = 'alloy.prefs.account.v1';
 
 export type MessageLayout = 'modern' | 'bubbles' | 'irc';
 export type FontScale = 90 | 100 | 110 | 120 | 130;
 export type TimeFormat = 'auto' | '12h' | '24h';
-export type LinkPreviewMode = 'off' | 'unencrypted' | 'always';
 export type VoiceSpeed = '1' | '1.5' | '2';
 
 export interface Prefs {
@@ -29,7 +26,10 @@ export interface Prefs {
   fontScale: FontScale;
   timeFormat: TimeFormat;
   bigEmoji: boolean;
-  /** Publish your read receipts and show other people's. Off means neither. */
+  /**
+   * Show the read markers other participants send. Alloy always reports its own reads: the
+   * networks' terms require it and the toggle never suppresses them.
+   */
   showReadReceipts: boolean;
   notifyDesktop: boolean;
   notifySound: boolean;
@@ -38,18 +38,14 @@ export interface Prefs {
   roomListPreviews: boolean;
   roomListSections: boolean;
   roomListPeople: boolean;
-  homeShowAllRooms: boolean;
   showTyping: boolean;
   sendTyping: boolean;
-  /** Announces incoming messages through the conversation's polite live region (mute for chatty rooms). */
+  /** Announces incoming messages through the conversation's polite live region (mute for chatty chats). */
   announceMessages: boolean;
   showRemovedPlaceholder: boolean;
   showMembershipEvents: boolean;
-  showProfileChanges: boolean;
-  showRoomUpdates: boolean;
   jumpToBottomOnSend: boolean;
   autoplayMedia: boolean;
-  linkPreviews: LinkPreviewMode;
   enterToSend: boolean;
   launchAtLogin: boolean;
   autoCheckUpdates: boolean;
@@ -60,14 +56,9 @@ export interface Prefs {
   voiceSpeed: VoiceSpeed;
   /** The first-run permissions prompt was dismissed on this device. */
   permissionsPromptDismissed: boolean;
-  /** Rooms muted for a limited time: room id -> epoch ms when the mute ends. */
-  mutedUntil: MutedUntil;
 }
 
 export type PrefKey = keyof Prefs;
-
-/** Handle returned by `setTimeout` in this runtime. */
-export type EngineTimer = ReturnType<typeof setTimeout>;
 
 export const DEFAULT_PREFS: Readonly<Prefs> = Object.freeze({
   messageLayout: 'bubbles',
@@ -82,17 +73,13 @@ export const DEFAULT_PREFS: Readonly<Prefs> = Object.freeze({
   roomListPreviews: true,
   roomListSections: true,
   roomListPeople: true,
-  homeShowAllRooms: true,
   showTyping: true,
   sendTyping: true,
   announceMessages: true,
   showRemovedPlaceholder: true,
   showMembershipEvents: true,
-  showProfileChanges: true,
-  showRoomUpdates: true,
   jumpToBottomOnSend: true,
   autoplayMedia: false,
-  linkPreviews: 'unencrypted',
   enterToSend: true,
   launchAtLogin: false,
   autoCheckUpdates: true,
@@ -101,89 +88,20 @@ export const DEFAULT_PREFS: Readonly<Prefs> = Object.freeze({
   quickReactions: DEFAULT_QUICK_REACTIONS,
   voiceSpeed: '1',
   permissionsPromptDismissed: false,
-  mutedUntil: NO_MUTES,
 });
 
 /** Equality for preference values: lists compare by content, everything else by identity. */
 function sameValue(a: unknown, b: unknown): boolean {
   if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((v, i) => v === b[i]);
-  if (isMutedUntil(a) && isMutedUntil(b)) return sameMutedUntil(a, b);
   return a === b;
 }
 
 const PREF_KEYS = Object.keys(DEFAULT_PREFS) as PrefKey[];
 
-type PrefScope = 'device' | 'synced';
-
-/**
- * Where each preference lives. Device preferences depend on this install (screen, input method, OS
- * notification permission, login item, updater), so they stay local. Synced preferences describe what the
- * user sees and sends in the account's conversations, so they travel with the Matrix account.
- */
-const PREF_SCOPE: Record<PrefKey, PrefScope> = {
-  messageLayout: 'device',
-  fontScale: 'device',
-  enterToSend: 'device',
-  jumpToBottomOnSend: 'device',
-  notifyDesktop: 'device',
-  notifySound: 'device',
-  notifyPreview: 'device',
-  notifyOnlyWhenUnfocused: 'device',
-  launchAtLogin: 'device',
-  autoCheckUpdates: 'device',
-  autoDownloadUpdates: 'device',
-  voiceSpeed: 'device',
-  permissionsPromptDismissed: 'device',
-  timeFormat: 'synced',
-  bigEmoji: 'synced',
-  showReadReceipts: 'synced',
-  roomListPreviews: 'synced',
-  roomListSections: 'synced',
-  roomListPeople: 'synced',
-  homeShowAllRooms: 'synced',
-  showTyping: 'synced',
-  sendTyping: 'synced',
-  // Screen-reader announcements are a property of this device's assistive setup, not the account.
-  announceMessages: 'device',
-  showRemovedPlaceholder: 'synced',
-  showMembershipEvents: 'synced',
-  showProfileChanges: 'synced',
-  showRoomUpdates: 'synced',
-  autoplayMedia: 'synced',
-  linkPreviews: 'synced',
-  roomSort: 'synced',
-  quickReactions: 'synced',
-  mutedUntil: 'synced',
-};
-
-/** Preferences that stay on this install. */
-export const DEVICE_PREF_KEYS: readonly PrefKey[] = PREF_KEYS.filter((key) => PREF_SCOPE[key] === 'device');
-/** Preferences stored in the account's `chat.alloy.prefs` document, shared by every device. */
-export const SYNCED_PREF_KEYS: readonly PrefKey[] = PREF_KEYS.filter((key) => PREF_SCOPE[key] === 'synced');
-
-/** Keeps only the synced keys of `values`. */
-function syncedSubset(values: Partial<Prefs>): Partial<Prefs> {
-  const out: Partial<Record<PrefKey, unknown>> = {};
-  for (const key of SYNCED_PREF_KEYS) {
-    if (values[key] !== undefined) out[key] = values[key];
-  }
-  return out as Partial<Prefs>;
-}
-/** Keeps only the device keys of `values`. */
-export function deviceSubset(values: Partial<Prefs>): Partial<Prefs> {
-  const out: Partial<Record<PrefKey, unknown>> = {};
-  for (const key of DEVICE_PREF_KEYS) {
-    if (values[key] !== undefined) out[key] = values[key];
-  }
-  return out as Partial<Prefs>;
-}
-
-
 const ENUM_VALUES = {
   messageLayout: ['modern', 'bubbles', 'irc'],
   fontScale: [90, 100, 110, 120, 130],
   timeFormat: ['auto', '12h', '24h'],
-  linkPreviews: ['off', 'unencrypted', 'always'],
   roomSort: ROOM_SORTS,
   voiceSpeed: ['1', '1.5', '2'],
 } as const satisfies Partial<{ [K in PrefKey]: readonly Prefs[K][] }>;
@@ -197,7 +115,6 @@ function isEnumKey(key: PrefKey): key is EnumKey {
 /** Whether `value` is an allowed value for `key`. Booleans and the enum sets are the only accepted types. */
 export function isValidPref(key: PrefKey, value: unknown): boolean {
   if (key === 'quickReactions') return isQuickReactions(value);
-  if (key === 'mutedUntil') return isMutedUntil(value);
   if (typeof DEFAULT_PREFS[key] === 'boolean') return typeof value === 'boolean';
   if (isEnumKey(key)) return (ENUM_VALUES[key] as readonly unknown[]).includes(value);
   return false;
@@ -246,39 +163,6 @@ function readStored(storage: PrefsStorage | null): Partial<Prefs> {
   }
 }
 
-/** Epoch milliseconds of the latest synced change this device knows of; 0 when none. */
-function readSyncedAt(storage: PrefsStorage | null): number {
-  if (!storage) return 0;
-  try {
-    const at = Number(storage.getItem(PREFS_SYNCED_AT_STORAGE_KEY));
-    return Number.isSafeInteger(at) && at > 0 ? at : 0;
-  } catch (err) {
-    console.warn('[prefs] could not read the synced-preferences timestamp', err);
-    return 0;
-  }
-}
-
-/** A parsed account document: the synced values it carries and the time they were changed. */
-interface AccountDoc {
-  updatedAt: number;
-  values: Partial<Prefs>;
-}
-
-/** Reads the account's `chat.alloy.prefs` document. Null when absent or not a valid document. */
-function parseAccountDoc(json: string | null): AccountDoc | null {
-  if (json === null) return null;
-  let raw: unknown;
-  try {
-    raw = JSON.parse(json);
-  } catch {
-    return null;
-  }
-  if (typeof raw !== 'object' || raw === null || !('updated_at' in raw)) return null;
-  const updatedAt = raw.updated_at;
-  if (typeof updatedAt !== 'number' || !Number.isSafeInteger(updatedAt) || updatedAt < 0) return null;
-  return { updatedAt, values: syncedSubset(sanitizePrefs(raw)) };
-}
-
 const flushHandlers = new Set<() => Promise<void> | void>();
 
 /** Registers another store's pending persistence writes with the app lifecycle flush. */
@@ -291,31 +175,19 @@ export class PrefsStore {
   #storage: PrefsStorage | null;
   #values = $state<Prefs>({ ...DEFAULT_PREFS });
   #version = 0;
-  #engineTimer: EngineTimer | undefined;
-  /** Epoch ms of the latest synced change this device knows of: local, or the adopted account document. */
-  #syncedAt = 0;
-  /** Synced values changed here and not yet stored on the account. */
-  #accountDirty = false;
-  #listening = false;
-  /** True once engine settings have been successfully loaded. */
-  #engineLoaded = false;
+  #engineTimer: ReturnType<typeof setTimeout> | undefined;
   /** Delays between retry attempts for initial GetSettings load. */
   #retryDelays: readonly number[];
   /** Pending engine save promise, or undefined if none in flight. */
   #inFlightEngine: Promise<void> | undefined;
-  /** Pending account save promise, or undefined if none in flight. */
-  #inFlightAccount: Promise<void> | undefined;
 
   /** True once `load()` has reconciled with the engine, or given up. */
   ready = $state(false);
-  /** The account the synced values come from; null before `beginAccount` and after sign-out. */
-  #accountId: string | null = null;
 
   constructor(storage: PrefsStorage | null = defaultStorage(), retryDelays: readonly number[] = [100, 200]) {
     this.#storage = storage;
     this.#retryDelays = retryDelays;
     this.#values = { ...DEFAULT_PREFS, ...readStored(storage) };
-    this.#syncedAt = readSyncedAt(storage);
   }
 
   get messageLayout(): MessageLayout {
@@ -354,9 +226,6 @@ export class PrefsStore {
   get roomListPeople(): boolean {
     return this.#values.roomListPeople;
   }
-  get homeShowAllRooms(): boolean {
-    return this.#values.homeShowAllRooms;
-  }
   get showTyping(): boolean {
     return this.#values.showTyping;
   }
@@ -372,20 +241,11 @@ export class PrefsStore {
   get showMembershipEvents(): boolean {
     return this.#values.showMembershipEvents;
   }
-  get showProfileChanges(): boolean {
-    return this.#values.showProfileChanges;
-  }
-  get showRoomUpdates(): boolean {
-    return this.#values.showRoomUpdates;
-  }
   get jumpToBottomOnSend(): boolean {
     return this.#values.jumpToBottomOnSend;
   }
   get autoplayMedia(): boolean {
     return this.#values.autoplayMedia;
-  }
-  get linkPreviews(): LinkPreviewMode {
-    return this.#values.linkPreviews;
   }
   get enterToSend(): boolean {
     return this.#values.enterToSend;
@@ -413,10 +273,6 @@ export class PrefsStore {
   get permissionsPromptDismissed(): boolean {
     return this.#values.permissionsPromptDismissed;
   }
-  get mutedUntil(): MutedUntil {
-    return this.#values.mutedUntil;
-  }
-
 
   get<K extends PrefKey>(key: K): Prefs[K] {
     return this.#values[key];
@@ -426,7 +282,7 @@ export class PrefsStore {
   set<K extends PrefKey>(key: K, value: Prefs[K]): void {
     if (!isValidPref(key, value) || sameValue(this.#values[key], value)) return;
     this.#values[key] = value;
-    this.#changed(PREF_SCOPE[key] === 'synced');
+    this.#changed();
   }
 
   /** Restores one key to its default, or every key when called without arguments. */
@@ -436,7 +292,7 @@ export class PrefsStore {
     } else {
       this.#values[key] = DEFAULT_PREFS[key];
     }
-    this.#changed(key === undefined || PREF_SCOPE[key] === 'synced');
+    this.#changed();
   }
 
   /**
@@ -445,12 +301,10 @@ export class PrefsStore {
   async flush(): Promise<void> {
     const pending: Promise<unknown>[] = [];
     if (this.#inFlightEngine) pending.push(this.#inFlightEngine);
-    if (this.#inFlightAccount) pending.push(this.#inFlightAccount);
     if (this.#engineTimer !== undefined) {
       clearTimeout(this.#engineTimer);
       this.#engineTimer = undefined;
       pending.push(this.#pushToEngine());
-      if (this.#accountDirty) pending.push(this.#pushToAccount());
     }
     for (const handler of flushHandlers) {
       try {
@@ -463,51 +317,11 @@ export class PrefsStore {
   }
 
   /**
-   * Sign-out: the synced values and their timestamp belong to the account that just left, so they are
-   * dropped (device-only settings stay). Clear synced values from the engine's settings file and
-   * localStorage so the next account does not inherit them.
-   */
-  signOut(): Promise<void> {
-    clearTimeout(this.#engineTimer);
-    this.#engineTimer = undefined;
-    this.#accountDirty = false;
-    this.#accountId = null;
-    const defaults = DEFAULT_PREFS;
-    for (const key of SYNCED_PREF_KEYS) (this.#values as Record<PrefKey, unknown>)[key] = defaults[key];
-    this.#syncedAt = 0;
-    this.#version++;
-    this.#writeLocal(true);
-    // Immediately push only device-scoped values to the engine, clearing synced values from the file.
-    return this.#pushToEngine();
-  }
-
-  /**
-   * Binds the local copy to the signed-in account, before `load()` reads the engine and account.
-   * A different account than the one that wrote the local copy starts from the defaults for the
-   * synced preferences: those values describe what the previous user saw, not what this one does.
-   */
-  beginAccount(accountId: string): void {
-    const previous = this.#storedAccount();
-    this.#accountId = accountId;
-    if (previous === accountId) return;
-    for (const key of SYNCED_PREF_KEYS) (this.#values as Record<PrefKey, unknown>)[key] = DEFAULT_PREFS[key];
-    this.#syncedAt = 0;
-    this.#accountDirty = false;
-    this.#version++;
-    this.#writeLocal(true);
-  }
-
-  /**
-   * Reconciles with the engine's device copy, then with the account's synced document. Each step keeps
-   * the local values when it fails and never rejects. The first call also starts listening for synced
-   * changes from other devices.
+   * Merges the engine's copy over the defaults. Each step keeps the local values when it fails and
+   * never rejects.
    */
   async load(): Promise<void> {
-    this.#listen();
     await this.#loadEngineCopy();
-    if (this.#engineLoaded) {
-      await this.#loadAccount();
-    }
     this.ready = true;
   }
 
@@ -531,14 +345,10 @@ export class PrefsStore {
         // A newer user change is already scheduled to reach the engine; do not overwrite it.
         if (this.#version !== startVersion) return;
         if (entry === undefined) {
-          this.#engineLoaded = true;
           this.#scheduleEngineSave();
           return;
         }
-        this.#engineLoaded = true;
-        // The settings file is install-wide, so only device-scoped values may cross from it; synced
-        // values come from the account document, or the local copy of this account.
-        this.#values = { ...this.#values, ...deviceSubset(sanitizePrefs(entry)) };
+        this.#values = { ...this.#values, ...sanitizePrefs(entry) };
         this.#writeLocal();
         return;
       } catch (err) {
@@ -554,82 +364,18 @@ export class PrefsStore {
     console.warn('[prefs] could not reconcile preferences with the engine after retries; keeping the local copy', lastErr);
   }
 
-  /**
-   * Adopts the account document when it is newer than this device's last synced change. Otherwise pushes
-   * this device's synced values, when they are newer or the account has none yet.
-   */
-  async #loadAccount(): Promise<void> {
-    const startVersion = this.#version;
-    try {
-      const res = await client.invoke({ action: 'GetAccountPrefs' });
-      if (res.type !== 'AccountPrefs') {
-        throw new Error(`unexpected response: ${res.type}`);
-      }
-      // A newer user change is pending; it is pushed with its own timestamp.
-      if (this.#version !== startVersion) return;
-      const remote = parseAccountDoc(res.payload.json);
-      if (this.#adoptIfNewer(remote)) return;
-      if (!remote && this.#syncedAt === 0) this.#syncedAt = Date.now();
-      if (!remote || this.#syncedAt > remote.updatedAt) {
-        this.#accountDirty = true;
-        this.#writeLocal();
-        this.#scheduleEngineSave();
-      }
-    } catch (err) {
-      console.warn('[prefs] could not reconcile preferences with the account; keeping the local copy', err);
-    }
-  }
-
-  /** Starts the listener for synced changes from other devices. Idempotent. */
-  #listen(): void {
-    if (this.#listening) return;
-    this.#listening = true;
-    client.subscribe((event) => {
-      if (event.type === 'AccountPrefsChanged') this.#adoptIfNewer(parseAccountDoc(event.payload.json));
-    });
-  }
-
-  /** Takes the synced values of a newer account document. A local change not yet pushed is newer and wins. */
-  #adoptIfNewer(remote: AccountDoc | null): boolean {
-    if (!remote || remote.updatedAt <= this.#syncedAt) return false;
-    this.#values = { ...this.#values, ...remote.values };
-    this.#syncedAt = remote.updatedAt;
-    this.#accountDirty = false;
-    this.#writeLocal();
-    return true;
-  }
-
-  #changed(synced: boolean): void {
+  #changed(): void {
     this.#version++;
-    if (synced) {
-      this.#accountDirty = true;
-      // Strictly increasing, so a change never ties with the last synced one.
-      this.#syncedAt = Math.max(Date.now(), this.#syncedAt + 1);
-    }
     this.#writeLocal();
     this.#scheduleEngineSave();
   }
 
-  #writeLocal(deviceOnly = false): void {
+  #writeLocal(): void {
     if (!this.#storage) return;
     try {
-      const toSave = deviceOnly ? deviceSubset(this.#values) : this.#values;
-      this.#storage.setItem(PREFS_STORAGE_KEY, JSON.stringify(toSave));
-      this.#storage.setItem(PREFS_SYNCED_AT_STORAGE_KEY, String(this.#syncedAt));
-      if (this.#accountId === null) this.#storage.removeItem(PREFS_ACCOUNT_STORAGE_KEY);
-      else this.#storage.setItem(PREFS_ACCOUNT_STORAGE_KEY, this.#accountId);
+      this.#storage.setItem(PREFS_STORAGE_KEY, JSON.stringify(this.#values));
     } catch (err) {
       console.warn('[prefs] could not persist preferences locally', err);
-    }
-  }
-
-  /** The account this install's local copy was last written for, if any. */
-  #storedAccount(): string | null {
-    if (!this.#storage) return null;
-    try {
-      return this.#storage.getItem(PREFS_ACCOUNT_STORAGE_KEY);
-    } catch {
-      return null;
     }
   }
 
@@ -638,22 +384,16 @@ export class PrefsStore {
     this.#engineTimer = setTimeout(() => {
       this.#engineTimer = undefined;
       void this.#pushToEngine();
-      if (this.#accountDirty) void this.#pushToAccount();
     }, PREFS_ENGINE_DEBOUNCE_MS);
   }
 
-  /**
-   * Saves the device-scoped preferences to the engine's settings file. The file is install-wide, so
-   * it never holds synced values — those belong to an account and travel in its document. Older
-   * builds wrote them here; this device-only write clears that out.
-   */
+  /** Saves the preferences to the engine's local settings file. Errors are logged, never thrown. */
   async #pushToEngine(): Promise<void> {
     const promise = (async () => {
       try {
-        const toSave = deviceSubset(this.#values);
         const res = await client.invoke({
           action: 'SetSetting',
-          params: { key: PREFS_ENGINE_KEY, value_json: JSON.stringify(toSave) },
+          params: { key: PREFS_ENGINE_KEY, value_json: JSON.stringify(this.#values) },
         });
         if (res.type !== 'SettingSet') {
           console.warn('[prefs] unexpected response while saving preferences', res.type);
@@ -668,34 +408,6 @@ export class PrefsStore {
     } finally {
       if (this.#inFlightEngine === promise) {
         this.#inFlightEngine = undefined;
-      }
-    }
-  }
-
-  /**
-   * Stores the synced values with this device's change time. The dirty flag is cleared before the request so
-   * a change made meanwhile is not lost; on failure it is set again and the next change or load retries.
-   */
-  async #pushToAccount(): Promise<void> {
-    this.#accountDirty = false;
-    const promise = (async () => {
-      const json = JSON.stringify({ ...syncedSubset(this.#values), updated_at: this.#syncedAt });
-      try {
-        const res = await client.invoke({ action: 'SetAccountPrefs', params: { json } });
-        if (res.type !== 'Unit') {
-          console.warn('[prefs] unexpected response while saving synced preferences', res.type);
-        }
-      } catch (err) {
-        this.#accountDirty = true;
-        console.warn('[prefs] could not save synced preferences to the account', err);
-      }
-    })();
-    this.#inFlightAccount = promise;
-    try {
-      await promise;
-    } finally {
-      if (this.#inFlightAccount === promise) {
-        this.#inFlightAccount = undefined;
       }
     }
   }

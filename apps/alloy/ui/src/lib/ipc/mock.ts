@@ -1,472 +1,207 @@
+/**
+ * In-memory development engine for protocol v2.
+ *
+ * `pnpm dev`, the screenshot scripts and the E2E walks run the UI without a connector; this class
+ * answers the same commands and streams the same diffs the real engine does, from the seeded demo
+ * state in `../mock/seed.ts`. It is reached only through `dev-transport.ts`, which `index.ts`
+ * imports behind a statically-false `import.meta.env.DEV` branch, so it never ships.
+ *
+ * Behaviour worth knowing while reading:
+ * - login is the connector state machine: Telegram walks phone → code (`12345`) → optional
+ *   password (only when the phone ends with `9`), Messenger walks cookies, the fake network walks
+ *   phone → code;
+ * - sending is the outbox: `MessageQueued` answers the command, the local echo arrives as a
+ *   `PushBack` with `send_state: Queued`, then `Sending`, then `Sent` with its local message id;
+ * - room-list and timeline changes are emitted as `VectorDiffDto` operations against what each
+ *   subscription has already received, never as full snapshots after the initial `Reset`.
+ */
+
 import type {
-  EngineCommand,
-  EngineResponse,
-  EngineEvent,
-  RoomSummary,
-  RoomTagDef,
-  TimelineItemDto,
   Account,
-  SasEmoji,
-  VectorDiffDto,
+  AccountId,
+  CookieFieldDto,
+  EngineCommand,
+  EngineEvent,
+  EngineResponse,
+  EventId,
+  GlobalSearchHit,
+  LoginId,
+  LoginInputDto,
+  LoginStepDto,
+  Network,
+  RoomId,
   RoomMediaItem,
   RoomMediaKind,
   RoomMemberDto,
-  RoomMembership,
-  UserProfileDto,
-  NotificationLevel,
-  NotificationSettingsDto,
-  OwnProfileDto,
-  DeviceDto,
-  SessionInfoDto,
-  EngineError,
+  RoomSearchHit,
+  RoomSummary,
+  RoomTagDef,
+  TimelineItemDto,
+  UserId,
+  VectorDiffDto,
 } from '../generated/index.js';
-import type { Transport, EventHandler, Unsubscribe } from './transport.js';
-import { makeTagId } from '../stores/tags.js';
-type SearchRoomMessagesParams = Extract<EngineCommand, { action: 'SearchRoomMessages' }>['params'];
-type RoomSearchResults = Extract<EngineResponse, { type: 'RoomSearchResults' }>['payload'];
-type RoomSearchHit = RoomSearchResults['hits'][number];
+import type { EventHandler, Transport, Unsubscribe } from './transport.js';
+import {
+  capabilitiesFor,
+  dayDivider,
+  previewOf,
+  seedDemo,
+  sortRoomList,
+  stableId,
+  svgImageDataUrl,
+  textFileDataUrl,
+  wavDataUrl,
+} from '../mock/seed.js';
 
-const MOCK_ACCOUNT: Account = {
-  id: 'acc_alice',
-  user_id: '@alice:alloy.chat',
-  display_name: 'Alice',
-  avatar_url: null,
-  homeserver_url: 'https://matrix.alloy.chat',
-};
+/** The only login code the demo accepts, matching the fake connector's `FAKE_CODE`. */
+export const MOCK_LOGIN_CODE = '12345';
 
-const MOCK_DEVICE_ID = 'MOCKDEVICE';
-
-const MOCK_DEVICES: DeviceDto[] = [
-  {
-    device_id: MOCK_DEVICE_ID,
-    display_name: 'Alloy Desktop (macOS)',
-    last_seen_ts: 1_792_314_000_000,
-    last_seen_ip: '192.0.2.14',
-    is_current: true,
-    verified: true,
-  },
-  {
-    device_id: 'MOCKPHONE01',
-    display_name: 'Alloy Android',
-    last_seen_ts: 1_792_268_100_000,
-    last_seen_ip: '203.0.113.42',
-    is_current: false,
-    verified: false,
-  },
-  {
-    device_id: 'MOCKLAPTOP02',
-    display_name: 'Old ThinkPad (Firefox)',
-    last_seen_ts: 1_788_090_120_000,
-    last_seen_ip: null,
-    is_current: false,
-    verified: true,
-  },
+/** Messenger cookies the demo asks for; `datr` is optional, the other two are not. */
+const MESSENGER_COOKIES: CookieFieldDto[] = [
+  { name: 'c_user', label: 'c_user (the numeric id in your Facebook profile URL)', required: true },
+  { name: 'xs', label: 'xs (the session cookie)', required: true },
+  { name: 'datr', label: 'datr (the browser cookie)', required: false },
 ];
 
-const MOCK_SESSION_INFO: SessionInfoDto = {
-  device_id: MOCK_DEVICE_ID,
-  ed25519_key: 'Hq3sZ0tYvW8kXb1RmN5pLc7dAeF2gJu4oIy6TrBwCxE',
-  curve25519_key: 'Qm8fLr2NdV6wYc0ZkH4sTa9BpXe1UjG7oRi3KlWvCyA',
-  cross_signing_ready: true,
-  backup_enabled: true,
-  verified: true,
-};
+const THEMES: [string, string][] = [
+  ['dark', 'Dark'],
+  ['light', 'Light'],
+  ['amoled', 'AMOLED'],
+];
 
-function invalidArgument(message: string): EngineError {
-  return { code: 'invalid_argument', message, reason: null };
+/** A demo upload has no real file behind it; progress and the row still need a believable size. */
+const DEMO_UPLOAD_BYTES = 1_842_176;
+
+interface RoomSubscription {
+  filter: string | null;
+  /** The rows this subscription has received; diffs are computed against it. */
+  rows: RoomSummary[];
+  /** False until the initial `Reset` went out, so early changes do not double-apply. */
+  ready: boolean;
 }
 
-const MOCK_MEMBERS: RoomMemberDto[] = [
-  { user_id: '@alice:alloy.chat', display_name: 'Alice', avatar_url: null, power_level: 100, membership: 'Joined' },
-  { user_id: '@bob:alloy.chat', display_name: 'Bob', avatar_url: null, power_level: 50, membership: 'Joined' },
-  { user_id: '@carol:alloy.chat', display_name: null, avatar_url: null, power_level: 0, membership: 'Invited' },
-];
-
-const PROFILE_MEMBERSHIP: Record<RoomMembership, string> = {
-  Joined: 'join',
-  Invited: 'invite',
-  Left: 'leave',
-  Banned: 'ban',
-};
-
-const MOCK_MEDIA_COUNT = 14;
-const MOCK_MEDIA_NEWEST_MILLIS = 1_767_225_600_000;
-
-/** Deterministic shared items of one kind, newest first. */
-function mockMediaItems(kind: RoomMediaKind): RoomMediaItem[] {
-  return Array.from({ length: MOCK_MEDIA_COUNT }, (_, i) => {
-    const fromAlice = i % 2 === 0;
-    const base = {
-      event_id: `$mock_${kind.toLowerCase()}_${i}`,
-      sender: fromAlice ? '@alice:alloy.chat' : '@bob:alloy.chat',
-      sender_display_name: fromAlice ? 'Alice' : 'Bob',
-      timestamp_millis: MOCK_MEDIA_NEWEST_MILLIS - i * 3_600_000,
-      uri: null,
-      thumbnail_uri: null,
-      mime_type: null,
-      size_bytes: null,
-      width: null,
-      height: null,
-    };
-    if (kind === 'Links') {
-      return {
-        ...base,
-        kind: 'link',
-        body: `Shared link ${i}`,
-        urls: [`https://example.org/article-${i}`],
-      };
-    }
-    if (kind === 'Files') {
-      const audio = i % 2 === 1;
-      return {
-        ...base,
-        kind: audio ? 'audio' : 'file',
-        body: audio ? `voice-${i}.ogg` : `report-${i}.pdf`,
-        uri: `mxc://alloy.chat/file-${i}`,
-        mime_type: audio ? 'audio/ogg' : 'application/pdf',
-        size_bytes: 20_480 + i * 1_024,
-      };
-    }
-    const video = i % 2 === 1;
-    return {
-      ...base,
-      kind: video ? 'video' : 'image',
-      body: video ? `clip-${i}.mp4` : `photo-${i}.jpg`,
-      uri: `mxc://alloy.chat/media-${i}`,
-      mime_type: video ? 'video/mp4' : 'image/jpeg',
-      size_bytes: 300_000 + i * 5_000,
-      width: 1280,
-      height: 720,
-    };
-  });
+interface LoginSession {
+  id: LoginId;
+  network: Network;
+  step: LoginStepDto;
+  phone: string | null;
+  cookies: Record<string, string>;
 }
 
-const MOCK_ROOMS: RoomSummary[] = [
-  {
-    id: '!general:alloy.chat',
-    name: 'General Discussion',
-    avatar_url: null,
-    unread_notifications: {
-      highlight_count: 0,
-      notification_count: 3,
-    },
-    latest_event: {
-      sender: '@bob:alloy.chat',
-      timestamp_millis: Date.now() - 60000,
-      body: 'Welcome to Alloy chat!',
-    },
-    is_direct: false,
-    is_space: false,
-    encrypted: true,
-    membership: 'Joined',
-    favourite: null,
-    low_priority: null,
-    tags: [],
-    direct_user_id: null,
-  },
-  {
-    id: '!dev:alloy.chat',
-    name: 'Alloy Core Dev',
-    avatar_url: null,
-    unread_notifications: {
-      highlight_count: 1,
-      notification_count: 5,
-    },
-    latest_event: {
-      sender: '@alice:alloy.chat',
-      timestamp_millis: Date.now() - 120000,
-      body: 'Sliding sync native benchmarks look great.',
-    },
-    is_direct: false,
-    is_space: false,
-    encrypted: true,
-    membership: 'Joined',
-    favourite: true,
-    low_priority: null,
-    tags: [],
-    direct_user_id: null,
-  },
-  {
-    id: '!bob:alloy.chat',
-    name: 'Bob',
-    avatar_url: null,
-    unread_notifications: {
-      highlight_count: 0,
-      notification_count: 0,
-    },
-    latest_event: {
-      sender: '@bob:alloy.chat',
-      timestamp_millis: Date.now() - 3600000,
-      body: 'Hey Alice, did you review the PR?',
-    },
-    is_direct: true,
-    is_space: false,
-    encrypted: true,
-    membership: 'Joined',
-    favourite: null,
-    low_priority: null,
-    tags: [],
-    direct_user_id: null,
-  },
-];
+/** An engine failure the UI can branch on: `code` is coarse, `reason` is the stable detail. */
+export class MockEngineError extends Error {
+  readonly code: string;
+  readonly reason: string | null;
 
-const MOCK_SAS_EMOJIS: SasEmoji[] = [
-  { emoji: '🐶', decimal: 1234, description: 'Dog' },
-  { emoji: '🐱', decimal: 2345, description: 'Cat' },
-  { emoji: '🦁', decimal: 3456, description: 'Lion' },
-  { emoji: '🐎', decimal: 4567, description: 'Horse' },
-  { emoji: '🦄', decimal: 5678, description: 'Unicorn' },
-  { emoji: '🐬', decimal: 6789, description: 'Dolphin' },
-  { emoji: '🐘', decimal: 7890, description: 'Elephant' },
-];
+  constructor(code: string, message: string, reason: string | null = null) {
+    super(message);
+    this.name = 'MockEngineError';
+    this.code = code;
+    this.reason = reason;
+  }
+}
 
-interface MockPoll {
-  question: string;
-  answers: { id: string; text: string }[];
-  disclosed: boolean;
-  maxSelections: number;
-  hasEnded: boolean;
-  endTime: number | null;
-  myVotes: string[];
-  tallies: Map<string, number>;
+function invalidArgument(message: string): MockEngineError {
+  return new MockEngineError('invalid_argument', message);
+}
+
+function notFound(message: string): MockEngineError {
+  return new MockEngineError('not_found', message);
+}
+
+const NETWORK_LABEL: Record<Network, string> = {
+  telegram: 'Telegram',
+  messenger: 'Messenger',
+  fake: 'Test',
+};
+
+/** Mime type a picked file would carry, by extension, when the caller does not say. */
+const MIME_BY_EXTENSION: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  svg: 'image/svg+xml',
+  mp4: 'video/mp4',
+  webm: 'video/webm',
+  mp3: 'audio/mpeg',
+  ogg: 'audio/ogg',
+  opus: 'audio/ogg',
+  wav: 'audio/wav',
+  pdf: 'application/pdf',
+  zip: 'application/zip',
+};
+
+/** Slug the demo tag catalogue assigns; the engine derives ids the same way. */
+function tagSlug(name: string, taken: ReadonlySet<string>): string {
+  const base =
+    name
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'tag';
+  if (!taken.has(base)) return base;
+  let suffix = 2;
+  while (taken.has(`${base}-${suffix}`)) suffix += 1;
+  return `${base}-${suffix}`;
 }
 
 /**
- * In-memory Mock Transport for UI development and unit testing.
- * Provides realistic fake Matrix sliding-sync diffs, local echo state transitions,
- * and an interactive device verification (SAS) flow.
+ * In-memory implementation of the v2 engine, seeded with a Telegram and a Messenger account.
  */
 export class MockTransport implements Transport {
   private handlers = new Set<EventHandler>();
-  private rooms: RoomSummary[] = [...MOCK_ROOMS];
-  private timelineByRoom = new Map<string, TimelineItemDto[]>();
-  private roomSubscriptions = new Set<string>();
-  private timelineSubscriptions = new Map<string, string>(); // sub_id -> room_id
-  private subCounter = 0;
-  private polls = new Map<string, MockPoll>();
-  private topics = new Map<string, string>();
-  private notes = new Map<string, string>();
-  private dmRooms = new Map<string, string>([['@bob:alloy.chat', '!bob:alloy.chat']]);
-  private draftsByRoom = new Map<string, { text: string; reply_to?: string | null; edit_of?: string | null }>();
-  private pinnedsByRoom = new Map<string, string[]>(); // room_id -> list of event_ids (oldest first)
-  private roomFavourites = new Map<string, boolean>(); // room_id -> is_favourite
-  private roomLowPriorities = new Map<string, boolean>(); // room_id -> is_low_priority
-  private tagCatalog: RoomTagDef[] = [];
-  /** Rooms whose timeline was closed: reopening one drops this mark. */
-  private closedTimelines = new Set<string>();
-  private notificationSettings: NotificationSettingsDto = {
-    one_to_one: 'All',
-    group: 'Mentions',
-    room_mention: true,
-    user_mention: true,
-    invite: true,
-  };
-  private roomNotificationLevels = new Map<string, NotificationLevel>();
-  private ownProfile: OwnProfileDto = {
-    user_id: MOCK_ACCOUNT.user_id,
-    display_name: MOCK_ACCOUNT.display_name,
-    avatar_url: MOCK_ACCOUNT.avatar_url,
-    device_id: MOCK_DEVICE_ID,
-    homeserver: MOCK_ACCOUNT.homeserver_url,
-  };
-  private mediaCacheBytes = 42_991_616;
-  private oidcTimer: ReturnType<typeof setTimeout> | null = null;
 
-  /** Drops a pending mock OIDC sign-in so a cancel or a second attempt cannot sign in later. */
-  private cancelMockOidc(): void {
-    if (this.oidcTimer !== null) {
-      clearTimeout(this.oidcTimer);
-      this.oidcTimer = null;
-    }
-  }
+  private accounts: Account[];
+  private rooms: RoomSummary[];
+  private members: Map<RoomId, RoomMemberDto[]>;
+  private timelines: Map<RoomId, TimelineItemDto[]>;
+  private media: Map<string, string>;
+  private notes: Map<RoomId, string>;
+  private drafts: Map<RoomId, { text: string; reply_to: EventId | null }>;
+  private tags: RoomTagDef[];
+  private people: Record<UserId, string>;
 
-  /** Default level for a room, by its direct flag: one-to-one or group. */
-  private defaultRoomLevel(roomId: string): NotificationLevel {
-    const room = this.rooms.find((r) => r.id === roomId);
-    return room?.is_direct ? this.notificationSettings.one_to_one : this.notificationSettings.group;
-  }
-
-  /** Applies a patch to a known room and pushes a Set diff to every room-list subscriber. */
-  private patchRoom(roomId: string, patch: Partial<RoomSummary>): void {
-    const index = this.rooms.findIndex((r) => r.id === roomId);
-    if (index === -1) return;
-    const value = { ...this.rooms[index], ...patch };
-    this.rooms[index] = value;
-    for (const subId of this.roomSubscriptions) {
-      this.emit({
-        type: 'RoomListDiff',
-        payload: { subscription_id: subId, diff: { type: 'Set', content: { index, value } } },
-      });
-    }
-  }
-
-  /** Builds the poll content as the engine maps it: counts stay hidden until the poll ends when undisclosed. */
-  private pollItemContent(eventId: string): TimelineItemDto['content'] {
-    const poll = this.polls.get(eventId);
-    if (!poll) throw new Error(`unknown poll ${eventId}`);
-    const reveal = poll.disclosed || poll.hasEnded;
-    const answers = poll.answers.map((a) => ({
-      id: a.id,
-      text: a.text,
-      votes: reveal ? (poll.tallies.get(a.id) ?? 0) : 0,
-    }));
-    return {
-      kind: 'Poll',
-      data: {
-        question: poll.question,
-        answers,
-        disclosed: poll.disclosed,
-        max_selections: poll.maxSelections,
-        total_votes: answers.reduce((sum, a) => sum + a.votes, 0),
-        has_ended: poll.hasEnded,
-        end_time: poll.endTime,
-        my_votes: [...poll.myVotes],
-      },
-    };
-  }
-
-  private emitPollUpdate(roomId: string, eventId: string) {
-    const items = this.timelineByRoom.get(roomId) ?? [];
-    const idx = items.findIndex((i) => i.event_id === eventId);
-    if (idx === -1) return;
-    items[idx] = { ...items[idx], content: this.pollItemContent(eventId) };
-    for (const [subId, rId] of this.timelineSubscriptions.entries()) {
-      if (rId === roomId) {
-        this.emit({
-          type: 'TimelineDiff',
-          payload: {
-            subscription_id: subId,
-            room_id: roomId,
-            diff: { type: 'Set', content: { index: idx, value: items[idx] } },
-          },
-        });
-      }
-    }
-  }
+  private roomSubscriptions = new Map<string, RoomSubscription>();
+  private timelineSubscriptions = new Map<string, RoomId>();
+  private logins = new Map<LoginId, LoginSession>();
+  private settings = new Map<string, string>([
+    ['notificationLevel', JSON.stringify('all')],
+    ['compactRows', JSON.stringify(false)],
+  ]);
+  private counter = 0;
+  private txnCounter = 0;
+  private announced = false;
 
   constructor() {
-    this.seedTimelines();
+    const seed = seedDemo();
+    this.accounts = seed.accounts;
+    this.rooms = seed.rooms;
+    this.members = seed.members;
+    this.timelines = seed.timelines;
+    this.media = seed.media;
+    this.notes = seed.notes;
+    this.drafts = seed.drafts;
+    this.tags = seed.tags;
+    this.people = seed.people;
   }
 
-  /** A short, believable conversation so the demo (and the README screenshots) look alive. */
-  private demoConversation(): TimelineItemDto[] {
-    const now = Date.now();
-    const text = (n: number, sender: string, body: string, minutesAgo: number, extra: Partial<TimelineItemDto> = {}): TimelineItemDto => ({
-      internal_id: `demo_${n}`,
-      event_id: `$demo_${n}:alloy.chat`,
-      sender,
-      timestamp_millis: now - minutesAgo * 60_000,
-      content: { kind: 'TextMessage', data: { body, formatted_body: null, html_sanitized: true } },
-      send_state: { status: 'Sent', data: { event_id: `$demo_${n}:alloy.chat` } },
-      is_own: sender === MOCK_ACCOUNT.user_id,
-      reply_to: null,
-      thread_summary: null,
-      read_receipts: null,
-      mentions_me: false,
-      ...extra,
-    });
-    const items = [
-      text(1, '@bob:alloy.chat', 'Morning! The release build finished: macOS, Windows, Linux and the Android APK.', 42),
-      text(2, '@charlie:alloy.chat', 'Nice. Did the update check pick it up on your machine?', 40),
-      text(3, MOCK_ACCOUNT.user_id, 'Yes, it shows the changelog and a "Restart to apply update" button after the download.', 38),
-      text(4, '@bob:alloy.chat', 'I tagged the rooms we use for the launch so they sort together. Search finds old messages too.', 25),
-      text(5, '@charlie:alloy.chat', 'Great, shipping the notes to the team channel now.', 12),
-    ];
-    items[2].content = {
-      kind: 'TextMessage',
-      data: {
-        body: 'Yes, it shows the changelog and a "Restart to apply update" button after the download.',
-        formatted_body: '<p>Yes, it shows the <strong>changelog</strong> and a "Restart to apply update" button after the download.</p>',
-        html_sanitized: true,
-      },
-    };
-    items[2].reactions = [{ key: '\u{1F44D}', count: 2, senders: ['@bob:alloy.chat', '@charlie:alloy.chat'], by_me: false }];
-    items[4].reply_to = items[3];
-    // A short own reply to a long message: the case where gluing the quote to the bubble used to
-    // open a notch, kept in the demo data so the reply layout has a mobile frame in the walk.
-    items.push(
-      text(6, MOCK_ACCOUNT.user_id, 'Noted, thanks!', 6, {
-        reply_to: items[0],
-      } as Partial<TimelineItemDto>)
-    );
-    return items;
-  }
-
-  private seedTimelines() {
-    const generalItems: TimelineItemDto[] = [
-      {
-        internal_id: 'item_1',
-        event_id: '$msg_1:alloy.chat',
-        sender: '@system:alloy.chat',
-        timestamp_millis: Date.now() - 86400000,
-        content: {
-          kind: 'DayDivider',
-          data: {
-            timestamp_millis: Date.now() - 86400000,
-          },
-        },
-        send_state: { status: 'Sent', data: { event_id: '$msg_1:alloy.chat' } },
-        is_own: false,
-        reply_to: null,
-        thread_summary: null,
-        read_receipts: null,
-        mentions_me: false,
-      },
-      {
-        internal_id: 'item_2',
-        event_id: '$msg_2:alloy.chat',
-        sender: '@bob:alloy.chat',
-        timestamp_millis: Date.now() - 3600000,
-        content: {
-          kind: 'TextMessage',
-          data: {
-            body: 'Welcome to Alloy Matrix Client prototype!',
-            formatted_body: '<p>Welcome to <strong>Alloy</strong> Matrix Client prototype!</p>',
-            html_sanitized: true,
-          },
-        },
-        send_state: { status: 'Sent', data: { event_id: '$msg_2:alloy.chat' } },
-        is_own: false,
-        reply_to: null,
-        thread_summary: null,
-        read_receipts: ['@alice:alloy.chat'],
-        mentions_me: false,
-      },
-      {
-        internal_id: 'item_3',
-        event_id: '$msg_3:alloy.chat',
-        sender: '@alice:alloy.chat',
-        timestamp_millis: Date.now() - 1800000,
-        content: {
-          kind: 'TextMessage',
-          data: {
-            body: 'Thanks Bob! The virtualized timeline is rendering smoothly at 60 fps.',
-            formatted_body: null,
-            html_sanitized: true,
-          },
-        },
-        send_state: { status: 'Sent', data: { event_id: '$msg_3:alloy.chat' } },
-        is_own: true,
-        reply_to: null,
-        thread_summary: null,
-        read_receipts: ['@bob:alloy.chat'],
-        mentions_me: false,
-      },
-    ];
-
-    this.timelineByRoom.set('!general:alloy.chat', generalItems);
-    this.timelineByRoom.set('!dev:alloy.chat', this.demoConversation());
-    this.timelineByRoom.set('!bob:alloy.chat', []);
-  }
+  // === Transport surface ===
 
   subscribe(handler: EventHandler): Unsubscribe {
     this.handlers.add(handler);
+    if (!this.announced) {
+      this.announced = true;
+      this.announceConnection();
+    }
     return () => {
       this.handlers.delete(handler);
     };
   }
 
-  emit(event: EngineEvent) {
+  emit(event: EngineEvent): void {
     for (const handler of this.handlers) {
       try {
         handler(event);
@@ -476,1301 +211,1089 @@ export class MockTransport implements Transport {
     }
   }
 
-  /** Encrypted rooms report Unavailable, as the homeserver cannot search them; the UI then searches locally. */
-  private searchRoomMessages(params: SearchRoomMessagesParams): RoomSearchResults {
-    const room = this.rooms.find((r) => r.id === params.room_id);
-    if (!room || room.encrypted) return { hits: [], next_batch: null, scope: 'Unavailable' };
-    const needle = params.query.toLowerCase();
-    const hits: RoomSearchHit[] = [];
-    for (const item of this.timelineByRoom.get(params.room_id) ?? []) {
-      if (item.event_id === null || item.content.kind !== 'TextMessage') continue;
-      const body = item.content.data.body;
-      if (!body.toLowerCase().includes(needle)) continue;
-      if (params.sender !== null && item.sender !== params.sender) continue;
-      hits.push({
-        event_id: item.event_id,
-        sender: item.sender,
-        sender_display_name: item.sender_display_name ?? null,
-        timestamp_millis: item.timestamp_millis,
-        body,
-      });
-    }
-    // Newest first, as the homeserver returns them.
-    hits.reverse();
-    return { hits: hits.slice(0, params.limit), next_batch: null, scope: 'Server' };
+  // === State helpers ===
+
+  private accountList(): Account[] {
+    return this.accounts.map((account) => ({ ...account, capabilities: { ...account.capabilities } }));
   }
 
-  async invoke(command: EngineCommand): Promise<EngineResponse> {
-    if (command.action === 'SearchRoomMessages') {
-      return { type: 'RoomSearchResults', payload: this.searchRoomMessages(command.params) };
+  private accountById(accountId: AccountId): Account {
+    const account = this.accounts.find((a) => a.id === accountId);
+    if (!account) throw notFound(`no account ${accountId}`);
+    return account;
+  }
+
+  private roomById(roomId: RoomId): RoomSummary {
+    const room = this.rooms.find((r) => r.id === roomId);
+    if (!room) throw notFound(`no chat ${roomId}`);
+    return room;
+  }
+
+  private items(roomId: RoomId): TimelineItemDto[] {
+    this.roomById(roomId);
+    const items = this.timelines.get(roomId);
+    if (!items) {
+      const empty: TimelineItemDto[] = [];
+      this.timelines.set(roomId, empty);
+      return empty;
     }
+    return items;
+  }
+
+  private myUserId(roomId: RoomId): UserId {
+    const room = this.roomById(roomId);
+    return this.accountById(room.account_id).remote_user_id ?? '';
+  }
+
+  private myDisplayName(roomId: RoomId): string | null {
+    const room = this.roomById(roomId);
+    return this.accountById(room.account_id).display_name;
+  }
+
+  private itemByEvent(roomId: RoomId, eventId: EventId): TimelineItemDto | null {
+    return this.items(roomId).find((item) => item.event_id === eventId) ?? null;
+  }
+
+  /** Applies a chat-flag or preview change and lets every room-list subscription see it. */
+  private touchRoom(roomId: RoomId, patch: Partial<RoomSummary>): void {
+    const index = this.rooms.findIndex((room) => room.id === roomId);
+    if (index === -1) throw notFound(`no chat ${roomId}`);
+    this.rooms[index] = { ...this.rooms[index], ...patch };
+    sortRoomList(this.rooms);
+    this.syncRoomSubscriptions();
+  }
+
+  private roomProjection(filter: string | null): RoomSummary[] {
+    const needle = (filter ?? '').trim().toLowerCase();
+    if (needle === '') return [...this.rooms];
+    return this.rooms.filter((room) => (room.name ?? '').toLowerCase().includes(needle));
+  }
+
+  private syncRoomSubscriptions(): void {
+    for (const [subscriptionId, subscription] of this.roomSubscriptions) {
+      if (!subscription.ready) continue;
+      const next = this.roomProjection(subscription.filter);
+      this.emitRoomDiff(subscriptionId, next, subscription.rows);
+      subscription.rows = next;
+    }
+  }
+
+  /** Emits the smallest set of operations that turns `prev` into `next`, in order. */
+  private emitRoomDiff(subscriptionId: string, next: RoomSummary[], prev: RoomSummary[]): void {
+    const nextIds = new Set(next.map((room) => room.id));
+    for (let index = prev.length - 1; index >= 0; index -= 1) {
+      if (!nextIds.has(prev[index].id)) {
+        this.emit({
+          type: 'RoomListDiff',
+          payload: { subscription_id: subscriptionId, diff: { type: 'Remove', content: { index } } },
+        });
+      }
+    }
+    const current = prev.filter((room) => nextIds.has(room.id));
+    for (let index = 0; index < next.length; index += 1) {
+      const row = next[index];
+      const at = current.findIndex((room) => room.id === row.id);
+      if (at === -1) {
+        this.emit({
+          type: 'RoomListDiff',
+          payload: { subscription_id: subscriptionId, diff: { type: 'Insert', content: { index, value: row } } },
+        });
+        current.splice(index, 0, row);
+      } else if (at !== index) {
+        this.emit({
+          type: 'RoomListDiff',
+          payload: { subscription_id: subscriptionId, diff: { type: 'Remove', content: { index: at } } },
+        });
+        current.splice(at, 1);
+        this.emit({
+          type: 'RoomListDiff',
+          payload: { subscription_id: subscriptionId, diff: { type: 'Insert', content: { index, value: row } } },
+        });
+        current.splice(index, 0, row);
+      } else if (current[index] !== row) {
+        this.emit({
+          type: 'RoomListDiff',
+          payload: { subscription_id: subscriptionId, diff: { type: 'Set', content: { index, value: row } } },
+        });
+        current[index] = row;
+      }
+    }
+  }
+
+  private emitTimelineDiff(roomId: RoomId, diff: VectorDiffDto<TimelineItemDto>): void {
+    for (const [subscriptionId, subscribedRoom] of this.timelineSubscriptions) {
+      if (subscribedRoom !== roomId) continue;
+      this.emit({
+        type: 'TimelineDiff',
+        payload: { subscription_id: subscriptionId, room_id: roomId, diff },
+      });
+    }
+  }
+
+  /** Pushes a new message, inserting a date separator when it starts a new day. */
+  private pushMessage(roomId: RoomId, item: TimelineItemDto): void {
+    const items = this.items(roomId);
+    const lastMessage = [...items].reverse().find((entry) => entry.content.kind !== 'DayDivider');
+    const sameDay =
+      lastMessage !== undefined &&
+      new Date(lastMessage.timestamp_millis).toDateString() ===
+        new Date(item.timestamp_millis).toDateString();
+    if (!sameDay) {
+      const divider = dayDivider(item.timestamp_millis);
+      const known = items.some(
+        (entry) => entry.content.kind === 'DayDivider' && entry.timestamp_millis === divider.timestamp_millis
+      );
+      if (!known) {
+        items.push(divider);
+        this.emitTimelineDiff(roomId, { type: 'PushBack', content: { value: divider } });
+      }
+    }
+    items.push(item);
+    this.emitTimelineDiff(roomId, { type: 'PushBack', content: { value: item } });
+    this.touchRoom(roomId, { latest_event: previewOf(item) });
+  }
+
+  /** Replaces one timeline item's send state (and id, on the sent transition) with a `Set` diff. */
+  private settleItem(
+    roomId: RoomId,
+    internalId: string,
+    sendState: TimelineItemDto['send_state'],
+    eventId?: EventId
+  ): void {
+    const items = this.timelines.get(roomId);
+    if (!items) return;
+    const index = items.findIndex((item) => item.internal_id === internalId);
+    if (index === -1) return;
+    const updated: TimelineItemDto = {
+      ...items[index],
+      send_state: sendState,
+      event_id: eventId ?? items[index].event_id,
+    };
+    items[index] = updated;
+    this.emitTimelineDiff(roomId, { type: 'Set', content: { index, value: updated } });
+  }
+
+  /**
+   * The outbox walk every outgoing message takes: queued echo, optional upload progress, sending,
+   * then sent with its local message id.
+   */
+  private queueOutgoing(roomId: RoomId, item: TimelineItemDto, txnId: string, uploadBytes?: number): void {
+    setTimeout(() => {
+      if (!this.rooms.some((room) => room.id === roomId)) return;
+      this.pushMessage(roomId, item);
+      if (uploadBytes !== undefined) {
+        const report = (sent: number): void => {
+          this.emit({
+            type: 'UploadProgress',
+            payload: { room_id: roomId, txn_id: txnId, sent_bytes: sent, total_bytes: uploadBytes },
+          });
+        };
+        report(0);
+        setTimeout(() => report(Math.round(uploadBytes / 2)), 10);
+        setTimeout(() => report(uploadBytes), 20);
+      }
+      setTimeout(() => {
+        this.settleItem(roomId, item.internal_id, { status: 'Sending', data: { transaction_id: txnId } });
+      }, 5);
+      setTimeout(() => {
+        const eventId = stableId('event', `${roomId}:${txnId}`);
+        this.settleItem(roomId, item.internal_id, { status: 'Sent', data: { event_id: eventId } }, eventId);
+      }, 30);
+    }, 0);
+  }
+
+  private nextTxnId(): string {
+    this.txnCounter += 1;
+    return `txn_${Date.now().toString(36)}_${this.txnCounter}`;
+  }
+
+  private announceConnection(): void {
+    setTimeout(() => {
+      for (const account of this.accounts) {
+        this.emit({ type: 'ConnectionStatus', payload: { account_id: account.id, status: 'Syncing' } });
+      }
+      setTimeout(() => {
+        for (const account of this.accounts) {
+          this.emit({ type: 'ConnectionStatus', payload: { account_id: account.id, status: 'Connected' } });
+        }
+      }, 20);
+    }, 0);
+  }
+
+  // === Login state machine ===
+
+  private firstStep(network: Network): LoginStepDto {
+    switch (network) {
+      case 'telegram':
+      case 'fake':
+        return { type: 'phone_number' };
+      case 'messenger':
+        return {
+          type: 'cookies',
+          fields: MESSENGER_COOKIES.map((field) => ({ ...field })),
+          help_url: 'https://www.facebook.com/help/',
+        };
+    }
+  }
+
+  private expected(input: string): LoginStepDto {
+    return {
+      type: 'failed',
+      reason: { type: 'invalid_input', field: null, message: `Enter ${input}.` },
+    };
+  }
+
+  private invalid(field: string, message: string): LoginStepDto {
+    return { type: 'failed', reason: { type: 'invalid_input', field, message } };
+  }
+
+  private finishLogin(session: LoginSession): LoginStepDto {
+    const network = session.network;
+    const remoteUserId =
+      network === 'telegram'
+        ? `tg:${(session.phone ?? '').replace(/\D/g, '') || '0'}`
+        : network === 'messenger'
+          ? `fb:${session.cookies.c_user ?? '0'}`
+          : `fake:${this.counter}`;
+    const account: Account = {
+      id: stableId('account', `${network}:${++this.counter}`),
+      network,
+      remote_user_id: remoteUserId,
+      display_name: 'Mara Vogel',
+      avatar: null,
+      state: 'active',
+      capabilities: capabilitiesFor(network),
+    };
+    this.accounts.push(account);
+    this.emit({ type: 'AccountsChanged', payload: { accounts: this.accountList() } });
+    this.emit({
+      type: 'ToastNotice',
+      payload: { message: `${NETWORK_LABEL[network]} account connected`, level: 'info' },
+    });
+    this.logins.delete(session.id);
+    return { type: 'done', account: { ...account, capabilities: { ...account.capabilities } } };
+  }
+
+  private advanceLogin(session: LoginSession, input: LoginInputDto): LoginStepDto {
+    const step = session.step;
+    switch (session.network) {
+      case 'telegram':
+      case 'fake': {
+        if (step.type === 'phone_number') {
+          if (input.type !== 'phone_number') return this.expected('your phone number');
+          const phone = input.phone.trim();
+          if (phone === '') return this.invalid('phone', 'Enter your phone number in international format.');
+          session.phone = phone;
+          return {
+            type: 'code',
+            via: session.network === 'fake' ? 'app' : 'sms',
+            length: MOCK_LOGIN_CODE.length,
+          };
+        }
+        if (step.type === 'code') {
+          if (input.type !== 'code') return this.expected('the login code');
+          if (input.code.trim() !== MOCK_LOGIN_CODE) {
+            return this.invalid('code', 'That code is not the one the network sent.');
+          }
+          if (session.network === 'telegram' && (session.phone ?? '').endsWith('9')) {
+            return { type: 'password', hint: 'Two-step verification is on for this account.' };
+          }
+          return this.finishLogin(session);
+        }
+        if (step.type === 'password') {
+          if (input.type !== 'password') return this.expected('the two-step password');
+          if (input.password.trim() === '') {
+            return this.invalid('password', 'Enter the password for two-step verification.');
+          }
+          return this.finishLogin(session);
+        }
+        return { type: 'failed', reason: { type: 'not_supported' } };
+      }
+      case 'messenger': {
+        if (step.type === 'cookies') {
+          if (input.type !== 'cookies') return this.expected('the browser cookies');
+          for (const field of step.fields) {
+            const value = (input.values[field.name] ?? '').trim();
+            if (field.required && value === '') {
+              return this.invalid(field.name, `Cookie ${field.name} is required.`);
+            }
+          }
+          session.cookies = { ...input.values };
+          return this.finishLogin(session);
+        }
+        return { type: 'failed', reason: { type: 'not_supported' } };
+      }
+    }
+  }
+
+  // === Shared media ===
+
+  private mediaItems(roomId: RoomId, kind: RoomMediaKind): RoomMediaItem[] {
+    const out: RoomMediaItem[] = [];
+    for (const item of this.items(roomId)) {
+      if (item.event_id === null) continue;
+      const base = {
+        event_id: item.event_id,
+        sender: item.sender,
+        sender_display_name: item.sender_display_name,
+        timestamp_millis: item.timestamp_millis,
+      };
+      if (item.content.kind === 'Media') {
+        const data = item.content.data;
+        const visual = data.media_kind === 'image' || data.media_kind === 'video' || data.media_kind === 'sticker';
+        if ((kind === 'Media' && visual) || (kind === 'Files' && !visual)) {
+          out.push({
+            ...base,
+            kind: data.media_kind,
+            body: data.body,
+            source: data.source,
+            mime_type: data.mime_type,
+            size_bytes: data.size_bytes,
+            width: data.width,
+            height: data.height,
+          });
+        }
+      } else if (item.content.kind === 'TextMessage' && kind === 'Links') {
+        const urls = item.content.data.body.match(/https?:\/\/[^\s<>"]+/g) ?? [];
+        if (urls.length > 0) {
+          out.push({
+            ...base,
+            kind: 'link',
+            body: item.content.data.body,
+            source: null,
+            mime_type: null,
+            size_bytes: null,
+            width: null,
+            height: null,
+            urls,
+          });
+        }
+      }
+    }
+    return out.reverse();
+  }
+
+  // === Command handling ===
+
+  async invoke(command: EngineCommand): Promise<EngineResponse> {
     switch (command.action) {
-      case 'DiscoverHomeserver':
-        return {
-          type: 'HomeserverInfo',
-          payload: {
-            url: command.params.input.startsWith('http')
-              ? command.params.input
-              : `https://${command.params.input}`,
-            name: 'Alloy Matrix Server',
-            supports_oidc: true,
-          },
-        };
-
-      case 'LoginPassword':
-        return {
-          type: 'LoggedIn',
-          payload: {
-            account: {
-              ...MOCK_ACCOUNT,
-              user_id: command.params.username.startsWith('@')
-                ? command.params.username
-                : `@${command.params.username}:alloy.chat`,
-              homeserver_url: command.params.homeserver_url,
-            },
-          },
-        };
-
-      case 'StartOidcLogin':
-        // No browser exists to authorize in: answer with a URL the opener ignores and sign in
-        // shortly after, so the waiting screen and the signed-in shell stay walkable.
-        this.cancelMockOidc();
-        this.oidcTimer = setTimeout(() => {
-          this.oidcTimer = null;
-          this.emit({ type: 'AuthState', payload: { account: MOCK_ACCOUNT } });
-        }, 700);
-        return {
-          type: 'OidcUrl',
-          payload: {
-            authorization_url: 'alloy-mock://oidc',
-            redirect_uri: 'http://127.0.0.1:17897/callback',
-          },
-        };
-
-      case 'CompleteOidcLogin':
-        return {
-          type: 'LoggedIn',
-          payload: { account: MOCK_ACCOUNT },
-        };
-
-      case 'CancelOidcLogin':
-        this.cancelMockOidc();
-        return { type: 'Unit' };
-
-      case 'RestoreSession':
-        return {
-          type: 'SessionRestored',
-          payload: { account: MOCK_ACCOUNT },
-        };
-
-      case 'Logout':
-        return { type: 'LoggedOut' };
-
       case 'ListAccounts':
-        return {
-          type: 'AccountsList',
-          payload: { accounts: [MOCK_ACCOUNT] },
-        };
+        return { type: 'AccountsList', payload: { accounts: this.accountList() } };
+
+      case 'ListNetworks':
+        return { type: 'Networks', payload: { networks: ['telegram', 'messenger', 'fake'] } };
+
+      case 'BeginLogin': {
+        const loginId = `login_${++this.counter}`;
+        const step = this.firstStep(command.params.network);
+        this.logins.set(loginId, {
+          id: loginId,
+          network: command.params.network,
+          step,
+          phone: null,
+          cookies: {},
+        });
+        return { type: 'LoginStep', payload: { login_id: loginId, step } };
+      }
+
+      case 'SubmitLogin': {
+        const session = this.logins.get(command.params.login_id);
+        if (!session) throw notFound('this login attempt has ended; start again');
+        const step = this.advanceLogin(session, command.params.input);
+        session.step = step;
+        return { type: 'LoginStep', payload: { login_id: session.id, step } };
+      }
+
+      case 'CancelLogin':
+        this.logins.delete(command.params.login_id);
+        return { type: 'LoginCancelled' };
+
+      case 'Logout': {
+        const accountId = command.params.account_id;
+        this.accountById(accountId);
+        const removed = this.rooms.filter((room) => room.account_id === accountId).map((room) => room.id);
+        this.accounts = this.accounts.filter((account) => account.id !== accountId);
+        this.rooms = this.rooms.filter((room) => room.account_id !== accountId);
+        for (const roomId of removed) {
+          this.timelines.delete(roomId);
+          this.members.delete(roomId);
+          this.notes.delete(roomId);
+          this.drafts.delete(roomId);
+          for (const [subscriptionId, subscribedRoom] of this.timelineSubscriptions) {
+            if (subscribedRoom === roomId) this.timelineSubscriptions.delete(subscriptionId);
+          }
+        }
+        this.emit({ type: 'AccountsChanged', payload: { accounts: this.accountList() } });
+        this.syncRoomSubscriptions();
+        return { type: 'LoggedOut', payload: { account_id: accountId } };
+      }
 
       case 'SubscribeRoomList': {
-        const subId = `sub_rooms_${++this.subCounter}`;
-        this.roomSubscriptions.add(subId);
-
-        // Stream initial room list diff via Reset
+        const subscriptionId = `sub_rooms_${++this.counter}`;
+        this.roomSubscriptions.set(subscriptionId, { filter: command.params.filter, rows: [], ready: false });
         setTimeout(() => {
+          const subscription = this.roomSubscriptions.get(subscriptionId);
+          if (!subscription) return;
+          subscription.rows = this.roomProjection(subscription.filter);
+          subscription.ready = true;
           this.emit({
             type: 'RoomListDiff',
             payload: {
-              subscription_id: subId,
-              diff: {
-                type: 'Reset',
-                content: { values: [...this.rooms] },
-              },
+              subscription_id: subscriptionId,
+              diff: { type: 'Reset', content: { values: [...subscription.rows] } },
             },
           });
-        }, 10);
-
-        return {
-          type: 'RoomListSubscribed',
-          payload: { subscription_id: subId },
-        };
+        }, 0);
+        return { type: 'RoomListSubscribed', payload: { subscription_id: subscriptionId } };
       }
 
-      case 'Unsubscribe': {
+      case 'Unsubscribe':
         this.roomSubscriptions.delete(command.params.subscription_id);
         this.timelineSubscriptions.delete(command.params.subscription_id);
-        return {
-          type: 'Unsubscribed',
-          payload: { subscription_id: command.params.subscription_id },
-        };
-      }
+        return { type: 'Unsubscribed' };
 
-      case 'JoinRoom': {
-        const newRoomId = command.params.room_id_or_alias.startsWith('!')
-          ? command.params.room_id_or_alias
-          : `!${command.params.room_id_or_alias}:alloy.chat`;
-
-        const newRoom: RoomSummary = {
-          id: newRoomId,
-          name: command.params.room_id_or_alias,
-          avatar_url: null,
-          unread_notifications: { highlight_count: 0, notification_count: 0 },
-          latest_event: null,
-          is_direct: false,
-          is_space: false,
-          encrypted: true,
-          membership: 'Joined',
-          favourite: null,
-          low_priority: null,
-          tags: [],
-          direct_user_id: null,
-        };
-
-        this.rooms.push(newRoom);
-        if (!this.timelineByRoom.has(newRoomId)) {
-          this.timelineByRoom.set(newRoomId, []);
-        }
-
-        // Notify room subscribers
-        for (const subId of this.roomSubscriptions) {
-          this.emit({
-            type: 'RoomListDiff',
-            payload: {
-              subscription_id: subId,
-              diff: { type: 'PushBack', content: { value: newRoom } },
-            },
-          });
-        }
-
-        return {
-          type: 'RoomJoined',
-          payload: { room_id: newRoomId },
-        };
-      }
-
-      case 'LeaveRoom': {
-        this.rooms = this.rooms.filter((r) => r.id !== command.params.room_id);
-        return {
-          type: 'RoomLeft',
-          payload: { room_id: command.params.room_id },
-        };
-      }
-
-      case 'CreateRoom': {
-        const roomId = `!created_${Date.now()}:alloy.chat`;
-        const newRoom: RoomSummary = {
-          id: roomId,
-          name: command.params.name,
-          avatar_url: null,
-          unread_notifications: { highlight_count: 0, notification_count: 0 },
-          latest_event: null,
-          is_direct: false,
-          is_space: false,
-          encrypted: command.params.encrypted,
-          membership: 'Joined',
-          favourite: null,
-          low_priority: null,
-          tags: [],
-          direct_user_id: null,
-        };
-
-        this.rooms.push(newRoom);
-        this.timelineByRoom.set(roomId, []);
-
-        for (const subId of this.roomSubscriptions) {
-          this.emit({
-            type: 'RoomListDiff',
-            payload: {
-              subscription_id: subId,
-              diff: { type: 'PushBack', content: { value: newRoom } },
-            },
-          });
-        }
-
-        return {
-          type: 'RoomCreated',
-          payload: { room_id: roomId },
-        };
-      }
-
-      case 'SubscribeTimeline': {
-        const subId = `sub_tl_${++this.subCounter}`;
+      case 'GetRoomMembers': {
         const roomId = command.params.room_id;
-        this.timelineSubscriptions.set(subId, roomId);
-        // Subscribing is what reopens a room's timeline after it was closed.
-        this.closedTimelines.delete(roomId);
-
-        const items = this.timelineByRoom.get(roomId) ?? [];
-
-        // Stream initial items
-        setTimeout(() => {
-          this.emit({
-            type: 'TimelineDiff',
-            payload: {
-              subscription_id: subId,
-              room_id: roomId,
-              diff: {
-                type: 'Reset',
-                content: { values: [...items] },
-              },
-            },
-          });
-        }, 10);
-
-        return {
-          type: 'TimelineSubscribed',
-          payload: { subscription_id: subId },
-        };
+        this.roomById(roomId);
+        const members = this.members.get(roomId) ?? [];
+        return { type: 'RoomMembers', payload: { members: members.map((member) => ({ ...member })) } };
       }
-
-      case 'SubscribeThread': {
-        const roomId = command.params.room_id;
-        const root = command.params.thread_root_event_id;
-        const subId = `sub_th_${++this.subCounter}`;
-        // Thread subscriptions use a composite key, so room-level diffs skip them.
-        this.timelineSubscriptions.set(subId, `${roomId}|thread|${root}`);
-
-        const items = (this.timelineByRoom.get(roomId) ?? []).filter(
-          (i) => i.event_id === root || i.reply_to?.event_id === root,
-        );
-
-        setTimeout(() => {
-          this.emit({
-            type: 'TimelineDiff',
-            payload: {
-              subscription_id: subId,
-              room_id: roomId,
-              diff: {
-                type: 'Reset',
-                content: { values: [...items] },
-              },
-            },
-          });
-        }, 10);
-
-        return {
-          type: 'TimelineSubscribed',
-          payload: { subscription_id: subId },
-        };
-      }
-
-      case 'PaginateBackwards':
-        // The demo rooms hold their whole history already.
-        return { type: 'Paginated', payload: { room_id: command.params.room_id, reached_start: true } };
-
-      case 'SendText': {
-        const roomId = command.params.room_id;
-        const txnId = command.params.txn_id ?? `txn_${Date.now()}`;
-        const internalId = `local_${txnId}`;
-        const threadRoot = command.params.in_thread_root ?? null;
-        const threadKey = threadRoot ? `${roomId}|thread|${threadRoot}` : null;
-        const rootItem = threadRoot
-          ? ((this.timelineByRoom.get(roomId) ?? []).find((i) => i.event_id === threadRoot) ?? null)
-          : null;
-
-        const localEcho: TimelineItemDto = {
-          internal_id: internalId,
-          event_id: null,
-          sender: MOCK_ACCOUNT.user_id,
-          timestamp_millis: Date.now(),
-          content: {
-            kind: 'TextMessage',
-            data: {
-              body: command.params.body,
-              formatted_body: null,
-              html_sanitized: true,
-            },
-          },
-          send_state: { status: 'Sending', data: { transaction_id: txnId } },
-          is_own: true,
-          reply_to: rootItem,
-          thread_summary: null,
-          read_receipts: null,
-          mentions_me: false,
-        };
-
-        const currentItems = this.timelineByRoom.get(roomId) ?? [];
-        currentItems.push(localEcho);
-        this.timelineByRoom.set(roomId, currentItems);
-
-        // Emit local echo PushBack
-        for (const [subId, rId] of this.timelineSubscriptions.entries()) {
-          if (threadKey ? rId === threadKey : rId === roomId) {
-            this.emit({
-              type: 'TimelineDiff',
-              payload: {
-                subscription_id: subId,
-                room_id: roomId,
-                diff: { type: 'PushBack', content: { value: localEcho } },
-              },
-            });
-          }
-        }
-
-        const eventId = `$sent_${Date.now()}:alloy.chat`;
-
-        // Simulate local echo resolution (Sending -> Sent) after 40ms
-        setTimeout(() => {
-          const sentItem: TimelineItemDto = {
-            ...localEcho,
-            event_id: eventId,
-            send_state: { status: 'Sent', data: { event_id: eventId } },
-          };
-
-          const items = this.timelineByRoom.get(roomId) ?? [];
-          const idx = items.findIndex((i) => i.internal_id === internalId);
-          if (idx !== -1) {
-            items[idx] = sentItem;
-            for (const [subId, rId] of this.timelineSubscriptions.entries()) {
-              if (rId === roomId) {
-                this.emit({
-                  type: 'TimelineDiff',
-                  payload: {
-                    subscription_id: subId,
-                    room_id: roomId,
-                    diff: { type: 'Set', content: { index: idx, value: sentItem } },
-                  },
-                });
-              }
-            }
-          }
-        }, 40);
-
-        return {
-          type: 'MessageSent',
-          payload: {
-            room_id: roomId,
-            txn_id: txnId,
-            event_id: eventId,
-          },
-        };
-      }
-
-      case 'EditMessage': {
-        const roomId = command.params.room_id;
-        const items = this.timelineByRoom.get(roomId) ?? [];
-        const idx = items.findIndex((i) => i.event_id === command.params.event_id);
-        if (idx !== -1) {
-          const item = items[idx];
-          const updated: TimelineItemDto = {
-            ...item,
-            content: {
-              kind: 'TextMessage',
-              data: {
-                body: command.params.body,
-                formatted_body: null,
-                html_sanitized: true,
-              },
-            },
-          };
-          items[idx] = updated;
-
-          for (const [subId, rId] of this.timelineSubscriptions.entries()) {
-            if (rId === roomId) {
-              this.emit({
-                type: 'TimelineDiff',
-                payload: {
-                  subscription_id: subId,
-                  room_id: roomId,
-                  diff: { type: 'Set', content: { index: idx, value: updated } },
-                },
-              });
-            }
-          }
-        }
-
-        return {
-          type: 'MessageEdited',
-          payload: {
-            room_id: roomId,
-            event_id: command.params.event_id,
-          },
-        };
-      }
-
-      case 'RedactEvent': {
-        const roomId = command.params.room_id;
-        const items = this.timelineByRoom.get(roomId) ?? [];
-        const idx = items.findIndex((i) => i.event_id === command.params.event_id);
-        if (idx !== -1) {
-          const item = items[idx];
-          const redacted: TimelineItemDto = {
-            ...item,
-            content: { kind: 'Redacted' },
-          };
-          items[idx] = redacted;
-
-          for (const [subId, rId] of this.timelineSubscriptions.entries()) {
-            if (rId === roomId) {
-              this.emit({
-                type: 'TimelineDiff',
-                payload: {
-                  subscription_id: subId,
-                  room_id: roomId,
-                  diff: { type: 'Set', content: { index: idx, value: redacted } },
-                },
-              });
-            }
-          }
-        }
-
-        return {
-          type: 'EventRedacted',
-          payload: {
-            room_id: roomId,
-            event_id: command.params.event_id,
-          },
-        };
-      }
-
-      case 'ToggleReaction': {
-        return {
-          type: 'ReactionToggled',
-          payload: {
-            room_id: command.params.room_id,
-            event_id: command.params.event_id,
-            key: command.params.key,
-            added: true,
-          },
-        };
-      }
-
-      case 'SendPoll': {
-        const roomId = command.params.room_id;
-        const eventId = `$poll_${Date.now()}:alloy.chat`;
-        this.polls.set(eventId, {
-          question: command.params.question.trim(),
-          answers: command.params.answers.map((text, i) => ({ id: String(i), text: text.trim() })),
-          disclosed: command.params.disclosed,
-          maxSelections: command.params.max_selections,
-          hasEnded: false,
-          endTime: null,
-          myVotes: [],
-          tallies: new Map(),
-        });
-        const item: TimelineItemDto = {
-          internal_id: `local_${eventId}`,
-          event_id: eventId,
-          sender: MOCK_ACCOUNT.user_id,
-          timestamp_millis: Date.now(),
-          content: this.pollItemContent(eventId),
-          send_state: { status: 'Sent', data: { event_id: eventId } },
-          is_own: true,
-          reply_to: null,
-          thread_summary: null,
-          read_receipts: null,
-          mentions_me: false,
-        };
-        const items = this.timelineByRoom.get(roomId) ?? [];
-        items.push(item);
-        this.timelineByRoom.set(roomId, items);
-        for (const [subId, rId] of this.timelineSubscriptions.entries()) {
-          if (rId === roomId) {
-            this.emit({
-              type: 'TimelineDiff',
-              payload: {
-                subscription_id: subId,
-                room_id: roomId,
-                diff: { type: 'PushBack', content: { value: item } },
-              },
-            });
-          }
-        }
-        return {
-          type: 'MessageSent',
-          payload: { room_id: roomId, txn_id: `poll_${Date.now()}`, event_id: null },
-        };
-      }
-
-      case 'RespondToPoll': {
-        const poll = this.polls.get(command.params.poll_event_id);
-        if (poll && !poll.hasEnded) {
-          for (const id of poll.myVotes) {
-            poll.tallies.set(id, Math.max(0, (poll.tallies.get(id) ?? 0) - 1));
-          }
-          const picked = [...new Set(command.params.answer_ids)]
-            .filter((id) => poll.answers.some((a) => a.id === id))
-            .slice(0, poll.maxSelections);
-          for (const id of picked) {
-            poll.tallies.set(id, (poll.tallies.get(id) ?? 0) + 1);
-          }
-          poll.myVotes = picked;
-          this.emitPollUpdate(command.params.room_id, command.params.poll_event_id);
-        }
-        return { type: 'Unit' };
-      }
-
-      case 'EndPoll': {
-        const poll = this.polls.get(command.params.poll_event_id);
-        if (poll && !poll.hasEnded) {
-          poll.hasEnded = true;
-          poll.endTime = Date.now();
-          this.emitPollUpdate(command.params.room_id, command.params.poll_event_id);
-        }
-        return { type: 'Unit' };
-      }
-
-      case 'RetrySend':
-        return {
-          type: 'SendRetried',
-          payload: {
-            room_id: command.params.room_id,
-            txn_id: command.params.txn_id,
-          },
-        };
-
-      case 'CancelSend':
-        return {
-          type: 'SendCancelled',
-          payload: {
-            room_id: command.params.room_id,
-            txn_id: command.params.txn_id,
-          },
-        };
-
-      case 'SendAttachment': {
-        const eventId = `$att_${Date.now()}:alloy.chat`;
-        return {
-          type: 'AttachmentSent',
-          payload: {
-            room_id: command.params.room_id,
-            txn_id: command.params.txn_id ?? `txn_${Date.now()}`,
-            event_id: eventId,
-          },
-        };
-      }
-
-      case 'SendVoice': {
-        const eventId = `$voice_${Date.now()}:alloy.chat`;
-        return {
-          type: 'AttachmentSent',
-          payload: {
-            room_id: command.params.room_id,
-            txn_id: command.params.txn_id ?? `txn_${Date.now()}`,
-            event_id: eventId,
-          },
-        };
-      }
-
-      case 'SendLocation':
-        return {
-          type: 'LocationSent',
-          payload: { room_id: command.params.room_id },
-        };
-
-      case 'StartLiveLocation':
-        return {
-          type: 'LiveLocationStarted',
-          payload: { room_id: command.params.room_id },
-        };
-
-      case 'SendLocationBeacon':
-        return {
-          type: 'LocationBeaconSent',
-          payload: { room_id: command.params.room_id },
-        };
-
-      case 'StopLiveLocation':
-        return {
-          type: 'LiveLocationStopped',
-          payload: { room_id: command.params.room_id },
-        };
-
-      case 'MarkRead':
-        return {
-          type: 'ReadMarked',
-          payload: { room_id: command.params.room_id },
-        };
-
-      case 'MarkRoomRead':
-        this.patchRoom(command.params.room_id, {
-          unread_notifications: { highlight_count: 0, notification_count: 0 },
-        });
-        return { type: 'Unit' };
-
-      case 'SetRoomName':
-        this.patchRoom(command.params.room_id, { name: command.params.name });
-        return { type: 'Unit' };
-
-      case 'SetRoomTopic':
-        this.topics.set(command.params.room_id, command.params.topic);
-        return { type: 'Unit' };
-
-      case 'SetRoomAvatar':
-        this.patchRoom(command.params.room_id, {
-          avatar_url: command.params.file_path ? 'mxc://alloy.chat/mock-avatar' : null,
-        });
-        return { type: 'Unit' };
-
-      case 'GetTagCatalog':
-        return { type: 'TagCatalog', payload: { tags: this.tagCatalog.map((t) => ({ ...t })) } };
-
-      case 'CloseTimeline': {
-        const { room_id } = command.params;
-        const closed = !this.closedTimelines.has(room_id);
-        this.closedTimelines.add(room_id);
-        return { type: 'TimelineClosed', payload: { room_id, closed } };
-      }
-
-      case 'CreateRoomTag': {
-        const tag: RoomTagDef = {
-          id: makeTagId(command.params.name, new Set(this.tagCatalog.map((t) => t.id))),
-          name: command.params.name.trim(),
-          colour: command.params.colour,
-        };
-        this.tagCatalog = [...this.tagCatalog, tag];
-        return { type: 'RoomTagCreated', payload: { tag: { ...tag } } };
-      }
-
-      case 'RenameRoomTag': {
-        const index = this.tagCatalog.findIndex((t) => t.id === command.params.id);
-        if (index === -1) throw invalidArgument('no such tag');
-        const current = this.tagCatalog[index];
-        const next: RoomTagDef = {
-          ...current,
-          name: command.params.name?.trim() || current.name,
-          colour: command.params.colour ?? current.colour,
-        };
-        this.tagCatalog = this.tagCatalog.map((t, i) => (i === index ? next : t));
-        return { type: 'Unit' };
-      }
-
-      case 'ReorderRoomTags': {
-        const ids = command.params.ids;
-        const known = new Set(this.tagCatalog.map((t) => t.id));
-        const isPermutation = ids.length === known.size && ids.every((id) => known.has(id)) && new Set(ids).size === ids.length;
-        if (!isPermutation) throw invalidArgument('ids must list the catalogue exactly once');
-        this.tagCatalog = ids.map((id) => this.tagCatalog.find((t) => t.id === id)!);
-        return { type: 'Unit' };
-      }
-
-      case 'SetRoomTag': {
-        const room = this.rooms.find((r) => r.id === command.params.room_id);
-        if (room) {
-          const tags = new Set(room.tags);
-          if (command.params.enabled) tags.add(command.params.tag_id);
-          else tags.delete(command.params.tag_id);
-          this.patchRoom(room.id, { tags: [...tags] });
-        }
-        return { type: 'Unit' };
-      }
-
-      case 'DeleteRoomTag': {
-        const tagId = command.params.tag_id;
-        this.tagCatalog = this.tagCatalog.filter((t) => t.id !== tagId);
-        for (const room of this.rooms.filter((r) => r.tags.includes(tagId))) {
-          this.patchRoom(room.id, { tags: room.tags.filter((t) => t !== tagId) });
-        }
-        return { type: 'Unit' };
-      }
-
-      case 'GetRoomNote':
-        return {
-          type: 'RoomNote',
-          payload: {
-            room_id: command.params.room_id,
-            note: this.notes.get(command.params.room_id) ?? '',
-          },
-        };
-
-      case 'SetRoomNote':
-        if (command.params.note === '') {
-          this.notes.delete(command.params.room_id);
-        } else {
-          this.notes.set(command.params.room_id, command.params.note);
-        }
-        return { type: 'Unit' };
-
-      case 'SetTyping':
-        return {
-          type: 'TypingStatusSet',
-          payload: { room_id: command.params.room_id },
-        };
-
-      case 'GetRoomMembers':
-        return {
-          type: 'RoomMembers',
-          payload: {
-            room_id: command.params.room_id,
-            members: [...MOCK_MEMBERS],
-          },
-        };
 
       case 'GetRoomDetails': {
         const roomId = command.params.room_id;
-        const room = this.rooms.find((r) => r.id === roomId);
+        const room = this.roomById(roomId);
+        const account = this.accountById(room.account_id);
         return {
           type: 'RoomDetailsRetrieved',
           payload: {
             details: {
-              room_id: roomId,
-              name: room?.name ?? 'General',
-              topic: this.topics.get(roomId) ?? 'Welcome to Alloy',
-              canonical_alias: '#general:alloy.chat',
-              avatar_url: room?.avatar_url ?? null,
-              is_direct: room?.is_direct ?? false,
-              encrypted: room?.encrypted ?? false,
-              joined_members: 2,
-              invited_members: 1,
-              can_set_name: true,
-              can_set_topic: true,
-              can_set_avatar: true,
-              can_pin: true,
-              can_redact_others: true,
-              can_mention_room: true,
-              pinned_event_ids: this.pinnedsByRoom.get(roomId) ?? [],
+              room_id: room.id,
+              account_id: room.account_id,
+              network: room.network,
+              name: room.name,
+              avatar: room.avatar,
+              kind: room.kind,
+              is_direct: room.is_direct,
+              member_count: (this.members.get(roomId) ?? []).length,
+              note: this.notes.get(roomId) ?? null,
+              capabilities: { ...account.capabilities },
             },
           },
         };
       }
 
       case 'GetUserProfile': {
+        const account = this.accountById(command.params.account_id);
         const userId = command.params.user_id;
-        const roomId = command.params.room_id;
-        const member = roomId ? MOCK_MEMBERS.find((m) => m.user_id === userId) : undefined;
-        const profile: UserProfileDto = {
-          user_id: userId,
-          display_name: member?.display_name ?? userId.slice(1).split(':')[0] ?? userId,
-          avatar_url: member?.avatar_url ?? null,
-          membership: member ? PROFILE_MEMBERSHIP[member.membership] : null,
-          power_level: member ? member.power_level : null,
-          dm_room_id: this.dmRooms.get(userId) ?? null,
-          is_me: userId === MOCK_ACCOUNT.user_id,
-        };
-        return { type: 'UserProfile', payload: { profile } };
-      }
-
-      case 'SearchUsers': {
-        const q = command.params.query.trim().toLowerCase();
-        if (!q) throw invalidArgument('search query must not be blank');
-        const people = [
-          ...MOCK_MEMBERS.map((m) => ({ user_id: m.user_id, display_name: m.display_name })),
-          // People outside the shared rooms, so the People group shows both states.
-          { user_id: '@dana:alloy.chat', display_name: 'Dana Okafor' },
-          { user_id: '@erin:alloy.chat', display_name: 'Erin Blake' },
-        ];
-        const limit = command.params.limit;
-        const matches = people.filter(
-          (p) =>
-            p.display_name?.toLowerCase().includes(q) ||
-            p.user_id.toLowerCase().includes(q),
-        );
-        const results = matches.slice(0, limit).map((p) => ({
-          user_id: p.user_id,
-          display_name: p.display_name,
-          avatar_url: null,
-          already_in_room: MOCK_MEMBERS.some((m) => m.user_id === p.user_id),
-        }));
+        let displayName = this.people[userId] ?? null;
+        let dmRoomId: RoomId | null = null;
+        for (const room of this.rooms) {
+          if (room.account_id !== account.id) continue;
+          const member = (this.members.get(room.id) ?? []).find((entry) => entry.user_id === userId);
+          if (member) displayName = member.display_name ?? displayName;
+          if (room.is_direct && member) dmRoomId = room.id;
+        }
         return {
-          type: 'UserSearchResults',
-          payload: { results, limited: matches.length > limit },
-        };
-      }
-
-      case 'StartDirectMessage': {
-        const userId = command.params.user_id;
-        const existing = this.dmRooms.get(userId);
-        if (existing) {
-          return { type: 'DirectMessageRoom', payload: { room_id: existing, created: false } };
-        }
-
-        const roomId = `!dm_${userId.slice(1).split(':')[0]}:alloy.chat`;
-        const newRoom: RoomSummary = {
-          id: roomId,
-          name: userId,
-          avatar_url: null,
-          unread_notifications: { highlight_count: 0, notification_count: 0 },
-          latest_event: null,
-          is_direct: true,
-          is_space: false,
-          encrypted: false,
-          membership: 'Joined',
-          favourite: null,
-          low_priority: null,
-          tags: [],
-          direct_user_id: null,
-        };
-
-        this.rooms.push(newRoom);
-        this.timelineByRoom.set(roomId, []);
-        this.dmRooms.set(userId, roomId);
-
-        for (const subId of this.roomSubscriptions) {
-          this.emit({
-            type: 'RoomListDiff',
-            payload: {
-              subscription_id: subId,
-              diff: { type: 'PushBack', content: { value: newRoom } },
+          type: 'UserProfile',
+          payload: {
+            profile: {
+              user_id: userId,
+              account_id: account.id,
+              display_name: displayName,
+              avatar: null,
+              is_me: account.remote_user_id === userId,
+              dm_room_id: dmRoomId,
             },
-          });
-        }
-
-        return { type: 'DirectMessageRoom', payload: { room_id: roomId, created: true } };
+          },
+        };
       }
+
+      case 'GetRoomNote':
+        this.roomById(command.params.room_id);
+        return { type: 'RoomNote', payload: { note: this.notes.get(command.params.room_id) ?? null } };
+
+      case 'SetRoomNote': {
+        const roomId = command.params.room_id;
+        this.roomById(roomId);
+        if (command.params.note.trim() === '') this.notes.delete(roomId);
+        else this.notes.set(roomId, command.params.note);
+        return { type: 'RoomNoteSet' };
+      }
+
+      case 'GetTagCatalog':
+        return { type: 'TagCatalog', payload: { tags: this.tags.map((tag) => ({ ...tag })) } };
+
+      case 'CreateRoomTag': {
+        const name = command.params.name.trim();
+        if (name === '') throw invalidArgument('a tag needs a name');
+        const tag: RoomTagDef = {
+          id: tagSlug(name, new Set(this.tags.map((entry) => entry.id))),
+          name,
+          colour: command.params.colour,
+        };
+        this.tags = [...this.tags, tag];
+        return { type: 'RoomTagCreated', payload: { tag: { ...tag } } };
+      }
+
+      case 'RenameRoomTag': {
+        const index = this.tags.findIndex((tag) => tag.id === command.params.id);
+        if (index === -1) throw notFound(`no tag ${command.params.id}`);
+        if (command.params.name === null && command.params.colour === null) {
+          throw invalidArgument('a rename needs a name or a colour');
+        }
+        const current = this.tags[index];
+        const next: RoomTagDef = {
+          ...current,
+          name: command.params.name?.trim() || current.name,
+          colour: command.params.colour ?? current.colour,
+        };
+        this.tags = this.tags.map((tag, at) => (at === index ? next : tag));
+        return { type: 'RoomTagsUpdated' };
+      }
+
+      case 'ReorderRoomTags': {
+        const ids = command.params.ids;
+        const known = new Set(this.tags.map((tag) => tag.id));
+        const permutation =
+          ids.length === known.size &&
+          new Set(ids).size === ids.length &&
+          ids.every((id) => known.has(id));
+        if (!permutation) throw invalidArgument('ids must list the catalogue exactly once');
+        this.tags = ids.map((id) => this.tags.find((tag) => tag.id === id) as RoomTagDef);
+        return { type: 'RoomTagsUpdated' };
+      }
+
+      case 'SetRoomTag': {
+        const room = this.roomById(command.params.room_id);
+        if (!this.tags.some((tag) => tag.id === command.params.tag_id)) {
+          throw notFound(`no tag ${command.params.tag_id}`);
+        }
+        const tags = new Set(room.tags);
+        if (command.params.enabled) tags.add(command.params.tag_id);
+        else tags.delete(command.params.tag_id);
+        this.touchRoom(room.id, { tags: [...tags].sort() });
+        return { type: 'RoomFlagsUpdated' };
+      }
+
+      case 'DeleteRoomTag': {
+        const tagId = command.params.tag_id;
+        if (!this.tags.some((tag) => tag.id === tagId)) throw notFound(`no tag ${tagId}`);
+        this.tags = this.tags.filter((tag) => tag.id !== tagId);
+        for (const room of this.rooms.filter((entry) => entry.tags.includes(tagId))) {
+          this.touchRoom(room.id, { tags: room.tags.filter((id) => id !== tagId) });
+        }
+        return { type: 'RoomTagsUpdated' };
+      }
+
+      case 'MarkRoomRead':
+        this.roomById(command.params.room_id);
+        this.touchRoom(command.params.room_id, {
+          unread_notifications: { highlight_count: 0, notification_count: 0 },
+        });
+        return { type: 'RoomFlagsUpdated' };
+
+      case 'SetRoomPinned':
+        this.roomById(command.params.room_id);
+        this.touchRoom(command.params.room_id, { pinned: command.params.pinned });
+        return { type: 'RoomFlagsUpdated' };
+
+      case 'SetRoomArchived':
+        this.roomById(command.params.room_id);
+        this.touchRoom(command.params.room_id, { archived: command.params.archived });
+        return { type: 'RoomFlagsUpdated' };
+
+      case 'SetRoomMarkedUnread':
+        this.roomById(command.params.room_id);
+        this.touchRoom(command.params.room_id, { marked_unread: command.params.unread });
+        return { type: 'RoomFlagsUpdated' };
+
+      case 'SetRoomMuted':
+        this.roomById(command.params.room_id);
+        this.touchRoom(command.params.room_id, { muted_until: command.params.muted_until });
+        return { type: 'RoomFlagsUpdated' };
 
       case 'GetRoomMedia': {
         const roomId = command.params.room_id;
-        const offset = Number.parseInt(command.params.from ?? '0', 10) || 0;
-        const all = mockMediaItems(command.params.kind);
-        const end = offset + command.params.limit;
+        const limit = command.params.limit;
+        if (limit === 0) throw invalidArgument('limit must be at least one');
+        const all = this.mediaItems(roomId, command.params.kind);
+        const offset = command.params.before === null ? 0 : Number.parseInt(command.params.before, 10) || 0;
+        const page = all.slice(offset, offset + limit);
+        const end = offset + page.length;
         return {
           type: 'RoomMedia',
-          payload: {
-            room_id: roomId,
-            items: all.slice(offset, end),
-            next_batch: end < all.length ? String(end) : null,
-          },
+          payload: { items: page, next: end < all.length ? String(end) : null },
         };
       }
 
-      case 'GetMedia':
-        return {
-          type: 'MediaRetrieved',
-          payload: { local_path: '/tmp/alloy-mock-cache/media.png' },
-        };
-
-      case 'GetUrlPreview': {
-        const url = command.params.url;
-        const preview = url.includes('example')
-          ? {
-              url,
-              title: 'Example Domain',
-              description: 'Mock link preview returned by the browser mock engine.',
-              site_name: 'Example',
-              image: null,
-              image_width: null,
-              image_height: null,
-            }
-          : null;
-        return { type: 'UrlPreview', payload: { preview } };
+      case 'SearchRoomMessages': {
+        const roomId = command.params.room_id;
+        const limit = command.params.limit;
+        const needle = command.params.query.trim().toLowerCase();
+        if (limit === 0) throw invalidArgument('limit must be at least one');
+        if (needle === '') throw invalidArgument('search query must not be blank');
+        const hits: RoomSearchHit[] = [];
+        for (const item of this.items(roomId)) {
+          if (item.event_id === null || item.content.kind !== 'TextMessage') continue;
+          const body = item.content.data.body;
+          if (!body.toLowerCase().includes(needle)) continue;
+          hits.push({
+            event_id: item.event_id,
+            sender: item.sender,
+            sender_display_name: item.sender_display_name,
+            timestamp_millis: item.timestamp_millis,
+            body,
+          });
+        }
+        hits.reverse();
+        return { type: 'RoomSearchResults', payload: { hits: hits.slice(0, limit) } };
       }
 
-      case 'RequestSelfVerification':
-        return {
-          type: 'VerificationRequested',
-          payload: { user_id: MOCK_ACCOUNT.user_id, device_id: MOCK_DEVICE_ID },
-        };
+      case 'SearchAllMessages': {
+        const needle = command.params.query.trim().toLowerCase();
+        if (needle === '') throw invalidArgument('search query must not be blank');
+        const limit = command.params.limit ?? 20;
+        if (limit === 0) throw invalidArgument('limit must be at least one');
+        const hits: GlobalSearchHit[] = [];
+        for (const room of this.rooms) {
+          for (const item of this.timelines.get(room.id) ?? []) {
+            if (item.event_id === null || item.content.kind !== 'TextMessage') continue;
+            const body = item.content.data.body;
+            if (!body.toLowerCase().includes(needle)) continue;
+            hits.push({
+              room_id: room.id,
+              room_name: room.name,
+              event_id: item.event_id,
+              sender: item.sender,
+              sender_display_name: item.sender_display_name,
+              timestamp_millis: item.timestamp_millis,
+              body,
+            });
+          }
+        }
+        hits.sort((a, b) => b.timestamp_millis - a.timestamp_millis);
+        return { type: 'AllMessagesFound', payload: { hits: hits.slice(0, limit) } };
+      }
 
-      case 'AcceptVerification':
-        return {
-          type: 'VerificationAccepted',
-          payload: {
-            user_id: command.params.user_id,
-            device_id: command.params.device_id,
-          },
-        };
+      case 'ClearMediaCache':
+        return { type: 'MediaCacheCleared' };
 
-      case 'StartSas': {
-        const userId = command.params.user_id;
-        const deviceId = command.params.device_id;
-
+      case 'RefreshSync': {
+        for (const account of this.accounts) {
+          this.emit({ type: 'ConnectionStatus', payload: { account_id: account.id, status: 'Connecting' } });
+        }
         setTimeout(() => {
+          for (const account of this.accounts) {
+            this.emit({ type: 'ConnectionStatus', payload: { account_id: account.id, status: 'Connected' } });
+          }
+        }, 20);
+        return { type: 'SyncRefreshed' };
+      }
+
+      case 'SubscribeTimeline': {
+        const roomId = command.params.room_id;
+        this.roomById(roomId);
+        const subscriptionId = `sub_tl_${++this.counter}`;
+        this.timelineSubscriptions.set(subscriptionId, roomId);
+        setTimeout(() => {
+          if (!this.timelineSubscriptions.has(subscriptionId)) return;
           this.emit({
-            type: 'VerificationState',
+            type: 'TimelineDiff',
             payload: {
-              user_id: userId,
-              device_id: deviceId,
-              state: {
-                CompareEmojis: {
-                  emojis: MOCK_SAS_EMOJIS,
-                  decimal_1: 1234,
-                  decimal_2: 5678,
-                  decimal_3: 9012,
-                },
-              },
+              subscription_id: subscriptionId,
+              room_id: roomId,
+              diff: { type: 'Reset', content: { values: [...(this.timelines.get(roomId) ?? [])] } },
             },
           });
-        }, 20);
+        }, 0);
+        return { type: 'TimelineSubscribed', payload: { subscription_id: subscriptionId } };
+      }
 
-        return {
-          type: 'SasStarted',
-          payload: {
-            user_id: userId,
-            device_id: deviceId,
-            emojis: MOCK_SAS_EMOJIS,
+      case 'CloseTimeline': {
+        const roomId = command.params.room_id;
+        this.roomById(roomId);
+        for (const [subscriptionId, subscribedRoom] of this.timelineSubscriptions) {
+          if (subscribedRoom === roomId) this.timelineSubscriptions.delete(subscriptionId);
+        }
+        return { type: 'TimelineClosed' };
+      }
+
+      case 'PaginateBackwards':
+        this.roomById(command.params.room_id);
+        // The demo timelines hold their whole history already.
+        return { type: 'Paginated', payload: { reached_start: true } };
+
+      case 'SendText': {
+        const roomId = command.params.room_id;
+        this.roomById(roomId);
+        const replyTo =
+          command.params.reply_to === null ? null : this.itemByEvent(roomId, command.params.reply_to);
+        if (command.params.reply_to !== null && replyTo === null) {
+          throw notFound(`no message ${command.params.reply_to}`);
+        }
+        const txnId = command.params.txn_id ?? this.nextTxnId();
+        const item: TimelineItemDto = {
+          internal_id: `local_${txnId}`,
+          event_id: null,
+          sender: this.myUserId(roomId),
+          sender_display_name: this.myDisplayName(roomId),
+          sender_avatar: null,
+          timestamp_millis: Date.now(),
+          content: {
+            kind: 'TextMessage',
+            data: { body: command.params.body, formatted_body: null, html_sanitized: true },
           },
+          send_state: { status: 'Queued', data: { transaction_id: txnId } },
+          is_own: true,
+          reply_to: replyTo,
+          read_by: [],
+          edited: false,
+          reactions: [],
+          transaction_id: txnId,
         };
+        this.queueOutgoing(roomId, item, txnId);
+        return { type: 'MessageQueued', payload: { txn_id: txnId } };
       }
 
-      case 'ConfirmSas': {
-        const userId = command.params.user_id;
-        const deviceId = command.params.device_id;
-
-        setTimeout(() => {
-          this.emit({
-            type: 'VerificationState',
-            payload: {
-              user_id: userId,
-              device_id: deviceId,
-              state: 'Verified',
-            },
-          });
-        }, 20);
-
-        return {
-          type: 'SasConfirmed',
-          payload: { user_id: userId, device_id: deviceId },
-        };
-      }
-
-      case 'CancelVerification': {
-        const userId = command.params.user_id;
-        const deviceId = command.params.device_id;
-
-        setTimeout(() => {
-          this.emit({
-            type: 'VerificationState',
-            payload: {
-              user_id: userId,
-              device_id: deviceId,
-              state: { Cancelled: { reason: 'User cancelled' } },
-            },
-          });
-        }, 20);
-
-        return {
-          type: 'VerificationCancelled',
-          payload: { user_id: userId, device_id: deviceId },
-        };
-      }
-
-      case 'GetRecoveryStatus':
-        return {
-          type: 'RecoveryStatusRetrieved',
-          payload: { state: 'Enabled' },
-        };
-
-      case 'EnableRecovery':
-        return {
-          type: 'RecoveryEnabled',
-          payload: { recovery_key: 'EsTc 1234 abcd 5678 efgh 9012 ijkl 3456 mock' },
-        };
-
-      case 'RecoverWithKey':
-        return {
-          type: 'RecoveredFromKey',
-          payload: { recovered: true },
-        };
-
-      case 'ResetRecovery':
-        return {
-          type: 'RecoveryReset',
-          payload: { recovery_key: 'EsTc 6543 dcba 8765 hgfe 2109 lkji 6543 mock' },
-        };
-
-      case 'GetSpaceParents':
-        return { type: 'SpaceParents', payload: { parents: [] } };
-
-      case 'ListThemes':
-        return {
-          type: 'ThemesList',
-          payload: {
-            themes: [
-              ['dark', 'Dark Default'],
-              ['light', 'Light Default'],
-              ['amoled', 'AMOLED Pure Black'],
-            ],
+      case 'EditMessage': {
+        const roomId = command.params.room_id;
+        const items = this.items(roomId);
+        const index = items.findIndex((item) => item.event_id === command.params.event_id);
+        if (index === -1) throw notFound(`no message ${command.params.event_id}`);
+        const current = items[index];
+        if (current.content.kind !== 'TextMessage') {
+          throw invalidArgument('only text messages can be edited');
+        }
+        const updated: TimelineItemDto = {
+          ...current,
+          content: {
+            kind: 'TextMessage',
+            data: { body: command.params.body, formatted_body: null, html_sanitized: true },
           },
+          edited: true,
         };
-
-      case 'GetTheme':
-        return {
-          type: 'ThemeCss',
-          payload: {
-            css: `:root { --alloy-theme-name: "${command.params.id}"; }`,
-          },
-        };
-
-      case 'SetActiveTheme':
-        return { type: 'ThemeSetActive' };
-
-      case 'SearchPublicRooms': {
-        const q = (command.params.query ?? '').trim().toLowerCase();
-        const catalogue = [
-          { name: 'Matrix HQ', topic: 'Chat about Matrix', members: 1200 },
-          { name: 'Alloy Users', topic: 'Questions and feedback', members: 42 },
-        ];
-        const rooms = catalogue
-          .filter((r) => r.name.toLowerCase().includes(q))
-          .map((r) => ({
-            room_id: `!${r.name.replace(/\W+/g, '').toLowerCase()}:alloy.chat`,
-            alias: `#${r.name.replace(/\W+/g, '-').toLowerCase()}:alloy.chat`,
-            name: r.name,
-            topic: r.topic,
-            avatar_url: null,
-            num_joined_members: r.members,
-            world_readable: false,
-            guest_can_join: false,
-            joined: false,
-          }));
-        return {
-          type: 'PublicRooms',
-          payload: { rooms, next_batch: null, total_estimate: rooms.length },
-        };
+        items[index] = updated;
+        this.emitTimelineDiff(roomId, { type: 'Set', content: { index, value: updated } });
+        return { type: 'MessageEdited' };
       }
 
-      case 'GetSettings':
-        return {
-          type: 'SettingsRetrieved',
-          payload: { settings_json: JSON.stringify({ notifications: true }) },
-        };
+      case 'DeleteMessage': {
+        const roomId = command.params.room_id;
+        const items = this.items(roomId);
+        const index = items.findIndex((item) => item.event_id === command.params.event_id);
+        if (index === -1) throw notFound(`no message ${command.params.event_id}`);
+        const updated: TimelineItemDto = { ...items[index], content: { kind: 'Deleted' } };
+        items[index] = updated;
+        this.emitTimelineDiff(roomId, { type: 'Set', content: { index, value: updated } });
+        return { type: 'MessageDeleted' };
+      }
 
-      case 'SetSetting':
-        return {
-          type: 'SettingSet',
-          payload: { key: command.params.key },
-        };
-
-      case 'GetAccountPrefs':
-        return { type: 'AccountPrefs', payload: { json: null } };
-
-      case 'SetAccountPrefs':
-        return { type: 'Unit' };
-
-      case 'GetNotificationSettings':
-        return {
-          type: 'NotificationSettings',
-          payload: { settings: { ...this.notificationSettings } },
-        };
-
-      case 'SetDefaultNotificationLevel':
-        if (command.params.one_to_one) {
-          this.notificationSettings.one_to_one = command.params.level;
+      case 'ToggleReaction': {
+        const roomId = command.params.room_id;
+        const items = this.items(roomId);
+        const index = items.findIndex((item) => item.event_id === command.params.event_id);
+        if (index === -1) throw notFound(`no message ${command.params.event_id}`);
+        const me = this.myUserId(roomId);
+        const key = command.params.key;
+        const current = items[index];
+        const existing = current.reactions.find((reaction) => reaction.key === key);
+        let reactions: TimelineItemDto['reactions'];
+        if (existing && existing.by_me) {
+          const senders = existing.senders.filter((sender) => sender !== me);
+          const count = existing.count - 1;
+          reactions = count <= 0
+            ? current.reactions.filter((reaction) => reaction.key !== key)
+            : current.reactions.map((reaction) =>
+                reaction.key === key ? { ...reaction, count, senders, by_me: false } : reaction
+              );
+        } else if (existing) {
+          reactions = current.reactions.map((reaction) =>
+            reaction.key === key
+              ? { ...reaction, count: reaction.count + 1, senders: [me, ...reaction.senders], by_me: true }
+              : reaction
+          );
         } else {
-          this.notificationSettings.group = command.params.level;
+          reactions = [...current.reactions, { key, count: 1, senders: [me], by_me: true }];
         }
-        return { type: 'Unit' };
-
-      case 'SetMentionRules': {
-        const { room_mention, user_mention, invite } = command.params;
-        if (room_mention !== null) this.notificationSettings.room_mention = room_mention;
-        if (user_mention !== null) this.notificationSettings.user_mention = user_mention;
-        if (invite !== null) this.notificationSettings.invite = invite;
-        return { type: 'Unit' };
-      }
-
-      case 'GetRoomNotificationLevel': {
-        const roomId = command.params.room_id;
-        const explicit = this.roomNotificationLevels.get(roomId);
-        return {
-          type: 'RoomNotificationLevel',
-          payload: {
-            room_id: roomId,
-            level: explicit ?? this.defaultRoomLevel(roomId),
-            is_default: explicit === undefined,
-          },
-        };
-      }
-
-      case 'SetRoomNotificationLevel': {
-        const roomId = command.params.room_id;
-        const level = command.params.level;
-        if (level === null) {
-          this.roomNotificationLevels.delete(roomId);
-        } else {
-          this.roomNotificationLevels.set(roomId, level);
-        }
-        return { type: 'Unit' };
-      }
-
-      case 'GetOwnProfile':
-        return { type: 'OwnProfile', payload: { profile: { ...this.ownProfile } } };
-
-      case 'SetDisplayName': {
-        const name = command.params.name.trim();
-        if (name === '') {
-          throw invalidArgument('display name must not be empty');
-        }
-        this.ownProfile = { ...this.ownProfile, display_name: name };
-        return { type: 'Unit' };
-      }
-
-      case 'SetOwnAvatar':
-        this.ownProfile = {
-          ...this.ownProfile,
-          avatar_url: command.params.file_path ? 'mxc://alloy.chat/mock-own-avatar' : null,
-        };
-        return { type: 'Unit' };
-
-      case 'ListDevices':
-        return { type: 'Devices', payload: { devices: MOCK_DEVICES.map((d) => ({ ...d })) } };
-
-      case 'GetSessionInfo':
-        return { type: 'SessionInfo', payload: { info: { ...MOCK_SESSION_INFO } } };
-
-      case 'ClearMediaCache': {
-        const freed = this.mediaCacheBytes;
-        this.mediaCacheBytes = 0;
-        return { type: 'MediaCacheCleared', payload: { freed_bytes: freed } };
-      }
-
-      case 'SetEventPinned': {
-        const roomId = command.params.room_id;
-        const eventId = command.params.event_id;
-        const pinned = command.params.pinned;
-        const pins = this.pinnedsByRoom.get(roomId) ?? [];
-        if (pinned && !pins.includes(eventId)) {
-          pins.push(eventId);
-          this.pinnedsByRoom.set(roomId, pins);
-        } else if (!pinned) {
-          const idx = pins.indexOf(eventId);
-          if (idx !== -1) pins.splice(idx, 1);
-          this.pinnedsByRoom.set(roomId, pins);
-        }
-        return { type: 'EventPinned', payload: { room_id: roomId, event_id: eventId, pinned } };
-      }
-
-      case 'GetPinnedEvents': {
-        const roomId = command.params.room_id;
-        const pins = this.pinnedsByRoom.get(roomId) ?? [];
-        const items: TimelineItemDto[] = pins.map((eid) => {
-          const found = this.timelineByRoom.get(roomId)?.find((i) => i.event_id === eid);
-          return found ?? {
-            internal_id: `pinned_${eid}`,
-            event_id: eid,
-            sender: '@alice:alloy.chat',
-            timestamp_millis: Date.now() - 86400000,
-            content: {
-              kind: 'TextMessage',
-              data: {
-                body: '[pinned message]',
-                formatted_body: null,
-                html_sanitized: false,
-              },
-            },
-            send_state: { status: 'Sent', data: { event_id: eid } },
-            is_own: false,
-            reply_to: null,
-            thread_summary: null,
-            read_receipts: null,
-            mentions_me: false,
-          };
-        });
-        return { type: 'PinnedEvents', payload: { room_id: roomId, items } };
+        const updated: TimelineItemDto = { ...current, reactions };
+        items[index] = updated;
+        this.emitTimelineDiff(roomId, { type: 'Set', content: { index, value: updated } });
+        return { type: 'ReactionToggled' };
       }
 
       case 'ForwardEvents': {
-        const forwarded = command.params.targets;
-        const failed: { room_id: string; error: string }[] = [];
-        return { type: 'EventsForwarded', payload: { forwarded, failed } };
-      }
-
-      case 'SetRoomFavourite': {
         const roomId = command.params.room_id;
-        const favourite = command.params.favourite;
-        this.roomFavourites.set(roomId, favourite);
-        this.patchRoom(roomId, { favourite });
-        return { type: 'RoomFavouriteSet', payload: { room_id: roomId, favourite } };
-      }
-
-      case 'SetRoomLowPriority': {
-        const roomId = command.params.room_id;
-        const low_priority = command.params.low_priority;
-        this.roomLowPriorities.set(roomId, low_priority);
-        this.patchRoom(roomId, { low_priority });
-        return { type: 'RoomLowPrioritySet', payload: { room_id: roomId, low_priority } };
-      }
-
-      case 'SetRoomMarkedUnread': {
-        const roomId = command.params.room_id;
-        const unread = command.params.unread;
-        this.patchRoom(roomId, { marked_unread: unread });
-        return { type: 'RoomMarkedUnreadSet', payload: { room_id: roomId, unread } };
+        const items = this.items(roomId);
+        const selected = command.params.event_ids
+          .map((eventId) => items.find((item) => item.event_id === eventId))
+          .filter((item): item is TimelineItemDto => item !== undefined);
+        if (selected.length === 0) throw invalidArgument('no messages to forward');
+        const failures: { room_id: RoomId; error: string }[] = [];
+        for (const target of command.params.targets) {
+          if (!this.rooms.some((room) => room.id === target)) {
+            failures.push({ room_id: target, error: 'chat not found' });
+            continue;
+          }
+          for (const source of selected) {
+            const txnId = this.nextTxnId();
+            const item: TimelineItemDto = {
+              internal_id: `local_${txnId}`,
+              event_id: null,
+              sender: this.myUserId(target),
+              sender_display_name: this.myDisplayName(target),
+              sender_avatar: null,
+              timestamp_millis: Date.now(),
+              content: source.content,
+              send_state: { status: 'Queued', data: { transaction_id: txnId } },
+              is_own: true,
+              reply_to: null,
+              read_by: [],
+              edited: false,
+              reactions: [],
+              transaction_id: txnId,
+            };
+            this.queueOutgoing(target, item, txnId);
+          }
+        }
+        return { type: 'EventsForwarded', payload: { failures } };
       }
 
       case 'SaveDraft': {
         const roomId = command.params.room_id;
-        const { text, reply_to, edit_of } = command.params;
-        if (text.trim().length === 0 && !reply_to && !edit_of) {
-          this.draftsByRoom.delete(roomId);
+        this.roomById(roomId);
+        const { text, reply_to } = command.params;
+        if (text.trim() === '' && reply_to === null) {
+          this.drafts.delete(roomId);
         } else {
-          this.draftsByRoom.set(roomId, { text, reply_to, edit_of });
+          this.drafts.set(roomId, { text, reply_to });
         }
-        return { type: 'DraftSaved', payload: { room_id: roomId } };
+        this.touchRoom(roomId, { draft: text.trim() === '' ? null : text.slice(0, 80) });
+        return { type: 'DraftSaved' };
       }
 
       case 'GetDraft': {
         const roomId = command.params.room_id;
-        const draft = this.draftsByRoom.get(roomId);
-        const dto = draft
-          ? { text: draft.text, reply_to: draft.reply_to ?? null, edit_of: draft.edit_of ?? null }
-          : null;
-        return { type: 'Draft', payload: { room_id: roomId, draft: dto } };
+        this.roomById(roomId);
+        const draft = this.drafts.get(roomId);
+        return {
+          type: 'Draft',
+          payload: { draft: draft ? { text: draft.text, reply_to: draft.reply_to } : null },
+        };
       }
 
       case 'ListDrafts': {
-        const items = Array.from(this.draftsByRoom.entries()).map(([room_id, { text }]) => ({
-          room_id,
-          text: text.slice(0, 80),
-        }));
-        return { type: 'Drafts', payload: { items } };
+        const drafts = [...this.drafts.entries()]
+          .filter(([, draft]) => draft.text.trim() !== '')
+          .map(([roomId, draft]) => ({ room_id: roomId, text: draft.text.slice(0, 80) }));
+        return { type: 'Drafts', payload: { drafts } };
       }
 
-      case 'DeleteDevices': {
-        const deleted = command.params.device_ids;
-        return { type: 'DevicesDeleted', payload: { deleted } };
+      case 'RetrySend': {
+        const roomId = command.params.room_id;
+        const items = this.items(roomId);
+        const index = items.findIndex((item) => item.transaction_id === command.params.txn_id);
+        if (index === -1) throw notFound(`no queued message ${command.params.txn_id}`);
+        const current = items[index];
+        if (current.send_state.status === 'Sent') {
+          throw invalidArgument('this message was already sent');
+        }
+        const txnId = command.params.txn_id;
+        setTimeout(() => {
+          this.settleItem(roomId, current.internal_id, { status: 'Sending', data: { transaction_id: txnId } });
+        }, 0);
+        setTimeout(() => {
+          const eventId = stableId('event', `${roomId}:${txnId}`);
+          this.settleItem(roomId, current.internal_id, { status: 'Sent', data: { event_id: eventId } }, eventId);
+        }, 20);
+        return { type: 'SendRetried' };
       }
 
-      case 'KickUser': {
-        const { room_id, user_id } = command.params;
-        return { type: 'UserKicked', payload: { room_id, user_id } };
+      case 'CancelSend': {
+        const roomId = command.params.room_id;
+        const items = this.items(roomId);
+        const index = items.findIndex((item) => item.transaction_id === command.params.txn_id);
+        if (index === -1) throw notFound(`no queued message ${command.params.txn_id}`);
+        items.splice(index, 1);
+        this.emitTimelineDiff(roomId, { type: 'Remove', content: { index } });
+        const latest = [...items].reverse().map((item) => previewOf(item)).find((preview) => preview !== null);
+        this.touchRoom(roomId, { latest_event: latest ?? null });
+        return { type: 'SendCancelled' };
       }
 
-      case 'BanUser': {
-        const { room_id, user_id } = command.params;
-        return { type: 'UserBanned', payload: { room_id, user_id } };
-      }
-
-      case 'UnbanUser': {
-        const { room_id, user_id } = command.params;
-        return { type: 'UserUnbanned', payload: { room_id, user_id } };
-      }
-
-      case 'SetPowerLevel': {
-        const { room_id, user_id, level } = command.params;
-        return { type: 'PowerLevelSet', payload: { room_id, user_id, level } };
-      }
-
-      case 'IgnoreUser': {
-        const { user_id } = command.params;
-        return { type: 'UserIgnored', payload: { user_id } };
-      }
-
-      case 'UnignoreUser': {
-        const { user_id } = command.params;
-        return { type: 'UserUnignored', payload: { user_id } };
-      }
-
-      case 'ListIgnoredUsers':
-        return { type: 'IgnoredUsers', payload: { user_ids: [] } };
-
-      case 'ReportEvent': {
-        const { room_id, event_id } = command.params;
-        return { type: 'EventReported', payload: { room_id, event_id } };
-      }
-
-      case 'SearchAllMessages': {
-        const hits = [
-          {
-            room_id: '!example:localhost',
-            room_name: 'Example Room',
-            event_id: '$example_event',
-            sender: '@alice:localhost',
-            sender_display_name: 'Alice',
-            timestamp_millis: Date.now(),
-            body: `Message containing "${command.params.query}"`,
+      case 'SendAttachment': {
+        const roomId = command.params.room_id;
+        this.roomById(roomId);
+        const txnId = command.params.txn_id ?? this.nextTxnId();
+        const extension = command.params.file_path.slice(command.params.file_path.lastIndexOf('.') + 1).toLowerCase();
+        const mimeType =
+          command.params.mime_type ?? MIME_BY_EXTENSION[extension] ?? 'application/octet-stream';
+        const mediaId = `local_${txnId}`;
+        const fileName = command.params.file_path.split(/[\\/]/).pop() ?? 'attachment';
+        const body = command.params.body ?? fileName;
+        const kind = mimeType.startsWith('image/')
+          ? 'image'
+          : mimeType.startsWith('video/')
+            ? 'video'
+            : mimeType.startsWith('audio/')
+              ? 'audio'
+              : 'file';
+        const dataUrl =
+          kind === 'image' ? svgImageDataUrl(body, 1_200, 800) : textFileDataUrl(`Uploaded from ${fileName}`);
+        this.media.set(mediaId, dataUrl);
+        const item: TimelineItemDto = {
+          internal_id: `local_${txnId}`,
+          event_id: null,
+          sender: this.myUserId(roomId),
+          sender_display_name: this.myDisplayName(roomId),
+          sender_avatar: null,
+          timestamp_millis: Date.now(),
+          content: {
+            kind: 'Media',
+            data: {
+              source: { media_id: mediaId },
+              mime_type: mimeType,
+              size_bytes: DEMO_UPLOAD_BYTES,
+              body,
+              media_kind: kind,
+              width: kind === 'image' ? 1_200 : null,
+              height: kind === 'image' ? 800 : null,
+              duration_ms: null,
+              voice: false,
+            },
           },
-        ];
-        return { type: 'AllMessagesFound', payload: { hits, next_batch: null } };
+          send_state: { status: 'Queued', data: { transaction_id: txnId } },
+          is_own: true,
+          reply_to: null,
+          read_by: [],
+          edited: false,
+          reactions: [],
+          transaction_id: txnId,
+        };
+        this.queueOutgoing(roomId, item, txnId, DEMO_UPLOAD_BYTES);
+        return { type: 'MessageQueued', payload: { txn_id: txnId } };
       }
 
-      case 'RefreshSync': {
-        return { type: 'SyncRefreshed' };
+      case 'SendVoice': {
+        const roomId = command.params.room_id;
+        this.roomById(roomId);
+        const txnId = command.params.txn_id ?? this.nextTxnId();
+        const mediaId = `local_${txnId}`;
+        const dataUrl = wavDataUrl(command.params.duration_ms);
+        this.media.set(mediaId, dataUrl);
+        const item: TimelineItemDto = {
+          internal_id: `local_${txnId}`,
+          event_id: null,
+          sender: this.myUserId(roomId),
+          sender_display_name: this.myDisplayName(roomId),
+          sender_avatar: null,
+          timestamp_millis: Date.now(),
+          content: {
+            kind: 'Media',
+            data: {
+              source: { media_id: mediaId },
+              mime_type: 'audio/wav',
+              size_bytes: dataUrl.length,
+              body: 'Voice message',
+              media_kind: 'voice',
+              width: null,
+              height: null,
+              duration_ms: command.params.duration_ms,
+              voice: true,
+            },
+          },
+          send_state: { status: 'Queued', data: { transaction_id: txnId } },
+          is_own: true,
+          reply_to: null,
+          read_by: [],
+          edited: false,
+          reactions: [],
+          transaction_id: txnId,
+        };
+        this.queueOutgoing(roomId, item, txnId, dataUrl.length);
+        return { type: 'MessageQueued', payload: { txn_id: txnId } };
+      }
+
+      case 'MarkRead': {
+        const roomId = command.params.room_id;
+        this.roomById(roomId);
+        this.touchRoom(roomId, {
+          unread_notifications: { highlight_count: 0, notification_count: 0 },
+        });
+        return { type: 'ReadMarked' };
+      }
+
+      case 'SetTyping': {
+        const roomId = command.params.room_id;
+        this.roomById(roomId);
+        if (command.params.typing) {
+          // The other side of the chat notices and starts typing back, so the indicator has
+          // something to show in the demo.
+          const me = this.myUserId(roomId);
+          const peer = (this.members.get(roomId) ?? []).find((member) => member.user_id !== me);
+          if (peer) {
+            setTimeout(() => {
+              if (this.handlers.size === 0) return;
+              this.emit({ type: 'TypingNotice', payload: { room_id: roomId, users: [peer.user_id] } });
+            }, 1_200);
+            setTimeout(() => {
+              if (this.handlers.size === 0) return;
+              this.emit({ type: 'TypingNotice', payload: { room_id: roomId, users: [] } });
+            }, 4_000);
+          }
+        }
+        return { type: 'Typing' };
+      }
+
+      case 'GetMedia': {
+        const dataUrl = this.media.get(command.params.source.media_id);
+        if (dataUrl === undefined) throw notFound(`no media ${command.params.source.media_id}`);
+        return { type: 'Media', payload: { path: dataUrl } };
+      }
+
+      case 'ListThemes':
+        return {
+          type: 'ThemesList',
+          payload: { themes: THEMES.map(([id, name]): [string, string] => [id, name]) },
+        };
+
+      case 'GetTheme': {
+        const theme = THEMES.find(([id]) => id === command.params.id);
+        if (!theme) throw notFound(`no theme ${command.params.id}`);
+        return {
+          type: 'ThemeCss',
+          payload: { css: `:root { --alloy-theme-id: "${theme[0]}"; }` },
+        };
+      }
+
+      case 'SetActiveTheme': {
+        const theme = THEMES.find(([id]) => id === command.params.id);
+        if (!theme) throw notFound(`no theme ${command.params.id}`);
+        return { type: 'ThemeSetActive' };
+      }
+
+      case 'GetSettings': {
+        // Values are stored as the JSON text the caller sent, so the blob keeps their types.
+        const values: Record<string, unknown> = {};
+        for (const [key, json] of this.settings) values[key] = JSON.parse(json);
+        return {
+          type: 'SettingsRetrieved',
+          payload: { settings_json: JSON.stringify(values) },
+        };
+      }
+
+      case 'SetSetting': {
+        try {
+          JSON.parse(command.params.value_json);
+        } catch {
+          throw invalidArgument('value_json must be valid JSON');
+        }
+        this.settings.set(command.params.key, command.params.value_json);
+        return { type: 'SettingSet', payload: { key: command.params.key } };
       }
 
       default: {
-        const _exhaustive: never = command;
-        throw new Error(`Unhandled command: ${JSON.stringify(_exhaustive)}`);
+        const unhandled: never = command;
+        throw invalidArgument(`unhandled command ${JSON.stringify(unhandled)}`);
       }
     }
   }

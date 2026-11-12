@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { client } from '$lib/ipc';
+import type { MediaSource } from '$lib/generated';
 import { isAndroid } from './capabilities';
 import { isTauriRuntime, localFileUrl } from './files';
 
@@ -18,13 +19,14 @@ export function canDownloadMedia(): boolean {
   return !isTauriRuntime() || !isAndroid() || androidBridge() !== null;
 }
 
-/** Fetch a remote media file into the local cache and return its absolute local path. */
-export async function fetchMediaPath(uri: string, mimeType: string): Promise<string> {
-  const res = await client.getMedia({ kind: 'Remote', data: { uri } }, 'file', {
-    mime_type: mimeType,
+/** Fetch a stored media object into the local cache and return its absolute local path. */
+export async function fetchMediaPath(source: MediaSource, mimeType: string | null): Promise<string> {
+  const res = await client.invoke({
+    action: 'GetMedia',
+    params: { source, kind: 'file', mime_type: mimeType },
   });
-  if (res.type !== 'MediaRetrieved') throw new Error(`unexpected response: ${res.type}`);
-  return res.payload.local_path;
+  if (res.type !== 'Media') throw new Error(`unexpected response: ${res.type}`);
+  return res.payload.path;
 }
 
 /**
@@ -44,13 +46,4 @@ export async function saveMediaFile(localPath: string, suggestedName: string, mi
   link.download = suggestedName;
   link.click();
   return true;
-}
-
-/** Fetch a remote media file and save it under `suggestedName`. Resolves false when cancelled. */
-export async function downloadMedia(
-  uri: string,
-  mimeType: string,
-  suggestedName: string
-): Promise<boolean> {
-  return saveMediaFile(await fetchMediaPath(uri, mimeType), suggestedName, mimeType);
 }

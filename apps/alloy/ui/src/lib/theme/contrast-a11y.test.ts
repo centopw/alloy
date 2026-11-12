@@ -171,7 +171,6 @@ describe('A11Y-09: error text clears 4.5:1 on every surface, destructive fill ke
   it('filled error controls use the derived danger fill, not the text-tuned status.error', () => {
     for (const path of [
       'src/lib/components/common/Button.svelte',
-      'src/lib/components/timeline/LiveLocationBanner.svelte',
       'src/lib/components/timeline/Timeline.svelte'
     ]) {
       expect(read(path), `${path} must paint filled destructive controls with --alloy-danger-fill`).toContain(

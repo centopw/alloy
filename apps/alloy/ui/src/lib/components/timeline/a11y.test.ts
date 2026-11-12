@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { TimelineItemDto } from '$lib/generated';
+import type { TimelineItemContent, TimelineItemDto } from '$lib/generated';
 import {
   ANNOUNCE_MAX_HOLD_MS,
   ANNOUNCE_SETTLE_MS,
@@ -21,31 +21,38 @@ import {
 
 function row(
   id: string,
-  kind = 'TextMessage',
+  kind: 'TextMessage' | 'Media' | 'Location' | 'System' | 'DayDivider' | 'Deleted' = 'TextMessage',
   options: { own?: boolean; body?: string; mediaKind?: string } = {},
 ): TimelineItemDto {
   const { own = false, body = 'hello there', mediaKind } = options;
-  const content =
+  const content: TimelineItemContent =
     kind === 'TextMessage'
-      ? { kind, data: { body, formatted_body: null, html_sanitized: true } }
+      ? { kind: 'TextMessage', data: { body, formatted_body: null, html_sanitized: true } }
       : kind === 'Media'
-        ? { kind, data: { uri: `mxc://${id}`, mime_type: 'image/png', size_bytes: 1, body, media_kind: mediaKind } }
-        : kind === 'RoomState'
-          ? { kind, data: { state_type: 'membership', content_json: '{}' } }
-          : kind === 'DayDivider'
-            ? { kind, data: { timestamp_millis: 0 } }
-            : { kind };
+        ? { kind: 'Media', data: { source: { media_id: id }, mime_type: 'image/png', size_bytes: 1, body, media_kind: mediaKind ?? 'image', width: null, height: null, duration_ms: null, voice: false } }
+        : kind === 'Location'
+          ? { kind: 'Location', data: { geo_uri: 'geo:1,2', description: null } }
+          : kind === 'System'
+            ? { kind: 'System', data: { text: 'Ada joined' } }
+            : kind === 'DayDivider'
+              ? { kind: 'DayDivider', data: { timestamp_millis: 0 } }
+              : { kind: 'Deleted' };
   return {
     internal_id: id,
     event_id: `$${id}`,
-    sender: '@mai:example.org',
+    sender: 'u-mai',
+    sender_display_name: null,
+    sender_avatar: null,
     timestamp_millis: 0,
     is_own: own,
     reply_to: null,
-    thread_summary: null,
-    read_receipts: null,
+    read_by: [],
+    edited: false,
+    reactions: [],
+    transaction_id: null,
+    send_state: { status: 'Sent', data: { event_id: `$${id}` } },
     content,
-  } as unknown as TimelineItemDto;
+  };
 }
 
 /** Labels that make the expected string obvious without depending on the real catalogs. */
@@ -67,23 +74,19 @@ describe('row kinds', () => {
   it('gives the keyboard cursor every message body kind and nothing else', () => {
     expect(isCursorRow(row('a'))).toBe(true);
     expect(isCursorRow(row('b', 'Media'))).toBe(true);
-    expect(isCursorRow(row('c', 'Poll'))).toBe(true);
-    expect(isCursorRow(row('d', 'Location'))).toBe(true);
-    expect(isCursorRow(row('e', 'Redacted'))).toBe(true);
-    expect(isCursorRow(row('f', 'UnableToDecrypt'))).toBe(true);
-    expect(isCursorRow(row('g', 'DayDivider'))).toBe(false);
-    expect(isCursorRow(row('h', 'RoomState'))).toBe(false);
-    expect(isCursorRow(row('i', 'Virtual'))).toBe(false);
-    expect(isCursorRow(row('j', 'Reaction'))).toBe(false);
+    expect(isCursorRow(row('c', 'Location'))).toBe(true);
+    expect(isCursorRow(row('d', 'Deleted'))).toBe(true);
+    expect(isCursorRow(row('e', 'DayDivider'))).toBe(false);
+    expect(isCursorRow(row('f', 'System'))).toBe(false);
   });
 
   it('announces other people’s messages, never own echoes or state events', () => {
     expect(isAnnounceableArrival(row('a'))).toBe(true);
     expect(isAnnounceableArrival(row('b', 'Media'))).toBe(true);
-    expect(isAnnounceableArrival(row('c', 'Poll'))).toBe(true);
-    expect(isAnnounceableArrival(row('d', 'Location'))).toBe(true);
-    expect(isAnnounceableArrival(row('e', 'TextMessage', { own: true }))).toBe(false);
-    expect(isAnnounceableArrival(row('f', 'RoomState'))).toBe(false);
+    expect(isAnnounceableArrival(row('c', 'Location'))).toBe(true);
+    expect(isAnnounceableArrival(row('d', 'TextMessage', { own: true }))).toBe(false);
+    expect(isAnnounceableArrival(row('e', 'Deleted'))).toBe(false);
+    expect(isAnnounceableArrival(row('f', 'System'))).toBe(false);
     expect(isAnnounceableArrival(row('g', 'DayDivider'))).toBe(false);
   });
 });
@@ -193,23 +196,23 @@ describe('describeRow', () => {
 
 describe('formatAnnouncement', () => {
   it('announces one message as sender and preview', () => {
-    expect(formatAnnouncement([row('a')], labels)).toBe('@mai:example.org: hello there');
+    expect(formatAnnouncement([row('a')], labels)).toBe('u-mai: hello there');
   });
 
   it('coalesces a burst into one line naming the newest message', () => {
     const batch = [row('a'), row('b'), row('c', 'TextMessage', { body: 'latest news' })];
-    expect(formatAnnouncement(batch, labels)).toBe('3 new messages, latest from @mai:example.org: latest news');
+    expect(formatAnnouncement(batch, labels)).toBe('3 new messages, latest from u-mai: latest news');
   });
 
   it('never announces own messages or non-message rows', () => {
     expect(formatAnnouncement([], labels)).toBeNull();
     expect(formatAnnouncement([row('a', 'TextMessage', { own: true })], labels)).toBeNull();
-    expect(formatAnnouncement([row('a', 'RoomState'), row('b', 'DayDivider')], labels)).toBeNull();
+    expect(formatAnnouncement([row('a', 'System'), row('b', 'DayDivider')], labels)).toBeNull();
   });
 
   it('skips non-announceable rows inside a batch', () => {
-    const batch = [row('a', 'RoomState'), row('b'), row('c', 'TextMessage', { own: true })];
-    expect(formatAnnouncement(batch, labels)).toBe('@mai:example.org: hello there');
+    const batch = [row('a', 'System'), row('b'), row('c', 'TextMessage', { own: true })];
+    expect(formatAnnouncement(batch, labels)).toBe('u-mai: hello there');
   });
 });
 
@@ -224,7 +227,7 @@ describe('AnnouncementBatcher', () => {
     expect(batcher.pending).toBe(3);
 
     expect(batcher.flush({ muted: false, labels })).toBe(
-      '3 new messages, latest from @mai:example.org: hello there',
+      '3 new messages, latest from u-mai: hello there',
     );
     expect(batcher.pending).toBe(0);
     expect(batcher.flush({ muted: false, labels })).toBeNull();
@@ -233,7 +236,7 @@ describe('AnnouncementBatcher', () => {
   it('announces a quiet single message as one line', () => {
     const batcher = new AnnouncementBatcher();
     batcher.push([row('a')], 0);
-    expect(batcher.flush({ muted: false, labels })).toBe('@mai:example.org: hello there');
+    expect(batcher.flush({ muted: false, labels })).toBe('u-mai: hello there');
   });
 
   it('drops the pending batch when announcements are muted', () => {
@@ -247,7 +250,7 @@ describe('AnnouncementBatcher', () => {
   it('ignores own and non-message arrivals', () => {
     const batcher = new AnnouncementBatcher();
     expect(batcher.push([row('a', 'TextMessage', { own: true })], 0)).toBeNull();
-    expect(batcher.push([row('b', 'RoomState')], 0)).toBeNull();
+    expect(batcher.push([row('b', 'System')], 0)).toBeNull();
     expect(batcher.pending).toBe(0);
     expect(batcher.flush({ muted: false, labels })).toBeNull();
   });

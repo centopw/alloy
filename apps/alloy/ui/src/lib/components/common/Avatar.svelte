@@ -6,14 +6,13 @@
     getUserColorVar,
     pickAvatarOnColor
   } from '$lib/identity/userColor';
-  import { avatarUrl } from '$lib/stores/avatars.svelte';
   import { themeStore } from '$lib/theme/theme.svelte';
 
   import { t } from '$lib/i18n';
   interface Props {
     userId?: string;
     displayName?: string | null;
-    /** An `mxc://` URI (resolved through the media cache) or a URL the webview can load directly. */
+    /** A URL the webview can load directly (already resolved through the media cache). */
     src?: string | null;
     /** Named preset, or a diameter in CSS pixels. */
     size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl' | number;
@@ -35,8 +34,6 @@
     class: className = ''
   }: Props = $props();
 
-  /** Resolved URL for an `mxc://` source; null while loading or on failure. */
-  let mediaUrl = $state<string | null>(null);
   /** The image URL that last failed to load, so a failed source falls back to initials. */
   let failedSrc = $state<string | null>(null);
 
@@ -111,23 +108,7 @@
     onColor = pickAvatarOnColor(resolveAvatarFill(rootEl));
   });
 
-  const imageSrc = $derived(src?.startsWith('mxc://') ? mediaUrl : (src || null));
-
-  // Resolve mxc sources at the rendered size. Clearing first keeps the initials
-  // visible while a new source loads, so a stale image never shows for the new user.
-  $effect(() => {
-    const source = src;
-    const px = currentSize;
-    mediaUrl = null;
-    if (!source?.startsWith('mxc://')) return;
-    let cancelled = false;
-    avatarUrl(source, px).then((url) => {
-      if (!cancelled) mediaUrl = url;
-    });
-    return () => {
-      cancelled = true;
-    };
-  });
+  const imageSrc = $derived(src || null);
 </script>
 
 <div

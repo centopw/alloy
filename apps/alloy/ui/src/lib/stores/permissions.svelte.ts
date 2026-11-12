@@ -9,7 +9,6 @@ import {
   type PermissionState,
 } from '../platform/permissions';
 import { specsFor, summarize, type PermissionSpec, type PermissionSummary } from '../content/permissionsModel';
-import { pushStore } from './push.svelte';
 
 export { supportsPermissionSettings };
 
@@ -44,12 +43,10 @@ class PermissionsStore {
   }
 
   #stateOf(id: PermissionId): PermissionState {
-    if (id === 'push-app') {
-      if (!pushStore.supported) return 'unavailable';
-      // A distributor must be installed, and the user must have turned the feature on and been registered.
-      if (pushStore.distributors.length === 0) return 'prompt';
-      return pushStore.registered ? 'granted' : 'prompt';
-    }
+    // `push-app` belonged to the UnifiedPush registration Alloy no longer performs: a connector runs
+    // on the device itself, so nothing registers with a distributor (ADR 0016; push returns only
+    // with the optional gateway).
+    if (id === 'push-app') return 'unavailable';
     return this.#states[id] ?? 'unknown';
   }
 
@@ -74,10 +71,6 @@ class PermissionsStore {
 
   /** Shows the system prompt for one permission, then reads the states again. */
   async request(id: PermissionId): Promise<void> {
-    if (id === 'push-app') {
-      pushStore.pick();
-      return;
-    }
     try {
       await requestPermission(id);
     } finally {

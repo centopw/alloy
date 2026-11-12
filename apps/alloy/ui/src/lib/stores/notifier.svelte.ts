@@ -1,22 +1,25 @@
 import { untrack } from 'svelte';
-import type { NotificationLevel, RoomSummary } from '../generated/index.js';
+import type { RoomSummary } from '../generated/index.js';
 import { showNotification, type OsNotification } from '../platform/notify.js';
 import { errorMessage } from './errors.js';
 import { prefs } from './prefs.svelte.js';
-import { roomNotify } from './roomNotify.svelte.js';
 import { roomsStore, roomTitle } from './rooms.svelte.js';
 
-/** At most one OS notification per room within this window; later messages replace the queued one. */
+import { t } from '$lib/i18n';
+
+/** At most one OS notification per chat within this window; later messages replace the queued one. */
 export const COALESCE_MS = 3000;
 
-/** A room as the notifier sees it: plain values, so observing never tracks reactive state. */
+/** A chat as the notifier sees it: plain values, so observing never tracks reactive state. */
 export interface RoomSnapshot {
   id: string;
   title: string;
-  /** Latest message body, or null when the room has none yet. */
+  /** Latest message body, or null when the chat has none yet. */
   preview: string | null;
   notifications: number;
   highlights: number;
+  /** The chat's mute is still running (or is permanent) at the time of the snapshot. */
+  muted: boolean;
 }
 
 export interface NotifierSettings {
@@ -27,45 +30,45 @@ export interface NotifierSettings {
 }
 
 export interface NotifyState {
-  /** Effective level the engine resolves for the room. */
-  level: NotificationLevel;
-  /** New notifications since the last observation of the room. */
+  /** New notifications since the last observation of the chat. */
   newNotifications: number;
-  /** New highlights (mentions and keywords) since the last observation of the room. */
-  newHighlights: number;
-  /** The room is the one open in the shell. */
+  /** The chat is muted. */
+  muted: boolean;
+  /** The chat is the one open in the shell. */
   viewingRoom: boolean;
   windowFocused: boolean;
   settings: NotifierSettings;
 }
 
-/** Whether a room's new activity should produce an OS notification. Pure so the rules are testable. */
+/** Whether a chat's new activity should produce an OS notification. Pure so the rules are testable. */
 export function shouldNotify(s: NotifyState): boolean {
   if (!s.settings.desktop) return false;
-  if (s.level === 'Mute') return false;
+  if (s.muted) return false;
   if (s.newNotifications <= 0) return false;
-  if (s.level === 'Mentions' && s.newHighlights <= 0) return false;
   if (s.windowFocused && (s.viewingRoom || s.settings.onlyWhenUnfocused)) return false;
   return true;
 }
 
-/** Maps room summaries to the snapshot fields the notifier reads. */
-export function snapshotRooms(rooms: RoomSummary[]): RoomSnapshot[] {
+/**
+ * Maps room summaries to the snapshot fields the notifier reads. `muted_until` is a wall-clock
+ * deadline (the store uses `u64::MAX` for a permanent mute), so `now` decides whether it still runs.
+ */
+export function snapshotRooms(rooms: RoomSummary[], now: number = Date.now()): RoomSnapshot[] {
   return rooms.map((r) => ({
     id: r.id,
     title: roomTitle(r),
     preview: r.latest_event?.body ?? null,
     notifications: r.unread_notifications.notification_count,
     highlights: r.unread_notifications.highlight_count,
+    muted: r.muted_until !== null && r.muted_until > now,
   }));
 }
 
-/** Side effects the notifier needs. The live store wires them to the engine, prefs and the OS. */
+/** Side effects the notifier needs. The live store wires them to prefs and the OS. */
 export interface NotifierDeps {
   now(): number;
   windowFocused(): boolean;
   activeRoomId(): string | null;
-  levelOf(roomId: string): Promise<NotificationLevel>;
   show(n: OsNotification): Promise<void>;
   settings(): NotifierSettings;
 }
@@ -78,17 +81,17 @@ interface QueuedNotice {
 /**
  * Turns unread-count changes in the room list into OS notifications.
  *
- * The first sighting of a room only records its counts, so the initial sync does not notify for
- * everything already unread. Later increases are checked against the room's engine level, the
- * notification preferences and the window focus, then coalesced per room.
+ * The first sighting of a chat only records its counts, so the initial sync does not notify for
+ * everything already unread. Later increases are checked against the chat's mute, the notification
+ * preferences and the window focus, then coalesced per chat.
  */
 export class Notifier {
-  /** Last observed counts per room. Rooms that leave the list are dropped, so a return re-baselines. */
+  /** Last observed counts per chat. Chats that leave the list are dropped, so a return re-baselines. */
   private seen = new Map<string, RoomSnapshot>();
   private lastShown = new Map<string, number>();
   private queued = new Map<string, QueuedNotice>();
   private stopWatch: (() => void) | null = null;
-  /** Last failure to read a level or show a notification. Null when the last attempt succeeded. */
+  /** Last failure to show a notification. Null when the last attempt succeeded. */
   error = $state<string | null>(null);
 
   constructor(private readonly deps: NotifierDeps) {}
@@ -117,37 +120,23 @@ export class Notifier {
   observe(rooms: RoomSnapshot[]): void {
     const prior = this.seen;
     this.seen = new Map(rooms.map((room): [string, RoomSnapshot] => [room.id, room]));
+    const settings = this.deps.settings();
     for (const room of rooms) {
       const before = prior.get(room.id);
       if (!before) continue;
-      const notifications = room.notifications - before.notifications;
-      if (notifications <= 0) continue;
-      void this.consider(room, notifications, room.highlights - before.highlights);
+      const newNotifications = room.notifications - before.notifications;
+      if (newNotifications <= 0) continue;
+      const state: NotifyState = {
+        newNotifications,
+        muted: room.muted,
+        viewingRoom: this.deps.activeRoomId() === room.id,
+        windowFocused: this.deps.windowFocused(),
+        settings,
+      };
+      if (!shouldNotify(state)) continue;
+      const body = settings.preview ? (room.preview ?? t('notifier-new-message')) : t('notifier-new-message');
+      this.deliver(room.id, { title: room.title, body, silent: !settings.sound, roomId: room.id });
     }
-  }
-
-  private async consider(room: RoomSnapshot, newNotifications: number, newHighlights: number): Promise<void> {
-    if (!this.deps.settings().desktop) return;
-    let level: NotificationLevel;
-    try {
-      level = await this.deps.levelOf(room.id);
-      this.error = null;
-    } catch (err) {
-      this.error = errorMessage(err);
-      return;
-    }
-    const settings = this.deps.settings();
-    const state: NotifyState = {
-      level,
-      newNotifications,
-      newHighlights,
-      viewingRoom: this.deps.activeRoomId() === room.id,
-      windowFocused: this.deps.windowFocused(),
-      settings,
-    };
-    if (!shouldNotify(state)) return;
-    const body = settings.preview ? (room.preview ?? 'New message') : 'New message';
-    this.deliver(room.id, { title: room.title, body, silent: !settings.sound, roomId: room.id });
   }
 
   private deliver(roomId: string, notice: OsNotification): void {
@@ -186,13 +175,7 @@ export class Notifier {
 export const notifier = new Notifier({
   now: () => Date.now(),
   windowFocused: () => typeof document !== 'undefined' && document.hasFocus(),
-  activeRoomId: () => roomsStore.activeRoomId,
-  levelOf: async (roomId) => {
-    await roomNotify.load(roomId);
-    const level = roomNotify.levelOf(roomId);
-    if (level === null) throw new Error(roomNotify.error(roomId) ?? 'room notification level unknown');
-    return level;
-  },
+  activeRoomId: () => roomsStore.active?.id ?? null,
   show: showNotification,
   settings: () => ({
     desktop: prefs.notifyDesktop,

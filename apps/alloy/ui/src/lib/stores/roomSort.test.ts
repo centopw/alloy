@@ -8,19 +8,19 @@ function room(
 ): RoomSummary {
   return {
     id,
+    account_id: 'acc-1',
+    network: 'telegram',
     name: p.title ?? id,
-    avatar_url: null,
+    avatar: null,
+    kind: 'group',
+    is_direct: false,
     unread_notifications: { highlight_count: 0, notification_count: p.unread ?? 0 },
     latest_event:
-      p.ts === undefined ? null : { sender: '@a:x', timestamp_millis: p.ts, body: '' },
-    is_direct: false,
-    is_space: false,
-    encrypted: false,
-    membership: 'Joined',
-    favourite: null,
-    low_priority: null,
+      p.ts === undefined ? null : { sender: 'user-a', timestamp_millis: p.ts, body: '' },
+    pinned: false,
+    archived: false,
+    muted_until: null,
     tags: p.tags ?? [],
-    direct_user_id: null,
   };
 }
 

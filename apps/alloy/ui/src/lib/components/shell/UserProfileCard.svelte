@@ -2,7 +2,10 @@
   import { Icon, X, Copy, Check } from '$lib/icons';
   import { getUserColorValue } from '$lib/identity/userColor';
   import { userProfile } from '$lib/stores/userProfile.svelte';
+  import { resolveAvatar } from '$lib/stores/avatars.svelte';
   import { errorMessage } from '$lib/stores/errors';
+  import { membersStore } from '$lib/stores/members.svelte';
+  import { roomsStore } from '$lib/stores/rooms.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
   import type { UserProfileDto } from '$lib/generated/protocol';
   import { Avatar, Button } from '../common';
@@ -10,33 +13,43 @@
   import { t } from '$lib/i18n';
   interface Props {
     userId: string;
+    /** The account that knows this user; profiles are account-scoped. Defaults to the open chat's. */
+    accountId?: string;
     roomId: string | null;
     onclose: () => void;
-    /** Called with the direct-message room id after Message succeeds. */
+    /** Called with the direct-chat room id when the user already has one with this person. */
     onmessage?: (roomId: string) => void;
     /** Called with the user id when Mention is pressed. Mention is hidden when omitted. */
     onmention?: (userId: string) => void;
   }
 
-  let { userId, roomId, onclose, onmessage, onmention }: Props = $props();
+  let { userId, accountId, roomId, onclose, onmessage, onmention }: Props = $props();
+
+  const account = $derived(accountId ?? roomsStore.active?.account_id ?? '');
 
   let profile = $state<UserProfileDto | null>(null);
+  let avatarSrc = $state<string | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
-  let busy = $state(false);
   let actionError = $state<string | null>(null);
   let copied = $state(false);
 
+  // Roles are a property of the member row, not of the profile: read them from the room's roster.
+  const role = $derived(
+    roomId ? (membersStore.membersOf(roomId).find((m) => m.user_id === userId)?.role ?? null) : null
+  );
+
   $effect(() => {
     const id = userId;
-    const room = roomId;
+    const owner = account;
     let cancelled = false;
     loading = true;
     error = null;
     profile = null;
+    avatarSrc = null;
     actionError = null;
     userProfile
-      .get(id, room)
+      .get(owner, id)
       .then((p) => {
         if (!cancelled) profile = p;
       })
@@ -51,20 +64,19 @@
     };
   });
 
+  $effect(() => {
+    const source = profile?.avatar ?? null;
+    let cancelled = false;
+    avatarSrc = null;
+    void resolveAvatar(source, 64).then((url) => {
+      if (!cancelled) avatarSrc = url;
+    });
+    return () => {
+      cancelled = true;
+    };
+  });
+
   const displayName = $derived(profile?.display_name || userId);
-
-  function roleLabel(powerLevel: number | null): string {
-    if (powerLevel === null) return 'Member';
-    if (powerLevel >= 100) return 'Admin';
-    if (powerLevel >= 50) return 'Moderator';
-    return 'Member';
-  }
-
-  function membershipLabel(membership: string | null): string {
-    if (!membership) return 'Not in this room';
-    const lower = membership.toLowerCase();
-    return lower.charAt(0).toUpperCase() + lower.slice(1);
-  }
 
   async function copyUserId() {
     try {
@@ -76,18 +88,9 @@
     }
   }
 
-  async function message() {
-    if (busy) return;
-    busy = true;
-    actionError = null;
-    try {
-      const dmRoomId = await userProfile.startDirectMessage(userId);
-      onmessage?.(dmRoomId);
-    } catch (e) {
-      actionError = errorMessage(e);
-    } finally {
-      busy = false;
-    }
+  function message() {
+    const dm = profile?.dm_room_id;
+    if (dm) onmessage?.(dm);
   }
 </script>
 
@@ -96,7 +99,7 @@
     <Avatar
       userId={userId}
       displayName={displayName}
-      src={profile?.avatar_url ?? null}
+      src={avatarSrc}
       size="xl"
       shape="circle"
     />
@@ -127,14 +130,12 @@
     </div>
 
     <dl class="facts">
-      <div class="fact">
-        <dt>{t('user-profile-card-role')}</dt>
-        <dd>{roleLabel(profile.power_level)}</dd>
-      </div>
-      <div class="fact">
-        <dt>{t('user-profile-card-membership')}</dt>
-        <dd>{membershipLabel(profile.membership)}</dd>
-      </div>
+      {#if role}
+        <div class="fact">
+          <dt>{t('user-profile-card-role')}</dt>
+          <dd>{role}</dd>
+        </div>
+      {/if}
     </dl>
   {/if}
 
@@ -144,9 +145,11 @@
 
   {#if profile && !profile.is_me}
     <div class="actions">
-      <Button variant="primary" size="md" disabled={busy} onclick={message}>
-        {#snippet children()}{t('user-profile-card-message')}{/snippet}
-      </Button>
+      {#if profile.dm_room_id && onmessage}
+        <Button variant="primary" size="md" onclick={message}>
+          {#snippet children()}{t('user-profile-card-message')}{/snippet}
+        </Button>
+      {/if}
       {#if onmention}
         <Button variant="ghost" size="md" onclick={() => onmention(userId)}>
           {#snippet children()}{t('user-profile-card-mention')}{/snippet}
@@ -298,7 +301,6 @@
     }
     .actions :global(button) {
       width: 100%;
-      min-height: 48px;
     }
   }
 </style>

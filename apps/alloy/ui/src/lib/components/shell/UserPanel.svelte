@@ -1,40 +1,48 @@
 <script lang="ts">
-  import { Avatar, UserName } from '../common';
+  import { Avatar } from '../common';
   import Icon from '$lib/icons/Icon.svelte';
   import { Copy, Settings } from '$lib/icons';
   import { contextmenu } from '$lib/platform/contextmenu';
   import type { MenuItem } from '$lib/stores/contextmenu.svelte';
-  import { session } from '$lib/stores/session.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
+  import { getUserColorValue } from '$lib/identity/userColor';
+  import type { Account } from '$lib/generated';
 
   import { t } from '$lib/i18n';
   interface Props {
+    /** The account the panel names; null hides the panel. A device may hold several accounts. */
+    account: Account | null;
+    /** The network the account belongs to, shown under the name. */
+    networkLabel?: string;
     onsettings?: () => void;
   }
-  let { onsettings }: Props = $props();
+  let { account, networkLabel, onsettings }: Props = $props();
 
-  const account = $derived(session.account);
-  const name = $derived(account?.display_name?.trim() || account?.user_id || '');
+  const userId = $derived(account?.remote_user_id ?? account?.id ?? '');
+  const name = $derived(account?.display_name?.trim() || userId);
+  const nameColor = $derived(getUserColorValue(userId));
 
-  function panelItems(userId: string): MenuItem[] {
+  function panelItems(accountId: string): MenuItem[] {
     return [
       { id: 'settings', label: t('common-settings'), icon: Settings, onselect: () => onsettings?.() },
       { separator: true },
-      { id: 'copy-user-id', label: t('user-profile-card-copy-user-id'), icon: Copy, onselect: () => void navigator.clipboard?.writeText(userId).catch(() => undefined) },
+      { id: 'copy-account-id', label: t('user-panel-copy-account-id'), icon: Copy, onselect: () => void navigator.clipboard?.writeText(accountId).catch(() => undefined) },
     ];
   }
 </script>
 
 {#if account && !viewport.isPhone}
-  <div class="panel" use:contextmenu={() => panelItems(account.user_id)}>
+  <div class="panel" use:contextmenu={() => panelItems(account.id)}>
     <span class="pinned">
-      <Avatar userId={account.user_id} displayName={name} src={account.avatar_url} size="md" />
+      <Avatar userId={userId} displayName={name} size="md" />
     </span>
     <div class="who">
-      <UserName userId={account.user_id} displayName={name} class="name" />
-      <span class="id" title={account.user_id}>{account.user_id}</span>
+      <span class="name" style:color={nameColor}>{name}</span>
+      {#if networkLabel}
+        <span class="id">{networkLabel}</span>
+      {/if}
     </div>
-    <button type="button" class="gear" aria-label={t('common-settings')} onclick={() => onsettings?.()}>
+    <button type="button" class="gear" aria-label={t('common-settings')} data-tooltip={t('common-settings')} onclick={() => onsettings?.()}>
       <Icon icon={Settings} size={20} />
     </button>
   </div>
@@ -65,7 +73,7 @@
     flex: 1;
     min-width: 0;
   }
-  .who :global(.name) {
+  .name {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

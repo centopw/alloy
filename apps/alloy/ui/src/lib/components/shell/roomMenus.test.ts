@@ -1,47 +1,47 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RoomSummary } from '$lib/generated';
-import { resolveSubmenuItems, type MenuAction, type MenuItem } from '$lib/stores/contextmenu.svelte';
-import { copyItems, notifyItems, notifyLabel, roomPictureItems } from './roomMenus';
+import type { MenuAction, MenuItem } from '$lib/stores/contextmenu.svelte';
+import { copyItems, notifyItems } from './roomMenus';
 
 const mocks = vi.hoisted(() => ({
   copyText: vi.fn(async (_text: string) => undefined),
-  pickFile: vi.fn(async (): Promise<string | null> => null),
-  details: vi.fn((): unknown => null),
-  roomInfoSaving: vi.fn(() => false),
-  roomInfoError: vi.fn((): string | null => null),
-  setAvatar: vi.fn(async (_roomId: string, _path: string | null) => undefined),
-  isDefault: vi.fn((): boolean | null => true),
-  levelOf: vi.fn((): string | null => 'All'),
-  notifySaving: vi.fn(() => false),
-  notifySet: vi.fn(async (_roomId: string, _level: string | null) => undefined),
-  openRoomInfo: vi.fn(),
   muteRoom: vi.fn(async (_roomId: string, _ms: number | null) => undefined),
-  setRoomLevel: vi.fn(async (_roomId: string, _level: string | null) => undefined),
+  unmuteRoom: vi.fn(async (_roomId: string) => undefined),
+  rooms: [] as RoomSummary[],
 }));
 
 vi.mock('$lib/platform/clipboard', () => ({ copyText: mocks.copyText }));
-vi.mock('$lib/platform/files', () => ({ pickFile: mocks.pickFile }));
-vi.mock('$lib/stores/roomInfo.svelte', () => ({
-  roomInfo: {
-    details: mocks.details,
-    saving: mocks.roomInfoSaving,
-    error: mocks.roomInfoError,
-    setAvatar: mocks.setAvatar,
-  },
+vi.mock('$lib/stores/muteTimer.svelte', () => ({
+  muteRoom: mocks.muteRoom,
+  unmuteRoom: mocks.unmuteRoom,
 }));
-vi.mock('$lib/stores/roomNotify.svelte', () => ({
-  roomNotify: {
-    isDefault: mocks.isDefault,
-    levelOf: mocks.levelOf,
-    saving: mocks.notifySaving,
-    set: mocks.notifySet,
+vi.mock('$lib/stores/rooms.svelte', () => ({
+  roomsStore: {
+    get rooms() {
+      return mocks.rooms;
+    },
   },
+  isRoomMuted: (room: Pick<RoomSummary, 'muted_until'>, now = Date.now()) =>
+    room.muted_until !== null && room.muted_until > now,
 }));
-vi.mock('$lib/stores/ui.svelte', () => ({ ui: { openRoomInfo: mocks.openRoomInfo } }));
-vi.mock('$lib/stores/muteTimer.svelte', () => ({ muteRoom: mocks.muteRoom, setRoomLevel: mocks.setRoomLevel }));
 
 function room(overrides: Partial<RoomSummary> = {}): RoomSummary {
-  return { id: '!room:example.org', name: 'Room', direct_user_id: null, ...overrides } as RoomSummary;
+  return {
+    id: 'chat-1',
+    account_id: 'acc-1',
+    network: 'telegram',
+    name: 'Chat',
+    avatar: null,
+    kind: 'direct',
+    is_direct: true,
+    unread_notifications: { highlight_count: 0, notification_count: 0 },
+    latest_event: null,
+    pinned: false,
+    archived: false,
+    muted_until: null,
+    tags: [],
+    ...overrides,
+  };
 }
 
 /** Menu entries that are actions (separators have no label or selection state). */
@@ -51,132 +51,51 @@ function actions(items: MenuItem[]): MenuAction[] {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.isDefault.mockReturnValue(true);
-  mocks.levelOf.mockReturnValue('All');
-  mocks.details.mockReturnValue(null);
-  mocks.roomInfoError.mockReturnValue(null);
-  mocks.pickFile.mockResolvedValue(null);
+  mocks.rooms = [room()];
 });
 
 describe('notifyItems', () => {
-  it('marks the account default as selected when the room follows it', () => {
-    const items = actions(notifyItems('!r:x'));
-    expect(items.map((i) => i.label)).toEqual([
-      'Use default',
-      'All messages',
-      'Mentions and keywords only',
-      'Mute',
+  it('marks notifications on as selected when the chat is not muted', () => {
+    const items = actions(notifyItems('chat-1'));
+    expect(items.map((i) => i.id)).toEqual([
+      'notify-unmuted',
+      'mute-3600000',
+      'mute-28800000',
+      'mute-86400000',
+      'mute-forever',
     ]);
-    expect(items.filter((i) => i.selected).map((i) => i.id)).toEqual(['notify-default']);
+    expect(items.filter((i) => i.selected).map((i) => i.id)).toEqual(['notify-unmuted']);
   });
 
-  it('marks only the overridden level as selected', () => {
-    mocks.isDefault.mockReturnValue(false);
-    mocks.levelOf.mockReturnValue('Mentions');
-    const items = actions(notifyItems('!r:x'));
-    expect(items.filter((i) => i.selected).map((i) => i.id)).toEqual(['notify-Mentions']);
+  it('marks nothing selected while the chat is muted', () => {
+    mocks.rooms = [room({ muted_until: Date.now() + 60_000 })];
+    expect(actions(notifyItems('chat-1')).some((i) => i.selected)).toBe(false);
   });
 
-  it('writes the chosen level, or null for the default', () => {
-    const items = actions(notifyItems('!r:x'));
-    items.find((i) => i.id === 'notify-Mentions')?.onselect?.();
-    items.find((i) => i.id === 'notify-default')?.onselect?.();
-    expect(mocks.setRoomLevel).toHaveBeenNthCalledWith(1, '!r:x', 'Mentions');
-    expect(mocks.setRoomLevel).toHaveBeenNthCalledWith(2, '!r:x', null);
+  it('unmutes with the notifications row', () => {
+    mocks.rooms = [room({ muted_until: 1 })];
+    actions(notifyItems('chat-1')).find((i) => i.id === 'notify-unmuted')?.onselect?.();
+    expect(mocks.unmuteRoom).toHaveBeenCalledWith('chat-1');
   });
 
-  it('offers timed mutes from the Mute row and mutes for the chosen time', () => {
-    const mute = actions(notifyItems('!r:x')).find((i) => i.id === 'notify-Mute');
-    const durations = actions(resolveSubmenuItems(mute!.submenu!));
-    expect(durations.map((i) => i.label)).toEqual(['For 1 hour', 'For 8 hours', 'For 24 hours', 'Until I turn it back on']);
-    durations[1].onselect?.();
-    durations[3].onselect?.();
-    expect(mocks.muteRoom).toHaveBeenNthCalledWith(1, '!r:x', 8 * 3_600_000);
-    expect(mocks.muteRoom).toHaveBeenNthCalledWith(2, '!r:x', null);
-  });
-
-  it('disables every choice while a write is in flight', () => {
-    mocks.notifySaving.mockReturnValue(true);
-    expect(actions(notifyItems('!r:x')).every((i) => i.disabled)).toBe(true);
-  });
-});
-
-describe('notifyLabel', () => {
-  it('names the current choice for the bell button', () => {
-    mocks.isDefault.mockReturnValue(false);
-    mocks.levelOf.mockReturnValue('All');
-    expect(notifyLabel('!r:x')).toBe('Notifications: All messages');
-  });
-
-  it('falls back to a plain label while the level is unknown', () => {
-    mocks.isDefault.mockReturnValue(null);
-    expect(notifyLabel('!r:x')).toBe('Notifications');
+  it('mutes for the chosen duration, and forever for the last row', () => {
+    const items = actions(notifyItems('chat-1'));
+    items.find((i) => i.id === 'mute-28800000')?.onselect?.();
+    items.find((i) => i.id === 'mute-forever')?.onselect?.();
+    expect(mocks.muteRoom).toHaveBeenNthCalledWith(1, 'chat-1', 8 * 3_600_000);
+    expect(mocks.muteRoom).toHaveBeenNthCalledWith(2, 'chat-1', null);
   });
 });
 
 describe('copyItems', () => {
-  it('offers only the room ID for a non-direct room', () => {
+  it('offers the chat id, which is also the id the store and engine use', () => {
     const items = actions(copyItems(room()));
-    expect(items.map((i) => i.label)).toEqual(['Copy room ID']);
-  });
-
-  it('leads with the other person\'s user ID for a direct room', () => {
-    const dm = room({ direct_user_id: '@facebook_100055605049765:matrix.hce.vn' } as Partial<RoomSummary>);
-    const items = actions(copyItems(dm));
-    expect(items.map((i) => i.label)).toEqual(['Copy user ID', 'Copy room ID']);
+    expect(items.map((i) => i.id)).toEqual(['copy-room-id']);
     items[0].onselect?.();
-    expect(mocks.copyText).toHaveBeenCalledWith('@facebook_100055605049765:matrix.hce.vn');
+    expect(mocks.copyText).toHaveBeenCalledWith('chat-1');
   });
 
-  it('copies the room ID for the room entry', () => {
-    actions(copyItems(room())).find((i) => i.id === 'copy-room-id')?.onselect?.();
-    expect(mocks.copyText).toHaveBeenCalledWith('!room:example.org');
-  });
-
-  it('never offers a matrix.to link', () => {
-    const dm = room({ direct_user_id: '@a:example.org' } as Partial<RoomSummary>);
-    expect(actions(copyItems(dm)).some((i) => /link/i.test(i.label))).toBe(false);
-  });
-});
-
-describe('roomPictureItems', () => {
-  it('disables both actions without permission', () => {
-    mocks.details.mockReturnValue({ can_set_avatar: false, avatar_url: 'mxc://x/y' });
-    const items = actions(roomPictureItems('!r:x'));
-    expect(items.map((i) => i.disabled)).toEqual([true, true]);
-  });
-
-  it('enables replace and remove for a room admin with a picture', () => {
-    mocks.details.mockReturnValue({ can_set_avatar: true, avatar_url: 'mxc://x/y' });
-    const items = actions(roomPictureItems('!r:x'));
-    expect(items.map((i) => i.disabled)).toEqual([false, false]);
-  });
-
-  it('disables removal when there is no picture to remove', () => {
-    mocks.details.mockReturnValue({ can_set_avatar: true, avatar_url: null });
-    const remove = actions(roomPictureItems('!r:x')).find((i) => i.id === 'picture-remove');
-    expect(remove?.disabled).toBe(true);
-  });
-
-  it('removes the picture by writing a null path', () => {
-    mocks.details.mockReturnValue({ can_set_avatar: true, avatar_url: 'mxc://x/y' });
-    actions(roomPictureItems('!r:x')).find((i) => i.id === 'picture-remove')?.onselect?.();
-    expect(mocks.setAvatar).toHaveBeenCalledWith('!r:x', null);
-  });
-
-  it('replaces the picture with the picked file', async () => {
-    mocks.details.mockReturnValue({ can_set_avatar: true, avatar_url: null });
-    mocks.pickFile.mockResolvedValue('/tmp/avatar.png');
-    actions(roomPictureItems('!r:x')).find((i) => i.id === 'picture-replace')?.onselect?.();
-    await vi.waitFor(() => expect(mocks.setAvatar).toHaveBeenCalledWith('!r:x', '/tmp/avatar.png'));
-    expect(mocks.openRoomInfo).not.toHaveBeenCalled();
-  });
-
-  it('opens room info when the write fails', async () => {
-    mocks.details.mockReturnValue({ can_set_avatar: true, avatar_url: null });
-    mocks.pickFile.mockResolvedValue('/tmp/avatar.png');
-    mocks.roomInfoError.mockReturnValue('forbidden');
-    actions(roomPictureItems('!r:x')).find((i) => i.id === 'picture-replace')?.onselect?.();
-    await vi.waitFor(() => expect(mocks.openRoomInfo).toHaveBeenCalledWith('info'));
+  it('never offers a network-specific user handle', () => {
+    expect(actions(copyItems(room())).some((i) => /user/i.test(i.label))).toBe(false);
   });
 });

@@ -15,14 +15,14 @@ export interface RoomMediaView {
 
 interface Feed {
   items: RoomMediaItem[];
-  /** Cursor for the next page, `null` when the server reported no more. */
-  nextBatch: string | null;
+  /** Cursor for the next page, `null` when the engine reported no more. */
+  next: string | null;
   loaded: boolean;
   loading: boolean;
   error: string | null;
 }
 
-const EMPTY_FEED: Feed = { items: [], nextBatch: null, loaded: false, loading: false, error: null };
+const EMPTY_FEED: Feed = { items: [], next: null, loaded: false, loading: false, error: null };
 
 /** Keys are `roomId NUL kind`; room ids never contain NUL, so one room's keys share a prefix. */
 const feedKey = (roomId: string, kind: RoomMediaKind) => `${roomId}\u0000${kind}`;
@@ -44,7 +44,7 @@ export class RoomMediaStore {
     return {
       items: feed.items.slice(),
       loading: feed.loading,
-      done: feed.loaded && feed.nextBatch === null,
+      done: feed.loaded && feed.next === null,
       error: feed.error,
     };
   }
@@ -59,8 +59,8 @@ export class RoomMediaStore {
   /** Appends the next page. No-op before the first page or after the last one. */
   loadMore(roomId: string, kind: RoomMediaKind): Promise<void> {
     const feed = this.feeds[feedKey(roomId, kind)];
-    if (!feed?.loaded || feed.nextBatch === null) return Promise.resolve();
-    return this.start(roomId, kind, feed.nextBatch, true);
+    if (!feed?.loaded || feed.next === null) return Promise.resolve();
+    return this.start(roomId, kind, feed.next, true);
   }
 
   /**
@@ -80,7 +80,7 @@ export class RoomMediaStore {
       try {
         const res = await client.invoke({
           action: 'GetRoomMedia',
-          params: { room_id: roomId, kind, from: null, limit: ROOM_MEDIA_PAGE_SIZE },
+          params: { room_id: roomId, kind, before: null, limit: ROOM_MEDIA_PAGE_SIZE },
         });
         if (this.requests.get(key) !== id) return;
         const page = expect(res, 'RoomMedia').payload;
@@ -112,7 +112,7 @@ export class RoomMediaStore {
   private start(
     roomId: string,
     kind: RoomMediaKind,
-    from: string | null,
+    before: string | null,
     append: boolean
   ): Promise<void> {
     const key = feedKey(roomId, kind);
@@ -123,7 +123,7 @@ export class RoomMediaStore {
     this.requests.set(key, id);
     this.setFeed(key, { loading: true, error: null });
 
-    const p: Promise<void> = this.fetch(key, roomId, kind, from, append, id).finally(() => {
+    const p: Promise<void> = this.fetch(key, roomId, kind, before, append, id).finally(() => {
       if (this.inflight.get(key) === p) this.inflight.delete(key);
     });
     this.inflight.set(key, p);
@@ -134,14 +134,14 @@ export class RoomMediaStore {
     key: string,
     roomId: string,
     kind: RoomMediaKind,
-    from: string | null,
+    before: string | null,
     append: boolean,
     id: number
   ): Promise<void> {
     try {
       const res = await client.invoke({
         action: 'GetRoomMedia',
-        params: { room_id: roomId, kind, from, limit: ROOM_MEDIA_PAGE_SIZE },
+        params: { room_id: roomId, kind, before, limit: ROOM_MEDIA_PAGE_SIZE },
       });
       if (this.requests.get(key) !== id) return;
       const page = expect(res, 'RoomMedia').payload;
@@ -152,7 +152,7 @@ export class RoomMediaStore {
         seen.add(item.event_id);
         items.push(item);
       }
-      this.setFeed(key, { items, nextBatch: page.next_batch, loaded: true, loading: false });
+      this.setFeed(key, { items, next: page.next, loaded: true, loading: false });
     } catch (err) {
       if (this.requests.get(key) === id) {
         this.setFeed(key, { loading: false, error: errorMessage(err) });

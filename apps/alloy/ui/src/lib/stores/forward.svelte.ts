@@ -30,8 +30,14 @@ class ForwardStore {
     if (!source || this.results[targetId] === 'sending' || this.results[targetId] === 'sent') return;
     this.results[targetId] = 'sending';
     try {
-      const res = expect(await client.forwardEvents(source, this.eventIds, [targetId]), 'EventsForwarded');
-      const failure = res.payload.failed.find((f) => f.room_id === targetId);
+      const res = expect(
+        await client.invoke({
+          action: 'ForwardEvents',
+          params: { room_id: source, event_ids: this.eventIds, targets: [targetId] },
+        }),
+        'EventsForwarded'
+      );
+      const failure = res.payload.failures.find((f) => f.room_id === targetId);
       this.results[targetId] = failure ? { error: failure.error } : 'sent';
     } catch (e) {
       this.results[targetId] = { error: errorMessage(e) };

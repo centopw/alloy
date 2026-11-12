@@ -1,4 +1,5 @@
 import { client } from '../ipc/index.js';
+import type { MediaSource } from '../generated/index.js';
 import { localFileUrl } from '../platform/files';
 
 /** Thumbnail sizes (CSS px at 1x) that avatar images are fetched at. */
@@ -15,17 +16,16 @@ export function bucket(px: number): number {
   return BUCKETS[BUCKETS.length - 1];
 }
 
-/** Resolves an mxc URI to a webview-loadable URL at `px` (already bucketed) CSS pixels. Throws on failure. */
-export type AvatarFetcher = (mxc: string, px: number) => Promise<string>;
+/** Resolves a stored media object to a webview-loadable URL at `px` (already bucketed) CSS pixels. Throws on failure. */
+export type AvatarFetcher = (source: MediaSource, px: number) => Promise<string>;
 
-const defaultFetcher: AvatarFetcher = async (mxc, px) => {
-  const res = await client.getMedia({ kind: 'Remote', data: { uri: mxc } }, 'thumbnail', {
-    width: px * 2,
-    height: px * 2,
-    mime_type: null,
+const defaultFetcher: AvatarFetcher = async (source, px) => {
+  const res = await client.invoke({
+    action: 'GetMedia',
+    params: { source, kind: 'thumbnail', mime_type: null },
   });
-  if (res.type !== 'MediaRetrieved') throw new Error(`unexpected response: ${res.type}`);
-  return localFileUrl(res.payload.local_path);
+  if (res.type !== 'Media') throw new Error(`unexpected response: ${res.type}`);
+  return await localFileUrl(res.payload.path);
 };
 
 let fetcher: AvatarFetcher = defaultFetcher;
@@ -49,24 +49,22 @@ export function resetAvatarCache(): void {
   inflight.clear();
 }
 
-async function load(mxc: string, px: number): Promise<string | null> {
+async function load(source: MediaSource, px: number): Promise<string | null> {
   try {
-    return (await fetcher(mxc, px)) || null;
+    return (await fetcher(source, px)) || null;
   } catch {
     return null;
   }
 }
 
 /**
- * Resolve an `mxc://` URI to a URL the webview can load, sized for `px` CSS pixels.
+ * Resolve a stored media object to a URL the webview can load, sized for `px` CSS pixels.
  * Successes are cached for the session; failures are cached for AVATAR_FAILURE_TTL_MS.
  * Concurrent requests for the same key share one fetch. Never rejects: resolves null on failure.
  */
-export function avatarUrl(mxc: string, px: number): Promise<string | null> {
-  if (!mxc.startsWith('mxc://')) return Promise.resolve(null);
-
+export function avatarUrl(source: MediaSource, px: number): Promise<string | null> {
   const size = bucket(px);
-  const key = `${mxc}|${size}`;
+  const key = `${source.media_id}|${size}`;
 
   const hit = settled.get(key);
   if (hit) {
@@ -77,7 +75,7 @@ export function avatarUrl(mxc: string, px: number): Promise<string | null> {
   const pending = inflight.get(key);
   if (pending) return pending;
 
-  const request: Promise<string | null> = load(mxc, size)
+  const request: Promise<string | null> = load(source, size)
     .then((url) => {
       settled.set(key, {
         url,
@@ -91,4 +89,9 @@ export function avatarUrl(mxc: string, px: number): Promise<string | null> {
 
   inflight.set(key, request);
   return request;
+}
+
+/** Resolve one chat or user avatar, or null when the row has none. */
+export function resolveAvatar(source: MediaSource | null | undefined, px: number): Promise<string | null> {
+  return source ? avatarUrl(source, px) : Promise.resolve(null);
 }

@@ -5,11 +5,8 @@
     X,
     ChevronLeft,
     ChevronRight,
-    LogOut,
     User,
-    Smartphone,
     ShieldCheck,
-    Lock,
     Palette,
     Bell,
     SlidersHorizontal,
@@ -20,7 +17,6 @@
     Tag,
     ShieldCheck as PermissionsIcon
   } from '$lib/icons';
-  import { session } from '$lib/stores/session.svelte';
   import { pushBack } from '$lib/platform/backstack';
   import { viewport } from '$lib/stores/viewport.svelte';
   import {
@@ -32,14 +28,12 @@
     type SettingsSectionId,
   } from '$lib/platform/capabilities';
 import Account from './sections/Account.svelte';
-import Devices from './sections/Devices.svelte';
 import Appearance from './sections/Appearance.svelte';
 import Notifications from './sections/Notifications.svelte';
 import Preferences from './sections/Preferences.svelte';
 import Keyboard from './sections/Keyboard.svelte';
 import SidebarPrefs from './sections/SidebarPrefs.svelte';
 import SecurityPrivacy from './sections/SecurityPrivacy.svelte';
-import Encryption from './sections/Encryption.svelte';
 import HelpAbout from './sections/HelpAbout.svelte';
 import Tags from './sections/Tags.svelte';
 import Permissions from './sections/Permissions.svelte';
@@ -57,12 +51,11 @@ import Permissions from './sections/Permissions.svelte';
 
   type NavIcon = Component<{ size?: number; strokeWidth?: number; class?: string }>;
 
-  // Icons for each section. The record is exhaustive, so a new section id cannot ship without one.
-  const NAV_ICONS: Record<SettingsSectionId, { icon: NavIcon; phoneIcon?: NavIcon }> = {
+  // Icons for each section this build still has. A section with no icon is not offered: the
+  // Matrix-only pages (signed-in devices, recovery keys and E2EE) are gone with Matrix (ADR 0016).
+  const NAV_ICONS: Partial<Record<SettingsSectionId, { icon: NavIcon; phoneIcon?: NavIcon }>> = {
     account: { icon: User },
-    devices: { icon: Smartphone },
     'security-privacy': { icon: ShieldCheck },
-    encryption: { icon: Lock },
     appearance: { icon: Palette },
     notifications: { icon: Bell },
     permissions: { icon: PermissionsIcon },
@@ -75,12 +68,11 @@ import Permissions from './sections/Permissions.svelte';
 
   const GROUPS: RawSettingsGroup<NavIcon>[] = SETTINGS_GROUPS_DEF.map((group) => ({
     ...group,
-    items: group.items.map((item) => ({
-      ...item,
-      icon: NAV_ICONS[item.id].icon,
-      phoneIcon: NAV_ICONS[item.id].phoneIcon,
-    })),
-  }));
+    items: group.items.flatMap((item) => {
+      const icons = NAV_ICONS[item.id];
+      return icons ? [{ ...item, icon: icons.icon, phoneIcon: icons.phoneIcon }] : [];
+    }),
+  })).filter((group) => group.items.length > 0);
 
   const caps = $derived(capabilities(currentEnv(viewport.isPhone)));
   const visibleGroups = $derived(filterSettingsGroups(GROUPS, caps));
@@ -171,11 +163,6 @@ import Permissions from './sections/Permissions.svelte';
       first.focus();
     }
   }
-
-  async function signOut() {
-    onclose();
-    await session.logout();
-  }
 </script>
 
 {#if open}
@@ -224,13 +211,6 @@ import Permissions from './sections/Permissions.svelte';
             {/each}
           </div>
         {/each}
-
-        <div class="nav-footer">
-          <button type="button" class="nav-item danger" onclick={signOut}>
-            <span class="nav-icon"><Icon icon={LogOut} size={20} /></span>
-            <span class="nav-label">{t('settings-dialog-sign-out')}</span>
-          </button>
-        </div>
       </nav>
 
       <div class="content" role="region" aria-labelledby="settings-section-title">
@@ -248,8 +228,6 @@ import Permissions from './sections/Permissions.svelte';
           <div class="column">
             {#if section === 'account'}
               <Account {onclose} />
-            {:else if section === 'devices'}
-              <Devices {onclose} />
             {:else if section === 'appearance'}
               <Appearance />
             {:else if section === 'notifications'}
@@ -266,8 +244,6 @@ import Permissions from './sections/Permissions.svelte';
               <Tags />
             {:else if section === 'security-privacy'}
               <SecurityPrivacy />
-            {:else if section === 'encryption'}
-              <Encryption {onclose} />
             {:else}
               <HelpAbout />
             {/if}
@@ -367,18 +343,10 @@ import Permissions from './sections/Permissions.svelte';
     font-weight: var(--alloy-typography-weight-medium);
     box-shadow: var(--alloy-glass-highlight);
   }
-  .nav-item.danger {
-    color: var(--alloy-color-status-error);
-  }
   .nav-item:focus-visible,
   .close:focus-visible {
     outline: 2px solid var(--alloy-color-accent-primary);
     outline-offset: 2px;
-  }
-  .nav-footer {
-    margin-top: auto;
-    padding-top: var(--alloy-spacing-scale-2);
-    border-top: 1px solid var(--alloy-glass-rim);
   }
   .content {
     display: flex;
@@ -511,10 +479,6 @@ import Permissions from './sections/Permissions.svelte';
       background: transparent;
       font-weight: var(--alloy-typography-weight-medium);
     }
-    .nav-item.danger,
-    .nav-item.danger .nav-icon {
-      color: var(--alloy-color-status-error);
-    }
     .nav-icon,
     .nav-chevron {
       display: inline-flex;
@@ -529,15 +493,6 @@ import Permissions from './sections/Permissions.svelte';
     .nav-label {
       flex: 1;
       min-width: 0;
-    }
-    .nav-footer {
-      margin-top: auto;
-      padding-top: 0;
-      border-top: 1px solid var(--alloy-color-border-subtle);
-    }
-    .nav-footer .nav-item {
-      min-height: 52px;
-      border-bottom: none;
     }
     .panel[data-view='nav'] .content {
       display: none;

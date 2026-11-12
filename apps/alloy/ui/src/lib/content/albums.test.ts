@@ -2,25 +2,43 @@ import { describe, expect, it } from 'vitest';
 import type { TimelineItemDto } from '$lib/generated';
 import { ALBUM_MAX, groupAlbums } from './albums';
 
-function media(id: string, at: number, extra: Record<string, unknown> = {}): TimelineItemDto {
-  return {
+function media(id: string, at: number, extra: Partial<TimelineItemDto> = {}): TimelineItemDto {
+  const item: TimelineItemDto = {
     internal_id: id,
     event_id: `$${id}`,
-    sender: '@a:hs',
+    sender: 'u-a',
+    sender_display_name: null,
+    sender_avatar: null,
     timestamp_millis: at,
-    content: { kind: 'Media', data: { media_kind: 'image', body: 'IMG_0001.jpg', uri: 'mxc://x/y', mime_type: 'image/jpeg', size_bytes: 1 } },
-    send_state: { status: 'Sent' },
+    content: {
+      kind: 'Media',
+      data: {
+        source: { media_id: `m-${id}` },
+        mime_type: 'image/jpeg',
+        size_bytes: 1,
+        body: 'IMG_0001.jpg',
+        media_kind: 'image',
+        width: null,
+        height: null,
+        duration_ms: null,
+        voice: false,
+      },
+    },
+    send_state: { status: 'Sent', data: { event_id: `$${id}` } },
     is_own: false,
     reply_to: null,
-    thread_summary: null,
-    read_receipts: null,
+    read_by: [],
+    edited: false,
     reactions: [],
-    ...extra,
-  } as unknown as TimelineItemDto;
+    transaction_id: null,
+  };
+  return Object.assign(item, extra);
 }
 
-const text = (id: string, at: number): TimelineItemDto =>
-  ({ ...media(id, at), content: { kind: 'TextMessage', data: { body: 'hi', formatted_body: null } } }) as unknown as TimelineItemDto;
+const text = (id: string, at: number): TimelineItemDto => ({
+  ...media(id, at),
+  content: { kind: 'TextMessage', data: { body: 'hi', formatted_body: null, html_sanitized: false } },
+});
 
 describe('groupAlbums', () => {
   it('folds consecutive pictures from one sender into the first row', () => {
@@ -37,16 +55,31 @@ describe('groupAlbums', () => {
   });
 
   it('starts a new album after a long gap or a different sender', () => {
-    const rows = [media('a', 0), media('b', 1_000), media('c', 200_000), media('d', 201_000, { sender: '@b:hs' })];
+    const rows = [media('a', 0), media('b', 1_000), media('c', 200_000), media('d', 201_000, { sender: 'u-b' })];
     const layout = groupAlbums(rows);
     expect([...layout.leads.keys()]).toEqual(['a']);
     expect(layout.hidden.has('c')).toBe(false);
   });
 
   it('keeps pictures that carry a caption, reply, reaction or unsent state out of albums', () => {
-    const captioned = media('b', 1_000, { content: { kind: 'Media', data: { media_kind: 'image', body: 'Look at this', uri: 'mxc://x/y', mime_type: 'image/jpeg', size_bytes: 1 } } });
+    const captioned = media('b', 1_000, {
+      content: {
+        kind: 'Media',
+        data: {
+          source: { media_id: 'm-b' },
+          mime_type: 'image/jpeg',
+          size_bytes: 1,
+          body: 'Look at this',
+          media_kind: 'image',
+          width: null,
+          height: null,
+          duration_ms: null,
+          voice: false,
+        },
+      },
+    });
     const reacted = media('c', 2_000, { reactions: [{ key: 'x', count: 1, by_me: false, senders: [] }] });
-    const sending = media('d', 3_000, { send_state: { status: 'Sending' } });
+    const sending = media('d', 3_000, { send_state: { status: 'Sending', data: { transaction_id: 'txn-1' } } });
     const layout = groupAlbums([media('a', 0), captioned, reacted, sending, media('e', 4_000)]);
     expect(layout.leads.size).toBe(0);
   });

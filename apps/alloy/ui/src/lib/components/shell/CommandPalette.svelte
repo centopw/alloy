@@ -6,10 +6,6 @@
   import { ChevronLeft, Search } from '$lib/icons';
   import { roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
   import { pushBack } from '$lib/platform/backstack';
-  import { client } from '$lib/ipc';
-  import { expect } from '$lib/stores/errors';
-  import { profileCard } from '$lib/stores/profileCard.svelte';
-  import type { UserSearchResultDto } from '$lib/generated';
   import { handleModalTabKey } from '$lib/platform/focusTrap';
 
   import { t } from '$lib/i18n';
@@ -35,8 +31,8 @@
 
   /**
    * Closes the palette and returns focus to the opener (A11Y-15). The run callback runs after the
-   * focus move so follow-up surfaces (the profile card) capture the opener as their own return
-   * target instead of the input that is about to be removed.
+   * focus move so follow-up surfaces capture the opener as their own return target instead of the
+   * input that is about to be removed.
    */
   function closeAndRestore(then?: () => void) {
     const target = opener;
@@ -46,7 +42,7 @@
     then?.();
   }
 
-  /** After a room is chosen the row is the keyboard user's landing spot; phones show the chat
+  /** After a chat is chosen the row is the keyboard user's landing spot; phones show the chat
    * instead and the shell moves focus there, so a hidden row is left alone. */
   function focusChosenRow(roomId: string) {
     void tick().then(() => {
@@ -59,54 +55,9 @@
 
   const results = $derived(
     roomsStore.rooms
-      .filter((r) => r.membership === 'Joined' && !r.is_space)
       .filter((r) => roomTitle(r).toLowerCase().includes(query.trim().toLowerCase()))
       .slice(0, 8)
   );
-
-  // People come from the server's user directory: the same query, a page of six. The directory is
-  // the only way to reach someone you share no room with, which is why this lives in the palette.
-  const PEOPLE_LIMIT = 6;
-  const PEOPLE_MIN_CHARS = 2;
-  let people = $state<UserSearchResultDto[]>([]);
-  let peopleBusy = $state(false);
-  let peopleError = $state<string | null>(null);
-  let peopleRequest = 0;
-
-  $effect(() => {
-    const q = query.trim();
-    const id = ++peopleRequest;
-    if (q.length < PEOPLE_MIN_CHARS) {
-      people = [];
-      peopleBusy = false;
-      peopleError = null;
-      return;
-    }
-    peopleBusy = true;
-    const timer = window.setTimeout(() => {
-      void (async () => {
-        try {
-          const res = await client.invoke({ action: 'SearchUsers', params: { query: q, limit: PEOPLE_LIMIT } });
-          if (id !== peopleRequest) return;
-          people = expect(res, 'UserSearchResults').payload.results;
-          peopleError = null;
-        } catch (e) {
-          if (id !== peopleRequest) return;
-          people = [];
-          peopleError = e instanceof Error ? e.message : t('command-palette-user-search-failed');
-        } finally {
-          if (id === peopleRequest) peopleBusy = false;
-        }
-      })();
-    }, 250);
-    return () => window.clearTimeout(timer);
-  });
-
-  /** Rooms first, then people: one list for the keyboard, two groups on screen. */
-  const options = $derived([
-    ...results.map((r) => ({ kind: 'room' as const, id: r.id, title: roomTitle(r) })),
-    ...people.map((p) => ({ kind: 'person' as const, id: `person-${p.user_id}`, title: p.display_name ?? p.user_id, user: p })),
-  ]);
 
   $effect(() => {
     if (open) {
@@ -125,35 +76,25 @@
   // The highlighted option's id. The input keeps DOM focus and points at it with
   // aria-activedescendant, which is the combobox pattern: screen readers announce the active
   // option without moving focus off the text field.
-  const activeOptionId = $derived(options[index] ? `palette-option-${options[index].id}` : undefined);
+  const activeOptionId = $derived(results[index] ? `palette-option-${results[index].id}` : undefined);
 
-  /** Opens a room, or the profile card of a person found in the directory. */
-  function choose(option: (typeof options)[number]) {
-    if (option.kind === 'room') {
-      onpick(option.id);
-      focusChosenRow(option.id);
-      return;
-    }
-    const anchor = input?.getBoundingClientRect();
-    closeAndRestore(() =>
-      profileCard.open(option.user.user_id, null, {
-        x: anchor?.left ?? 0,
-        y: anchor?.bottom ?? 0
-      })
-    );
+  /** Opens one chat and leaves the keyboard user on its row in the chat list. */
+  function choose(roomId: string) {
+    onpick(roomId);
+    focusChosenRow(roomId);
   }
 
   function onKey(e: KeyboardEvent) {
     if (e.key === 'Escape') closeAndRestore();
     else if (e.key === 'ArrowDown') {
       e.preventDefault();
-      index = Math.min(index + 1, options.length - 1);
+      index = Math.min(index + 1, results.length - 1);
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       index = Math.max(index - 1, 0);
-    } else if (e.key === 'Enter' && options[index]) {
+    } else if (e.key === 'Enter' && results[index]) {
       e.preventDefault();
-      choose(options[index]);
+      choose(results[index].id);
     } else if (e.key === 'Tab') {
       // Options are not in the tab order (the input moves through them with aria-activedescendant),
       // so the only focusable elements are the back button and the input. The shared trap keeps
@@ -184,8 +125,8 @@
         <input
           bind:this={input}
           bind:value={query}
-          placeholder={t('command-palette-search-rooms')}
-          aria-label={t('command-palette-search-rooms')}
+          placeholder={t('command-palette-search-chats')}
+          aria-label={t('command-palette-search-chats')}
           role="combobox"
           aria-expanded="true"
           aria-controls="palette-results"
@@ -202,36 +143,14 @@
             aria-selected={i === index}
             class="option"
             class:sel={i === index}
-            onclick={() => choose(options[i])}
+            onclick={() => choose(r.id)}
           >
             <Avatar userId={r.id} displayName={roomTitle(r)} size={viewport.isPhone ? 48 : 'sm'} />
             <span>{roomTitle(r)}</span>
           </li>
         {/each}
-        {#if people.length > 0}
-          <li class="group" role="presentation">{t('command-palette-people')}</li>
-          {#each people as p, j (p.user_id)}
-            <!-- svelte-ignore a11y_click_events_have_key_events -->
-            <li
-              id={`palette-option-person-${p.user_id}`}
-              role="option"
-              aria-selected={results.length + j === index}
-              class="option"
-              class:sel={results.length + j === index}
-              onclick={() => choose(options[results.length + j])}
-            >
-              <Avatar userId={p.user_id} displayName={p.display_name} src={p.avatar_url} size={viewport.isPhone ? 48 : 'sm'} />
-              <span class="who">
-                <span class="name">{p.display_name ?? p.user_id}</span>
-                <span class="id">{p.user_id}{p.already_in_room ? t('command-palette-in-a-room') : ''}</span>
-              </span>
-            </li>
-          {/each}
-        {:else if results.length === 0 && !peopleBusy}
-          <li class="none">{t('command-palette-no-matching-conversations-or-people')}</li>
-        {/if}
-        {#if peopleError}
-          <li class="none" role="alert">{peopleError}</li>
+        {#if results.length === 0}
+          <li class="none">{t('command-palette-no-matching-conversations')}</li>
         {/if}
       </ul>
       <footer class="hints" aria-hidden="true">
@@ -310,30 +229,6 @@
   .option.sel,
   .option:hover {
     background: var(--alloy-glass-control-hover);
-  }
-  .group {
-    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-row-pad-x) var(--alloy-spacing-scale-1);
-    color: var(--alloy-color-text-muted);
-    font-size: var(--alloy-typography-size-xs);
-    letter-spacing: var(--alloy-letter-spacing-caps);
-    text-transform: uppercase;
-  }
-  .who {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-  }
-  .who .name {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .who .id {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: var(--alloy-color-text-muted);
-    font-size: var(--alloy-typography-size-xs);
   }
   .none {
     padding: var(--alloy-spacing-scale-4);

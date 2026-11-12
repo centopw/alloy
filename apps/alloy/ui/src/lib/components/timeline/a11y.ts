@@ -16,26 +16,28 @@
 import type { TimelineItemDto } from '$lib/generated';
 
 /** Rows the message cursor can focus: everything that carries a message body. */
-const CURSOR_KINDS: ReadonlySet<string> = new Set([
-  'TextMessage',
-  'Media',
-  'Poll',
-  'Location',
-  'Redacted',
-  'UnableToDecrypt',
-]);
+const CURSOR_KINDS: Record<string, true> = {
+  TextMessage: true,
+  Media: true,
+  Location: true,
+  Deleted: true,
+};
 
-/** Arrivals worth announcing. State events and dividers are not messages. */
-const ANNOUNCE_KINDS: ReadonlySet<string> = new Set(['TextMessage', 'Media', 'Poll', 'Location']);
+/** Arrivals worth announcing. System lines and dividers are not messages. */
+const ANNOUNCE_KINDS: Record<string, true> = {
+  TextMessage: true,
+  Media: true,
+  Location: true,
+};
 
 /** Whether the roving message cursor may focus this row. */
 export function isCursorRow(item: TimelineItemDto): boolean {
-  return CURSOR_KINDS.has(item.content.kind);
+  return CURSOR_KINDS[item.content.kind] === true;
 }
 
 /** Whether this arrival should produce (or join) a screen-reader announcement. Own echoes do not. */
 export function isAnnounceableArrival(item: TimelineItemDto): boolean {
-  return !item.is_own && ANNOUNCE_KINDS.has(item.content.kind);
+  return !item.is_own && ANNOUNCE_KINDS[item.content.kind] === true;
 }
 
 /** A move of the message cursor within the focused conversation. */

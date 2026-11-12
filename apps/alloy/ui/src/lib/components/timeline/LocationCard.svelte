@@ -2,36 +2,33 @@
   import Icon from '$lib/icons/Icon.svelte';
   import { ExternalLink, MapPin } from '$lib/icons';
   import { formatAccuracy, formatCoordinates, mapUrl, parseGeoUri } from '$lib/content/geo';
-  import { formatTime } from '$lib/content/format';
   import { openExternal } from '$lib/platform/links';
-  import { prefs } from '$lib/stores/prefs.svelte';
 
   import { t } from '$lib/i18n';
   interface Props {
+    /** `TimelineItemContent::Location::geo_uri`, an RFC 5870 `geo:` URI. */
     geoUri: string;
+    /** `TimelineItemContent::Location::description`, a network-supplied name or null. */
     description: string | null;
-    live?: boolean;
-    liveUntil?: number | null;
   }
-  let { geoUri, description, live = false, liveUntil = null }: Props = $props();
+  let { geoUri, description }: Props = $props();
 
   const point = $derived(parseGeoUri(geoUri));
-  const sharing = $derived(live && liveUntil !== null && liveUntil > Date.now());
-  // The engine writes "Location: lat, lon" as the plain-text fallback; that is not a name worth showing twice.
+  // The engine may write a plain-text fallback ("Location: 48.2, 16.37"); coordinates are already
+  // shown as numbers, so a description that just repeats them is not worth a second line.
   const label = $derived(description && !/^Location: -?\d/.test(description) ? description : null);
 </script>
 
 <div class="card">
-  <span class="pin" class:live={sharing} aria-hidden="true"><Icon icon={MapPin} size={24} /></span>
+  <span class="pin" aria-hidden="true"><Icon icon={MapPin} size={24} /></span>
   <div class="text">
-    <span class="title">{sharing ? t('location-card-sharing-live-location') : live ? t('location-card-live-location-ended') : (label ?? t('location-card-location'))}</span>
+    <span class="title">{label ?? t('location-card-location')}</span>
     {#if point}
       <span class="coords">{formatCoordinates(point)}</span>
       {#if point.accuracy !== null}<span class="muted">{t('location-card-accuracy')} {formatAccuracy(point.accuracy)}</span>{/if}
     {:else}
       <span class="muted">{t('location-card-this-location-could-not-be-read')}</span>
     {/if}
-    {#if sharing && liveUntil}<span class="muted">{t('location-card-until')} {formatTime(liveUntil, prefs.timeFormat)}</span>{/if}
   </div>
   {#if point}
     <button type="button" class="open" aria-label={t('location-card-open-in-maps')} data-tooltip={t('location-card-open-in-maps')} onclick={() => void openExternal(mapUrl(point))}>
@@ -60,10 +57,6 @@
     border-radius: var(--alloy-radii-full);
     background: var(--alloy-color-accent-subtle);
     color: var(--alloy-color-accent-primary);
-  }
-  .pin.live {
-    background: var(--alloy-color-accent-primary);
-    color: var(--alloy-color-text-on-accent);
   }
   .text {
     display: flex;

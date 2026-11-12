@@ -41,36 +41,6 @@ export function errorReason(e: unknown): string | null {
   return null;
 }
 
-/**
- * What went wrong in a browser sign-in, from the engine's stable `reason` and the server the user
- * chose. Copy follows the sign-in design spec: no raw engine text, no protocol jargon, and every
- * sentence ends at something the user can do.
- */
-export function oidcErrorMessage(e: unknown, server: string): string {
-  switch (errorReason(e)) {
-    case 'not_pending':
-      return 'Sign-in wasn’t completed. You can try again.';
-    case 'expired':
-      return 'This sign-in took too long and expired. Try again to get a fresh prompt.';
-    case 'state_mismatch':
-      return 'Sign-in didn’t complete. Try again.';
-    case 'denied':
-      return `${server} didn’t approve the sign-in. Try again or use a different account.`;
-    case 'exchange_failed':
-      return 'We couldn’t finish signing you in. Try again. If it keeps happening, check that the server is reachable.';
-    case 'registration_failed':
-      return 'We couldn’t start the browser sign-in. Try again.';
-    case 'unsupported':
-      return 'This server doesn’t offer browser sign-in. Use a password if your server allows it.';
-    case 'launch_failed':
-      return 'We couldn’t open your browser. Open it manually and try again.';
-    case 'network':
-      return `We couldn’t reach ${server}. Check your connection and try again.`;
-    default:
-      return 'Sign-in didn’t complete. Try again.';
-  }
-}
-
 /** Narrow a response to one variant or throw (a protocol bug, not a user error). */
 export function expect<T extends EngineResponse['type']>(
   res: EngineResponse,

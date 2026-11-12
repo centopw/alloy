@@ -110,7 +110,9 @@ const AUDITED = Object.entries(modules).filter(
 
 describe('tokens-audit: ADR 0014 token discipline', () => {
   it('finds the components to audit', () => {
-    expect(AUDITED.length).toBeGreaterThan(80);
+    // A sanity floor, not a target: the Matrix-only components (spaces, threads, polls, the mxc
+    // gallery) were deleted under ADR 0016, so the shipped count is now well below the old 80.
+    expect(AUDITED.length).toBeGreaterThan(70);
   });
 
   it('uses no colour literals', () => {

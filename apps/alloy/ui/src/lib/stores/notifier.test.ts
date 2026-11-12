@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
+import type { RoomSummary } from '$lib/generated';
 
 vi.mock('../ipc/index.js', () => ({
   client: { invoke: vi.fn() },
@@ -8,6 +9,7 @@ import {
   COALESCE_MS,
   Notifier,
   shouldNotify,
+  snapshotRooms,
   type NotifierDeps,
   type NotifierSettings,
   type NotifyState,
@@ -18,9 +20,8 @@ const ALL_ON: NotifierSettings = { desktop: true, sound: true, preview: true, on
 
 function state(overrides: Partial<NotifyState> = {}): NotifyState {
   return {
-    level: 'All',
     newNotifications: 1,
-    newHighlights: 0,
+    muted: false,
     viewingRoom: false,
     windowFocused: false,
     settings: ALL_ON,
@@ -29,7 +30,7 @@ function state(overrides: Partial<NotifyState> = {}): NotifyState {
 }
 
 describe('shouldNotify', () => {
-  it('notifies for new activity in an All room when the window is unfocused', () => {
+  it('notifies for new activity when the window is unfocused', () => {
     expect(shouldNotify(state())).toBe(true);
   });
 
@@ -37,20 +38,15 @@ describe('shouldNotify', () => {
     expect(shouldNotify(state({ settings: { ...ALL_ON, desktop: false } }))).toBe(false);
   });
 
-  it('never notifies for a muted room', () => {
-    expect(shouldNotify(state({ level: 'Mute' }))).toBe(false);
-  });
-
-  it('notifies a Mentions room only for new highlights', () => {
-    expect(shouldNotify(state({ level: 'Mentions', newHighlights: 0 }))).toBe(false);
-    expect(shouldNotify(state({ level: 'Mentions', newHighlights: 1 }))).toBe(true);
+  it('never notifies for a muted chat', () => {
+    expect(shouldNotify(state({ muted: true }))).toBe(false);
   });
 
   it('notifies nothing when no new notifications arrived', () => {
     expect(shouldNotify(state({ newNotifications: 0 }))).toBe(false);
   });
 
-  it('stays silent for the viewed room while the window is focused', () => {
+  it('stays silent for the viewed chat while the window is focused', () => {
     expect(shouldNotify(state({ windowFocused: true, viewingRoom: true }))).toBe(false);
   });
 
@@ -61,14 +57,63 @@ describe('shouldNotify', () => {
   });
 });
 
-function room(id: string, notifications: number, highlights = 0, preview: string | null = 'hello'): RoomSnapshot {
-  return { id, title: id, preview, notifications, highlights };
+function summary(overrides: Partial<RoomSummary> = {}): RoomSummary {
+  return {
+    id: 'chat-1',
+    account_id: 'account-1',
+    network: 'telegram',
+    name: 'Ada',
+    avatar: null,
+    kind: 'direct',
+    is_direct: true,
+    unread_notifications: { highlight_count: 0, notification_count: 2 },
+    latest_event: { sender: 'u1', timestamp_millis: 1_700_000_000_000, body: 'hello' },
+    pinned: false,
+    archived: false,
+    muted_until: null,
+    tags: [],
+    ...overrides,
+  };
+}
+
+describe('snapshotRooms', () => {
+  const NOW = 1_700_000_000_000;
+
+  it('reads counts, preview and title from the summary', () => {
+    const [room] = snapshotRooms([summary()], NOW);
+    expect(room).toEqual({
+      id: 'chat-1',
+      title: 'Ada',
+      preview: 'hello',
+      notifications: 2,
+      highlights: 0,
+      muted: false,
+    });
+  });
+
+  it('treats a running mute, including a permanent one, as muted and an expired mute as open', () => {
+    const rooms = [
+      summary({ id: 'a', muted_until: NOW + 60_000 }),
+      summary({ id: 'b', muted_until: NOW - 1 }),
+      summary({ id: 'c', muted_until: 18_446_744_073_709_551_615 }),
+      summary({ id: 'd', muted_until: null }),
+    ];
+    expect(snapshotRooms(rooms, NOW).map((r) => r.muted)).toEqual([true, false, true, false]);
+  });
+
+  it('has no preview for a chat whose latest message is unknown', () => {
+    const [room] = snapshotRooms([summary({ latest_event: null })], NOW);
+    expect(room.preview).toBeNull();
+  });
+});
+
+function room(id: string, notifications: number, preview: string | null = 'hello', muted = false): RoomSnapshot {
+  return { id, title: id, preview, notifications, highlights: 0, muted };
 }
 
 let clock = 0;
 let deps: NotifierDeps & {
   show: Mock;
-  levelOf: Mock;
 };
 
 beforeEach(() => {
@@ -78,7 +123,6 @@ beforeEach(() => {
     now: () => clock,
     windowFocused: () => false,
     activeRoomId: () => null,
-    levelOf: vi.fn().mockResolvedValue('All'),
     show: vi.fn().mockResolvedValue(undefined),
     settings: () => ALL_ON,
   };
@@ -89,82 +133,80 @@ afterEach(() => {
 });
 
 describe('Notifier', () => {
-  it('records the first sighting of a room without notifying for existing unread', async () => {
+  it('records the first sighting of a chat without notifying for existing unread', async () => {
     const notifier = new Notifier(deps);
-    notifier.observe([room('!a', 5)]);
+    notifier.observe([room('a', 5)]);
     await vi.advanceTimersByTimeAsync(0);
     expect(deps.show).not.toHaveBeenCalled();
   });
 
-  it('notifies once a known room gains notifications', async () => {
+  it('notifies once a known chat gains notifications', async () => {
     const notifier = new Notifier(deps);
-    notifier.observe([room('!a', 2)]);
-    notifier.observe([room('!a', 3, 0, 'new message')]);
+    notifier.observe([room('a', 2)]);
+    notifier.observe([room('a', 3, 'new message')]);
     await vi.advanceTimersByTimeAsync(0);
     expect(deps.show).toHaveBeenCalledOnce();
-    expect(deps.show).toHaveBeenCalledWith({ title: '!a', body: 'new message', silent: false, roomId: '!a' });
+    expect(deps.show).toHaveBeenCalledWith({ title: 'a', body: 'new message', silent: false, roomId: 'a' });
   });
 
-  it('hides the preview when previews are disabled', async () => {
+  it('hides the preview and silences the sound when those preferences are off', async () => {
     deps.settings = () => ({ ...ALL_ON, preview: false, sound: false });
     const notifier = new Notifier(deps);
-    notifier.observe([room('!a', 0)]);
-    notifier.observe([room('!a', 1, 0, 'secret')]);
+    notifier.observe([room('a', 0)]);
+    notifier.observe([room('a', 1, 'secret')]);
     await vi.advanceTimersByTimeAsync(0);
-    expect(deps.show).toHaveBeenCalledWith({ title: '!a', body: 'New message', silent: true, roomId: '!a' });
+    expect(deps.show).toHaveBeenCalledWith({ title: 'a', body: 'New message', silent: true, roomId: 'a' });
   });
 
-  it('does not notify for a room whose engine level is Mute', async () => {
-    deps.levelOf.mockResolvedValue('Mute');
+  it('does not notify for a muted chat', async () => {
     const notifier = new Notifier(deps);
-    notifier.observe([room('!a', 0)]);
-    notifier.observe([room('!a', 1)]);
-    await vi.advanceTimersByTimeAsync(0);
-    expect(deps.show).not.toHaveBeenCalled();
-  });
-
-  it('records a level read failure and shows nothing', async () => {
-    deps.levelOf.mockRejectedValue(new Error('no level'));
-    const notifier = new Notifier(deps);
-    notifier.observe([room('!a', 0)]);
-    notifier.observe([room('!a', 1)]);
+    notifier.observe([room('a', 0)]);
+    notifier.observe([room('a', 1, 'hello', true)]);
     await vi.advanceTimersByTimeAsync(0);
     expect(deps.show).not.toHaveBeenCalled();
-    expect(notifier.error).toBe('no level');
   });
 
-  it('coalesces bursts per room and delivers the latest notice after the window', async () => {
+  it('records a failure to show a notification', async () => {
+    deps.show.mockRejectedValue(new Error('no permission'));
     const notifier = new Notifier(deps);
-    notifier.observe([room('!a', 0)]);
-    notifier.observe([room('!a', 1, 0, 'first')]);
+    notifier.observe([room('a', 0)]);
+    notifier.observe([room('a', 1)]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(notifier.error).toBe('no permission');
+  });
+
+  it('coalesces bursts per chat and delivers the latest notice after the window', async () => {
+    const notifier = new Notifier(deps);
+    notifier.observe([room('a', 0)]);
+    notifier.observe([room('a', 1, 'first')]);
     await vi.advanceTimersByTimeAsync(0);
     expect(deps.show).toHaveBeenCalledTimes(1);
 
     clock += 500;
-    notifier.observe([room('!a', 2, 0, 'second')]);
-    notifier.observe([room('!a', 3, 0, 'third')]);
+    notifier.observe([room('a', 2, 'second')]);
+    notifier.observe([room('a', 3, 'third')]);
     await vi.advanceTimersByTimeAsync(0);
     expect(deps.show).toHaveBeenCalledTimes(1);
 
     clock += COALESCE_MS;
     await vi.advanceTimersByTimeAsync(COALESCE_MS);
     expect(deps.show).toHaveBeenCalledTimes(2);
-    expect(deps.show).toHaveBeenLastCalledWith({ title: '!a', body: 'third', silent: false, roomId: '!a' });
+    expect(deps.show).toHaveBeenLastCalledWith({ title: 'a', body: 'third', silent: false, roomId: 'a' });
   });
 
-  it('keeps coalescing separate per room', async () => {
+  it('keeps coalescing separate per chat', async () => {
     const notifier = new Notifier(deps);
-    notifier.observe([room('!a', 0), room('!b', 0)]);
-    notifier.observe([room('!a', 1), room('!b', 1)]);
+    notifier.observe([room('a', 0), room('b', 0)]);
+    notifier.observe([room('a', 1), room('b', 1)]);
     await vi.advanceTimersByTimeAsync(0);
     expect(deps.show).toHaveBeenCalledTimes(2);
   });
 
   it('drops queued notices on stop', async () => {
     const notifier = new Notifier(deps);
-    notifier.observe([room('!a', 0)]);
-    notifier.observe([room('!a', 1)]);
-    notifier.observe([room('!a', 2)]);
+    notifier.observe([room('a', 0)]);
+    notifier.observe([room('a', 1)]);
+    notifier.observe([room('a', 2)]);
     await vi.advanceTimersByTimeAsync(0);
     notifier.stop();
     await vi.advanceTimersByTimeAsync(COALESCE_MS * 2);

@@ -4,7 +4,8 @@
   import { reactionTabs, reactorRows } from '$lib/content/reactors';
   import { membersStore } from '$lib/stores/members.svelte';
   import { timelineStore } from '$lib/stores/timeline.svelte';
-  import { session } from '$lib/stores/session.svelte';
+  import { roomsStore } from '$lib/stores/rooms.svelte';
+  import { resolveAvatar } from '$lib/stores/avatars.svelte';
   import { nextRovingIndex, rovingTabindex } from '$lib/platform/roving';
 
   import { t } from '$lib/i18n';
@@ -19,11 +20,21 @@
 
   let selected = $state<string | null>(null);
   const roomId = $derived(timelineStore.roomId);
-  const reactions = $derived(item.reactions ?? []);
+  const reactions = $derived(item.reactions);
   const tabs = $derived(reactionTabs(reactions));
   const rows = $derived(reactorRows(reactions, selected));
   const activeTab = $derived(Math.max(0, tabs.findIndex((tab) => tab.key === selected)));
   let tablistEl = $state<HTMLDivElement | null>(null);
+  /** Resolved avatars of the reactors; null while a lookup runs. */
+  let avatars = $state<Record<string, string | null>>({});
+
+  /** The signed-in user of the chat's account, when the engine reports one. */
+  const me = $derived(
+    (() => {
+      const room = roomId ? roomsStore.rooms.find((r) => r.id === roomId) : null;
+      return room ? (roomsStore.accounts.find((a) => a.id === room.account_id)?.remote_user_id ?? null) : null;
+    })()
+  );
 
   /** Arrow/Home/End move selection in the tablist; Tab enters and leaves it once (A11Y-17). */
   function onTabKey(e: KeyboardEvent, index: number) {
@@ -53,6 +64,17 @@
   function member(userId: string) {
     return membersStore.membersOf(roomId).find((m) => m.user_id === userId);
   }
+
+  // Member avatars are stored media; resolve the ones this sheet shows.
+  $effect(() => {
+    if (!open) return;
+    for (const row of rows) {
+      if (Object.hasOwn(avatars, row.userId)) continue;
+      const source = member(row.userId)?.avatar ?? null;
+      avatars = { ...avatars, [row.userId]: null };
+      void resolveAvatar(source, 32).then((url) => (avatars = { ...avatars, [row.userId]: url }));
+    }
+  });
 </script>
 
 <Modal {open} title={t('reactions-sheet-reactions')} {onclose} width="420px">
@@ -76,10 +98,10 @@
     {#each rows as row (row.userId + row.key)}
       {@const m = member(row.userId)}
       <li class="person">
-        <Avatar userId={row.userId} displayName={m?.display_name ?? null} src={m?.avatar_url ?? null} size={32} />
+        <Avatar userId={row.userId} displayName={m?.display_name ?? null} src={avatars[row.userId] ?? null} size={32} />
         <span class="name"><UserName userId={row.userId} displayName={m?.display_name ?? null} {roomId} /></span>
         <span class="emoji">{row.key}</span>
-        {#if row.userId === session.account?.user_id}
+        {#if me !== null && row.userId === me}
           <button type="button" class="remove" onclick={() => void timelineStore.toggleReaction(item, row.key)}>{t('common-remove')}</button>
         {/if}
       </li>

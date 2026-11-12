@@ -46,29 +46,29 @@ describe('downsample', () => {
 
 describe('fallbackBars', () => {
   it('returns empty array when bars <= 0', () => {
-    expect(fallbackBars('mxc://example.org/audio1', 0)).toEqual([]);
-    expect(fallbackBars('mxc://example.org/audio1', -1)).toEqual([]);
+    expect(fallbackBars('media-1', 0)).toEqual([]);
+    expect(fallbackBars('media-1', -1)).toEqual([]);
   });
 
   it('produces exactly bars count', () => {
-    const res = fallbackBars('mxc://test/123', 64);
+    const res = fallbackBars('media-123', 64);
     expect(res).toHaveLength(64);
   });
 
   it('is deterministic for the same seed and bars', () => {
-    const a = fallbackBars('mxc://matrix.org/audio123', 32);
-    const b = fallbackBars('mxc://matrix.org/audio123', 32);
+    const a = fallbackBars('media-voice-123', 32);
+    const b = fallbackBars('media-voice-123', 32);
     expect(a).toEqual(b);
   });
 
   it('produces different patterns for different seeds', () => {
-    const a = fallbackBars('mxc://matrix.org/audioA', 32);
-    const b = fallbackBars('mxc://matrix.org/audioB', 32);
+    const a = fallbackBars('media-a', 32);
+    const b = fallbackBars('media-b', 32);
     expect(a).not.toEqual(b);
   });
 
   it('keeps plausible values between 0.1 and 1.0', () => {
-    const res = fallbackBars('mxc://seed/sound', 64);
+    const res = fallbackBars('seed-sound', 64);
     for (const v of res) {
       expect(v).toBeGreaterThanOrEqual(0.1);
       expect(v).toBeLessThanOrEqual(1.0);

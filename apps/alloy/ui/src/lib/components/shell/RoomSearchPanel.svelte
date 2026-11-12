@@ -205,20 +205,8 @@
       </ul>
 
       {#if roomSearch.capped}
-        <p class="hint">{t('room-search-panel-showing-the-first-200-matches')}</p>
+        <p class="hint">{t('chat-search-results-capped')}</p>
       {/if}
-
-      {#if roomSearch.canLoadMore}
-        <button type="button" class="action wide" disabled={roomSearch.loading} onclick={() => roomSearch.loadMore()}>
-          {t('room-search-panel-load-more-results')}
-        </button>
-      {/if}
-    {/if}
-
-    {#if roomSearch.canSearchOlder}
-      <button type="button" class="action wide" disabled={roomSearch.loading} onclick={() => roomSearch.searchOlder()}>
-        {t('room-search-panel-search-older-messages')}
-      </button>
     {/if}
   </div>
 </aside>
@@ -384,10 +372,6 @@
     color: var(--alloy-color-accent-primary);
     font: inherit;
     cursor: pointer;
-  }
-
-  .action.wide {
-    align-self: stretch;
   }
 
   .action:disabled {
