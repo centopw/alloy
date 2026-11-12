@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { Button } from '$lib/components/common';
-  import { Icon, Bell, Mic, MapPin, Smartphone, BatteryCharging, Check } from '$lib/icons';
+  import { Icon, Bell, Mic, MapPin, BatteryCharging, Check } from '$lib/icons';
   import { actionFor, stateLabel } from '$lib/content/permissionsModel';
   import type { PermissionId } from '$lib/platform/permissions';
   import { permissionsStore, type PermissionRow } from '$lib/stores/permissions.svelte';
@@ -11,7 +11,6 @@
     notifications: Bell,
     microphone: Mic,
     location: MapPin,
-    'push-app': Smartphone,
     battery: BatteryCharging,
   } as const;
 
@@ -63,7 +62,7 @@
           </span>
           {#if action === 'allow'}
             <Button variant="primary" size="sm" disabled={busy === row.id} onclick={() => allow(row)}>
-              {row.id === 'push-app' ? t('permissions-panel-choose-app') : row.id === 'battery' ? t('permissions-panel-open-settings') : t('permissions-panel-allow')}
+              {row.id === 'battery' ? t('permissions-panel-open-settings') : t('permissions-panel-allow')}
             </Button>
           {:else if action === 'open-settings'}
             <Button variant="ghost" size="sm" disabled={busy === row.id} onclick={() => openSettings(row)}>{t('permissions-panel-open-settings')}</Button>

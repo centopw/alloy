@@ -137,9 +137,9 @@ describe('permissionsStore', () => {
 
     expect(permissionsStore.rows.every((r) => r.canOpenSettings)).toBe(true);
 
-    const opened = await permissionsStore.openSettings('push-app');
+    const opened = await permissionsStore.openSettings('battery');
     expect(opened).toBe(true);
-    expect(bridge.openSettings).toHaveBeenCalledWith('notifications');
+    expect(bridge.openSettings).toHaveBeenCalledWith('battery');
   });
 
   it('enables opening settings on desktop Tauri and calls open_permission_settings', async () => {
@@ -190,7 +190,6 @@ describe('supportsPermissionSettings', () => {
     expect(supportsPermissionSettings('microphone')).toBe(true);
     expect(supportsPermissionSettings('location')).toBe(true);
     expect(supportsPermissionSettings('battery')).toBe(false);
-    expect(supportsPermissionSettings('push-app')).toBe(false);
   });
 
   it('returns false in a plain browser', () => {

@@ -51,9 +51,7 @@ import Permissions from './sections/Permissions.svelte';
 
   type NavIcon = Component<{ size?: number; strokeWidth?: number; class?: string }>;
 
-  // Icons for each section this build still has. A section with no icon is not offered: the
-  // Matrix-only pages (signed-in devices, recovery keys and E2EE) are gone with Matrix (ADR 0016).
-  const NAV_ICONS: Partial<Record<SettingsSectionId, { icon: NavIcon; phoneIcon?: NavIcon }>> = {
+  const NAV_ICONS: Record<SettingsSectionId, { icon: NavIcon; phoneIcon?: NavIcon }> = {
     account: { icon: User },
     'security-privacy': { icon: ShieldCheck },
     appearance: { icon: Palette },
@@ -68,11 +66,8 @@ import Permissions from './sections/Permissions.svelte';
 
   const GROUPS: RawSettingsGroup<NavIcon>[] = SETTINGS_GROUPS_DEF.map((group) => ({
     ...group,
-    items: group.items.flatMap((item) => {
-      const icons = NAV_ICONS[item.id];
-      return icons ? [{ ...item, icon: icons.icon, phoneIcon: icons.phoneIcon }] : [];
-    }),
-  })).filter((group) => group.items.length > 0);
+    items: group.items.map((item) => ({ ...item, icon: NAV_ICONS[item.id].icon, phoneIcon: NAV_ICONS[item.id].phoneIcon })),
+  }));
 
   const caps = $derived(capabilities(currentEnv(viewport.isPhone)));
   const visibleGroups = $derived(filterSettingsGroups(GROUPS, caps));

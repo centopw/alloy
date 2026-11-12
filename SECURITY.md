@@ -32,27 +32,47 @@ versions will not receive backported fixes; upgrade to the latest main branch.
 
 ## Security Scope
 
+### Architecture and threat model
+
+Alloy connects personal Telegram and Facebook Messenger accounts directly from the device
+([ADR 0016](docs/decisions/0016-on-device-connectors.md)). There is no Alloy server and no
+intermediate homeserver or bridge:
+
+- **Transport.** Telegram traffic uses MTProto's transport encryption (grammers, in-process).
+  Messenger traffic uses TLS to Meta's web endpoints, made by the separate Go sidecar
+  `sidecars/alloy-meta`, which the app supervises and talks to over NDJSON on stdio.
+- **Local data.** Accounts, chats and messages live in a local SQLite database (`alloy-store`) in
+  the app data directory. Connector secrets (session bytes, tokens, cookies) are sealed with
+  XChaCha20-Poly1305, bound to the account id, under a key held by `alloy-storage`'s `SecretStore`
+  (the OS keyring on desktop, an owner-only file on Android). The message database itself is not
+  yet encrypted; full-database encryption is the M5 hardening decision (#134).
+- **End-to-end encryption.** Alloy adds no E2EE layer of its own. Messenger's end-to-end
+  encrypted chats are handled by the sidecar; Telegram cloud chats are not end-to-end encrypted by
+  the network.
+
 ### In Scope
-- Matrix protocol implementation (matrix-sdk + alloy-core)
+- Connector implementations (`alloy-telegram`, `alloy-sidecar`, `sidecars/alloy-meta`) and the
+  NDJSON boundary between the app and the sidecar
+- Local storage (`alloy-store`): secret sealing, migrations, data left behind after logout
 - Cryptographic key handling (keychains, zeroization)
-- Local data encryption (SQLite via matrix-sdk-sqlite)
 - Plugin sandbox enforcement (Wasmtime capability model, WASM fuel)
-- Supply chain (dependency versions, license compliance)
+- Supply chain (Rust and Go dependency versions, license compliance)
 - Update mechanism (code signing, delta verification)
 - Network security (TLS, certificate pinning—future)
 
-### Out of Scope (Homeserver Responsibility)
-- Homeserver authentication bugs or account compromises
-- Homeserver-side encryption/decryption
-- Network eavesdropping (use a trusted network or VPN)
+### Out of Scope (Network Responsibility)
+- Account restrictions or locks imposed by Telegram or Meta on unofficial clients (a documented,
+  accepted risk; see the README)
+- Server-side bugs, account compromises or encryption at Telegram or Meta
+- Malware or another user with access to an unlocked device and its app data directory
 - Social engineering attacks against users
 
 ## Security Baseline
 
 Alloy enforces the following architectural constraints per [docs/plan/04-security-delivery.md](docs/plan/04-security-delivery.md):
 
-1. **No unsafe Rust code** at workspace level (`#![forbid(unsafe_code)]`), except
-   platform-specific FFI in thin, audited wrapper crates.
+1. **No unsafe Rust code**: `unsafe_code = "forbid"` for the whole workspace, with no exception
+   crate.
 2. **Zero telemetry by default.** Opt-in analytics only via explicit user consent;
    no collection of message content, contact lists, or encryption keys.
 3. **Mandatory supply-chain checks:**
@@ -61,8 +81,8 @@ Alloy enforces the following architectural constraints per [docs/plan/04-securit
    - SBOM generated per release
 4. **No downloading unsigned code** (plugins require Minisign/Ed25519 signature;
    marketplace enforces signed-only delivery).
-5. **Platform keychains** for secrets at rest (macOS/Linux/Windows Credential Manager;
-   Android Keystore).
+5. **Platform keychains** for secrets at rest (macOS Keychain, Windows Credential Manager, Linux
+   Secret Service; an owner-only file on Android).
 6. **Memory-safe secret handling** (zeroize + secrecy crates for crypto material).
 
 ## Plugin Sandbox
@@ -103,7 +123,7 @@ Plugins run in **Wasmtime with capabilities-based security:**
 ## Known Limitations & Future Work
 
 - [ ] Device certificate pinning (post-MVP)
-- [ ] Local storage encryption (SQLCipher investigation ongoing—see PLAN.md D2 conflict note)
+- [ ] Local message database encryption (SQLCipher decision in M5, #134)
 - [ ] SafetyNet (Android) pinning (post-v1)
 - [ ] Formal security audit (planned post-MVP before expanding distribution channels)
 

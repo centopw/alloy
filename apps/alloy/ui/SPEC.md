@@ -14,7 +14,7 @@ The Svelte 5 / TypeScript / Vite view layer. It consumes generated protocol type
 
 ## Boundary
 
-It talks only to the protocol through `ipc/`; it has no Rust crate dependencies, makes no homeserver calls and holds no product logic. Platform differences live in `platform/`, native controls are wrapped in shared components, and design tokens arrive as CSS variables from `alloy-theme`. It must not call matrix-sdk or bypass the engine. Pull-to-refresh and content-URI picking are wired through `platform/files.ts` and the shell's `pullToRefresh` action; the composer's tiered attach menu calls `pickMediaFiles` for pictures and videos and `pickFiles` for a plain file, with polls and locations under its More flyout. Staged pictures and videos each carry a thumbnail in the preview strip — a picture's image or a video's poster frame — and fall back to a file-type glyph when no preview can be drawn.
+It talks only to the protocol through `ipc/`; it has no Rust crate dependencies, makes no network calls of its own and holds no product logic. Platform differences live in `platform/`, native controls are wrapped in shared components, and design tokens arrive as CSS variables from `alloy-theme`. It must not talk to a network or connector directly or bypass the engine. Pull-to-refresh and content-URI picking are wired through `platform/files.ts` and the shell's `pullToRefresh` action; the composer's tiered attach menu calls `pickMediaFiles` for pictures and videos and `pickFiles` for a plain file, with polls and locations under its More flyout. Staged pictures and videos each carry a thumbnail in the preview strip — a picture's image or a video's poster frame — and fall back to a file-type glyph when no preview can be drawn.
 
 ### UI stack
 
@@ -80,9 +80,9 @@ applies to any new overlay that can be opened from inside a pane.
 
 ### Room list
 
-A room's tags are the account's, not the install's: the catalogue is the synced `chat.alloy.room_tags`
-account-data event and each assignment is a `u.<tag>` room tag, so a reinstall, a restart or an update
-finds the same groups. The list shows one chip per tag that any room carries (catalogue order, then
+Tags live on the device, not on a server: the catalogue is the engine's `tags.json` in the data
+directory and a chat's assignments are its `local_tags` column in the store (ADR 0016), so a restart or
+an update finds the same groups. The list shows one chip per tag that any room carries (catalogue order, then
 anything a room still references), and a chip filters the list to that tag. Beside the chips, **Group**
 turns the list into one section per tag, untagged rooms last; it is the same `roomSort` preference as
 "By tag" in the sort menu, so the two controls always agree. Chips and the grouping control are
@@ -124,12 +124,11 @@ erase the tail into the 20px bubble or pinch every attachment.
 | Composer field | `.field` (`Composer.svelte`) | 12 → 16 |
 | Context menu shell | `.context-menu` (`ContextMenu.svelte`) | 16 → 18 |
 | Menu rows | `.item`, `.sheet .item` (`ContextMenu.svelte`); `.option` (`MentionPicker.svelte`); `button` (`CommandPalette.svelte`) | 12/6/6/6 → 8 |
-| Sheet tops | `.context-menu.sheet`, `.host.sheet` (`ProfileCardHost.svelte`), `.sheet` (`VerificationDialog.svelte`), `.dialog` phone top (`Modal.svelte`) | 8/8/8/16 → 18 |
+| Sheet tops | `.context-menu.sheet`, `.host.sheet` (`ProfileCardHost.svelte`), `.dialog` phone top (`Modal.svelte`) | 8/8/16 → 18 |
 | Mention popover | `.picker` (`MentionPicker.svelte`) | 12 → 18 |
-| Rows and cards | `.row` (`Tags.svelte`), `.list` (`PermissionsPanel.svelte`), `.results li` (`DirectoryDialog.svelte`), `.media-cell`, `.notice` (`RoomInfoPanel.svelte`), `.choice` (`SettingRadioMatrix.svelte`), `.notice` (`UpdateNotice.svelte`), `.swipe` (`RoomSwipe.svelte`), `.picture img/video`, `.picture-icon` (`Composer.svelte`), `pre` (`ChangelogDialog.svelte`) | 6 → 8 |
-| Rail tile | `.space` (`SpaceRail.svelte`) | 12 → 8 |
+| Rows and cards | `.row` (`Tags.svelte`), `.list` (`PermissionsPanel.svelte`), `.media-cell`, `.notice` (`RoomInfoPanel.svelte`), `.choice` (`SettingRadioMatrix.svelte`), `.notice` (`UpdateNotice.svelte`), `.swipe` (`RoomSwipe.svelte`), `.picture img/video`, `.picture-icon` (`Composer.svelte`), `pre` (`ChangelogDialog.svelte`) | 6 → 8 |
 | Action bar | `.toolbar` (`MessageRow.svelte`) | 16 → 12 |
-| Legacy aliases | `SpaceChips`, `MobileTabBar`, `Badge`, `UpdateNotice` | `--alloy-radius-*` → `--alloy-radii-*` (no visual change) |
+| Legacy aliases | `MobileTabBar`, `Badge`, `UpdateNotice` | `--alloy-radius-*` → `--alloy-radii-*` (no visual change) |
 
 No other radius value is permitted; `0` is a junction, not a size. Values that are not in the table
 are a review finding.
@@ -159,6 +158,5 @@ once and shows that, and when the webview rejects the picture too the retry fall
 icon instead of the browser's broken-image placeholder. Only a served URL is cached, a refusal is
 retried on the next lookup, and the cache lives for one panel, so reopening Room info retries media
 that failed earlier. Save errors surface inline; a private
-note is the user's own room account
-data (synced to their account, never visible to other members).
+note is stored only in the local store on this device and is never sent to the network.
 

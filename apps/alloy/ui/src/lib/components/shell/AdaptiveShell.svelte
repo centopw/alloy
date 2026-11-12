@@ -32,7 +32,6 @@
   import { viewport } from '$lib/stores/viewport.svelte';
   import { updatesStore } from '$lib/stores/updates.svelte';
   import { focusComposer, shouldFocusComposer } from '$lib/platform/typeToFocus';
-  import { extractOpenRoomId, takePendingRoom } from '$lib/platform/push';
   import { refreshStore } from '$lib/stores/refresh.svelte';
   import ChangelogDialog from '$lib/components/updates/ChangelogDialog.svelte';
   import { listen } from '@tauri-apps/api/event';
@@ -128,16 +127,13 @@
     const stopUpdates = updatesStore.start();
     void tags.load();
     notifier.start();
-    const pendingRoom = takePendingRoom();
-    if (pendingRoom) {
-      pick(pendingRoom);
-    }
+    // Notification clicks name the chat to open: a DOM event from web notifications, a Tauri event
+    // from desktop ones. Both carry the chat id as a string.
     const onOpenRoom = (e: Event) => {
-      const roomId = extractOpenRoomId(e instanceof CustomEvent ? e.detail : undefined);
+      const detail = e instanceof CustomEvent ? e.detail : undefined;
+      const roomId = typeof detail === 'string' ? detail.trim() : '';
       if (roomId) {
         pick(roomId);
-        // The shell has the room now; drop the copy the Android side kept for a page that was not ready.
-        takePendingRoom();
       }
     };
     window.addEventListener('alloy-open-room', onOpenRoom);

@@ -1,6 +1,13 @@
 # Agent contract (read first)
 
-Project: Alloy, a Matrix client (Rust core + Tauri 2 + Svelte 5). Scope/decisions: `docs/PLAN.md`. Workflow and traceability: `docs/TRACKING.md`.
+Project: Alloy, a client for personal Telegram and Facebook Messenger accounts, connected directly from the device (Rust core + Tauri 2 + Svelte 5). Architecture: `docs/decisions/0016-on-device-connectors.md` (the Matrix rows in `docs/PLAN.md` are history). Workflow and traceability: `docs/TRACKING.md`.
+
+Architecture facts every change must respect:
+- Telegram is an in-process connector on grammers (`crates/alloy-telegram`). Messenger is a separate AGPL-3.0 Go sidecar, `sidecars/alloy-meta`, speaking NDJSON over stdio to `crates/alloy-sidecar`; it is never linked into the Apache-2.0 code.
+- The connector contract is `crates/alloy-connector`; the engine (`crates/alloy-engine`) drives it and maps to the store. All data lives in the local SQLite store `crates/alloy-store`; its migrations are append-only and checksummed — never edit an applied migration, add a new one.
+- There is no Matrix, no homeserver, no Synapse and no E2EE verification UI. End-to-end encryption, where a network has it, is the network's own.
+- `just sidecar` must run before any build of `alloy-app`: tauri-build copies `apps/alloy/src-tauri/binaries/alloy-meta-<triple>` and fails when it is missing (`just sidecar-android` for Android).
+- Connector tests: `cargo test -p alloy-connector --features testing`, `cargo test -p alloy-engine --features testing`, `cargo test -p alloy-sidecar --features fake-sidecar`; sidecar: `( cd sidecars/alloy-meta && go vet ./... && go test ./... )`.
 
 1. Work is defined by a GitHub issue: `gh issue view <N>`. Stay inside its **Owned paths**.
 2. Do NOT call `scripts/board.sh` or `gh project`/`gh issue` write commands (GitHub GraphQL rate limit; the orchestrator is the single board writer). Read the issue with `gh issue view <N>` only; report findings in your final message.

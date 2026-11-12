@@ -1,5 +1,10 @@
 # Alloy UI Spike (UI-01, UI-04) – Performance Report
 
+> **Superseded by [ADR 0016](../../docs/decisions/0016-on-device-connectors.md) (2026-11-12).** Historical
+> record of the 2026-10-16 UI spike. Its Matrix plans (matrix-sdk-ui sync, Vodozemac E2EE) are void:
+> Alloy now connects Telegram and Messenger accounts directly from the
+> device and stores data in a local SQLite store. The scroll measurements below remain valid history.
+
 ## Scroll Performance Measurement
 
 ```json

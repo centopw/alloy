@@ -43,18 +43,12 @@ class PermissionsStore {
   }
 
   #stateOf(id: PermissionId): PermissionState {
-    // `push-app` belonged to the UnifiedPush registration Alloy no longer performs: a connector runs
-    // on the device itself, so nothing registers with a distributor (ADR 0016; push returns only
-    // with the optional gateway).
-    if (id === 'push-app') return 'unavailable';
     return this.#states[id] ?? 'unknown';
   }
 
   /** Reads every platform permission again. Never prompts. */
   async refresh(): Promise<void> {
-    const ids = specsFor(isAndroid())
-      .map((spec) => spec.id)
-      .filter((id) => id !== 'push-app');
+    const ids = specsFor(isAndroid()).map((spec) => spec.id);
     const next: Partial<Record<PermissionId, PermissionState>> = {};
     await Promise.all(
       ids.map(async (id) => {

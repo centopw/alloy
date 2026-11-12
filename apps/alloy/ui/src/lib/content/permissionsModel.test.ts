@@ -9,9 +9,9 @@ describe('specsFor', () => {
     expect(specsFor(false).map((s) => s.id)).toEqual(['notifications', 'microphone', 'location']);
   });
 
-  it('lists the push app and battery on Android, with notifications as the only required one', () => {
+  it('lists battery on Android, with notifications as the only required one', () => {
     const android = specsFor(true);
-    expect(android.map((s) => s.id)).toEqual(['notifications', 'push-app', 'battery', 'microphone', 'location']);
+    expect(android.map((s) => s.id)).toEqual(['notifications', 'battery', 'microphone', 'location']);
     expect(android.filter((s) => s.required).map((s) => s.id)).toEqual(['notifications']);
   });
 });

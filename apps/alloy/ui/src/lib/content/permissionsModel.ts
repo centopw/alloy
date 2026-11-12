@@ -23,13 +23,6 @@ export const PERMISSION_SPECS: readonly PermissionSpec[] = [
     androidOnly: false,
   },
   {
-    id: 'push-app',
-    label: t('notifications-push-app'),
-    why: t('permissions-push-app-why'),
-    required: false,
-    androidOnly: true,
-  },
-  {
     id: 'battery',
     label: t('permissions-battery-unrestricted'),
     why: t('permissions-battery-why'),

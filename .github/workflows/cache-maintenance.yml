@@ -2,11 +2,12 @@ name: Cache Maintenance
 
 # Keeps the repository's 10 GB Actions cache budget healthy.
 #
-# The 900-crate dependency graph produces ~1.3-1.6 GB of cache per OS for the debug matrix and
-# ~0.7 GB per desktop platform for the release profile. Every dependency change writes a new key,
-# and GitHub evicts entries by least-recent use only once the budget is exhausted - frequently
-# evicting the release caches the tag build needs. A cold tag build recompiles Tauri and
-# matrix-sdk from scratch (measured: macOS x64 "Finished `release` profile in 25m 01s").
+# The dependency graph produces ~1.3-1.6 GB of cache per OS for the debug builds and ~0.7 GB per
+# desktop platform for the release profile. Every dependency change writes a new key, and GitHub
+# evicts entries by least-recent use only once the budget is exhausted - frequently evicting the
+# release caches the tag build needs. The cache-heavy crates are Tauri (with wry and its webview
+# stack) and, in workspace jobs, the plugin host's Wasmtime; a cold tag build recompiles them from
+# scratch (measured: macOS x64 "Finished `release` profile in 25m 01s").
 #
 # This job deletes caches that can never be useful again (tag-scoped entries) and superseded
 # entries of a family, keeping the newest of each. It runs weekly after the nightly build and can

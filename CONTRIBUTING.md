@@ -1,6 +1,6 @@
 # Contributing to Alloy
 
-Thank you for your interest in contributing to Alloy! Alloy is an open-source, cross-platform Matrix client built with a Rust core, Tauri 2 desktop shell, and Svelte 5 frontend.
+Thank you for your interest in contributing to Alloy! Alloy is an open-source, cross-platform client for personal Telegram and Facebook Messenger accounts, connected directly from the device, built with a Rust core, Tauri 2 desktop shell, and Svelte 5 frontend. The architecture is recorded in [ADR 0016](docs/decisions/0016-on-device-connectors.md).
 
 Please read this document before submitting issues or pull requests.
 
@@ -35,7 +35,7 @@ Ensure you have the following installed on your machine:
    # Linux / cargo
    cargo install just
    ```
-4. **Docker:** Required for running the local Synapse homeserver test instance.
+4. **Go:** the version in `sidecars/alloy-meta/go.mod` (1.26+). It builds the Messenger sidecar, which every app build bundles.
 5. **Security Tools:**
    ```bash
    cargo install cargo-deny --locked
@@ -55,9 +55,9 @@ Ensure you have the following installed on your machine:
    just ui-check
    ```
 
-3. **Start local Synapse test instance (optional, for matrix-sdk testing):**
+3. **Build the Messenger sidecar** (required before any build of `alloy-app`; tauri-build copies `apps/alloy/src-tauri/binaries/alloy-meta-<triple>` and fails when it is missing):
    ```bash
-   just synapse-up
+   just sidecar
    ```
 
 4. **Verify your environment with the CI recipe:**
@@ -127,16 +127,19 @@ Before submitting a Pull Request, verify that all local checks pass:
 3. **Tests:** `just test` (runs all cargo unit/integration tests)
 4. **Dependency policy:** `just deny` (runs `cargo deny check`)
 5. **Vulnerability audit:** `just audit` (runs `cargo audit`)
-6. **UI check & build:** `just ui-check` and `just ui-build`
-7. **Full pre-flight run:**
+6. **Connector tests:** `cargo test -p alloy-connector --features testing`, `cargo test -p alloy-engine --features testing`, `cargo test -p alloy-sidecar --features fake-sidecar`
+7. **Sidecar checks:** `( cd sidecars/alloy-meta && go vet ./... && go test ./... )`
+8. **UI check & build:** `just ui-check` and `just ui-build`
+9. **Full pre-flight run:**
    ```bash
    just ci
    ```
 
 ### Rules & Architectural Guidelines
 
-- **Forbid unsafe code:** `#![forbid(unsafe_code)]` is enforced across all Rust crates. Platform-specific FFI wrappers requiring `unsafe` must be strictly isolated, reviewed, and justified.
-- **Apache-2.0 License:** All files are licensed under Apache-2.0. Do not introduce dependencies incompatible with Apache-2.0 (verified by `cargo-deny`).
+- **Forbid unsafe code:** `unsafe_code = "forbid"` is set for the whole workspace in `Cargo.toml`. There is no exception crate.
+- **Apache-2.0 License:** Alloy's Rust and UI code is Apache-2.0. Do not introduce dependencies incompatible with Apache-2.0 (verified by `cargo-deny`). The Messenger sidecar `sidecars/alloy-meta` is AGPL-3.0 because it builds on mautrix-meta; it ships as a separate executable speaking NDJSON over stdio and must never be linked into the Rust code.
+- **Local data:** messages and accounts live in the local SQLite store `crates/alloy-store`. Its migrations are append-only and checksummed: never edit an applied migration, add a new one.
 - **Zero telemetry by default:** No tracking, metrics, or telemetry code may collect user communications or metadata without explicit opt-in.
 
 ---

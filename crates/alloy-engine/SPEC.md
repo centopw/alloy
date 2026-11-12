@@ -33,8 +33,8 @@ catalogue (`tags.json`) and drafts (`drafts.json`), written atomically.
 
 ## Boundary
 
-It depends on protocol, store, connector, storage, theme, telegram and sidecar; it does not depend
-on `alloy-core` or the Matrix SDK. Tauri types do not appear here; secrets reach the store only
+It depends on protocol, store, connector, storage, theme, telegram and sidecar, and on no network
+SDK beyond what those connectors bring. Tauri types do not appear here; secrets reach the store only
 through the injected `SecretStore`, and connector sessions are opaque bytes sealed by the store.
 Commands arrive as protocol types and errors map to `EngineError` with stable codes; events are
 broadcast to subscribers. Attachment paths are canonicalised and allowlisted in this layer, and a

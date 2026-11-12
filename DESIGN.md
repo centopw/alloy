@@ -171,7 +171,7 @@ The type scale is built around `Inter`, prioritizing neutral clarity, tall x-hei
 - **`body-sm` (13px/400):** Channel item lists, user bio previews, thread reply counts, rich embed sub-descriptions.
 - **`label-md` (12px/500):** Timestamps, filter tags, reactions counts, composer mode switches.
 - **`label-sm` (11px/600, uppercase):** Section dividers (e.g., "TEXT CHANNELS", "DIRECT MESSAGES"), keyboard key badge indicators, unread count pills.
-- **`code-sm` (12px/400):** Inline markdown backticks, room IDs, event hashes, and server matrix addresses.
+- **`code-sm` (12px/400):** Inline markdown backticks, chat and message ids, and network user handles.
 
 ## Layout & Spacing
 

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/banner.png" alt="Alloy: a modern, cross-platform Matrix chat client" width="100%">
+  <img src="docs/assets/banner.png" alt="Alloy: one app for your Telegram and Messenger chats" width="100%">
 </p>
 
 <p align="center">
@@ -17,11 +17,17 @@
 
 # Alloy
 
-Alloy is a chat app for [Matrix](https://matrix.org), the open network that lets you talk to people on
-any server, with end-to-end encryption. It runs on **Mac, Windows, Linux and Android**, it is free and open
-source, and it **never collects any data about you**: no analytics, no tracking, no ads.
+Alloy is one app for your **Telegram** and **Facebook Messenger** chats. You sign in to your own personal
+accounts and Alloy talks to each network **directly from your device**: there is no server in the middle,
+and every message is stored only on your device. It runs on **Mac, Windows, Linux and Android**, it is free
+and open source, and it **never collects any data about you**: no analytics, no tracking, no ads.
 
-Use your existing Matrix account (matrix.org, your company's server, your own) or create one on any server.
+> **Account risk.** Neither network offers an official API for personal accounts in third-party apps.
+> Telegram allows unofficial clients under its [API terms](https://core.telegram.org/api/terms) and may watch
+> them closely; Alloy never hides read receipts or typing from the people you talk to. Meta has no
+> personal-account API at all, and Messenger accounts used this way have been locked
+> ([mautrix/meta#44](https://github.com/mautrix/meta/issues/44)). Alloy shows this risk before you connect
+> Messenger; only connect an account you can afford to have restricted.
 
 > **Early release.** Alloy already does the everyday things well, but it is young: some features are still
 > missing (see [What's next](#whats-next)) and the installers are not yet signed, so your computer will ask you to confirm the first start.
@@ -32,18 +38,18 @@ Use your existing Matrix account (matrix.org, your company's server, your own) o
 
 ## What you can do
 
-- **Chat with anyone on Matrix**, in private encrypted rooms, group rooms and direct messages. Reply (swipe a
-  message on a phone), edit, delete, react with one tap, pin messages, forward, start threads, create polls, send
-  voice messages, albums of photos, files and your location, and see when your messages have been read.
-- **Find things fast.** Search your rooms from the sidebar (or with Ctrl/Cmd+K). Search *inside* a chat
+- **Telegram and Messenger in one list.** Connect your personal accounts and read every chat side by side.
+  Reply (swipe a message on a phone), edit, delete, react, send voice messages, photos and files, and see
+  when your messages have been read, wherever the network supports it: Alloy only offers what each network
+  can really do.
+- **Find things fast.** Search your chats from the sidebar (or with Ctrl/Cmd+K). Search *inside* a chat
   for words or for who said them, and jump straight to the message.
-- **Stay organised.** Make your own tags (for example "Work", "Family"), colour them, put rooms under them,
-  and filter or sort your room list by tag, unread, name or recent activity.
+- **Stay organised.** Make your own tags (for example "Work", "Family"), colour them, put chats under them,
+  and filter or sort your chat list by tag, unread, name or recent activity.
 - **Keep chats in order.** Pin or archive a chat, mark it unread, mute it for an hour or a day, and unsent text
   waits for you as a draft.
 - **Make it yours.** Dark theme, three message layouts (modern, chat bubbles or compact), text size,
-  notification levels per room, and a settings page where every switch really does something.
-  Your preferences follow you to your other devices.
+  notification levels per chat, and a settings page where every switch really does something.
 - **Always know what's new.** Notifications on desktop and Android, unread counts that clear when you read,
   typing indicators, and an update notice that shows what changed before you install.
 - **Feels right on a phone.** On Android the app turns into a proper phone app: one screen at a time, a bottom
@@ -68,11 +74,14 @@ Use your existing Matrix account (matrix.org, your company's server, your own) o
 
 ## Privacy
 
-- Your messages are protected with end-to-end encryption in encrypted rooms. Only you and the people in the
-  room can read them.
-- Alloy has **no telemetry**. It only talks to your own Matrix server.
-- Link previews are built by your server, and are off in encrypted rooms unless you turn them on.
-- On desktop, your login and encryption keys are kept in the system's secure storage (Keychain, Credential Manager, Secret Service).
+- Your messages go straight between your device and Telegram or Meta. There is no Alloy server, and no copy
+  of your chats exists anywhere but on your device and at the network itself.
+- Alloy has **no telemetry**. It only talks to the networks you connected.
+- Your chats are kept in a local database in Alloy's app folder. Your account sign-ins are encrypted with a
+  key held in the system's secure storage (Keychain, Credential Manager, Secret Service; a private app file
+  on Android). Encrypting the whole message database is planned.
+- Where a network encrypts chats end to end (Messenger's encrypted chats), that encryption is the network's
+  own; Alloy does not add a layer of its own.
 
 ## Install
 
@@ -97,11 +106,12 @@ signed with a temporary key for now, uninstall the old version before installing
 Alloy is developed in the open and the plan is public: **[roadmap](docs/PLAN.md)** and
 **[project board](https://github.com/users/centopw/projects/2)**. Coming up:
 
-- Notifications on Android when the app is closed (without needing Google services)
-- Signing in through your server's web login (needed for matrix.org-style single sign-on)
-- Searching old messages in encrypted rooms, QR code sign-in, more languages
+- Hardening: encrypting the whole local database, steadier device sign-ins and end-to-end tests on desktop
+  and Android
+- An optional self-hosted gateway that keeps your accounts connected and brings notifications while the app
+  is closed
 - Your own themes and shortcuts from simple files, then plugins and a community marketplace
-- Voice and video calls, web version and multiple accounts (later)
+- Searching old messages, more languages, voice and video calls and a web version (later)
 
 ## Project activity
 
@@ -121,23 +131,28 @@ Alloy is developed in the open and the plan is public: **[roadmap](docs/PLAN.md)
 
 ## For developers
 
-Alloy is written in Rust (the Matrix part) with a Tauri 2 app shell and a Svelte 5 interface.
+Alloy is written in Rust (engine, local store and the Telegram connector), with a Tauri 2 app shell and a
+Svelte 5 interface. Messenger runs through `sidecars/alloy-meta`, a separate Go program (AGPL-3.0, built on
+[mautrix-meta](https://github.com/mautrix/meta)) that the app starts and talks to over stdio. The design is
+recorded in [ADR 0016](docs/decisions/0016-on-device-connectors.md).
 
 ```bash
 git clone https://github.com/centopw/alloy.git && cd alloy
 just hooks          # commit message checks
-just synapse-up     # a local test server (users alice and bob, password testpassword123!)
+just sidecar        # build the Messenger sidecar; every app build needs it
 cd apps/alloy && pnpm install && (cd ui && pnpm install)
 pnpm tauri dev      # run the desktop app
 ```
 
-You need Rust 1.90+, Node 22+ with pnpm, [just](https://github.com/casey/just) and Docker (for the test server).
-Android builds also need the Android SDK and NDK 27.
+You need Rust 1.90+, Go (the version in `sidecars/alloy-meta/go.mod`), Node 22+ with pnpm and
+[just](https://github.com/casey/just). Android builds also need the Android SDK and NDK 27 and JDK 17; then
+run `just android-debug` (it builds the Android sidecar first).
 
 | | |
 |---|---|
-| Everything CI runs | `just ci`, plus `pnpm check && pnpm test && pnpm build` in `apps/alloy/ui` |
-| Try the UI without a server | `pnpm dev` in `apps/alloy/ui` (uses demo data) |
+| Everything CI runs | `just ci`, plus `pnpm check && pnpm test && pnpm build` in `apps/alloy/ui` and `go vet ./... && go test ./...` in `sidecars/alloy-meta` |
+| Connector tests | `cargo test -p alloy-connector --features testing`, `-p alloy-engine --features testing`, `-p alloy-sidecar --features fake-sidecar` |
+| Try the UI without an account | `pnpm dev` in `apps/alloy/ui` (uses demo data) |
 | Refresh the screenshots above | `pnpm build && node scripts/readme-shots.mjs` in `apps/alloy/ui` |
 | Master plan and decisions | [docs/PLAN.md](docs/PLAN.md), [docs/decisions/](docs/decisions/README.md) |
 | How releases work | [docs/RELEASING.md](docs/RELEASING.md) |
@@ -145,4 +160,5 @@ Android builds also need the Android SDK and NDK 27.
 
 ## License
 
-Apache License 2.0, see [LICENSE](LICENSE).
+Apache License 2.0, see [LICENSE](LICENSE). The Messenger sidecar in `sidecars/alloy-meta` is AGPL-3.0 (see
+its [LICENSE](sidecars/alloy-meta/LICENSE)) and ships as a separate program.

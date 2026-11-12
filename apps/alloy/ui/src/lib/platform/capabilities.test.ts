@@ -49,7 +49,6 @@ describe('capabilities', () => {
       systemTray: true,
       autoDownloadUpdates: true,
       voiceMessages: false,
-      backgroundPush: false,
     });
   });
 
@@ -66,7 +65,6 @@ describe('capabilities', () => {
       systemTray: false,
       autoDownloadUpdates: false,
       voiceMessages: false,
-      backgroundPush: false,
     });
   });
 
@@ -83,7 +81,6 @@ describe('capabilities', () => {
       systemTray: false,
       autoDownloadUpdates: false,
       voiceMessages: false,
-      backgroundPush: false,
     });
   });
 
@@ -100,7 +97,6 @@ describe('capabilities', () => {
       systemTray: false,
       autoDownloadUpdates: false,
       voiceMessages: false,
-      backgroundPush: false,
     });
   });
 
@@ -117,18 +113,12 @@ describe('capabilities', () => {
       systemTray: false,
       autoDownloadUpdates: false,
       voiceMessages: false,
-      backgroundPush: false,
     });
   });
 
   it('respects explicit voiceMessages override in env', () => {
     const caps = capabilities({ phone: false, android: false, tauri: true, voiceMessages: true });
     expect(caps.voiceMessages).toBe(true);
-  });
-
-  it('respects explicit backgroundPush override in env', () => {
-    const caps = capabilities({ phone: true, android: true, tauri: true, backgroundPush: true });
-    expect(caps.backgroundPush).toBe(true);
   });
 });
 

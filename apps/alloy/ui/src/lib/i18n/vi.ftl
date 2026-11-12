@@ -283,7 +283,6 @@ notifications-mute-until-tomorrow-time = Đã tắt thông báo đến { $time }
 notifications-only-when-the-window-is-unfocused = Chỉ khi cửa sổ không được chọn
 notifications-open-permissions = Mở quyền
 notifications-play-a-sound = Phát âm thanh
-notifications-push-app = Ứng dụng đẩy
 notifications-show-message-preview = Hiển thị xem trước tin nhắn
 onboarding-open-source-apache-2-0 = Mã nguồn mở · Apache-2.0
 page-engine-ws = ?engine=ws://…
@@ -300,12 +299,10 @@ permissions-microphone-why = Ghi âm tin nhắn thoại.
 permissions-notifications-why = Hiển thị tin nhắn mới khi bạn không mở Alloy.
 permissions-panel-allow = Cho phép
 permissions-panel-checking-what-is-allowed = Đang kiểm tra quyền được phép…
-permissions-panel-choose-app = Chọn ứng dụng
 permissions-panel-open-settings = Mở cài đặt
 permissions-panel-optional = Tùy chọn
 permissions-panel-required = Bắt buộc
 permissions-permissions = Quyền
-permissions-push-app-why = Một ứng dụng UnifiedPush như ntfy sẽ gửi tin nhắn khi Alloy đã đóng, không cần dịch vụ của Google.
 permissions-state-allowed = Đã cho phép
 permissions-state-not-allowed = Không được phép
 permissions-state-not-asked-yet = Chưa được hỏi
@@ -711,7 +708,7 @@ chat-system-message = Tin nhắn hệ thống
 chat-timeline-label = Cuộc trò chuyện: { $title } ({ $kind })
 chat-untitled-room = Cuộc trò chuyện chưa đặt tên
 
-# --- shell & settings (B3d): device-local settings, no Matrix vocabulary ---
+# --- shell & settings (B3d): device-local settings ---
 command-palette-no-matching-conversations = Không có cuộc trò chuyện nào khớp
 command-palette-search-chats = Tìm cuộc trò chuyện
 mobile-tab-bar-chats-with-unread = Trò chuyện, { $count } chưa đọc

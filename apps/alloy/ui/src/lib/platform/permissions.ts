@@ -4,10 +4,10 @@ import { isTauriShell } from './notify';
 
 /**
  * What the app can use that the system has to allow.
- * `push-app` and `battery` exist on Android only: a UnifiedPush app to deliver messages while Alloy is closed, and the
- * exemption from battery optimisation that keeps those deliveries on time.
+ * `battery` exists on Android only: the exemption from battery optimisation that keeps the
+ * foreground service holding the connectors alive while Alloy is in the background.
  */
-export type PermissionId = 'notifications' | 'microphone' | 'location' | 'push-app' | 'battery';
+export type PermissionId = 'notifications' | 'microphone' | 'location' | 'battery';
 
 /**
  * `prompt`: not decided yet. `denied`: refused, only the system settings can change it.
@@ -76,16 +76,13 @@ export async function readPermission(id: PermissionId): Promise<PermissionState>
       return webState('geolocation');
     case 'battery':
       return native && isAndroid() ? parseState(native.status('battery')) : 'unavailable';
-    case 'push-app':
-      // Read from the push store by the caller: it holds the distributor list the native bridge reports.
-      return 'unknown';
   }
 }
 
 /** Shows the system's own prompt for one permission. Resolves once the user answered; callers read the state again. */
 export async function requestPermission(id: PermissionId): Promise<void> {
   const native = bridge();
-  if (native && isAndroid() && id !== 'push-app') {
+  if (native && isAndroid()) {
     // The answer arrives as PERMISSION_CHANGED_EVENT; the caller re-reads on it.
     native.request(id);
     return;
@@ -109,7 +106,6 @@ export async function requestPermission(id: PermissionId): Promise<void> {
         );
       });
       return;
-    case 'push-app':
     case 'battery':
       return;
   }
@@ -138,11 +134,11 @@ export function supportsPermissionSettings(id?: PermissionId): boolean {
 export async function openPermissionSettings(id: PermissionId): Promise<boolean> {
   const native = bridge();
   if (native && isAndroid()) {
-    native.openSettings(id === 'push-app' ? 'notifications' : id);
+    native.openSettings(id);
     return true;
   }
   if (isTauriShell() && !isAndroid()) {
-    if (id === 'push-app' || id === 'battery') {
+    if (id === 'battery') {
       return false;
     }
     try {

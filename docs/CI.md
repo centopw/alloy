@@ -15,7 +15,7 @@ Continuous integration, automated testing, security checks, and binary releases 
 ```mermaid
 graph LR
     A["Commit/PR to main"] --> B{"Branch type?"}
-    B -->|PR| C["Lint & Test Matrix"]
+    B -->|PR| C["Lint & Test jobs"]
     B -->|Tag: v*| D["Release Pipeline"]
 
     C --> E["cargo fmt --check"]
@@ -24,6 +24,8 @@ graph LR
     C --> H["cargo deny check"]
     C --> I["cargo audit"]
     C --> J["pnpm check & build"]
+    C --> J2["connector tests<br/>(fake connector, fake sidecar)"]
+    C --> J3["go vet & go test<br/>(Messenger sidecar)"]
     C --> K["Android build<br/>conditional"]
 
     H --> L{"Pass?"}
@@ -31,7 +33,7 @@ graph LR
     L -->|No| M["Fail CI"]
     L -->|Yes| N["Gate: Code Review"]
 
-    D --> O["Build Matrix"]
+    D --> O["Build per platform"]
     O --> P["macOS<br/>Linux<br/>Windows"]
     O --> P2["Android APK<br/>Signed"]
 
@@ -56,9 +58,11 @@ graph LR
 |-----|---------|---------|
 | `commits` | `ubuntu-latest` | Validate Conventional Commits format |
 | `fmt` | `ubuntu-latest` | Verify Rust code formatting (`rustfmt`) |
-| `clippy-test` | Ubuntu, macOS, Windows | Lint + unit/integration tests with `wasm32-wasip2` target |
+| `clippy-test` | Ubuntu, macOS, Windows | Builds the Go sidecar for the host triple, then clippy (non-Windows) + `cargo test --workspace --locked` with the `wasm32-wasip2` target; theme-CSS and protocol-TS drift checks on Ubuntu |
+| `connector-tests` | `ubuntu-latest` | `cargo test -p alloy-connector --features testing`, `-p alloy-engine --features testing`, `-p alloy-sidecar --features fake-sidecar` |
+| `sidecar-tests` | `ubuntu-latest` | `go vet ./...` and `go test ./...` in `sidecars/alloy-meta` |
 | `cargo-deny` | `ubuntu-latest` | License audit + banned crates check |
-| `ui` | `ubuntu-latest` | SvelteKit type-check + Vite build |
+| `ui` | `ubuntu-latest` | SvelteKit type-check + Vite build + unit tests |
 | `mobile-android` | `ubuntu-latest` | Android APK build (gated: only if `apps/alloy/src-tauri/gen/android/` exists) |
 
 **Key Features:**
@@ -230,8 +234,8 @@ just deny             # License + advisory checks
 just audit            # Vulnerability scan
 just ui-check         # SvelteKit type check
 just ui-build         # Build UI assets
-just synapse-up       # Start test Synapse homeserver (Docker)
-just synapse-down     # Stop Synapse
+just sidecar          # Build the Messenger sidecar for the host triple (needed by any alloy-app build)
+just sidecar-android  # Build the arm64 Android sidecar
 just ci               # Run full pipeline (all checks + tests + audit + UI)
 ```
 
@@ -248,6 +252,12 @@ This executes:
 4. `cargo deny check` (licenses & bans)
 5. `cargo audit` (security advisories)
 6. `pnpm install`, `pnpm check`, `pnpm build` (UI)
+
+`just ci` does not run the connector feature tests or the Go checks; run
+`cargo test -p alloy-connector --features testing`, `cargo test -p alloy-engine --features testing`,
+`cargo test -p alloy-sidecar --features fake-sidecar` and
+`( cd sidecars/alloy-meta && go vet ./... && go test ./... )` as CI's `connector-tests` and
+`sidecar-tests` jobs do.
 
 ---
 
@@ -336,15 +346,15 @@ Alloy binaries are distributed directly to users via GitHub Releases and direct 
 
 ## Build time and the cache budget
 
-Almost all of the wall time in CI and in a release is **cold Rust compilation** of a ~900-crate
-dependency graph (Tauri/wry, matrix-sdk plus its crypto and SQLite stack, Ruma, and the plugin
-host's Wasmtime in workspace jobs), not the tests themselves. Measured on 2026-11-02/03:
+Almost all of the wall time in CI and in a release is **cold Rust compilation** of the dependency
+graph (Tauri/wry, the plugin host's Wasmtime in workspace jobs, grammers and SQLite), not the tests
+themselves. The figures below were measured on 2026-11-02/03, when the Matrix SDK was still in the
+graph (ADR 0016 removed it); they have not been re-measured since:
 
 | Job | Warm cache | Cold cache |
 |---|---|---|
 | CI · Clippy & Tests (ubuntu) | ~7–11 min | 25–35 min |
 | CI · Clippy & Tests (macOS) | ~12 min | 30+ min |
-| CI · Engine integration test shard | ~5–9 min | 20+ min |
 | Release · macOS x64 bundle | ~5–8 min | **27 min** (`Finished `release` profile … in 25m 01s`; bundling + signing takes under a minute) |
 | Release · macOS arm64 bundle | — | 20 min |
 | Release · Windows bundle | — | 19 min |
@@ -357,8 +367,8 @@ cache miss.
 
 ### Why a build sometimes takes 30+ minutes
 
-1. **GitHub allows 10 GB of Actions cache per repository.** The debug matrix (three OSes plus
-   Android) needs ~1.3–1.6 GB per OS and the release profile ~0.7 GB per desktop platform. Every
+1. **GitHub allows 10 GB of Actions cache per repository.** The debug builds (three OSes plus
+   Android) need ~1.3–1.6 GB per OS and the release profile ~0.7 GB per desktop platform. Every
    dependency change writes a new cache key; old entries are only evicted at the budget cap, so
    superseded debug caches can push the release caches out. When that happens the tag build finds
    `No cache found` in its `Swatinem/rust-cache` step and recompiles everything.
@@ -394,22 +404,6 @@ cache miss.
 ---
 
 ## Troubleshooting
-
-### Engine integration test times out on the shared Synapse account
-
-**Symptom:** `forward_events_text_and_reply_and_strip_quotes` (or another parity test) panics with
-`timed out waiting for: both messages forwarded to B`, usually after ~150 s, while the other tests
-in the shard pass. Rerunning the job sometimes goes green, which makes it look random.
-
-**Cause:** every parity test logs in as `alice` and runs in parallel inside one test binary. On a
-loaded runner the six concurrent sliding-sync streams for the same account starve each other; the
-forward command itself succeeded (`failed` is empty) but the sync copy of one message is not
-delivered inside the test's 150 s budget.
-
-**Fix:** the `Engine integration tests` step runs with `--test-threads=1`, so the parity tests
-serialize on the account. Keep that flag when changing the shard script or the test invocation; if
-a single test still times out, capture the mirror dump it prints and treat it as an engine bug, not
-a flake.
 
 ### Android APK build fails
 

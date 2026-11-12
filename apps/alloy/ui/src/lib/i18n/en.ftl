@@ -289,7 +289,6 @@ notifications-mute-until-tomorrow-time = Muted until tomorrow { $time }
 notifications-only-when-the-window-is-unfocused = Only when the window is unfocused
 notifications-open-permissions = Open Permissions
 notifications-play-a-sound = Play a sound
-notifications-push-app = Push app
 notifications-show-message-preview = Show message preview
 onboarding-open-source-apache-2-0 = Open source · Apache-2.0
 page-engine-ws = ?engine=ws://…
@@ -306,12 +305,10 @@ permissions-microphone-why = Records voice messages.
 permissions-notifications-why = Shows new messages when Alloy is not in front of you.
 permissions-panel-allow = Allow
 permissions-panel-checking-what-is-allowed = Checking what is allowed…
-permissions-panel-choose-app = Choose app
 permissions-panel-open-settings = Open settings
 permissions-panel-optional = Optional
 permissions-panel-required = Required
 permissions-permissions = Permissions
-permissions-push-app-why = A UnifiedPush app such as ntfy delivers messages while Alloy is closed, without Google services.
 permissions-state-allowed = Allowed
 permissions-state-not-allowed = Not allowed
 permissions-state-not-asked-yet = Not asked yet
@@ -717,7 +714,7 @@ chat-system-message = System message
 chat-timeline-label = Conversation: { $title } ({ $kind })
 chat-untitled-room = Untitled chat
 
-# --- shell & settings (B3d): device-local settings, no Matrix vocabulary ---
+# --- shell & settings (B3d): device-local settings ---
 command-palette-no-matching-conversations = No matching chats
 command-palette-search-chats = Search chats
 mobile-tab-bar-chats-with-unread = Chats, { $count } unread
