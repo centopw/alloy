@@ -146,11 +146,14 @@ fn token_is_valid(token: &str) -> bool {
 ///
 /// `--fake` uses the deterministic connector so the web UI can be driven without Telegram or
 /// Messenger credentials; that variant only exists when the crate is built with the `fake` feature.
-fn connector_factory(fake: bool) -> std::io::Result<Arc<dyn ConnectorFactory>> {
+fn connector_factory(
+    fake: bool,
+    secrets: Arc<dyn SecretStore>,
+) -> std::io::Result<Arc<dyn ConnectorFactory>> {
     if fake {
         return fake_factory();
     }
-    Ok(Arc::new(DefaultConnectorFactory::from_env()))
+    Ok(Arc::new(DefaultConnectorFactory::from_env(secrets)))
 }
 
 #[cfg(feature = "fake")]
@@ -253,8 +256,11 @@ async fn main() -> std::io::Result<()> {
     } else {
         Arc::new(InMemorySecretStore::new())
     };
-    let factory = connector_factory(args.fake)?;
-    tracing::info!(networks = ?factory.networks(), "connector factory ready");
+    let factory = connector_factory(args.fake, secrets.clone())?;
+    tracing::info!(
+        networks = ?factory.networks().await,
+        "connector factory ready"
+    );
     let ctx = EngineContext::open(args.data_dir, secrets, factory)
         .await
         .map_err(engine_error)?;

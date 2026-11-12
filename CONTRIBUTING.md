@@ -67,19 +67,25 @@ Ensure you have the following installed on your machine:
 
 ### Telegram application credentials
 
-You never configure Telegram: the app asks for your phone number and the code it sends, nothing
-else. `api_id`/`api_hash` identify Alloy the *application*, the same role they play in a mautrix
-bridge config, and `crates/alloy-telegram/build.rs` bakes one pair into every binary. Only a
-developer building a distributable registers that application once, at
-<https://my.telegram.org/apps>, and then either exports `ALLOY_TELEGRAM_API_ID` /
-`ALLOY_TELEGRAM_API_HASH` before building or writes them to `.env.telegram` (`just telegram-app`
-prints the recipe; `just nightly-local` and `just android-*` read the file, and an exported value
-wins over it). Release CI passes the same pair as secrets. Without a pair the build still succeeds
-and Telegram is simply listed as unavailable, with the registration URL in the log. Telegram's API
-terms ask any client that is not the official app to carry a name prefixed "Unofficial", so the
-registered entry is titled "Unofficial Alloy"; if that prefix is not acceptable, the fix is to
-rename the client itself (display name, bundle name and docs) so the two titles agree — the title
-is what the terms constrain, not the phone-number prompt.
+`api_id`/`api_hash` identify Alloy the *application*, the same role they play in a mautrix bridge
+config. They are a runtime setting, not a build input: no credential is compiled into a release, so
+an installed binary cannot be mined for one, and the pair can be replaced without shipping a new
+version.
+
+- **In the app:** Settings -> Networks -> Telegram application. The pair is sealed in the OS
+  keyring under `alloy.telegram.app.v1` and reused from then on; the `api_hash` is never returned
+  or logged, and `GetTelegramApp` reports only the `api_id` and where the pair came from.
+- **Registering one yourself:** <https://my.telegram.org/apps>. Telegram's API terms ask any client
+  that is not the official app to carry a name prefixed "Unofficial", so the registered entry is
+  titled "Unofficial Alloy"; if that prefix is not acceptable, the fix is to rename the client
+  itself (display name, bundle name and docs) so the two titles agree — the title is what the terms
+  constrain, not the phone-number prompt.
+- **Headless development (no UI):** export `ALLOY_TELEGRAM_API_ID` and `ALLOY_TELEGRAM_API_HASH`
+  before running the engine. This is an override only: the sealed runtime pair wins when both are
+  present, and `GetTelegramApp` reports the environment as its source.
+- **Without a pair:** the build still succeeds and `ListNetworks` lists Telegram with
+  `ready: false` plus a setup block naming the two fields and the registration URL; `BeginLogin`
+  then fails with an actionable `not_supported`. `just telegram-app` prints this recipe.
 
 ---
 

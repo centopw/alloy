@@ -27,7 +27,6 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 alloy-protocol = { path = "../../../crates/alloy-protocol" }
 alloy-engine = { path = "../../../crates/alloy-engine" }
-alloy-telegram = { path = "../../../crates/alloy-telegram" }
 alloy-store = { path = "../../../crates/alloy-store" }
 alloy-storage = { path = "../../../crates/alloy-storage", features = ["keyring"] }
 tokio = { version = "1", features = ["sync", "rt"] }

@@ -40,3 +40,8 @@ testing = ["alloy-connector/testing"]
 name = "engine"
 path = "tests/engine.rs"
 required-features = ["testing"]
+
+[[test]]
+name = "accounts_config"
+path = "tests/accounts_config.rs"
+required-features = ["testing"]

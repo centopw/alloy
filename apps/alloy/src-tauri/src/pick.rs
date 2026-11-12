@@ -777,16 +777,18 @@ mod tests {
 
     /// A real engine context over a throwaway data dir, so the allowlist under test is the production one.
     fn test_context(dir: &Path) -> EngineContext {
-        let secrets = std::sync::Arc::new(alloy_storage::FileSecretStore::new(
-            dir.join("secrets.json"),
-        ));
+        let secrets: std::sync::Arc<dyn alloy_storage::SecretStore> = std::sync::Arc::new(
+            alloy_storage::FileSecretStore::new(dir.join("secrets.json")),
+        );
         // The allowlist lives on the context, not the store, so an in-memory database is enough.
         let store = alloy_store::Store::open_in_memory([7u8; 32]).expect("open the test store");
         EngineContext::with_store(
             store,
             dir.to_path_buf(),
-            secrets,
-            std::sync::Arc::new(alloy_engine::factory::DefaultConnectorFactory::from_env()),
+            secrets.clone(),
+            std::sync::Arc::new(alloy_engine::factory::DefaultConnectorFactory::from_env(
+                secrets,
+            )),
         )
     }
 

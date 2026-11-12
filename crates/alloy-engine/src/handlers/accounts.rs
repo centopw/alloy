@@ -15,6 +15,7 @@ use crate::accounts::{account_dto, accounts_dto, start_with_connector};
 use crate::context::EngineContext;
 use crate::convert;
 use crate::error::{EngineError, map_connector, map_store};
+use crate::factory;
 use crate::login::PendingLogin;
 use crate::router::{CommandGroup, GroupHandler, command_name};
 
@@ -50,7 +51,7 @@ impl GroupHandler for AccountsHandler {
                 accounts: accounts_dto(ctx).await?,
             }),
             EngineCommand::ListNetworks => Ok(EngineResponse::Networks {
-                networks: ctx.factory.networks(),
+                networks: ctx.factory.networks().await,
             }),
             EngineCommand::BeginLogin { network } => begin_login(ctx, network).await,
             EngineCommand::SubmitLogin { login_id, input } => {
@@ -58,6 +59,11 @@ impl GroupHandler for AccountsHandler {
             }
             EngineCommand::CancelLogin { login_id } => cancel_login(ctx, &login_id).await,
             EngineCommand::Logout { account_id } => logout(ctx, &account_id).await,
+            EngineCommand::SetTelegramApp { api_id, api_hash } => {
+                set_telegram_app(ctx, api_id, api_hash.expose()).await
+            }
+            EngineCommand::ClearTelegramApp => clear_telegram_app(ctx).await,
+            EngineCommand::GetTelegramApp => get_telegram_app(ctx).await,
             _ => Err(EngineError::invalid_argument(format!(
                 "Command '{}' does not belong to the Accounts group",
                 name
@@ -67,8 +73,20 @@ impl GroupHandler for AccountsHandler {
 }
 
 async fn begin_login(ctx: &EngineContext, network: Network) -> Result<EngineResponse, EngineError> {
-    if !ctx.factory.networks().contains(&network) {
-        return Err(EngineError::not_supported(convert::network_label(network)));
+    // Checked before any directory is created, so a login that cannot start leaves nothing behind.
+    // Telegram is always listed, but not ready until its application pair is configured.
+    let ready = ctx
+        .factory
+        .networks()
+        .await
+        .iter()
+        .any(|info| info.network == network && info.ready);
+    if !ready {
+        return Err(if network == Network::Telegram {
+            factory::telegram_app_missing_error()
+        } else {
+            EngineError::not_supported(convert::network_label(network))
+        });
     }
     let login_id = LoginId(Uuid::new_v4().to_string());
     // The account id is allocated before the first network call, so the connector's working
@@ -320,4 +338,39 @@ fn remove_cached_file(path: &str) {
             tracing::warn!(path = %path, error = %err, "cannot remove a cached media file");
         }
     }
+}
+
+/// Stores the user-entered Telegram application pair, sealed in the OS keyring.
+async fn set_telegram_app(
+    ctx: &EngineContext,
+    api_id: i32,
+    api_hash: &str,
+) -> Result<EngineResponse, EngineError> {
+    let record = factory::TelegramAppRecord::parse(api_id, api_hash)
+        .map_err(EngineError::invalid_argument)?;
+    factory::save_telegram_app(ctx.secrets.as_ref(), &record).await?;
+    Ok(EngineResponse::TelegramAppSet { configured: true })
+}
+
+/// Deletes the sealed pair; Telegram is unready again and cannot log in.
+async fn clear_telegram_app(ctx: &EngineContext) -> Result<EngineResponse, EngineError> {
+    factory::clear_telegram_app(ctx.secrets.as_ref()).await?;
+    Ok(EngineResponse::TelegramAppCleared)
+}
+
+/// Reports the pair in effect without ever returning the hash.
+async fn get_telegram_app(ctx: &EngineContext) -> Result<EngineResponse, EngineError> {
+    let resolved = factory::resolve_telegram_app(ctx.secrets.as_ref()).await;
+    Ok(match resolved {
+        Some(resolved) => EngineResponse::TelegramApp {
+            configured: true,
+            api_id: Some(resolved.config.api_id),
+            source: convert::telegram_app_source(resolved.source),
+        },
+        None => EngineResponse::TelegramApp {
+            configured: false,
+            api_id: None,
+            source: alloy_protocol::TelegramAppSource::None,
+        },
+    })
 }

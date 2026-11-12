@@ -29,7 +29,10 @@ impl CommandGroup {
             | EngineCommand::BeginLogin { .. }
             | EngineCommand::SubmitLogin { .. }
             | EngineCommand::CancelLogin { .. }
-            | EngineCommand::Logout { .. } => CommandGroup::Accounts,
+            | EngineCommand::Logout { .. }
+            | EngineCommand::SetTelegramApp { .. }
+            | EngineCommand::ClearTelegramApp
+            | EngineCommand::GetTelegramApp => CommandGroup::Accounts,
 
             EngineCommand::SubscribeRoomList { .. }
             | EngineCommand::Unsubscribe { .. }

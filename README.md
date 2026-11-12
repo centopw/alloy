@@ -148,6 +148,11 @@ You need Rust 1.90+, Go (the version in `sidecars/alloy-meta/go.mod`), Node 22+ 
 [just](https://github.com/casey/just). Android builds also need the Android SDK and NDK 27 and JDK 17; then
 run `just android-debug` (it builds the Android sidecar first).
 
+Telegram asks for the application `api_id`/`api_hash` pair once, in Settings -> Networks -> Telegram
+application, and seals it in the OS keyring; nothing is compiled into the build. For headless work you can
+export `ALLOY_TELEGRAM_API_ID`/`ALLOY_TELEGRAM_API_HASH` instead (a developer override — see
+[CONTRIBUTING.md](CONTRIBUTING.md)).
+
 | | |
 |---|---|
 | Everything CI runs | `just ci`, plus `pnpm check && pnpm test && pnpm build` in `apps/alloy/ui` and `go vet ./... && go test ./...` in `sidecars/alloy-meta` |

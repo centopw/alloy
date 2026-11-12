@@ -87,6 +87,32 @@ final):
 | messenger | yes | yes | yes | no | yes | yes | no |
 | fake | yes (no window) | yes | yes (3/user) | no | no | yes | no |
 
+### 3.1 Network readiness and setup
+
+`ListNetworks` reports `NetworkInfoDto { network, ready, setup }`, not a bare network name, so the
+UI can tell "this build does not ship the network" from "this network needs a setting first".
+
+| Field | Meaning |
+|---|---|
+| `network` | `telegram`, `messenger` (tests: `fake`) |
+| `ready` | `BeginLogin` can start now; `false` means `setup` explains what is missing |
+| `setup` | `NetworkSetupDto { kind, app_url, fields }`, or `null` when ready |
+
+- **Telegram** is always listed. It is `ready: false` with `setup.kind = telegram_app`,
+  `app_url = "https://my.telegram.org/apps"` and fields `api_id` (visible) and `api_hash`
+  (`secret: true`) until the user enters the application pair. `BeginLogin` on that state fails
+  with `not_supported`, reason `telegram application credentials`.
+- **Messenger** is listed only when the sidecar executable exists, and is always `ready: true`
+  with `setup: null`: no application-level configuration is involved.
+
+The pair is the *application's*, not the account's. It is entered once and sealed in the OS keyring
+under `alloy.telegram.app.v1` as `{"api_id":<i32>,"api_hash":"<hex>"}`; the engine resolves it per
+call (sealed value, then `ALLOY_TELEGRAM_API_ID`/`ALLOY_TELEGRAM_API_HASH` for development, then
+none), so a saved pair takes effect without a restart. `SetTelegramApp` validates `api_id > 0` and
+a 32-character hex `api_hash` (`invalid_argument` otherwise), `ClearTelegramApp` deletes it, and
+`GetTelegramApp` returns `{ configured, api_id, source }` with `source` one of `runtime`,
+`environment`, `none`. No response ever carries the `api_hash`.
+
 ## 4. Login
 
 Login is a total state machine owned by the connector. The host never sequences credentials

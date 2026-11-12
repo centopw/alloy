@@ -3,12 +3,6 @@
 
 set shell := ["bash", "-cu"]
 
-# The Telegram application pair (ALLOY_TELEGRAM_API_ID/ALLOY_TELEGRAM_API_HASH) is inherited from
-# the shell, or read from .env.telegram when that file exists. An exported value wins over the
-# file, and a missing file is not an error. `just telegram-app` explains how to obtain the pair.
-set dotenv-filename := ".env.telegram"
-set dotenv-load := true
-
 # UI workspace directory (apps/alloy by default; apps/alloy/ui configurable)
 UI_DIR := env_var_or_default("UI_DIR", "apps/alloy/ui")
 
@@ -106,20 +100,21 @@ changelog *args:
     @command -v git-cliff >/dev/null 2>&1 || (echo "Error: git-cliff is not installed. Install via: brew install git-cliff or cargo install git-cliff" && exit 1)
     git-cliff {{args}}
 
-# Explain how to register the Telegram application this build identifies as
+# Explain where the Telegram application pair comes from
 telegram-app:
     @echo "Alloy identifies itself to Telegram with an application pair (api_id/api_hash)."
-    @echo "People installing Alloy never set it: crates/alloy-telegram/build.rs bakes it in."
+    @echo "It is a setting, not a build input: the app asks for the pair once and seals it"
+    @echo "in the OS keyring (Settings -> Networks -> Telegram application). No credential is"
+    @echo "compiled into a release, and the pair can be replaced without rebuilding."
     @echo ""
-    @echo "If you build distributables:"
+    @echo "Developers can skip the UI and export the pair instead:"
+    @echo "         ALLOY_TELEGRAM_API_ID=123456"
+    @echo "         ALLOY_TELEGRAM_API_HASH=0123456789abcdef0123456789abcdef"
+    @echo ""
+    @echo "Registering the application yourself:"
     @echo "  1. Sign in at https://my.telegram.org/apps and register an application."
     @echo "     Title it \"Unofficial Alloy\": Telegram's API terms require an \"Unofficial\" prefix"
     @echo "     unless the client is the official app."
-    @echo "  2. Export the pair, or write it to .env.telegram (gitignored):"
-    @echo "         ALLOY_TELEGRAM_API_ID=123456"
-    @echo "         ALLOY_TELEGRAM_API_HASH=0123456789abcdef0123456789abcdef"
-    @echo "  3. Build: just nightly-local (or just android-debug / just android-release)."
-    @echo "     Release CI passes the same pair as secrets."
 
 # Build unsigned desktop bundle locally
 nightly-local: sidecar

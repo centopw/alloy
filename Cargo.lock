@@ -107,7 +107,6 @@ dependencies = [
  "alloy-protocol",
  "alloy-storage",
  "alloy-store",
- "alloy-telegram",
  "async-trait",
  "base64 0.22.1",
  "percent-encoding",

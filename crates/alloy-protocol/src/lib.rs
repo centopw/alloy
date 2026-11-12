@@ -66,6 +66,92 @@ pub enum Network {
     Fake,
 }
 
+/// One network the engine can offer, and whether it is ready for a login right now.
+///
+/// Telegram is always listed: `ready: false` with a [`NetworkSetupDto`] names what the user still
+/// has to enter. Networks this build does not ship (the Messenger sidecar is missing) are absent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct NetworkInfoDto {
+    pub network: Network,
+    /// `BeginLogin` can start now; `false` means `setup` explains what is missing.
+    pub ready: bool,
+    /// The values the user must provide first; `None` once the network is ready.
+    pub setup: Option<NetworkSetupDto>,
+}
+
+/// What the user has to enter before a network becomes usable.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct NetworkSetupDto {
+    pub kind: NetworkSetupKind,
+    /// Page where the user registers the values, opened in a browser.
+    pub app_url: String,
+    /// Inputs to collect, in display order.
+    pub fields: Vec<NetworkSetupFieldDto>,
+}
+
+/// Which setup a [`NetworkSetupDto`] asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum NetworkSetupKind {
+    /// The application `api_id`/`api_hash` pair from <https://my.telegram.org/apps>.
+    TelegramApp,
+}
+
+/// One input a [`NetworkSetupDto`] collects.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct NetworkSetupFieldDto {
+    /// Key the setup command expects, e.g. `"api_id"`.
+    pub key: String,
+    /// Human-readable input label.
+    pub label: String,
+    /// The value is a credential: mask it while typing and never echo it back.
+    pub secret: bool,
+}
+
+/// Where the Telegram application pair in effect came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum TelegramAppSource {
+    /// Entered in the app and sealed in the OS keyring.
+    Runtime,
+    /// Exported as `ALLOY_TELEGRAM_API_ID`/`ALLOY_TELEGRAM_API_HASH` (developer override).
+    Environment,
+    /// Nothing is configured; a Telegram login cannot start.
+    None,
+}
+
+/// The Telegram application hash (`api_hash` from <https://my.telegram.org/apps>), a credential.
+///
+/// The wire shape stays a plain string, but [`fmt::Debug`] prints `<redacted>`: no log line, panic
+/// message or `{:?}` of [`EngineCommand`] can leak it. Read the value only where the network or the
+/// keyring needs it, through [`ApiHash::expose`].
+#[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+#[serde(transparent)]
+pub struct ApiHash(String);
+
+impl ApiHash {
+    /// Wraps a hash as entered; trimming and validation belong to the engine, not the wire type.
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    /// The hash itself, for the one place that hands it to the network or the secret store.
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+
+    /// True when nothing was entered.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl fmt::Debug for ApiHash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ApiHash({REDACTED})")
+    }
+}
+
 /// Lifecycle of one locally stored account.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
@@ -671,6 +757,18 @@ pub enum EngineCommand {
     Logout {
         account_id: AccountId,
     },
+    /// Stores the Telegram application pair, sealed in the OS keyring, so a login can start.
+    ///
+    /// `api_id` must be positive and `api_hash` a 32-character hex string. The hash is never
+    /// echoed back by any response, and [`ApiHash`] never prints it.
+    SetTelegramApp {
+        api_id: i32,
+        api_hash: ApiHash,
+    },
+    /// Deletes the stored Telegram application pair; Telegram returns to `ready: false`.
+    ClearTelegramApp,
+    /// Reports whether a Telegram application pair is configured, and where it came from.
+    GetTelegramApp,
     // Chats
     /// Starts the room list stream; `filter` narrows the projection by chat name.
     SubscribeRoomList {
@@ -902,9 +1000,21 @@ pub enum EngineResponse {
     AccountsList {
         accounts: Vec<Account>,
     },
-    /// The networks this build can connect.
+    /// The networks this build can offer, with readiness and any setup they still need.
     Networks {
-        networks: Vec<Network>,
+        networks: Vec<NetworkInfoDto>,
+    },
+    /// The application pair is sealed; the hash is never returned.
+    TelegramAppSet {
+        configured: bool,
+    },
+    /// The stored application pair is gone.
+    TelegramAppCleared,
+    /// The pair in effect: `api_id` only, never `api_hash`.
+    TelegramApp {
+        configured: bool,
+        api_id: Option<i32>,
+        source: TelegramAppSource,
     },
     /// The next login step of `login_id`; answers both `BeginLogin` and `SubmitLogin`.
     LoginStep {
@@ -1176,6 +1286,7 @@ pub fn register_types() -> Types {
         .register::<UserId>()
         .register::<SubscriptionId>()
         .register::<LoginId>()
+        .register::<ApiHash>()
         .register::<Network>()
         .register::<AccountState>()
         .register::<CapabilitiesDto>()
@@ -1231,6 +1342,45 @@ pub fn export_typescript_to_file(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn test_api_hash_is_redacted_in_debug_and_plain_on_the_wire() {
+        const HASH: &str = "deadbeef0123456789abcdef01234567";
+        let command = EngineCommand::SetTelegramApp {
+            api_id: 1,
+            api_hash: ApiHash::new(HASH),
+        };
+
+        assert_eq!(
+            format!("{:?}", ApiHash::new(HASH)),
+            "ApiHash(<redacted>)",
+            "the hash itself must never reach Debug output"
+        );
+        let rendered = format!("{command:?}");
+        assert!(rendered.contains("<redacted>"), "{rendered}");
+        assert!(
+            !rendered.contains(HASH),
+            "Debug of the command leaked the hash: {rendered}"
+        );
+
+        // The wire shape is unchanged: the hash is still a plain string.
+        let wire = serde_json::to_value(&command).expect("serialize the command");
+        assert_eq!(
+            wire,
+            json!({
+                "action": "SetTelegramApp",
+                "params": { "api_id": 1, "api_hash": HASH },
+            })
+        );
+        assert_eq!(
+            serde_json::from_value::<EngineCommand>(wire).expect("deserialize the command"),
+            command
+        );
+
+        // TypeScript sees the newtype as an alias of `string`, so the UI sends a plain string.
+        let ts = export_typescript().expect("export typescript should succeed");
+        assert!(ts.contains("export type ApiHash = string"), "{ts}");
+    }
 
     #[test]
     fn test_export_typescript() {

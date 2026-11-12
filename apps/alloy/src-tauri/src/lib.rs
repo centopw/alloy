@@ -137,21 +137,13 @@ pub fn run() {
             std::fs::create_dir_all(&data_dir)?;
 
             let secret_store = open_secret_store(&data_dir)?;
-            // One precedence rule for every binary (`TelegramConfig::resolve`): the process
-            // environment, then the pair `build.rs` baked in, then no Telegram at all (ADR 0016).
-            let telegram = match alloy_telegram::TelegramConfig::resolve() {
-                Ok(config) => Some(config),
-                Err(err @ alloy_telegram::ConfigError::NotConfigured) => {
-                    tracing::info!("{err}");
-                    None
-                }
-                Err(err) => {
-                    tracing::warn!(error = %err, "Telegram credentials are misconfigured");
-                    None
-                }
-            };
-            let factory: Arc<dyn ConnectorFactory> =
-                Arc::new(DefaultConnectorFactory::new(telegram, messenger_sidecar()));
+            // The Telegram application pair is the user's own, sealed in this same secret store;
+            // the factory reads it on every `ListNetworks`/`BeginLogin`, so a pair entered while
+            // the app runs takes effect without a restart (ADR 0016).
+            let factory: Arc<dyn ConnectorFactory> = Arc::new(DefaultConnectorFactory::new(
+                secret_store.clone(),
+                messenger_sidecar(),
+            ));
             // The database is opened before the window is shown so the first `ListChats` is served
             // from the stored projection instead of racing the migrations.
             let ctx = tauri::async_runtime::block_on(EngineContext::open(

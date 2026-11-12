@@ -297,9 +297,6 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Embedded at compile time so every installed copy identifies Alloy's own Telegram application.
-          ALLOY_TELEGRAM_API_ID: ${{ secrets.ALLOY_TELEGRAM_API_ID }}
-          ALLOY_TELEGRAM_API_HASH: ${{ secrets.ALLOY_TELEGRAM_API_HASH }}
         with:
           projectPath: apps/alloy
           tagName: ${{ github.ref_name }}
@@ -422,9 +419,6 @@ jobs:
       - name: Build Android APK (release, arm64)
         working-directory: apps/alloy
         env:
-          # Embedded at compile time so every installed copy identifies Alloy's own Telegram application.
-          ALLOY_TELEGRAM_API_ID: ${{ secrets.ALLOY_TELEGRAM_API_ID }}
-          ALLOY_TELEGRAM_API_HASH: ${{ secrets.ALLOY_TELEGRAM_API_HASH }}
           # Size over speed on phones: 36.7 MB vs 72.5 MB with the plain release profile (#73).
           # panic=abort alone saves about 14 MB of unwind tables.
           CARGO_PROFILE_RELEASE_OPT_LEVEL: s

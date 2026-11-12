@@ -11,12 +11,16 @@ use alloy_connector::types::{ChatKind as ConnectorChatKind, MessageKind as Conne
 use alloy_protocol::{
     AccountState as ProtocolAccountState, CapabilitiesDto, ChatKind as ProtocolChatKind,
     CodeChannel as ProtocolCodeChannel, ConnectionStatus, CookieFieldDto, LoginAlternativeDto,
-    LoginFailureDto, LoginInputDto, LoginStepDto, Network as ProtocolNetwork,
+    LoginFailureDto, LoginInputDto, LoginStepDto, Network as ProtocolNetwork, NetworkInfoDto,
+    NetworkSetupDto, NetworkSetupFieldDto, NetworkSetupKind,
+    TelegramAppSource as ProtocolTelegramAppSource,
 };
 use alloy_store::{
     AccountState as StoreAccountState, ChatKind as StoreChatKind, MessageKind as StoreMessageKind,
     Network as StoreNetwork,
 };
+
+use crate::factory::TelegramAppSource;
 
 // === Networks ===
 
@@ -41,6 +45,55 @@ pub fn network_label(network: ProtocolNetwork) -> &'static str {
         ProtocolNetwork::Telegram => "telegram",
         ProtocolNetwork::Messenger => "messenger",
         ProtocolNetwork::Fake => "fake",
+    }
+}
+
+/// Where a user registers the Telegram application pair.
+pub const TELEGRAM_APP_URL: &str = "https://my.telegram.org/apps";
+
+/// Telegram as `ListNetworks` reports it: always listed, ready once a pair is configured.
+///
+/// Without a pair the setup block names the two values the user has to enter and where to get
+/// them, so `BeginLogin` failing with `NotSupported` has actionable context.
+pub fn telegram_network_info(configured: bool) -> NetworkInfoDto {
+    let setup = (!configured).then(|| NetworkSetupDto {
+        kind: NetworkSetupKind::TelegramApp,
+        app_url: TELEGRAM_APP_URL.to_string(),
+        fields: vec![
+            NetworkSetupFieldDto {
+                key: "api_id".to_string(),
+                label: "API ID".to_string(),
+                secret: false,
+            },
+            NetworkSetupFieldDto {
+                key: "api_hash".to_string(),
+                label: "API hash".to_string(),
+                secret: true,
+            },
+        ],
+    });
+    NetworkInfoDto {
+        network: ProtocolNetwork::Telegram,
+        ready: configured,
+        setup,
+    }
+}
+
+/// Messenger as `ListNetworks` reports it: listed only when the sidecar exists, and never needs
+/// app-level configuration.
+pub fn messenger_network_info() -> NetworkInfoDto {
+    NetworkInfoDto {
+        network: ProtocolNetwork::Messenger,
+        ready: true,
+        setup: None,
+    }
+}
+
+/// The source of the Telegram application pair, as `GetTelegramApp` reports it.
+pub fn telegram_app_source(source: TelegramAppSource) -> ProtocolTelegramAppSource {
+    match source {
+        TelegramAppSource::Runtime => ProtocolTelegramAppSource::Runtime,
+        TelegramAppSource::Environment => ProtocolTelegramAppSource::Environment,
     }
 }
 

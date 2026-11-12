@@ -3,25 +3,206 @@
 //! The engine never constructs a network connector itself: it asks the factory injected into
 //! [`EngineContext`](crate::context::EngineContext). A desktop build injects
 //! [`DefaultConnectorFactory`]; the end-to-end tests inject [`FakeConnectorFactory`].
+//!
+//! The Telegram application pair is the person's own setting: the app asks for it once and seals
+//! it in the OS keyring ([`TELEGRAM_APP_SECRET`]). Nothing is compiled in, so an installed binary
+//! carries no credential, and the pair can be replaced without a release. The process environment
+//! stays as a developer override.
 
+use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use alloy_connector::{Connector, ConnectorError};
-use alloy_protocol::Network;
+use alloy_protocol::{Network, NetworkInfoDto};
 use alloy_sidecar::{SidecarConfig, SidecarConnector};
+use alloy_storage::{SecretStore, StorageError};
 use alloy_telegram::{ConfigError, TelegramConfig, TelegramConnector};
+use serde::{Deserialize, Serialize};
 
-use crate::convert::network_label;
+use crate::convert;
+use crate::error::EngineError;
 
 /// Environment variable naming the Messenger sidecar executable.
 pub const MESSENGER_SIDECAR_ENV: &str = "ALLOY_MESSENGER_SIDECAR";
 
+/// Secret under which the user-entered Telegram application pair is sealed.
+pub const TELEGRAM_APP_SECRET: &str = "alloy.telegram.app.v1";
+
+/// Named in [`ConnectorError::NotSupported`] when Telegram has no application pair yet.
+pub const TELEGRAM_APP_FEATURE: &str = "telegram application credentials";
+
+/// Length of a Telegram `api_hash`: 32 hexadecimal characters.
+const API_HASH_LEN: usize = 32;
+
+/// The application pair as the user entered it, sealed as JSON under [`TELEGRAM_APP_SECRET`].
+///
+/// The wire shape is `{"api_id":<i32>,"api_hash":"<hex>"}`. [`fmt::Debug`] redacts the hash
+/// because it is a credential.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TelegramAppRecord {
+    /// `api_id` from <https://my.telegram.org/apps>.
+    pub api_id: i32,
+    /// `api_hash` paired with [`Self::api_id`]. Never log or return it.
+    pub api_hash: String,
+}
+
+impl TelegramAppRecord {
+    /// Validates a user-entered pair: a positive `api_id` and a 32-character hex `api_hash`.
+    ///
+    /// The message is returned as text so the caller decides the error code; it never contains
+    /// the hash.
+    pub fn parse(api_id: i32, api_hash: &str) -> Result<Self, String> {
+        if api_id <= 0 {
+            return Err(format!(
+                "the Telegram api_id must be a positive number, got {api_id}"
+            ));
+        }
+        let api_hash = api_hash.trim();
+        if api_hash.len() != API_HASH_LEN || !api_hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(format!(
+                "the Telegram api_hash must be the {API_HASH_LEN}-character hexadecimal value \
+                 shown at https://my.telegram.org/apps"
+            ));
+        }
+        Ok(Self {
+            api_id,
+            api_hash: api_hash.to_string(),
+        })
+    }
+
+    /// The connector configuration for this pair, with Alloy's client defaults.
+    pub fn config(&self) -> TelegramConfig {
+        TelegramConfig::new(self.api_id, self.api_hash.clone())
+    }
+}
+
+impl fmt::Debug for TelegramAppRecord {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TelegramAppRecord")
+            .field("api_id", &self.api_id)
+            .field("api_hash", &"<redacted>")
+            .finish()
+    }
+}
+
+/// Where the Telegram application pair in effect came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TelegramAppSource {
+    /// Entered in the app and sealed in the OS keyring.
+    Runtime,
+    /// Exported as `ALLOY_TELEGRAM_API_ID`/`ALLOY_TELEGRAM_API_HASH` for a development build.
+    Environment,
+}
+
+/// A usable Telegram application pair and where it came from.
+#[derive(Debug, Clone)]
+pub struct ResolvedTelegramApp {
+    pub config: TelegramConfig,
+    pub source: TelegramAppSource,
+}
+
+/// Resolves the pair per call: the sealed runtime value first, then [`TelegramConfig::from_env`],
+/// then none.
+///
+/// A sealed value that cannot be decoded is logged and treated as absent, so a corrupt keyring
+/// entry never stops the app; entering the pair again overwrites it.
+pub async fn resolve_telegram_app(secrets: &dyn SecretStore) -> Option<ResolvedTelegramApp> {
+    match read_telegram_app(secrets).await {
+        Ok(Some(record)) => {
+            return Some(ResolvedTelegramApp {
+                config: record.config(),
+                source: TelegramAppSource::Runtime,
+            });
+        }
+        Ok(None) => {}
+        Err(err) => {
+            tracing::warn!(error = %err.message, "cannot read the sealed Telegram application pair")
+        }
+    }
+    match TelegramConfig::from_env() {
+        Ok(config) => Some(ResolvedTelegramApp {
+            config,
+            source: TelegramAppSource::Environment,
+        }),
+        Err(err @ ConfigError::NotConfigured) => {
+            tracing::debug!(error = %err, "no Telegram application pair is configured");
+            None
+        }
+        Err(err) => {
+            tracing::warn!(error = %err, "Telegram credentials in the environment are unusable");
+            None
+        }
+    }
+}
+
+/// Reads the sealed pair; `Ok(None)` when none is stored.
+pub async fn read_telegram_app(
+    secrets: &dyn SecretStore,
+) -> Result<Option<TelegramAppRecord>, EngineError> {
+    match secrets.get_secret(TELEGRAM_APP_SECRET).await {
+        Ok(json) => serde_json::from_str(&json).map(Some).map_err(|err| {
+            EngineError::internal_error(format!(
+                "the sealed Telegram application pair is not valid JSON: {err}"
+            ))
+        }),
+        Err(StorageError::SecretNotFound(_)) => Ok(None),
+        Err(err) => Err(EngineError::internal_error(format!(
+            "cannot read the sealed Telegram application pair: {err}"
+        ))),
+    }
+}
+
+/// Seals `record` in the OS keyring, replacing any previous pair.
+pub async fn save_telegram_app(
+    secrets: &dyn SecretStore,
+    record: &TelegramAppRecord,
+) -> Result<(), EngineError> {
+    let json = serde_json::to_string(record).map_err(|err| {
+        EngineError::internal_error(format!(
+            "cannot encode the Telegram application pair: {err}"
+        ))
+    })?;
+    secrets
+        .set_secret(TELEGRAM_APP_SECRET, &json)
+        .await
+        .map_err(|err| {
+            EngineError::internal_error(format!("cannot seal the Telegram application pair: {err}"))
+        })
+}
+
+/// Deletes the sealed pair; a later login needs it entered again.
+pub async fn clear_telegram_app(secrets: &dyn SecretStore) -> Result<(), EngineError> {
+    match secrets.delete_secret(TELEGRAM_APP_SECRET).await {
+        Ok(()) | Err(StorageError::SecretNotFound(_)) => Ok(()),
+        Err(err) => Err(EngineError::internal_error(format!(
+            "cannot delete the sealed Telegram application pair: {err}"
+        ))),
+    }
+}
+
+/// The error a login gets when Telegram has no application pair yet.
+///
+/// `not_supported` with [`TELEGRAM_APP_FEATURE`] as the reason, and a message that names where the
+/// user enters the pair, because this is a setting the person can fix without a new release.
+pub fn telegram_app_missing_error() -> EngineError {
+    EngineError {
+        code: "not_supported".to_string(),
+        message: "Telegram needs its application pair first: enter the api_id and api_hash from \
+                  https://my.telegram.org/apps in Settings -> Networks -> Telegram application"
+            .to_string(),
+        reason: Some(TELEGRAM_APP_FEATURE.to_string()),
+    }
+}
+
 /// Builds a connector for one network in one account's private directory.
 #[async_trait::async_trait]
 pub trait ConnectorFactory: Send + Sync {
-    /// Networks this factory can actually connect, in the order `ListNetworks` reports them.
-    fn networks(&self) -> Vec<Network>;
+    /// Networks this factory can offer, in the order `ListNetworks` reports them.
+    ///
+    /// Telegram is always present; `ready` and `setup` say whether a login can start now.
+    async fn networks(&self) -> Vec<NetworkInfoDto>;
 
     /// Creates a connector whose own files may live in `account_dir` (created by the caller).
     async fn create(
@@ -32,57 +213,54 @@ pub trait ConnectorFactory: Send + Sync {
 }
 
 /// The production factory: in-process Telegram and, when installed, the Messenger sidecar.
-#[derive(Debug, Clone, Default)]
+///
+/// It holds no credential of its own: the Telegram pair is read from `secrets` on every call, so
+/// a pair entered while the app runs takes effect without a restart.
+#[derive(Clone)]
 pub struct DefaultConnectorFactory {
-    /// Telegram application credentials; `None` omits Telegram from the network list.
-    pub telegram: Option<TelegramConfig>,
+    /// The platform secret store the Telegram application pair is sealed in.
+    pub secrets: Arc<dyn SecretStore>,
     /// Executable speaking the connector protocol for Messenger; `None` omits Messenger.
     pub messenger_sidecar: Option<PathBuf>,
 }
 
 impl DefaultConnectorFactory {
-    pub fn new(telegram: Option<TelegramConfig>, messenger_sidecar: Option<PathBuf>) -> Self {
+    pub fn new(secrets: Arc<dyn SecretStore>, messenger_sidecar: Option<PathBuf>) -> Self {
         Self {
-            telegram,
+            secrets,
             messenger_sidecar,
         }
     }
 
-    /// Reads the build's configuration: the Telegram application pair through
-    /// [`TelegramConfig::resolve`] and the Messenger sidecar from [`MESSENGER_SIDECAR_ENV`]. A
-    /// missing piece only removes that network; it is not an error, so a build with neither still
-    /// starts and lists no networks.
-    pub fn from_env() -> Self {
-        let telegram = match TelegramConfig::resolve() {
-            Ok(config) => Some(config),
-            // Nothing is wrong with an install that lacks the pair, and nobody using the app can
-            // set it: the error carries the instructions the developer building it needs.
-            Err(err @ ConfigError::NotConfigured) => {
-                tracing::info!("{err}");
-                None
-            }
-            Err(err) => {
-                tracing::warn!(error = %err, "Telegram credentials are misconfigured");
-                None
-            }
-        };
+    /// Reads the build's configuration: the Messenger sidecar from [`MESSENGER_SIDECAR_ENV`]. A
+    /// missing sidecar only removes that network; it is not an error.
+    pub fn from_env(secrets: Arc<dyn SecretStore>) -> Self {
         let messenger_sidecar = std::env::var_os(MESSENGER_SIDECAR_ENV).map(PathBuf::from);
         Self {
-            telegram,
+            secrets,
             messenger_sidecar,
         }
+    }
+
+    /// The Telegram configuration in effect for this call, or the error a login gets when the user
+    /// has not entered a pair yet.
+    pub async fn telegram_config(&self) -> Result<TelegramConfig, ConnectorError> {
+        resolve_telegram_app(self.secrets.as_ref())
+            .await
+            .map(|resolved| resolved.config)
+            .ok_or_else(|| ConnectorError::NotSupported {
+                feature: TELEGRAM_APP_FEATURE.to_string(),
+            })
     }
 }
 
 #[async_trait::async_trait]
 impl ConnectorFactory for DefaultConnectorFactory {
-    fn networks(&self) -> Vec<Network> {
-        let mut networks = Vec::new();
-        if self.telegram.is_some() {
-            networks.push(Network::Telegram);
-        }
+    async fn networks(&self) -> Vec<NetworkInfoDto> {
+        let telegram = resolve_telegram_app(self.secrets.as_ref()).await;
+        let mut networks = vec![convert::telegram_network_info(telegram.is_some())];
         if self.messenger_sidecar.is_some() {
-            networks.push(Network::Messenger);
+            networks.push(convert::messenger_network_info());
         }
         networks
     }
@@ -94,12 +272,7 @@ impl ConnectorFactory for DefaultConnectorFactory {
     ) -> Result<Arc<dyn Connector>, ConnectorError> {
         match network {
             Network::Telegram => {
-                let config = self
-                    .telegram
-                    .clone()
-                    .ok_or_else(|| ConnectorError::NotSupported {
-                        feature: network_label(network).to_string(),
-                    })?;
+                let config = self.telegram_config().await?;
                 Ok(Arc::new(TelegramConnector::new(config)))
             }
             Network::Messenger => {
@@ -107,21 +280,21 @@ impl ConnectorFactory for DefaultConnectorFactory {
                     self.messenger_sidecar
                         .clone()
                         .ok_or_else(|| ConnectorError::NotSupported {
-                            feature: network_label(network).to_string(),
+                            feature: convert::network_label(network).to_string(),
                         })?;
                 let connector =
                     SidecarConnector::spawn(SidecarConfig::new(program, account_dir)).await?;
                 Ok(Arc::new(connector))
             }
             Network::Fake => Err(ConnectorError::NotSupported {
-                feature: network_label(network).to_string(),
+                feature: convert::network_label(network).to_string(),
             }),
         }
     }
 }
 
 #[cfg(feature = "testing")]
-pub use testing::{CapabilityOverrideConnector, FakeConnectorFactory};
+pub use testing::{CapabilityOverrideConnector, FakeConnectorFactory, SealedTelegramFactory};
 
 #[cfg(feature = "testing")]
 mod testing {
@@ -134,11 +307,12 @@ mod testing {
         Connector, ConnectorError, ConnectorEvent, LoginInput, LoginStep, MediaRef,
         OutgoingMessage, Page, RemoteChat, RemoteMessage, RemoteUser, SendAck, SessionBlob,
     };
-    use alloy_protocol::Network;
+    use alloy_protocol::{Network, NetworkInfoDto};
+    use alloy_storage::SecretStore;
     use async_trait::async_trait;
     use tokio::sync::mpsc::Sender;
 
-    use super::ConnectorFactory;
+    use super::{ConnectorFactory, DefaultConnectorFactory};
     use crate::convert::network_label;
 
     /// Adjusts the capabilities a fake connector reports before the engine sees them.
@@ -190,8 +364,12 @@ mod testing {
 
     #[async_trait]
     impl ConnectorFactory for FakeConnectorFactory {
-        fn networks(&self) -> Vec<Network> {
-            vec![Network::Fake]
+        async fn networks(&self) -> Vec<NetworkInfoDto> {
+            vec![NetworkInfoDto {
+                network: Network::Fake,
+                ready: true,
+                setup: None,
+            }]
         }
 
         async fn create(
@@ -224,6 +402,61 @@ mod testing {
                     Ok(connector)
                 }
             }
+        }
+    }
+
+    /// A factory that keeps the production Telegram credential gate and swaps the connector for
+    /// the deterministic fake, so a test can prove a login reaches a connector without a network.
+    ///
+    /// `networks()` is exactly [`DefaultConnectorFactory`]'s, so readiness and the setup block
+    /// under test are the production ones.
+    pub struct SealedTelegramFactory {
+        factory: DefaultConnectorFactory,
+        created: Mutex<Vec<Arc<FakeConnector>>>,
+    }
+
+    impl SealedTelegramFactory {
+        pub fn new(secrets: Arc<dyn SecretStore>) -> Self {
+            Self {
+                factory: DefaultConnectorFactory::new(secrets, None),
+                created: Mutex::new(Vec::new()),
+            }
+        }
+
+        /// The connector created most recently.
+        pub fn last(&self) -> Option<Arc<FakeConnector>> {
+            self.created
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .last()
+                .cloned()
+        }
+    }
+
+    #[async_trait]
+    impl ConnectorFactory for SealedTelegramFactory {
+        async fn networks(&self) -> Vec<NetworkInfoDto> {
+            self.factory.networks().await
+        }
+
+        async fn create(
+            &self,
+            network: Network,
+            _account_dir: PathBuf,
+        ) -> Result<Arc<dyn Connector>, ConnectorError> {
+            if network != Network::Telegram {
+                return Err(ConnectorError::NotSupported {
+                    feature: network_label(network).to_string(),
+                });
+            }
+            // The production gate: no pair sealed and none in the environment.
+            self.factory.telegram_config().await?;
+            let fake = Arc::new(FakeConnector::new());
+            self.created
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(fake.clone());
+            Ok(fake)
         }
     }
 
