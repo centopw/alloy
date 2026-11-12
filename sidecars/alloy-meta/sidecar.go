@@ -68,6 +68,8 @@ type Messenger struct {
 	log     zerolog.Logger
 	out     *writer
 	dataDir string
+	// settings is the runtime configuration the host passed in the environment; it never changes.
+	settings settings
 
 	mu         sync.Mutex
 	cookies    *cookies.Cookies
@@ -99,7 +101,7 @@ type Messenger struct {
 	device      *store.Device
 }
 
-func newMessenger(log zerolog.Logger, out *writer) *Messenger {
+func newMessenger(log zerolog.Logger, out *writer, cfg settings) *Messenger {
 	dataDir := os.Getenv("ALLOY_SIDECAR_DATA_DIR")
 	if dataDir == "" {
 		if configDir, err := os.UserConfigDir(); err == nil {
@@ -112,6 +114,7 @@ func newMessenger(log zerolog.Logger, out *writer) *Messenger {
 		log:         log,
 		out:         out,
 		dataDir:     dataDir,
+		settings:    cfg,
 		threads:     make(map[int64]*threadInfo),
 		e2eeThreads: make(map[string]*threadInfo),
 		messages:    make(map[string]*msgMeta),
@@ -179,7 +182,7 @@ func (m *Messenger) ensureClientLocked() *WireError {
 		return errUnauthorized()
 	}
 	if m.cli == nil {
-		m.cli = messagix.NewClient(m.cookies, m.logger(), &messagix.Config{})
+		m.cli = m.settings.newMessagixClient(m.logger(), m.cookies)
 		m.cli.MessengerLite.SetNativeSession(m.native)
 	}
 	return nil
@@ -224,7 +227,7 @@ func (m *Messenger) restore(ctx context.Context, params json.RawMessage) (any, *
 	m.mu.Lock()
 	m.cookies = c
 	m.native = native
-	m.cli = messagix.NewClient(c, m.logger(), &messagix.Config{})
+	m.cli = m.settings.newMessagixClient(m.logger(), c)
 	m.cli.MessengerLite.SetNativeSession(native)
 	m.loggedOut = false
 	m.mu.Unlock()

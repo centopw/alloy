@@ -55,13 +55,16 @@ func encodeSession(c *cookies.Cookies, native *types.NativeSession) (string, err
 }
 
 // sessionPlatform is the platform a stored blob was created for. Both messenger.com cookie import
-// and the Messenger Lite flow are accepted; anything else is a foreign or corrupt blob.
+// and either Messenger Lite variant are accepted — the blob records what the account logged in
+// with, which is what its cookies belong to; anything else is a foreign or corrupt blob.
 func sessionPlatform(name string) (types.Platform, error) {
 	switch name {
 	case types.Messenger.String():
 		return types.Messenger, nil
 	case types.MessengerLiteAndroid.String():
 		return types.MessengerLiteAndroid, nil
+	case types.MessengerLiteIOS.String():
+		return types.MessengerLiteIOS, nil
 	default:
 		return types.Unset, fmt.Errorf("session platform %q is not messenger", name)
 	}

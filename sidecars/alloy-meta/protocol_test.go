@@ -134,7 +134,7 @@ func TestPasswordLoginStep(t *testing.T) {
 
 // TestSwitchToCookies drives the login switch the UI sends when the user picks the cookie fallback.
 func TestSwitchToCookies(t *testing.T) {
-	m := newMessenger(zerolog.Nop(), newWriter(io.Discard))
+	m := newMessenger(zerolog.Nop(), newWriter(io.Discard), defaultSettings())
 	if step := m.beginLogin(); step.Type != "credentials" {
 		t.Fatalf("begin_login returned %q, want credentials", step.Type)
 	}
@@ -158,7 +158,7 @@ func TestSwitchToCookies(t *testing.T) {
 }
 
 func TestSwitchToUnknownAlternativeFails(t *testing.T) {
-	m := newMessenger(zerolog.Nop(), newWriter(io.Discard))
+	m := newMessenger(zerolog.Nop(), newWriter(io.Discard), defaultSettings())
 	m.beginLogin()
 	result, _ := m.submitLogin(context.Background(), json.RawMessage(`{"input":{"type":"switch","to":"qr"}}`))
 	step, ok := result.(LoginStep)
@@ -168,7 +168,7 @@ func TestSwitchToUnknownAlternativeFails(t *testing.T) {
 }
 
 func TestLoginRequiresBegin(t *testing.T) {
-	m := newMessenger(zerolog.Nop(), newWriter(io.Discard))
+	m := newMessenger(zerolog.Nop(), newWriter(io.Discard), defaultSettings())
 	result, _ := m.submitLogin(context.Background(), json.RawMessage(`{"input":{"type":"code","code":"1"}}`))
 	step, ok := result.(LoginStep)
 	if !ok || step.Type != "failed" || step.Reason == nil || step.Reason.Type != "invalid_input" {

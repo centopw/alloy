@@ -23,12 +23,6 @@ import (
 	"go.mau.fi/mautrix-meta/pkg/messagix/types"
 )
 
-// litePlatform is the platform variant mautrix-meta uses for its Android Messenger Lite login. The
-// bridge offers iOS and Android; Android is the variant whose login response also carries a native
-// session (access token + device ids) that the session-for-app endpoint can exchange later, so it is
-// the one worth persisting.
-const litePlatform = types.MessengerLiteAndroid
-
 // liteUsernameLabel is the label for the username field. Messenger accounts are Facebook accounts,
 // so an email address, a phone number or the username all work.
 const liteUsernameLabel = "Email or phone number"
@@ -101,12 +95,13 @@ type liteLogin struct {
 	flow *liteFlow
 }
 
-// newLiteLogin starts a fresh Messenger Lite attempt. The cookie jar is empty on purpose: the flow
-// produces its own cookies, and a stale session would leak the previous account into the login.
-func newLiteLogin(log zerolog.Logger) *liteLogin {
+// newLiteLogin starts a fresh Messenger Lite attempt on the configured platform variant. The cookie
+// jar is empty on purpose: the flow produces its own cookies, and a stale session would leak the
+// previous account into the login.
+func newLiteLogin(cfg settings, log zerolog.Logger) *liteLogin {
 	l := &liteLogin{
 		log: log,
-		cli: messagix.NewClient(&cookies.Cookies{Platform: litePlatform}, log, &messagix.Config{}),
+		cli: cfg.newMessagixClient(log, &cookies.Cookies{Platform: cfg.platform}),
 	}
 	l.flow = &liteFlow{poll: l.poll}
 	return l

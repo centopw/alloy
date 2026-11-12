@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	"go.mau.fi/mautrix-meta/pkg/messagix"
 	"go.mau.fi/mautrix-meta/pkg/messagix/cookies"
 	"go.mau.fi/mautrix-meta/pkg/messagix/httpclient"
 	"go.mau.fi/mautrix-meta/pkg/messagix/types"
@@ -108,7 +107,7 @@ func (m *Messenger) liteForAttempt() *liteLogin {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.lite == nil {
-		m.lite = newLiteLogin(m.logger())
+		m.lite = newLiteLogin(m.settings, m.logger())
 	}
 	return m.lite
 }
@@ -137,7 +136,7 @@ func (m *Messenger) finishLiteLogin(ctx context.Context, c *cookies.Cookies, fai
 		native = lite.nativeSession()
 	}
 
-	cli := messagix.NewClient(c, m.logger(), &messagix.Config{})
+	cli := m.settings.newMessagixClient(m.logger(), c)
 	cli.MessengerLite.SetNativeSession(native)
 	user, initial, err := cli.LoadMessagesPage(ctx)
 	if err != nil {
@@ -175,7 +174,7 @@ func (m *Messenger) submitCookies(ctx context.Context, values map[string]string,
 	if err != nil {
 		return fail(failureInvalidInput("cookies", err.Error()))
 	}
-	cli := messagix.NewClient(c, m.logger(), &messagix.Config{})
+	cli := m.settings.newMessagixClient(m.logger(), c)
 	user, initial, err := cli.LoadMessagesPage(ctx)
 	if err != nil {
 		return fail(loginFailure(err, "cookies"))

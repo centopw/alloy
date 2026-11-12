@@ -37,8 +37,19 @@ func (w *writer) write(frame any) error {
 
 func main() {
 	logger := zerolog.New(os.Stderr).With().Timestamp().Logger()
+	cfg, err := loadSettings(os.Getenv)
+	if err != nil {
+		// stdout is reserved for protocol frames, so the host reads this on stderr and surfaces it
+		// as the network's error instead of a sidecar that starts with the wrong settings.
+		logger.Error().Err(err).Msg("Invalid startup configuration")
+		os.Exit(2)
+	}
+	logger.Info().
+		Str("platform", cfg.platformName()).
+		Str("proxy", cfg.describeProxy()).
+		Msg("Messenger sidecar starting")
 	out := newWriter(os.Stdout)
-	messenger := newMessenger(logger, out)
+	messenger := newMessenger(logger, out, cfg)
 
 	if err := out.write(NewHello()); err != nil {
 		logger.Err(err).Msg("Failed to write the hello frame")
