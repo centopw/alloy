@@ -32,6 +32,8 @@ import type {
   LoginStepDto,
   Network,
   NetworkInfoDto,
+  NetworkSettingDto,
+  NetworkSettingKind,
   RoomId,
   RoomMediaItem,
   RoomMediaKind,
@@ -64,6 +66,37 @@ const MESSENGER_COOKIES: CookieFieldDto[] = [
   { name: 'c_user', label: 'c_user (the numeric id in your Facebook profile URL)', required: true },
   { name: 'xs', label: 'xs (the session cookie)', required: true },
   { name: 'datr', label: 'datr (the browser cookie)', required: false },
+];
+
+/** One Messenger runtime knob, as `ListNetworks` declares it. */
+interface MockMessengerSetting {
+  key: string;
+  label: string;
+  kind: NetworkSettingKind;
+  options: { value: string; label: string }[];
+  /** Value in effect when nothing is stored; clearing restores it. */
+  default: string | null;
+}
+
+/** Messenger's runtime knobs, mirroring the engine's declaration in `factory.rs`. */
+const MESSENGER_SETTINGS: MockMessengerSetting[] = [
+  {
+    key: 'proxy',
+    label: 'Proxy URL (http://, https://, socks5://)',
+    kind: 'text',
+    options: [],
+    default: null,
+  },
+  {
+    key: 'platform',
+    label: 'Platform',
+    kind: 'choice',
+    options: [
+      { value: 'android', label: 'Messenger for Android' },
+      { value: 'ios', label: 'Messenger for iOS' },
+    ],
+    default: 'android',
+  },
 ];
 
 /** Where the Telegram application pair is registered; `ListNetworks` hands it to the UI. */
@@ -192,6 +225,8 @@ export class MockTransport implements Transport {
   ]);
   /** The Telegram application pair in effect; `null` until one is stored. */
   private telegramApp: { api_id: number; api_hash: string } | null = { ...DEMO_TELEGRAM_APP };
+  /** Messenger's stored runtime settings; a key that was cleared falls back to its default. */
+  private messengerSettings = new Map<string, string>();
   private counter = 0;
   private txnCounter = 0;
   private announced = false;
@@ -594,7 +629,10 @@ export class MockTransport implements Transport {
     return out.reverse();
   }
 
-  /** `ListNetworks`: Telegram is always offered, ready only once its pair is stored. */
+  /**
+   * `ListNetworks`: Telegram is always offered, ready only once its pair is stored; Messenger
+   * always declares its runtime settings, with the values stored here.
+   */
   private networkInfo(): NetworkInfoDto[] {
     const configured = this.telegramApp !== null;
     return [
@@ -606,15 +644,44 @@ export class MockTransport implements Transport {
           : {
               kind: 'telegram_app',
               app_url: TELEGRAM_APPS_URL,
-              fields: [
+              credentials: [
                 { key: 'api_id', label: 'API ID', secret: false },
                 { key: 'api_hash', label: 'API hash', secret: true },
               ],
+              settings: [],
             },
       },
-      { network: 'messenger', ready: true, setup: null },
+      {
+        network: 'messenger',
+        ready: true,
+        setup: {
+          kind: 'messenger',
+          app_url: '',
+          credentials: [],
+          settings: MESSENGER_SETTINGS.map((spec) => this.settingDto(spec)),
+        },
+      },
       { network: 'fake', ready: true, setup: null },
     ];
+  }
+
+  /** One declared Messenger setting with the value in effect: stored, else its default. */
+  private settingDto(spec: MockMessengerSetting): NetworkSettingDto {
+    return {
+      key: spec.key,
+      label: spec.label,
+      kind: spec.kind,
+      options: spec.options.map((option) => ({ ...option })),
+      value: this.messengerSettings.get(spec.key) ?? spec.default,
+    };
+  }
+
+  /** The declaration of `key` on `network`; anything else is what the engine calls invalid. */
+  private messengerSetting(network: Network, key: string): MockMessengerSetting {
+    const spec =
+      network === 'messenger' ? MESSENGER_SETTINGS.find((entry) => entry.key === key) : undefined;
+    if (!spec) throw invalidArgument(`${network} does not declare a "${key}" setting`);
+    return spec;
   }
 
   // === Command handling ===
@@ -652,6 +719,38 @@ export class MockTransport implements Transport {
             source: this.telegramApp === null ? 'none' : 'runtime',
           },
         };
+
+      case 'SetNetworkSetting': {
+        const spec = this.messengerSetting(command.params.network, command.params.key);
+        const value = command.params.value.trim();
+        if (value === '') {
+          // The engine treats an empty value as a clear; the declared default applies again.
+          this.messengerSettings.delete(spec.key);
+        } else if (spec.kind === 'choice') {
+          if (!spec.options.some((option) => option.value === value)) {
+            throw invalidArgument(
+              `the ${spec.key} setting accepts only ${spec.options
+                .map((option) => option.value)
+                .join(', ')}`
+            );
+          }
+          this.messengerSettings.set(spec.key, value);
+        } else {
+          if (spec.key === 'proxy' && !/^(https?|socks5):\/\/\S+$/i.test(value)) {
+            throw invalidArgument(
+              'the proxy must be an http://, https:// or socks5:// URL with a host'
+            );
+          }
+          this.messengerSettings.set(spec.key, value);
+        }
+        return { type: 'NetworkSettingSet', payload: { setting: this.settingDto(spec) } };
+      }
+
+      case 'ClearNetworkSetting': {
+        const spec = this.messengerSetting(command.params.network, command.params.key);
+        this.messengerSettings.delete(spec.key);
+        return { type: 'NetworkSettingCleared' };
+      }
 
       case 'BeginLogin': {
         const info = this.networkInfo().find(

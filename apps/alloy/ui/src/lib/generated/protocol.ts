@@ -153,6 +153,24 @@ export type EngineCommand =
 { action: "ClearTelegramApp" } | 
 /**  Reports whether a Telegram application pair is configured, and where it came from. */
 { action: "GetTelegramApp" } | 
+/**
+ *  Stores one runtime setting of `network`; an empty `value` clears it.
+ * 
+ *  Only the settings `ListNetworks` declares for that network are accepted: an unknown `key`
+ *  is `invalid_argument`, as is a `choice` value outside its options or a text setting whose
+ *  declaration asks for a proxy URL that does not parse. The change applies to the next
+ *  connector the engine creates; a running account is not restarted.
+ */
+{ action: "SetNetworkSetting"; params: {
+	network: Network,
+	key: string,
+	value: string,
+} } | 
+/**  Removes the stored value of one runtime setting; its declared default applies again. */
+{ action: "ClearNetworkSetting"; params: {
+	network: Network,
+	key: string,
+} } | 
 /**  Starts the room list stream; `filter` narrows the projection by chat name. */
 { action: "SubscribeRoomList"; params: {
 	filter: string | null,
@@ -414,6 +432,12 @@ export type EngineResponse = { type: "AccountsList"; payload: {
 	api_id: number | null,
 	source: TelegramAppSource,
 } } | 
+/**  The setting after the write, with the value now in effect (never a secret's value). */
+{ type: "NetworkSettingSet"; payload: {
+	setting: NetworkSettingDto,
+} } | 
+/**  The stored value is gone; the declared default applies again. */
+{ type: "NetworkSettingCleared" } | 
 /**  The next login step of `login_id`; answers both `BeginLogin` and `SubmitLogin`. */
 { type: "LoginStep"; payload: {
 	login_id: LoginId,
@@ -666,17 +690,74 @@ export type NetworkInfoDto = {
 	network: Network,
 	/**  `BeginLogin` can start now; `false` means `setup` explains what is missing. */
 	ready: boolean,
-	/**  The values the user must provide first; `None` once the network is ready. */
+	/**
+	 *  The setup block: credentials still missing, and the network's runtime settings.
+	 * 
+	 *  Changing a setting never changes `ready`, and it applies to the next connector the engine
+	 *  creates; a running account keeps the settings it was started with. `None` only when the
+	 *  network needs no input and declares no settings.
+	 */
 	setup: NetworkSetupDto | null,
 };
 
-/**  What the user has to enter before a network becomes usable. */
+/**
+ *  One runtime knob of a network, with the value in effect.
+ * 
+ *  `SetNetworkSetting` accepts only the keys the network declares, and an empty value clears the
+ *  stored one so the default (if any) applies again.
+ */
+export type NetworkSettingDto = {
+	/**  Key `SetNetworkSetting` and `ClearNetworkSetting` expect, e.g. `"proxy"`. */
+	key: string,
+	/**  Human-readable label. */
+	label: string,
+	/**  How the value is edited and validated. */
+	kind: NetworkSettingKind,
+	/**  Allowed values for [`NetworkSettingKind::Choice`]; empty for the other kinds. */
+	options: NetworkSettingOptionDto[],
+	/**
+	 *  The value in effect: the stored one, else the declared default, else `None`. A
+	 *  [`NetworkSettingKind::Secret`] setting never carries its value.
+	 */
+	value: string | null,
+};
+
+/**  How a [`NetworkSettingDto`] is edited and stored. */
+export type NetworkSettingKind = 
+/**  Free text, persisted in the engine's settings file. */
+"text" | 
+/**  Free text sealed in the OS keyring; never returned and never written in the clear. */
+"secret" | 
+/**  Exactly one of the declared options. */
+"choice";
+
+/**  One allowed value of a [`NetworkSettingKind::Choice`] setting. */
+export type NetworkSettingOptionDto = {
+	/**  Value `SetNetworkSetting` stores. */
+	value: string,
+	/**  Human-readable label. */
+	label: string,
+};
+
+/**
+ *  What a network asks the user for: credentials it cannot work without, and the knobs it lets
+ *  the person change at runtime.
+ * 
+ *  The two are deliberately separate. A credential identifies the application and never carries a
+ *  value on the wire; a setting is a choice that is read back, and each declared setting is the
+ *  complete list of what `SetNetworkSetting` accepts for that key.
+ */
 export type NetworkSetupDto = {
 	kind: NetworkSetupKind,
-	/**  Page where the user registers the values, opened in a browser. */
+	/**
+	 *  Page where the user registers the credentials, opened in a browser. Empty when the network
+	 *  registers nothing there.
+	 */
 	app_url: string,
-	/**  Inputs to collect, in display order. */
-	fields: NetworkSetupFieldDto[],
+	/**  Credentials to collect, in display order. Never carries a value: the wire type has none. */
+	credentials: NetworkSetupFieldDto[],
+	/**  Runtime settings, in display order, with the value in effect. */
+	settings: NetworkSettingDto[],
 };
 
 /**  One input a [`NetworkSetupDto`] collects. */
@@ -689,10 +770,12 @@ export type NetworkSetupFieldDto = {
 	secret: boolean,
 };
 
-/**  Which setup a [`NetworkSetupDto`] asks for. */
+/**  Which setup a [`NetworkSetupDto`] describes. */
 export type NetworkSetupKind = 
 /**  The application `api_id`/`api_hash` pair from <https://my.telegram.org/apps>. */
-"telegram_app";
+"telegram_app" | 
+/**  Messenger's own runtime settings; it asks for no credential here. */
+"messenger";
 
 export type NotificationCount = {
 	highlight_count: number,

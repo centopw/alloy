@@ -148,6 +148,28 @@ class SessionStore {
     await Promise.all([this.refreshTelegramApp(), this.loadNetworks()]);
   }
 
+  /**
+   * Stores one runtime setting the network declares, then re-reads the list: the value the record
+   * shows is the engine's, never the one typed here. The engine refuses an undeclared key or a
+   * value its declaration rejects with `invalid_argument`. Applies to the next connector.
+   */
+  async setNetworkSetting(network: Network, key: string, value: string): Promise<void> {
+    expect(
+      await client.invoke({ action: 'SetNetworkSetting', params: { network, key, value } }),
+      'NetworkSettingSet'
+    );
+    await this.loadNetworks();
+  }
+
+  /** Drops the stored value; the declared default (if any) applies again on the next connector. */
+  async clearNetworkSetting(network: Network, key: string): Promise<void> {
+    expect(
+      await client.invoke({ action: 'ClearNetworkSetting', params: { network, key } }),
+      'NetworkSettingCleared'
+    );
+    await this.loadNetworks();
+  }
+
   /** Opens onboarding over the app, keeping the current accounts on screen behind it. */
   openAddAccount() {
     this.preferredNetwork = null;

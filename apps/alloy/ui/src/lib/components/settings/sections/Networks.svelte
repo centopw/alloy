@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { SettingGroup } from '$lib/components/settings/controls';
+  import NetworkSettingsForm from './NetworkSettingsForm.svelte';
   import TelegramAppForm from './TelegramAppForm.svelte';
   import { errorMessage } from '$lib/stores/errors';
   import { session, networkLabel } from '$lib/stores/session.svelte';
@@ -55,6 +56,19 @@
   >
     <TelegramAppForm />
   </SettingGroup>
+
+  <!-- Runtime settings exist only where the engine declared them: a network without a setup block
+       (its sidecar missing, its credentials absent) shows none, so nothing writes into a void. -->
+  {#each session.networks as info (info.network)}
+    {#if info.network !== 'telegram' && info.setup && info.setup.settings.length > 0}
+      <SettingGroup
+        title={networkLabel(info.network)}
+        description={t('settings-networks-settings-description')}
+      >
+        <NetworkSettingsForm {info} />
+      </SettingGroup>
+    {/if}
+  {/each}
 </section>
 
 <style>
