@@ -234,7 +234,7 @@ just deny             # License + advisory checks
 just audit            # Vulnerability scan
 just ui-check         # SvelteKit type check
 just ui-build         # Build UI assets
-just sidecar          # Build the Messenger sidecar for the host triple (needed by any alloy-app build)
+just sidecar          # Rebuild the Messenger sidecar for the host triple (builds automatically on demand)
 just sidecar-android  # Build the arm64 Android sidecar
 just ci               # Run full pipeline (all checks + tests + audit + UI)
 ```

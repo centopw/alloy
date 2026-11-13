@@ -39,7 +39,9 @@ ui-check:
 ui-build:
     pnpm -C {{UI_DIR}} build
 
-# Build the Messenger sidecar (Go) for the host triple, where `tauri build` bundles it
+# Build the Messenger sidecar (Go) for the host triple, where `tauri build` bundles it.
+# apps/alloy/src-tauri/build.rs already builds it on demand when Go is on PATH; run this to
+# force a rebuild, or to produce the binary without invoking cargo.
 sidecar:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -58,7 +60,9 @@ sidecar:
     CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build -trimpath -ldflags='-s -w' \
       -o "../../apps/alloy/src-tauri/binaries/alloy-meta-$triple$ext" .
 
-# Build the Messenger sidecar for the arm64 Android APK (it ships as a native library)
+# Build the Messenger sidecar for the arm64 Android APK (it ships as a native library).
+# Like `sidecar`, this forces a rebuild; an `aarch64-linux-android` cargo build produces the
+# triple-named copy on its own.
 sidecar-android:
     #!/usr/bin/env bash
     set -euo pipefail

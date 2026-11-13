@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.4.0 (pre-release)
+
+Alloy no longer talks to a homeserver: Telegram and Messenger are connected straight from the device. Both networks may restrict accounts that use unofficial clients, so read https://core.telegram.org/api/terms and https://github.com/mautrix/meta/issues/44 before you connect an account you cannot afford to lose.
+
+### Added
+- **Accounts connect straight from the device.** Telegram signs in in-process on `grammers` — phone number, login code, two-step password, or a QR code — and Messenger goes through a separately shipped Go sidecar that takes the account's email, phone number or username with its password, and browser cookies when the account cannot sign in with a password at all. No homeserver sits between the app and either network.
+- **A send that fails is not lost.** Outgoing operations are written to an outbox row with their attempt count and next attempt time, and retried on a backoff that starts at one second and caps at five minutes; typing and read markers ride the same queue.
+- **Android keeps the connections open while you are elsewhere.** A `dataSync` foreground service holds the process — and with it the Telegram socket and the Messenger sidecar, which is its child — alive when the app is backgrounded, under a low-importance ongoing notification. Upload progress, notifications and the mobile shell work as before, and Android's own data-sync time limit still ends the service; there is no homeserver to register a pusher with.
+
+### Changed
+- **Storage is local-first.** Accounts, chats, participants, messages, reactions, read markers, media and the outbox live in an on-device SQLite database whose migrations are append-only and checksummed, so an upgrade adds schema instead of rewriting what an earlier build wrote.
+- **No network credential is compiled into a release.** The Telegram application pair (API id and hash) and the Messenger proxy and platform variant are entered in Settings → Networks and sealed in the OS keyring; a network without them reads as needing setup instead of failing at login.
+
+### Removed
+- **The Matrix core.** `alloy-core`, `alloy-push` and `alloy-ffi` are gone, and with them the engine that drove them: the app has no homeserver, no session discovery and no end-to-end encryption or verification of its own, because encryption, where a network has it, is the network's own.
+- **The Matrix surfaces in the interface.** Device verification, the Devices and Encryption panels, spaces, the room directory, polls, threads, live location sharing, link previews and the dialogs behind room creation and renaming are removed from the UI and from the protocol; the shell now shows what the two connectors can answer.
+- **UnifiedPush and the Synapse fixtures.** The push registration path and `tests/synapse` — compose file, user registration, start script and the engine shards that ran against it — are deleted: there is no homeserver to register a pusher with, and nothing left to run locally.
+
+### Fixed
+- **The i18n gate read engine actions as copy.** Three stores passed an engine action to the IPC client as a string literal, which `pnpm check` treats as a hardcoded English string; they now call `client.logout` and `client.unsubscribe`.
+- **The Android release job copied the sidecar into a directory it had not created.** The job changed directory before `mkdir`, so the triple-named binary landed under `sidecars/alloy-meta/apps/...` and `cp` failed; the `mkdir` now runs from the repository root and the copy finds its destination.
+
 ## 0.3.3 (pre-release)
 
 ### Fixed

@@ -55,10 +55,16 @@ Ensure you have the following installed on your machine:
    just ui-check
    ```
 
-3. **Build the Messenger sidecar** (required before any build of `alloy-app`; tauri-build copies `apps/alloy/src-tauri/binaries/alloy-meta-<triple>` and fails when it is missing):
+3. **Messenger sidecar:** nothing to do on a machine with Go. `apps/alloy/src-tauri/build.rs`
+   builds `apps/alloy/src-tauri/binaries/alloy-meta-<triple>` on demand the first time `alloy-app`
+   is built, and again only when the sidecar sources change; without Go the build stops with one
+   message naming both ways forward (install Go 1.26+, or run `just sidecar` elsewhere and copy the
+   binary in). To force a rebuild, or to produce the binary without cargo:
    ```bash
-   just sidecar
+   just sidecar         # host triple; `just sidecar-android` for the arm64 Android library
    ```
+   CI still builds the sidecar explicitly before clippy and tests, so a Go-less runner never gets
+   that far.
 
 4. **Verify your environment with the CI recipe:**
    ```bash
