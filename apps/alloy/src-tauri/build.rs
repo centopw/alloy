@@ -17,7 +17,14 @@ const SIDECAR_DIR: &str = "../../../sidecars/alloy-meta";
 const BINARIES_DIR: &str = "binaries";
 const SIDECAR_NAME: &str = "alloy-meta";
 /// Environment that changes the sidecar build output; a change must rerun this script.
-const TRACKED_ENV: [&str; 6] = ["TARGET", "GOFLAGS", "CGO_ENABLED", "GOOS", "GOARCH", "GOCACHE"];
+const TRACKED_ENV: [&str; 6] = [
+    "TARGET",
+    "GOFLAGS",
+    "CGO_ENABLED",
+    "GOOS",
+    "GOARCH",
+    "GOCACHE",
+];
 
 fn main() {
     // `option_env!("ALLOY_DISTRIBUTION")` in src/update.rs is read at compile time.
@@ -33,7 +40,11 @@ fn ensure_sidecar() {
     );
     let target = env::var("TARGET").expect("cargo sets TARGET for build scripts");
     let sidecar_dir = manifest_dir.join(SIDECAR_DIR);
-    let extension = if target.contains("windows") { ".exe" } else { "" };
+    let extension = if target.contains("windows") {
+        ".exe"
+    } else {
+        ""
+    };
     let dest = manifest_dir
         .join(BINARIES_DIR)
         .join(format!("{SIDECAR_NAME}-{target}{extension}"));
@@ -96,8 +107,9 @@ fn sidecar_sources(dir: &Path) -> Vec<PathBuf> {
             )
         });
         for entry in entries {
-            let entry = entry
-                .unwrap_or_else(|error| panic!("cannot read an entry of {}: {error}", current.display()));
+            let entry = entry.unwrap_or_else(|error| {
+                panic!("cannot read an entry of {}: {error}", current.display())
+            });
             let path = entry.path();
             if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
                 pending.push(path);
