@@ -270,11 +270,13 @@ jobs:
       - name: Build the Messenger sidecar into jniLibs
         if: steps.check-android.outputs.has_android == 'true'
         run: |
+          mkdir -p apps/alloy/src-tauri/binaries
           mkdir -p apps/alloy/src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a
           cd sidecars/alloy-meta
           CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build -trimpath -ldflags='-s -w' \
             -o ../../apps/alloy/src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a/liballoymeta.so .
-          mkdir -p apps/alloy/src-tauri/binaries
+          # The app build script copies `binaries/alloy-meta-<triple>` into the target dir and fails
+          # when it is missing, so the triple-named file must exist as well as the jniLibs copy.
           cp ../../apps/alloy/src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a/liballoymeta.so \
             ../../apps/alloy/src-tauri/binaries/alloy-meta-aarch64-linux-android
 

@@ -225,7 +225,7 @@ class RoomsStore {
     this.rooms.length = 0;
     this.activeRoomId = null;
     this.lastActive = null;
-    if (id) await client.invoke({ action: 'Unsubscribe', params: { subscription_id: id } }).catch(() => {});
+    if (id) await client.unsubscribe(id).catch(() => {});
   }
 
   /**

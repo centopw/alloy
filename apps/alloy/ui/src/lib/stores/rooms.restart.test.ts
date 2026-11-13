@@ -6,6 +6,7 @@ vi.mock('../ipc/index.js', () => ({
   client: {
     subscribe: () => () => {},
     invoke: ipc.invoke,
+    unsubscribe: (id: string) => ipc.invoke({ action: 'Unsubscribe', params: { subscription_id: id } }),
   },
   applyDiff: vi.fn(),
 }));

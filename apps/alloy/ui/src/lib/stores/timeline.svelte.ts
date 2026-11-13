@@ -246,7 +246,7 @@ class TimelineStore {
     this.selecting = false;
     this.selectedIds = [];
     this.pendingDelete = null;
-    if (id) await client.invoke({ action: 'Unsubscribe', params: { subscription_id: id } }).catch(() => {});
+    if (id) await client.unsubscribe(id).catch(() => {});
   }
 
   /** The timeline reports its scroll offset, so reopening the room can put the reader back. */

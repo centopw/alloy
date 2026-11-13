@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../ipc/index.js', () => ({
   client: {
     invoke: mocks.invoke,
+    unsubscribe: (id: string) => mocks.invoke({ action: 'Unsubscribe', params: { subscription_id: id } }),
     subscribe: (fn: (e: unknown) => void) => {
       mocks.handlers.push(fn);
       return () => {};

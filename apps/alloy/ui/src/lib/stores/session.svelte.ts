@@ -308,7 +308,7 @@ class SessionStore {
     this.error = null;
     try {
       for (const id of ids) {
-        expect(await client.invoke({ action: 'Logout', params: { account_id: id } }), 'LoggedOut');
+        expect(await client.logout(id), 'LoggedOut');
         this.dropAccount(id);
       }
       this.syncPhase();
