@@ -48,6 +48,13 @@
   const video = $derived(mediaKind === 'video');
   const loadFailed = $derived((visual || video) && failed);
   const aspect = $derived(width && height ? `${width} / ${height}` : '4 / 3');
+  /**
+   * The frame's own width: the 400px cap, or less when the 360px height cap binds first. It has to
+   * be definite. A percentage-width image inside a shrink-to-fit message box contributes its
+   * natural width to the box, so a frame that is only clamped by `max-width` ends up narrower
+   * than the bubble around it and sits off to one side with the timestamp far away.
+   */
+  const ratio = $derived(width && height ? width / height : 4 / 3);
   /** A caption that is only the file name belongs to the attachment row, not to the picture. */
   const caption = $derived(body || t('media-view-attachment'));
 
@@ -145,7 +152,7 @@
   <button
     class="frame frame-open"
     type="button"
-    style="aspect-ratio: {aspect};"
+    style="aspect-ratio: {aspect}; --ratio: {ratio};"
     aria-label={t('media-open', { name: body || mediaKind })}
     onclick={() => void openFullSize()}
     disabled={loadingFile}
@@ -177,9 +184,9 @@
 <style>
   .frame {
     position: relative;
-    max-width: min(400px, 100%);
-    min-width: 120px;
-    max-height: 360px;
+    width: min(400px, calc(360px * var(--ratio, 1.3333)));
+    max-width: 100%;
+    min-width: min(120px, 100%);
     border: 1px solid var(--alloy-color-border-subtle);
     border-radius: var(--alloy-bubble-radius-nested);
     overflow: hidden;
