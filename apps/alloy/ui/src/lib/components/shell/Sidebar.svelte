@@ -6,7 +6,7 @@
   import TagEditDialog from '../tags/TagEditDialog.svelte';
   import Icon from '$lib/icons/Icon.svelte';
   import NetworkIcon from '$lib/icons/NetworkIcon.svelte';
-  import { Archive, ArchiveRestore, ArrowUpDown, Bell, BellOff, CheckCheck, ChevronDown, ChevronUp, Copy, Ellipsis, Info, Mail, Palette, Pencil, Pin, PinOff, RefreshCw, Search, Settings, StickyNote, Tag, Trash2 } from '$lib/icons';
+  import { Archive, ArchiveRestore, ArrowUpDown, Bell, BellOff, CheckCheck, ChevronDown, ChevronRight, ChevronUp, Copy, Ellipsis, Info, Mail, Palette, Pencil, Pin, PinOff, RefreshCw, Search, Settings, StickyNote, Tag, Trash2 } from '$lib/icons';
   import { contextmenu } from '$lib/platform/contextmenu';
   import { pullToRefresh } from '$lib/platform/pullToRefresh';
   import { shortcutLabel } from '$lib/platform/shortcuts';
@@ -33,6 +33,7 @@
   import { muteRoom, unmuteRoom } from '$lib/stores/muteTimer.svelte';
   import { resolveAvatar } from '$lib/stores/avatars.svelte';
   import { globalSearch, isSearchable } from '$lib/stores/globalSearch.svelte';
+  import { forumTotals, groupForumTopics } from './forumTopics';
   import { muteEndLabel } from '$lib/content/mute';
 
   import { t } from '$lib/i18n';
@@ -288,9 +289,13 @@
   const multipleAccounts = $derived(roomsStore.accounts.length > 1);
 
   const joined = $derived(roomsStore.visible);
+  // Topics live under their forum, so the top-level lists see only rooms that have no parent here.
+  const forumGroups = $derived(groupForumTopics(joined));
+  const topLevel = $derived(forumGroups.top);
+  const topicsByForum = $derived(forumGroups.topicsByForum);
   // Pinned chats sit above everything else; the Archive view lists them in place.
-  const pinned = $derived(roomsStore.filter === 'archive' ? [] : joined.filter((r) => r.pinned));
-  const unpinned = $derived(roomsStore.filter === 'archive' ? joined : joined.filter((r) => !r.pinned));
+  const pinned = $derived(roomsStore.filter === 'archive' ? [] : topLevel.filter((r) => r.pinned));
+  const unpinned = $derived(roomsStore.filter === 'archive' ? topLevel : topLevel.filter((r) => !r.pinned));
   // One list for people and groups alike: pinned chats first, then every other chat in the store's order.
   const flat = $derived([...pinned, ...unpinned]);
   const searching = $derived(isSearchable(roomsStore.query));
@@ -309,17 +314,39 @@
   function roomButtonIds(list: readonly RoomItem[]): string[] {
     return list.map((r) => r.id);
   }
+  /** Whether a topic matches the search box; the room list filter already applied to the rest. */
+  function topicMatches(t: RoomItem): boolean {
+    return roomTitle(t).toLowerCase().includes(roomsStore.query.trim().toLowerCase());
+  }
+
+  /** Topics a forum row reveals in the list: its topics when expanded, or the matching ones while searching. */
+  function topicsRevealedBy(r: RoomItem): RoomItem[] {
+    const topics = topicsByForum.get(r.id) ?? [];
+    if (searching) return topics.filter((t) => topicMatches(t));
+    return roomsStore.expandedForums.has(r.id) ? topics : [];
+  }
+
+  // Roving ids follow the rows as drawn: each forum, then its revealed topics, in every grouping mode.
   const rovingIds = $derived.by(() => {
-    if (prefs.roomSort === 'tag') {
-      return roomButtonIds(groupRoomsByTag(flat, tagDefs).flatMap((g) => g.rooms));
-    }
-    return roomButtonIds(flat);
+    const visibleRows = prefs.roomSort === 'tag' ? groupRoomsByTag(flat, tagDefs).flatMap((g) => g.rooms) : flat;
+    return roomButtonIds(visibleRows.flatMap((r) => [r, ...topicsRevealedBy(r)]));
   });
   const rovingStopId = $derived(rovingTabStop(rovingIds, rovingId, roomsStore.activeRoomId));
 
   /** Remembers the row the user last focused, so Tab returns there instead of the top of the list. */
   function onRoomFocus(roomId: string) {
     rovingId = roomId;
+  }
+
+  /** Forum rows toggle their topics; Enter and Space activate, ArrowRight opens, ArrowLeft closes. */
+  function onForumKeydown(e: KeyboardEvent, forumId: string) {
+    if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
+    const open = roomsStore.expandedForums.has(forumId);
+    if (e.key === 'ArrowRight' && !open) roomsStore.toggleForum(forumId);
+    else if (e.key === 'ArrowLeft' && open) roomsStore.toggleForum(forumId);
+    else if (e.key === 'Enter' || e.key === ' ') roomsStore.toggleForum(forumId);
+    else return;
+    e.preventDefault();
   }
 
   /**
@@ -470,6 +497,7 @@
   {@const dropAfter = dropTarget?.roomId === r.id && dropTarget.after}
   <div
     class="row-wrap"
+    class:topic={r.parent_id != null}
     class:dragging={dragging?.roomId === r.id}
     class:drop-before={dropBefore}
     class:drop-after={dropAfter}
@@ -557,6 +585,65 @@
   </div>
 {/snippet}
 
+{#snippet forumRow(r: RoomItem)}
+  {@const topics = topicsByForum.get(r.id) ?? []}
+  {@const open = roomsStore.expandedForums.has(r.id)}
+  {@const totals = forumTotals(r, topics, (x) => roomsStore.unreadOf(x))}
+  {@const name = roomTitle(r)}
+  <div class="row-wrap forum">
+    <button
+      type="button"
+      class="row forum-row"
+      class:expanded={open}
+      aria-expanded={open}
+      aria-label={open ? t('forum-topics-collapse', { name }) : t('forum-topics-expand', { name })}
+      data-room-id={r.id}
+      tabindex={viewport.isPhone ? undefined : r.id === rovingStopId ? 0 : -1}
+      onclick={() => roomsStore.toggleForum(r.id)}
+      onfocus={() => onRoomFocus(r.id)}
+      onkeydown={(e) => onForumKeydown(e, r.id)}
+    >
+      <span class="twisty" aria-hidden="true"><Icon icon={open ? ChevronDown : ChevronRight} size={16} /></span>
+      <span class="pinned avatar">
+        <Avatar userId={r.id} displayName={name} src={avatars[r.id] ?? null} size={36} shape="rounded" />
+      </span>
+      <span class="text">
+        <span class="title">{name}</span>
+        <span class="preview">{t('forum-topic-count', { count: topics.length })}</span>
+      </span>
+      <span class="end">
+        <span class="marks">
+          {#if totals.notifications > 0}
+            <span class="pinned"><Badge count={totals.notifications} /></span>
+          {/if}
+        </span>
+      </span>
+    </button>
+  </div>
+{/snippet}
+
+{#snippet forumList(list: RoomItem[])}
+  <ul>
+    {#each list as r (r.id)}
+      <li>
+        {#if topicsByForum.has(r.id)}
+          {@render forumRow(r)}
+        {:else}
+          {@render listRow(r)}
+        {/if}
+        {#if topicsByForum.has(r.id) && topicsRevealedBy(r).length > 0}
+          <ul class="topics">
+            {#each topicsRevealedBy(r) as topic (topic.id)}
+              <li>{@render roomRow(topic)}</li>
+            {/each}
+          </ul>
+        {/if}
+      </li>
+    {/each}
+  </ul>
+{/snippet}
+
+
 {#snippet listRow(r: RoomItem)}
   <RoomSwipe
     id={r.id}
@@ -586,11 +673,7 @@
       </section>
     {/each}
   {:else}
-    <ul>
-      {#each list as r (r.id)}
-        <li>{@render listRow(r)}</li>
-      {/each}
-    </ul>
+    {@render forumList(list)}
   {/if}
 {/snippet}
 
@@ -1214,6 +1297,17 @@
   }
   .row-wrap {
     position: relative;
+  }
+  /* Forums are containers: the chevron opens their topic list, which nests under the forum row. */
+  .forum-row .twisty {
+    display: inline-flex;
+    color: var(--alloy-color-text-muted);
+  }
+  /* `.group ul` zeroes list padding, so the indent needs the same specificity to win. */
+  .group ul.topics {
+    list-style: none;
+    margin: 0;
+    padding: 0 0 0 var(--alloy-spacing-scale-5);
   }
   /* Rearranging pinned chats: the dragged row fades, and an accent rule marks the slot the drop would take. */
   .row-wrap.dragging {

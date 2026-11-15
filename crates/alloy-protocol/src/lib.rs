@@ -268,6 +268,10 @@ pub struct CapabilitiesDto {
     /// message is local to this device.
     #[serde(default)]
     pub pin_messages: bool,
+    /// The network has topics: a forum whose topics are separate conversations (Telegram forum
+    /// supergroups). The UI nests the topics of a forum under its row.
+    #[serde(default)]
+    pub topics: bool,
 }
 
 /// One connected account, as listed by `ListAccounts`.
@@ -517,6 +521,13 @@ pub struct RoomSummary {
     /// First 80 chars of the chat's draft message, if any.
     #[serde(default)]
     pub draft: Option<String>,
+    /// Local id of the forum this chat is a topic of; `None` for every chat that is not a topic.
+    /// The UI nests the chat under that forum's row.
+    #[serde(default)]
+    pub parent_id: Option<RoomId>,
+    /// The chat is a forum container whose topics are listed as separate rows beneath it.
+    #[serde(default)]
+    pub is_forum: bool,
 }
 
 /// One member of a chat, as listed by `GetRoomMembers`.
@@ -1551,6 +1562,8 @@ mod tests {
             marked_unread: true,
             tags: vec!["work".into()],
             draft: Some("draft".into()),
+            parent_id: Some(RoomId("chat-0".into())),
+            is_forum: false,
         }
     }
 

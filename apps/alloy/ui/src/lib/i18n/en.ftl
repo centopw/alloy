@@ -174,6 +174,12 @@ format-toolbar-quote = Quote
 format-toolbar-spoiler = Spoiler
 format-toolbar-strikethrough = Strikethrough
 format-toolbar-text-formatting = Text formatting
+forum-topic-count = { $count ->
+    [one] { $count } topic
+   *[other] { $count } topics
+  }
+forum-topics-collapse = Hide topics of { $name }
+forum-topics-expand = Show topics of { $name }
 forward-dialog-forward-message = Forward message
 forward-dialog-forward-messages = Forward { $count } messages
 forward-dialog-no-matching-rooms = No matching rooms.

@@ -213,6 +213,7 @@ pub fn capabilities_dto(capabilities: &ConnectorCapabilities) -> CapabilitiesDto
         formatted_text: capabilities.formatted_text,
         pin_chats: capabilities.pin_chats,
         pin_messages: capabilities.pin_messages,
+        topics: capabilities.topics,
     }
 }
 
@@ -239,6 +240,7 @@ pub fn no_capabilities() -> CapabilitiesDto {
         formatted_text: false,
         pin_chats: false,
         pin_messages: false,
+        topics: false,
     }
 }
 

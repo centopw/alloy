@@ -51,6 +51,8 @@ pub(crate) fn chat(row: &Row<'_>) -> rusqlite::Result<ChatRecord> {
         mention_count: row.get("mention_count")?,
         is_pinned: row.get("is_pinned")?,
         pin_order: row.get("pin_order")?,
+        parent_remote_chat_id: row.get("parent_remote_chat_id")?,
+        is_forum: row.get("is_forum")?,
         is_archived: row.get("is_archived")?,
         is_muted: row.get("is_muted")?,
         muted_until: row.get("muted_until")?,

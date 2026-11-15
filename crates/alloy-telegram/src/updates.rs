@@ -98,7 +98,9 @@ async fn handle(shared: &Shared, update: Update) {
         Update::NewMessage(message) => {
             let message: &GrammersMessage = &message;
             remember(shared, message).await;
-            let Some(chat_id) = mapping::message_chat(&message.raw) else {
+            let Some(chat_id) =
+                mapping::message_chat_in(&message.raw, is_forum_message(shared, &message.raw))
+            else {
                 debug!(id = message.id(), "telegram message without a peer");
                 return;
             };
@@ -119,7 +121,9 @@ async fn handle(shared: &Shared, update: Update) {
         Update::MessageEdited(message) => {
             let message: &GrammersMessage = &message;
             remember(shared, message).await;
-            let Some(chat_id) = mapping::message_chat(&message.raw) else {
+            let Some(chat_id) =
+                mapping::message_chat_in(&message.raw, is_forum_message(shared, &message.raw))
+            else {
                 return;
             };
             let (body, formatted) = match &message.raw {
@@ -197,7 +201,11 @@ async fn handle_raw(shared: &Shared, update: &tl::enums::Update) {
             };
             shared
                 .emit(ConnectorEvent::Typing {
-                    remote_chat_id: mapping::encode_peer(PeerKindTag::Channel, typing.channel_id),
+                    remote_chat_id: {
+                        let forum = mapping::encode_peer(PeerKindTag::Channel, typing.channel_id);
+                        let top = typing.top_msg_id.filter(|_| shared.is_forum(&forum));
+                        mapping::topic_chat_id(&forum, top)
+                    },
                     remote_user_id: mapping::encode_peer(user.0, user.1),
                     typing: is_typing(&typing.action),
                 })
@@ -241,7 +249,11 @@ async fn handle_raw(shared: &Shared, update: &tl::enums::Update) {
             let Some((kind, bare_id)) = mapping::tl_peer(&changed.peer) else {
                 return;
             };
-            let chat = mapping::encode_peer(kind, bare_id);
+            let forum = mapping::encode_peer(kind, bare_id);
+            let chat = mapping::topic_chat_id(
+                &forum,
+                changed.top_msg_id.filter(|_| shared.is_forum(&forum)),
+            );
             // Single-constructor boxed types convert infallibly, so no variant has to be named.
             let reactions: tl::types::MessageReactions = changed.reactions.clone().into();
             let Some(recent) = reactions.recent_reactions else {
@@ -337,6 +349,13 @@ async fn emit_message_pins(shared: &Shared, chat: &str, messages: &[i32], pinned
     }
 }
 
+/// Whether a message belongs to a channel the connector knows to be a forum.
+///
+/// Only a forum’s messages carry topic routing, so this is the gate `message_chat_in` needs.
+fn is_forum_message(shared: &Shared, raw: &tl::enums::Message) -> bool {
+    mapping::message_chat(raw).is_some_and(|chat| shared.is_forum(&chat))
+}
+
 /// `sendMessageCancelAction` stops an indicator; every other action shows one.
 fn is_typing(action: &tl::enums::SendMessageAction) -> bool {
     !matches!(
@@ -351,6 +370,11 @@ async fn remember(shared: &Shared, message: &GrammersMessage) {
         && let Ok(Some(reference)) = peer.to_ref().await
     {
         shared.remember_peer(reference);
+        if let Some(entry) = mapping::entry_from_peer(peer)
+            && entry.is_forum
+        {
+            shared.remember_forum(&entry.id);
+        }
     }
     if let Some(sender) = message.sender()
         && let Ok(Some(reference)) = sender.to_ref().await

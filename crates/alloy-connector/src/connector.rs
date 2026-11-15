@@ -149,6 +149,19 @@ pub trait Connector: Send + Sync {
         })
     }
 
+    /// Lists the topics of a forum, newest activity first. Each topic is a full [`RemoteChat`]
+    /// with `parent_remote_chat_id` set to `remote_chat_id`. Topics are chats too and also appear
+    /// in [`list_chats`](Self::list_chats). Fails with `InvalidInput` when `remote_chat_id` is not
+    /// a forum.
+    ///
+    /// The default is for connectors without topics: `NotSupported("topics")`.
+    async fn list_topics(&self, remote_chat_id: &str) -> Result<Vec<RemoteChat>, ConnectorError> {
+        let _ = remote_chat_id;
+        Err(ConnectorError::NotSupported {
+            feature: "topics".to_string(),
+        })
+    }
+
     /// Pages history backwards, newest message first.
     ///
     /// `before` is exclusive: only messages strictly older than that remote message id are

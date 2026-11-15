@@ -243,6 +243,13 @@ pub async fn initial_sync(ctx: &EngineContext, runtime: &AccountRuntime) {
             if let Err(err) = crate::actor::apply_chat(ctx, account_id, chat.clone()).await {
                 tracing::warn!(account = %account_id, error = %err.message, "failed to store a chat");
             }
+            if chat.is_forum
+                && runtime.capabilities.topics
+                && let Err(err) =
+                    crate::actor::apply_topics(ctx, runtime, &chat.remote_chat_id).await
+            {
+                tracing::warn!(account = %account_id, chat = %chat.remote_chat_id, error = %err.message, "topic sync failed");
+            }
         }
         pages += 1;
         match page.next_cursor {

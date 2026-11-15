@@ -33,6 +33,8 @@ async fn account_and_chat(store: &Store) -> (String, String) {
             avatar_media_id: None,
             last_message_id: None,
             last_activity_at: Some(1_000),
+            parent_remote_chat_id: None,
+            is_forum: false,
         })
         .await
         .expect("upsert chat");
@@ -559,6 +561,8 @@ async fn extra_chat(store: &Store, account_id: &str, remote: &str, activity: i64
             avatar_media_id: None,
             last_message_id: None,
             last_activity_at: Some(activity),
+            parent_remote_chat_id: None,
+            is_forum: false,
         })
         .await
         .expect("upsert chat")
@@ -718,4 +722,136 @@ async fn pinned_messages_are_listed_newest_first_without_deleted_ones() {
             .await
             .is_err()
     );
+}
+
+fn topic(account_id: &str, remote: &str, parent: &str, activity: i64) -> ChatUpsert {
+    ChatUpsert {
+        account_id: account_id.to_owned(),
+        remote_chat_id: remote.to_owned(),
+        kind: ChatKind::Group,
+        title: Some(remote.to_owned()),
+        avatar_media_id: None,
+        last_message_id: None,
+        last_activity_at: Some(activity),
+        parent_remote_chat_id: Some(parent.to_owned()),
+        is_forum: false,
+    }
+}
+
+#[tokio::test]
+async fn forum_topics_round_trip_list_newest_first_and_keep_their_parent() {
+    let store = Store::open_in_memory(KEY).expect("open");
+    let (account_id, _) = account_and_chat(&store).await;
+
+    store
+        .upsert_chat(ChatUpsert {
+            account_id: account_id.clone(),
+            remote_chat_id: "ch123".to_owned(),
+            kind: ChatKind::Group,
+            title: Some("Forum".to_owned()),
+            avatar_media_id: None,
+            last_message_id: None,
+            last_activity_at: Some(1_000),
+            parent_remote_chat_id: None,
+            is_forum: true,
+        })
+        .await
+        .expect("upsert forum");
+    store
+        .upsert_chat(topic(&account_id, "ch123/t45", "ch123", 2_000))
+        .await
+        .expect("upsert topic");
+    store
+        .upsert_chat(topic(&account_id, "ch123/t1", "ch123", 3_000))
+        .await
+        .expect("upsert general topic");
+
+    let forum = store
+        .find_chat(&account_id, "ch123")
+        .await
+        .expect("find forum")
+        .expect("forum exists");
+    assert!(forum.is_forum);
+    assert_eq!(forum.parent_remote_chat_id, None);
+
+    let topic45 = store
+        .find_chat(&account_id, "ch123/t45")
+        .await
+        .expect("find topic")
+        .expect("topic exists");
+    assert_eq!(topic45.parent_remote_chat_id.as_deref(), Some("ch123"));
+    assert!(!topic45.is_forum);
+    assert_eq!(topic45.kind, ChatKind::Group);
+
+    let topics = store
+        .list_topics(&account_id, "ch123")
+        .await
+        .expect("list topics");
+    let remotes: Vec<&str> = topics.iter().map(|c| c.remote_chat_id.as_str()).collect();
+    assert_eq!(remotes, ["ch123/t1", "ch123/t45"]);
+
+    // Sync re-upserts a topic without a parent: the stored parent is kept.
+    store
+        .upsert_chat(ChatUpsert {
+            account_id: account_id.clone(),
+            remote_chat_id: "ch123/t45".to_owned(),
+            kind: ChatKind::Group,
+            title: Some("Renamed".to_owned()),
+            avatar_media_id: None,
+            last_message_id: None,
+            last_activity_at: Some(2_500),
+            parent_remote_chat_id: None,
+            is_forum: false,
+        })
+        .await
+        .expect("re-upsert topic");
+    let topic45 = store
+        .find_chat(&account_id, "ch123/t45")
+        .await
+        .expect("find topic")
+        .expect("topic exists");
+    assert_eq!(topic45.parent_remote_chat_id.as_deref(), Some("ch123"));
+    assert_eq!(topic45.title.as_deref(), Some("Renamed"));
+
+    // A later sync that omits the forum flag does not clear it.
+    store
+        .upsert_chat(ChatUpsert {
+            account_id: account_id.clone(),
+            remote_chat_id: "ch123".to_owned(),
+            kind: ChatKind::Group,
+            title: Some("Forum".to_owned()),
+            avatar_media_id: None,
+            last_message_id: None,
+            last_activity_at: Some(1_000),
+            parent_remote_chat_id: None,
+            is_forum: false,
+        })
+        .await
+        .expect("re-upsert forum");
+    let forum = store
+        .find_chat(&account_id, "ch123")
+        .await
+        .expect("find forum")
+        .expect("forum exists");
+    assert!(forum.is_forum);
+
+    // Topics are never pinned on their own, so the pinned list holds only the forum.
+    let topic1 = store
+        .find_chat(&account_id, "ch123/t1")
+        .await
+        .expect("find topic")
+        .expect("topic exists");
+    assert!(
+        store
+            .update_chat_flags(&topic1.chat_id, pin(true))
+            .await
+            .is_err()
+    );
+    store
+        .update_chat_flags(&forum.chat_id, pin(true))
+        .await
+        .expect("pin forum");
+    let pinned = store.pinned_chats(&account_id).await.expect("pinned");
+    let pinned_remotes: Vec<&str> = pinned.iter().map(|c| c.remote_chat_id.as_str()).collect();
+    assert_eq!(pinned_remotes, ["ch123"]);
 }

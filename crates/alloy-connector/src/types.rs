@@ -109,6 +109,14 @@ pub struct RemoteChat {
     pub pin_order: Option<u32>,
     pub is_archived: bool,
     pub is_muted: bool,
+    /// Remote id of the forum this chat is a topic of. `Some` only for topics; `None` for every
+    /// other chat. The host resolves it to the local id of the forum chat.
+    #[serde(default)]
+    pub parent_remote_chat_id: Option<String>,
+    /// This chat is a forum container. Its topics are separate conversations, listed by
+    /// [`crate::Connector::list_topics`].
+    #[serde(default)]
+    pub is_forum: bool,
 }
 
 /// A participant in a remote chat.

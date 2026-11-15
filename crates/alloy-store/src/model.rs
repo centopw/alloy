@@ -162,6 +162,12 @@ pub struct ChatRecord {
     pub draft: Option<String>,
     pub local_tags: Vec<String>,
     pub note: Option<String>,
+    /// The remote id of the forum this chat is a topic of; `None` for every chat that is not one.
+    #[serde(default)]
+    pub parent_remote_chat_id: Option<String>,
+    /// Whether this chat is a forum container whose topics are its conversations.
+    #[serde(default)]
+    pub is_forum: bool,
 }
 
 /// Remote chat fields that sync may refresh. User-owned flags (pin, archive, draft, ...) are never
@@ -175,6 +181,10 @@ pub struct ChatUpsert {
     pub avatar_media_id: Option<String>,
     pub last_message_id: Option<String>,
     pub last_activity_at: Option<i64>,
+    /// The remote id of the forum this chat is a topic of; `None` for a chat that is not one.
+    pub parent_remote_chat_id: Option<String>,
+    /// Whether this chat is a forum container.
+    pub is_forum: bool,
 }
 
 /// User-owned chat state. `None` keeps the stored value; `Some(None)` clears a nullable column.

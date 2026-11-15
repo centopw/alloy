@@ -89,6 +89,11 @@ export type CapabilitiesDto = {
 	 *  message is local to this device.
 	 */
 	pin_messages?: boolean,
+	/**
+	 *  The network has topics: a forum whose topics are separate conversations (Telegram forum
+	 *  supergroups). The UI nests the topics of a forum under its row.
+	 */
+	topics?: boolean,
 };
 
 /**  Kind of a chat, in network-neutral terms. */
@@ -940,6 +945,13 @@ export type RoomSummary = {
 	tags: string[],
 	/**  First 80 chars of the chat's draft message, if any. */
 	draft?: string | null,
+	/**
+	 *  Local id of the forum this chat is a topic of; `None` for every chat that is not a topic.
+	 *  The UI nests the chat under that forum's row.
+	 */
+	parent_id?: RoomId | null,
+	/**  The chat is a forum container whose topics are listed as separate rows beneath it. */
+	is_forum?: boolean,
 };
 
 /**  A user-defined chat tag, as stored in the device-local tag catalogue. */

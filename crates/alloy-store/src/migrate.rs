@@ -11,7 +11,7 @@ use crate::error::StoreError;
 use crate::model::now_ms;
 
 /// Highest schema version this binary knows how to produce.
-pub const CURRENT_SCHEMA_VERSION: u32 = 3;
+pub const CURRENT_SCHEMA_VERSION: u32 = 4;
 
 struct Migration {
     version: u32,
@@ -42,6 +42,11 @@ static MIGRATIONS: &[Migration] = &[
         version: 3,
         name: "0003_pins",
         sql: include_str!("../migrations/0003_pins.sql"),
+    },
+    Migration {
+        version: 4,
+        name: "0004_topics",
+        sql: include_str!("../migrations/0004_topics.sql"),
     },
 ];
 

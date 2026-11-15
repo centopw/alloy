@@ -77,6 +77,10 @@ export const DEMO_ROOM = {
   messengerFlat: stableId('chat', 'messenger-flat-4b'),
   messengerTomas: stableId('chat', 'messenger-tomas'),
   messengerCycling: stableId('chat', 'messenger-cycling'),
+  telegramForum: stableId('chat', 'telegram-rust-forum'),
+  telegramForumGeneral: stableId('chat', 'telegram-rust-forum-general'),
+  telegramForumReleases: stableId('chat', 'telegram-rust-forum-release-notes'),
+  telegramForumOffTopic: stableId('chat', 'telegram-rust-forum-off-topic'),
 } as const;
 
 export const DEMO_ACCOUNT = {
@@ -120,6 +124,7 @@ export const TELEGRAM_CAPABILITIES: CapabilitiesDto = {
   formatted_text: true,
   pin_chats: true,
   pin_messages: true,
+  topics: true,
 };
 
 /** Messenger: 15-minute edit window, 25 MiB attachments, polls but no shared locations. */
@@ -579,6 +584,25 @@ export function seedDemo(): DemoState {
     text(cycling, FB_MARA, 'cycling-2', FB_TOMAS, 1_610, 'That climb after the bridge is brutal, but fine.'),
   ]);
 
+  // === Telegram: Rust Forum (forum with topics) ===
+  const forumGeneral = DEMO_ROOM.telegramForumGeneral;
+  const forumReleases = DEMO_ROOM.telegramForumReleases;
+  const forumOffTopic = DEMO_ROOM.telegramForumOffTopic;
+  const forumGeneralTimeline = withDayDividers([
+    text(forumGeneral, TG_MARA, 'forum-general-1', TG_RUST_WEEKLY, 300, 'Welcome to the Rust Forum. Introduce yourself in Off-topic.'),
+    text(forumGeneral, TG_MARA, 'forum-general-2', TG_SAM, 240, 'Is the async trait stabilisation in the next release?'),
+    text(forumGeneral, TG_MARA, 'forum-general-3', TG_MARA, 200, 'Yes, it landed in this cycle. Notes are in Release notes.'),
+  ]);
+  const forumReleasesTimeline = withDayDividers([
+    text(forumReleases, TG_MARA, 'forum-releases-1', TG_JONAS, 180, 'Release notes for 1.92 are up: async traits, cargo profiles, sampling profiler.'),
+    text(forumReleases, TG_MARA, 'forum-releases-2', TG_PRIYA, 120, 'Checked the profiler section. The flamegraph output matches the docs now.'),
+    text(forumReleases, TG_MARA, 'forum-releases-3', TG_MARA, 60, 'Good. I will tag the patch release once CI is green.'),
+  ]);
+  const forumOffTopicTimeline = withDayDividers([
+    text(forumOffTopic, TG_MARA, 'forum-off-topic-1', TG_PRIYA, 90, 'Anyone else going to the meetup on Thursday?'),
+    text(forumOffTopic, TG_MARA, 'forum-off-topic-2', TG_SAM, 30, 'I am in. Bringing the tablet with the Android build.'),
+  ]);
+
   const timelines = new Map<RoomId, TimelineItemDto[]>([
     [dev, devTimeline],
     [jonas, jonasTimeline],
@@ -589,6 +613,9 @@ export function seedDemo(): DemoState {
     [flat, flatTimeline],
     [tomas, tomasTimeline],
     [cycling, cyclingTimeline],
+    [forumGeneral, forumGeneralTimeline],
+    [forumReleases, forumReleasesTimeline],
+    [forumOffTopic, forumOffTopicTimeline],
   ]);
 
   const members = new Map<RoomId, RoomMemberDto[]>([
@@ -666,6 +693,10 @@ export function seedDemo(): DemoState {
     muted_until?: number | null;
     marked_unread?: boolean;
     tags?: string[];
+    /** The forum a topic belongs to (the forum's room id). */
+    parent_id?: RoomId | null;
+    /** This room is a forum: a container whose topics are the conversations. */
+    is_forum?: boolean;
   }
 
   const room = (init: RoomInit): RoomSummary => ({
@@ -685,6 +716,8 @@ export function seedDemo(): DemoState {
     marked_unread: init.marked_unread ?? false,
     tags: init.tags ?? [],
     draft: draftPreview(init.id),
+    parent_id: init.parent_id ?? null,
+    is_forum: init.is_forum ?? false,
   });
 
   const rooms = sortRoomList([
@@ -768,6 +801,42 @@ export function seedDemo(): DemoState {
       kind: 'group',
       unread: { highlight_count: 0, notification_count: 5 },
       tags: [DEMO_TAG.friends],
+    }),
+    room({
+      id: DEMO_ROOM.telegramForum,
+      account: DEMO_ACCOUNT.telegram,
+      network: 'telegram',
+      name: 'Rust Forum',
+      kind: 'group',
+      unread: { highlight_count: 0, notification_count: 0 },
+      is_forum: true,
+    }),
+    room({
+      id: forumGeneral,
+      account: DEMO_ACCOUNT.telegram,
+      network: 'telegram',
+      name: 'General',
+      kind: 'group',
+      unread: { highlight_count: 0, notification_count: 1 },
+      parent_id: DEMO_ROOM.telegramForum,
+    }),
+    room({
+      id: forumReleases,
+      account: DEMO_ACCOUNT.telegram,
+      network: 'telegram',
+      name: 'Release notes',
+      kind: 'group',
+      unread: { highlight_count: 1, notification_count: 2 },
+      parent_id: DEMO_ROOM.telegramForum,
+    }),
+    room({
+      id: forumOffTopic,
+      account: DEMO_ACCOUNT.telegram,
+      network: 'telegram',
+      name: 'Off-topic',
+      kind: 'group',
+      unread: { highlight_count: 0, notification_count: 0 },
+      parent_id: DEMO_ROOM.telegramForum,
     }),
   ]);
 

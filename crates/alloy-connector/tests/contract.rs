@@ -5,8 +5,8 @@
 use std::collections::BTreeMap;
 
 use alloy_connector::fake::{
-    FAKE_CHAT_CHANNEL, FAKE_CHAT_DIRECT, FAKE_CHAT_GROUP, FAKE_CODE, FAKE_USER_ID, FakeConnector,
-    MAX_PINNED_CHATS,
+    FAKE_CHAT_CHANNEL, FAKE_CHAT_DIRECT, FAKE_CHAT_FORUM, FAKE_CHAT_GROUP, FAKE_CODE,
+    FAKE_TOPIC_GENERAL, FAKE_TOPIC_RELEASE_NOTES, FAKE_USER_ID, FakeConnector, MAX_PINNED_CHATS,
 };
 use alloy_connector::{
     ChatKind, CodeChannel, ConnectionState, Connector, ConnectorError, ConnectorEvent, Frame,
@@ -28,6 +28,8 @@ fn direct_chat() -> RemoteChat {
         pin_order: None,
         is_archived: false,
         is_muted: false,
+        parent_remote_chat_id: None,
+        is_forum: false,
     }
 }
 
@@ -514,8 +516,14 @@ async fn backfill_pagination_covers_every_seeded_message_exactly_once() {
     let connector = logged_in().await;
 
     let chats = connector.list_chats(None, 10).await.unwrap();
-    assert_eq!(chats.items.len(), 3);
+    assert_eq!(chats.items.len(), 6);
     assert!(chats.next_cursor.is_none());
+    assert!(
+        chats
+            .items
+            .iter()
+            .any(|chat| chat.remote_chat_id == FAKE_CHAT_FORUM && chat.is_forum)
+    );
 
     for chat in &chats.items {
         let full = connector
@@ -1037,4 +1045,110 @@ async fn fetch_media_writes_the_requested_file() {
     assert_eq!(written, contents.len() as u64);
 
     std::fs::remove_file(&path).unwrap();
+}
+
+#[tokio::test]
+async fn list_topics_returns_each_topic_of_a_forum_newest_first() {
+    let connector = logged_in().await;
+    assert!(connector.capabilities().topics);
+
+    let topics = connector.list_topics(FAKE_CHAT_FORUM).await.unwrap();
+    let ids: Vec<&str> = topics
+        .iter()
+        .map(|chat| chat.remote_chat_id.as_str())
+        .collect();
+    assert_eq!(ids, [FAKE_TOPIC_RELEASE_NOTES, FAKE_TOPIC_GENERAL]);
+    for topic in &topics {
+        assert_eq!(topic.kind, ChatKind::Group);
+        assert!(!topic.is_forum);
+        assert_eq!(
+            topic.parent_remote_chat_id.as_deref(),
+            Some(FAKE_CHAT_FORUM)
+        );
+    }
+    assert_eq!(topics[0].title, "Release notes");
+    assert_eq!(topics[1].title, "General");
+}
+
+#[tokio::test]
+async fn list_topics_on_a_non_forum_is_invalid_input() {
+    let connector = logged_in().await;
+    assert!(matches!(
+        connector.list_topics(FAKE_CHAT_GROUP).await,
+        Err(ConnectorError::InvalidInput { .. })
+    ));
+    assert!(matches!(
+        connector.list_topics(FAKE_TOPIC_GENERAL).await,
+        Err(ConnectorError::InvalidInput { .. })
+    ));
+    assert!(matches!(
+        connector.list_topics("chat-does-not-exist").await,
+        Err(ConnectorError::InvalidInput { .. })
+    ));
+}
+
+#[tokio::test]
+async fn backfill_on_a_topic_returns_only_that_topics_messages() {
+    let connector = logged_in().await;
+
+    let general = connector
+        .backfill(FAKE_TOPIC_GENERAL, None, 100)
+        .await
+        .unwrap();
+    assert_eq!(general.items.len(), 3);
+    assert!(
+        general
+            .items
+            .iter()
+            .all(|message| message.remote_chat_id == FAKE_TOPIC_GENERAL)
+    );
+
+    let release = connector
+        .backfill(FAKE_TOPIC_RELEASE_NOTES, None, 100)
+        .await
+        .unwrap();
+    assert_eq!(release.items.len(), 2);
+    assert!(
+        release
+            .items
+            .iter()
+            .all(|message| message.remote_chat_id == FAKE_TOPIC_RELEASE_NOTES)
+    );
+
+    let forum = connector
+        .backfill(FAKE_CHAT_FORUM, None, 100)
+        .await
+        .unwrap();
+    assert!(forum.items.is_empty());
+}
+
+#[tokio::test]
+async fn send_to_a_topic_echoes_the_topic_id() {
+    let connector = logged_in().await;
+    let (sender, mut events) = tokio::sync::mpsc::channel(16);
+    connector.start(sender).await.unwrap();
+    next_event(&mut events).await;
+    next_event(&mut events).await;
+
+    let message = OutgoingMessage {
+        remote_chat_id: FAKE_TOPIC_GENERAL.to_string(),
+        ..outgoing("txn-topic")
+    };
+    let ack = connector.send(message).await.unwrap();
+    assert_eq!(ack.txn_id, "txn-topic");
+
+    match next_event(&mut events).await {
+        ConnectorEvent::Message { message } => {
+            assert_eq!(message.remote_chat_id, FAKE_TOPIC_GENERAL);
+            assert_eq!(message.remote_msg_id, ack.remote_msg_id);
+            assert_eq!(message.txn_id.as_deref(), Some("txn-topic"));
+        }
+        other => panic!("expected the topic message echo, got {other:?}"),
+    }
+
+    let history = connector
+        .backfill(FAKE_TOPIC_GENERAL, None, 1)
+        .await
+        .unwrap();
+    assert_eq!(history.items[0].remote_msg_id, ack.remote_msg_id);
 }

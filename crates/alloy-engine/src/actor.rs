@@ -5,7 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use alloy_connector::{
-    ConnectionState, ConnectorEvent, MediaRef, RemoteChat, RemoteMessage, RemoteUser,
+    ConnectionState, ConnectorError, ConnectorEvent, MediaRef, RemoteChat, RemoteMessage,
+    RemoteUser,
 };
 use alloy_protocol::{
     AccountId, ConnectionStatus as ConnectionStatusDto, EngineEvent, RoomId, UserId,
@@ -19,7 +20,7 @@ use tokio::sync::mpsc;
 use crate::accounts::AccountRuntime;
 use crate::context::EngineContext;
 use crate::convert;
-use crate::error::{EngineError, map_store};
+use crate::error::{EngineError, map_connector, map_store};
 use crate::support::now_ms;
 
 /// Drains one account's connector events until the connector drops the sender.
@@ -46,9 +47,16 @@ async fn apply(
     match event {
         ConnectorEvent::Connection { state } => apply_connection(ctx, runtime, state).await,
         ConnectorEvent::ChatUpserted { chat } => {
+            let forum = chat.is_forum.then(|| chat.remote_chat_id.clone());
             apply_chat(ctx, &account_id, chat).await?;
+            let topics = match forum {
+                Some(forum) if runtime.capabilities.topics => {
+                    apply_topics(ctx, runtime, &forum).await
+                }
+                _ => Ok(()),
+            };
             ctx.bus.chats();
-            Ok(())
+            topics
         }
         ConnectorEvent::ChatRemoved { remote_chat_id } => {
             // The store has no hard delete for a chat; archiving keeps it out of the main list
@@ -249,6 +257,11 @@ pub(crate) async fn apply_chat(
         Some(media) => Some(store_media_ref(ctx, account_id, media).await?),
         None => None,
     };
+    // A topic is not pinned or archived on its own: the forum it belongs to carries that state,
+    // and the UI nests the topic under it.
+    let is_topic = chat.parent_remote_chat_id.is_some();
+    let is_pinned = !is_topic && chat.is_pinned;
+    let is_archived = !is_topic && chat.is_archived;
     let chat_id = ctx
         .store
         .upsert_chat(ChatUpsert {
@@ -259,6 +272,8 @@ pub(crate) async fn apply_chat(
             avatar_media_id,
             last_message_id: None,
             last_activity_at: Some(chat.last_activity_at),
+            parent_remote_chat_id: chat.parent_remote_chat_id.clone(),
+            is_forum: chat.is_forum,
         })
         .await
         .map_err(map_store)?;
@@ -280,7 +295,7 @@ pub(crate) async fn apply_chat(
     let mut flags = ChatFlagsUpdate::default();
     // A pin the network placed with its position keeps that position. Writing it through
     // `update_chat_flags` would move it to the top and shift every other pinned chat.
-    match chat.is_pinned.then_some(chat.pin_order).flatten() {
+    match is_pinned.then_some(chat.pin_order).flatten() {
         Some(order) => {
             let order = i64::from(order);
             if !record.is_pinned || record.pin_order != Some(order) {
@@ -291,13 +306,13 @@ pub(crate) async fn apply_chat(
             }
         }
         None => {
-            if record.is_pinned != chat.is_pinned {
-                flags.is_pinned = Some(chat.is_pinned);
+            if record.is_pinned != is_pinned {
+                flags.is_pinned = Some(is_pinned);
             }
         }
     }
-    if record.is_archived != chat.is_archived {
-        flags.is_archived = Some(chat.is_archived);
+    if record.is_archived != is_archived {
+        flags.is_archived = Some(is_archived);
     }
     if record.is_muted != chat.is_muted {
         flags.muted_until = Some(if chat.is_muted { Some(i64::MAX) } else { None });
@@ -307,6 +322,24 @@ pub(crate) async fn apply_chat(
             .update_chat_flags(&chat_id, flags)
             .await
             .map_err(map_store)?;
+    }
+    Ok(())
+}
+
+/// Stores every topic of a forum through the same path as any chat, so each topic becomes its own
+/// room. A connector without topics for this chat answers `NotSupported`, which is not a failure.
+pub(crate) async fn apply_topics(
+    ctx: &EngineContext,
+    runtime: &AccountRuntime,
+    forum_remote_id: &str,
+) -> Result<(), EngineError> {
+    let topics = match runtime.connector.list_topics(forum_remote_id).await {
+        Ok(topics) => topics,
+        Err(ConnectorError::NotSupported { .. }) => return Ok(()),
+        Err(err) => return Err(map_connector(err)),
+    };
+    for topic in topics {
+        apply_chat(ctx, &runtime.account_id, topic).await?;
     }
     Ok(())
 }
@@ -691,6 +724,8 @@ pub(crate) async fn ensure_chat(
             avatar_media_id: None,
             last_message_id: None,
             last_activity_at: None,
+            parent_remote_chat_id: None,
+            is_forum: false,
         })
         .await
         .map_err(map_store)?;

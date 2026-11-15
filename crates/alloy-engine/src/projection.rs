@@ -282,6 +282,25 @@ pub async fn query_room_list(
             .then_with(|| left.chat_id.cmp(&right.chat_id))
     });
 
+    // A topic names its forum by the network's id; resolve each distinct forum once, not per row.
+    let mut forums: HashMap<(String, String), Option<RoomId>> = HashMap::new();
+    for chat in &chats {
+        let Some(parent) = &chat.parent_remote_chat_id else {
+            continue;
+        };
+        let key = (chat.account_id.clone(), parent.clone());
+        if forums.contains_key(&key) {
+            continue;
+        }
+        let local = ctx
+            .store
+            .find_chat(&chat.account_id, parent)
+            .await
+            .map_err(map_store)?
+            .map(|forum| RoomId(forum.chat_id));
+        forums.insert(key, local);
+    }
+
     let needle = filter
         .map(|value| value.trim().to_lowercase())
         .filter(|value| !value.is_empty());
@@ -297,7 +316,13 @@ pub async fn query_room_list(
                 continue;
             }
         }
-        summaries.push(room_summary(ctx, &chat, account).await?);
+        let parent_id = chat.parent_remote_chat_id.as_ref().and_then(|parent| {
+            forums
+                .get(&(chat.account_id.clone(), parent.clone()))
+                .cloned()
+                .flatten()
+        });
+        summaries.push(room_summary(ctx, &chat, account, parent_id).await?);
     }
     Ok(summaries)
 }
@@ -306,6 +331,7 @@ async fn room_summary(
     ctx: &EngineContext,
     chat: &ChatRecord,
     account: &AccountRecord,
+    parent_id: Option<RoomId>,
 ) -> Result<RoomSummary, EngineError> {
     let latest = match &chat.last_message_id {
         Some(message_id) => ctx.store.get_message(message_id).await.map_err(map_store)?,
@@ -319,6 +345,8 @@ async fn room_summary(
             .clone()
             .unwrap_or_else(|| preview_label(message.kind)),
     });
+
+    let is_topic = chat.parent_remote_chat_id.is_some();
 
     Ok(RoomSummary {
         id: RoomId(chat.chat_id.clone()),
@@ -336,11 +364,13 @@ async fn room_summary(
             notification_count: u64::try_from(chat.unread_count).unwrap_or(0),
         },
         latest_event,
-        pinned: chat.is_pinned,
+        pinned: !is_topic && chat.is_pinned,
         pin_order: chat
             .pin_order
-            .filter(|_| chat.is_pinned)
+            .filter(|_| chat.is_pinned && !is_topic)
             .and_then(|order| u32::try_from(order).ok()),
+        is_forum: chat.is_forum,
+        parent_id,
         archived: chat.is_archived,
         muted_until: muted_until(chat),
         marked_unread: chat.is_marked_unread,

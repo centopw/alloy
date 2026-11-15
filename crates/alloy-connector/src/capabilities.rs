@@ -54,4 +54,8 @@ pub struct Capabilities {
     /// `false` means the host pins messages locally only.
     #[serde(default)]
     pub pin_messages: bool,
+    /// The network groups chats into forums whose topics are separate conversations, listed by
+    /// [`crate::Connector::list_topics`]. `false` means the network has no forums.
+    #[serde(default)]
+    pub topics: bool,
 }

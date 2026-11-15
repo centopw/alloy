@@ -28,8 +28,14 @@
     details?.member_count ?? (membersStore.membersOf(roomId).length || null)
   );
   // Phones have no inline subtitle on the title row, so the second line carries the member count.
+  // A topic shows its forum as the subtitle, so the header reads as a breadcrumb: topic over forum.
+  const forum = $derived(room.parent_id ? roomsStore.rooms.find((r) => r.id === room.parent_id) ?? null : null);
   const subtitle = $derived(
-    memberCount === null ? null : t('chat-header-member-count', { count: memberCount })
+    forum
+      ? roomTitle(forum)
+      : memberCount === null
+        ? null
+        : t('chat-header-member-count', { count: memberCount })
   );
   const searchShortcut = shortcutLabel('F');
   let avatarSrc = $state<string | null>(null);

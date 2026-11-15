@@ -1,9 +1,10 @@
 //! Deterministic in-memory connector behind the `testing` feature.
 //!
 //! It implements the whole [`Connector`] contract without a network: a two-step login
-//! (phone number → code), three seeded chats, seeded history, real message state for
-//! send/edit/delete, reaction tracking, and event emission. The contract tests drive it, and from
-//! M1 on the desktop and Android end-to-end suites use it through the real engine.
+//! (phone number → code), three seeded chats plus a forum with two topics, seeded history, real
+//! message state for send/edit/delete, reaction tracking, and event emission. The contract tests
+//! drive it, and from M1 on the desktop and Android end-to-end suites use it through the real
+//! engine.
 //!
 //! Determinism makes it useful as a fixture: ids and timestamps are assigned from a counter and a
 //! clock that starts at a fixed value, so two runs observe the same events in the same order.
@@ -58,6 +59,12 @@ pub const FAKE_CHAT_DIRECT: &str = "fake-chat-direct";
 pub const FAKE_CHAT_GROUP: &str = "fake-chat-group";
 /// Seeded channel with no history.
 pub const FAKE_CHAT_CHANNEL: &str = "fake-chat-channel";
+/// Seeded forum: a group whose topics are separate conversations. It has no messages of its own.
+pub const FAKE_CHAT_FORUM: &str = "fake-chat-forum";
+/// The General topic of [`FAKE_CHAT_FORUM`].
+pub const FAKE_TOPIC_GENERAL: &str = "fake-chat-forum/t1";
+/// The "Release notes" topic of [`FAKE_CHAT_FORUM`].
+pub const FAKE_TOPIC_RELEASE_NOTES: &str = "fake-chat-forum/t2";
 
 const MAX_REACTIONS_PER_USER: u8 = 3;
 /// The fake's pin limit, so the engine's handling of a refused list can be tested.
@@ -186,6 +193,7 @@ impl Connector for FakeConnector {
             formatted_text: false,
             pin_chats: true,
             pin_messages: true,
+            topics: true,
         }
     }
 
@@ -332,6 +340,29 @@ impl Connector for FakeConnector {
                 role: None,
             },
         ])
+    }
+
+    async fn list_topics(&self, remote_chat_id: &str) -> Result<Vec<RemoteChat>, ConnectorError> {
+        let inner = self.inner.lock().await;
+        logged_in_user(&inner)?;
+        let forum = &inner.chats[inner.chat_index(remote_chat_id)?];
+        if !forum.is_forum {
+            return Err(ConnectorError::InvalidInput {
+                message: format!("not a forum: {remote_chat_id}"),
+            });
+        }
+        let mut topics: Vec<RemoteChat> = inner
+            .chats
+            .iter()
+            .filter(|chat| chat.parent_remote_chat_id.as_deref() == Some(remote_chat_id))
+            .cloned()
+            .collect();
+        topics.sort_by(|a, b| {
+            b.last_activity_at
+                .cmp(&a.last_activity_at)
+                .then_with(|| a.remote_chat_id.cmp(&b.remote_chat_id))
+        });
+        Ok(topics)
     }
 
     async fn backfill(
@@ -851,6 +882,8 @@ impl Inner {
                 pin_order: Some(0),
                 is_archived: false,
                 is_muted: false,
+                parent_remote_chat_id: None,
+                is_forum: false,
             },
             RemoteChat {
                 remote_chat_id: FAKE_CHAT_GROUP.to_string(),
@@ -863,6 +896,8 @@ impl Inner {
                 pin_order: None,
                 is_archived: false,
                 is_muted: true,
+                parent_remote_chat_id: None,
+                is_forum: false,
             },
             RemoteChat {
                 remote_chat_id: FAKE_CHAT_CHANNEL.to_string(),
@@ -875,6 +910,50 @@ impl Inner {
                 pin_order: None,
                 is_archived: true,
                 is_muted: false,
+                parent_remote_chat_id: None,
+                is_forum: false,
+            },
+            RemoteChat {
+                remote_chat_id: FAKE_CHAT_FORUM.to_string(),
+                kind: ChatKind::Group,
+                title: "Alloy Forum".to_string(),
+                avatar: None,
+                last_activity_at: 1_700_000_150_000,
+                unread_count: 0,
+                is_pinned: false,
+                pin_order: None,
+                is_archived: false,
+                is_muted: false,
+                parent_remote_chat_id: None,
+                is_forum: true,
+            },
+            RemoteChat {
+                remote_chat_id: FAKE_TOPIC_GENERAL.to_string(),
+                kind: ChatKind::Group,
+                title: "General".to_string(),
+                avatar: None,
+                last_activity_at: 1_700_000_120_000,
+                unread_count: 0,
+                is_pinned: false,
+                pin_order: None,
+                is_archived: false,
+                is_muted: false,
+                parent_remote_chat_id: Some(FAKE_CHAT_FORUM.to_string()),
+                is_forum: false,
+            },
+            RemoteChat {
+                remote_chat_id: FAKE_TOPIC_RELEASE_NOTES.to_string(),
+                kind: ChatKind::Group,
+                title: "Release notes".to_string(),
+                avatar: None,
+                last_activity_at: 1_700_000_150_000,
+                unread_count: 0,
+                is_pinned: false,
+                pin_order: None,
+                is_archived: false,
+                is_muted: false,
+                parent_remote_chat_id: Some(FAKE_CHAT_FORUM.to_string()),
+                is_forum: false,
             },
         ];
 
@@ -904,6 +983,29 @@ impl Inner {
             ),
         );
         messages.insert(FAKE_CHAT_CHANNEL.to_string(), Vec::new());
+        messages.insert(FAKE_CHAT_FORUM.to_string(), Vec::new());
+        messages.insert(
+            FAKE_TOPIC_GENERAL.to_string(),
+            seed_messages(
+                FAKE_TOPIC_GENERAL,
+                "topic-general",
+                "fake-user-ada",
+                &[
+                    "Welcome to the forum.",
+                    "Keep each topic to its subject.",
+                    "Thanks for organizing.",
+                ],
+            ),
+        );
+        messages.insert(
+            FAKE_TOPIC_RELEASE_NOTES.to_string(),
+            seed_messages(
+                FAKE_TOPIC_RELEASE_NOTES,
+                "topic-release",
+                "fake-user-charles",
+                &["The release notes draft is up.", "Added the forum section."],
+            ),
+        );
 
         Self {
             login: LoginState::Idle,

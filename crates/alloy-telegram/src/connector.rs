@@ -45,6 +45,10 @@ const MAX_MEMBERS: usize = 200;
 const MESSAGE_INDEX_CAPACITY: usize = 4_096;
 /// Download attempts: the first with the stored reference, one more after refreshing it.
 const MAX_MEDIA_ATTEMPTS: usize = 2;
+/// Most topics asked for per `messages.getForumTopics` call.
+const MAX_TOPIC_PAGE: i32 = 100;
+/// Most `getForumTopics` pages read for one forum, so a broken paging cursor cannot loop forever.
+const MAX_TOPIC_PAGES: usize = 100;
 /// How often the session checkpoint is written while updates flow.
 const CHECKPOINT_INTERVAL: Duration = Duration::from_secs(60);
 
@@ -68,6 +72,8 @@ pub(crate) struct Shared {
     dc_ids: StdMutex<BTreeSet<i32>>,
     checkpoint: StdMutex<Option<Instant>>,
     logged_in: AtomicBool,
+    /// Remote ids of the forums seen so far: their messages are filed under their topics.
+    forums: RwLock<BTreeSet<String>>,
 }
 
 /// State that only the API methods touch, serialized by the connector’s mutex.
@@ -141,6 +147,7 @@ impl TelegramConnector {
                 dc_ids: StdMutex::new(dc_ids),
                 checkpoint: StdMutex::new(None),
                 logged_in: AtomicBool::new(false),
+                forums: RwLock::new(BTreeSet::new()),
             }),
             inner: Mutex::new(Inner {
                 client: None,
@@ -247,6 +254,21 @@ impl TelegramConnector {
         Err(ConnectorError::InvalidInput {
             message: format!("unknown chat: {remote_chat_id}"),
         })
+    }
+
+    /// Resolves a remote chat id that may name a forum topic to the forum's peer.
+    ///
+    /// Message ids of a topic are ids in its forum, so the forum peer is what every message call
+    /// needs; the topic id is returned for the calls that name it.
+    async fn resolve_forum_peer(
+        &self,
+        remote_chat_id: &str,
+    ) -> Result<(PeerRef, Option<i32>), ConnectorError> {
+        let (peer_id, topic) =
+            mapping::split_topic(remote_chat_id).ok_or_else(|| ConnectorError::InvalidInput {
+                message: format!("invalid chat id: {remote_chat_id}"),
+            })?;
+        Ok((self.resolve_peer(peer_id).await?, topic))
     }
 
     /// Moves the session to another datacenter, as Telegram asks during login.
@@ -870,6 +892,7 @@ impl Connector for TelegramConnector {
             formatted_text: true,
             pin_chats: true,
             pin_messages: true,
+            topics: true,
         }
     }
 
@@ -1032,6 +1055,75 @@ impl Connector for TelegramConnector {
         Ok(Page { items, next_cursor })
     }
 
+    async fn list_topics(&self, remote_chat_id: &str) -> Result<Vec<RemoteChat>, ConnectorError> {
+        let mut inner = self.inner.lock().await;
+        self.require_login()?;
+        let client = self.ensure_pool(&mut inner).await?;
+        let forum = match mapping::split_topic(remote_chat_id) {
+            Some((forum, None)) => forum,
+            _ => {
+                return Err(ConnectorError::InvalidInput {
+                    message: format!("{remote_chat_id} is not a forum"),
+                });
+            }
+        };
+        let peer = self.resolve_peer(forum).await?;
+
+        let mut topics: Vec<RemoteChat> = Vec::new();
+        let mut offset_date = 0;
+        let mut offset_id = 0;
+        let mut offset_topic = 0;
+        // Telegram pages topics by the position of the last one; a short page is the last page.
+        for _ in 0..MAX_TOPIC_PAGES {
+            let response = client
+                .invoke(&tl::functions::messages::GetForumTopics {
+                    peer: peer.into(),
+                    q: None,
+                    offset_date,
+                    offset_id,
+                    offset_topic,
+                    limit: MAX_TOPIC_PAGE,
+                })
+                .await
+                .map_err(error::map_invocation)?;
+            let tl::enums::messages::ForumTopics::Topics(page) = response;
+            let returned = page.topics.len();
+
+            let dates: HashMap<(String, i32), i32> = page
+                .messages
+                .iter()
+                .filter_map(|raw| {
+                    let chat = mapping::message_chat(raw)?;
+                    Some(((chat, mapping::message_id(raw)), mapping::raw_date(raw)?))
+                })
+                .collect();
+            let mut last = None;
+            for raw in &page.topics {
+                let tl::enums::ForumTopic::Topic(topic) = raw else {
+                    continue;
+                };
+                let activity = dates
+                    .get(&(forum.to_string(), topic.top_message))
+                    .map_or(0, |seconds| mapping::seconds_to_ms(*seconds));
+                topics.push(mapping::chat_from_topic(topic, forum, activity));
+                last = Some(topic.clone());
+            }
+            if returned < MAX_TOPIC_PAGE as usize {
+                break;
+            }
+            let Some(last) = last else {
+                break;
+            };
+            offset_date = dates
+                .get(&(forum.to_string(), last.top_message))
+                .copied()
+                .unwrap_or_default();
+            offset_id = last.top_message;
+            offset_topic = last.id;
+        }
+        Ok(topics)
+    }
+
     async fn list_members(
         &self,
         remote_chat_id: &str,
@@ -1086,7 +1178,50 @@ impl Connector for TelegramConnector {
         let mut inner = self.inner.lock().await;
         self.require_login()?;
         let client = self.ensure_pool(&mut inner).await?;
-        let peer = self.resolve_peer(remote_chat_id).await?;
+        let (peer_id, topic) =
+            mapping::split_topic(remote_chat_id).ok_or_else(|| ConnectorError::InvalidInput {
+                message: format!("invalid chat id: {remote_chat_id}"),
+            })?;
+        let peer = self.resolve_peer(peer_id).await?;
+
+        // A topic's messages are the replies under its root, which Telegram only lists through
+        // `messages.getReplies`; the forum's own plain id has no messages of its own.
+        if let Some(topic_id) = topic {
+            let response = client
+                .invoke(&tl::functions::messages::GetReplies {
+                    peer: peer.into(),
+                    msg_id: topic_id,
+                    offset_id: before.unwrap_or(0),
+                    offset_date: 0,
+                    add_offset: 0,
+                    limit: i32::try_from(limit).unwrap_or(i32::MAX),
+                    max_id: 0,
+                    min_id: 0,
+                    hash: 0,
+                })
+                .await
+                .map_err(error::map_invocation)?;
+            let raw_messages = match response {
+                tl::enums::messages::Messages::Messages(page) => page.messages,
+                tl::enums::messages::Messages::Slice(page) => page.messages,
+                tl::enums::messages::Messages::ChannelMessages(page) => page.messages,
+                tl::enums::messages::Messages::NotModified(_) => Vec::new(),
+            };
+            let mut items = Vec::with_capacity(raw_messages.len().min(limit));
+            for raw in raw_messages.iter().take(limit) {
+                let txn_id = self.shared.txn_of(mapping::message_id(raw));
+                if let Some(mapped) = mapping::message_from_raw(
+                    raw,
+                    remote_chat_id,
+                    self.shared.self_bare_id(),
+                    txn_id,
+                ) {
+                    items.push(mapped);
+                }
+            }
+            let next_cursor = items.last().map(|message| message.remote_msg_id.clone());
+            return Ok(Page { items, next_cursor });
+        }
 
         let mut iterator = client.iter_messages(peer).limit(limit);
         if let Some(id) = before {
@@ -1128,7 +1263,11 @@ impl Connector for TelegramConnector {
         let mut inner = self.inner.lock().await;
         self.require_login()?;
         let client = self.ensure_pool(&mut inner).await?;
-        let peer = self.resolve_peer(&remote_chat_id).await?;
+        let (peer_id, topic) =
+            mapping::split_topic(&remote_chat_id).ok_or_else(|| ConnectorError::InvalidInput {
+                message: format!("invalid chat id: {remote_chat_id}"),
+            })?;
+        let peer = self.resolve_peer(peer_id).await?;
         if body.is_none() && attachment.is_none() {
             return Err(ConnectorError::InvalidInput {
                 message: "a message needs a body or an attachment".to_string(),
@@ -1137,29 +1276,92 @@ impl Connector for TelegramConnector {
         let reply_to = reply_to
             .map(|value| mapping::parse_msg_id(&value))
             .transpose()?;
-        let mut input = InputMessage::new()
-            .text(body.unwrap_or_default())
-            .reply_to(reply_to);
-        if let Some(html) = formatted {
-            let (_, entities) = grammers_client::parsers::parse_html_message(&html);
-            if !entities.is_empty() {
-                input = input.fmt_entities(entities);
-            }
-        }
-        if let Some(attachment) = &attachment {
-            input = self.attach(&client, input, attachment).await?;
-        }
 
-        let sent = client
-            .send_message(peer, input)
-            .await
-            .map_err(error::map_invocation)?;
-        let id = sent.id();
-        let sent_at = mapping::raw_date(&sent.raw)
-            .map(mapping::seconds_to_ms)
-            .ok_or_else(|| ConnectorError::Protocol {
-                message: "telegram accepted the message without a date".to_string(),
-            })?;
+        let (id, sent_at) = match (topic, attachment.as_ref()) {
+            // A topic message with no attachment goes out as a raw send: grammers' input message
+            // cannot carry the topic's top message id, which is what files it under the topic.
+            (Some(topic_id), None) => {
+                let (text, entities) = match formatted {
+                    Some(html) => {
+                        let (plain, parsed) = grammers_client::parsers::parse_html_message(&html);
+                        if parsed.is_empty() {
+                            (body.unwrap_or_default(), None)
+                        } else {
+                            (plain, Some(parsed))
+                        }
+                    }
+                    None => (body.unwrap_or_default(), None),
+                };
+                let updates = client
+                    .invoke(&tl::functions::messages::SendMessage {
+                        no_webpage: false,
+                        silent: false,
+                        background: false,
+                        clear_draft: false,
+                        peer: peer.into(),
+                        reply_to: Some(
+                            tl::types::InputReplyToMessage {
+                                reply_to_msg_id: reply_to.unwrap_or(topic_id),
+                                top_msg_id: Some(topic_id),
+                                reply_to_peer_id: None,
+                                quote_text: None,
+                                quote_entities: None,
+                                quote_offset: None,
+                                monoforum_peer_id: None,
+                                todo_item_id: None,
+                                poll_option: None,
+                                quote_rich: None,
+                            }
+                            .into(),
+                        ),
+                        message: text,
+                        random_id: next_random_id(),
+                        reply_markup: None,
+                        entities,
+                        schedule_date: None,
+                        schedule_repeat_period: None,
+                        send_as: None,
+                        noforwards: false,
+                        update_stickersets_order: false,
+                        invert_media: false,
+                        quick_reply_shortcut: None,
+                        effect: None,
+                        allow_paid_floodskip: false,
+                        allow_paid_stars: None,
+                        suggested_post: None,
+                        rich_message: None,
+                    })
+                    .await
+                    .map_err(error::map_invocation)?;
+                sent_from_updates(&updates)?
+            }
+            _ => {
+                // Attachments and plain chats keep grammers' send. Its input message takes only a
+                // reply id, so an attachment sent into a topic is not filed under the topic yet.
+                let mut input = InputMessage::new()
+                    .text(body.unwrap_or_default())
+                    .reply_to(reply_to.or(topic));
+                if let Some(html) = formatted {
+                    let (_, entities) = grammers_client::parsers::parse_html_message(&html);
+                    if !entities.is_empty() {
+                        input = input.fmt_entities(entities);
+                    }
+                }
+                if let Some(attachment) = &attachment {
+                    input = self.attach(&client, input, attachment).await?;
+                }
+                let sent = client
+                    .send_message(peer, input)
+                    .await
+                    .map_err(error::map_invocation)?;
+                let sent_at = mapping::raw_date(&sent.raw)
+                    .map(mapping::seconds_to_ms)
+                    .ok_or_else(|| ConnectorError::Protocol {
+                        message: "telegram accepted the message without a date".to_string(),
+                    })?;
+                (sent.id(), sent_at)
+            }
+        };
         if id <= 0 {
             return Err(ConnectorError::Protocol {
                 message: "telegram accepted the message without returning its id".to_string(),
@@ -1184,7 +1386,7 @@ impl Connector for TelegramConnector {
         let mut inner = self.inner.lock().await;
         self.require_login()?;
         let client = self.ensure_pool(&mut inner).await?;
-        let peer = self.resolve_peer(remote_chat_id).await?;
+        let (peer, _) = self.resolve_forum_peer(remote_chat_id).await?;
         let id = mapping::parse_msg_id(remote_msg_id)?;
 
         let mut input = InputMessage::new().text(body);
@@ -1209,7 +1411,7 @@ impl Connector for TelegramConnector {
         let mut inner = self.inner.lock().await;
         self.require_login()?;
         let client = self.ensure_pool(&mut inner).await?;
-        let peer = self.resolve_peer(remote_chat_id).await?;
+        let (peer, _) = self.resolve_forum_peer(remote_chat_id).await?;
         let id = mapping::parse_msg_id(remote_msg_id)?;
 
         if !for_everyone {
@@ -1245,7 +1447,7 @@ impl Connector for TelegramConnector {
         let mut inner = self.inner.lock().await;
         self.require_login()?;
         let client = self.ensure_pool(&mut inner).await?;
-        let peer = self.resolve_peer(remote_chat_id).await?;
+        let (peer, _) = self.resolve_forum_peer(remote_chat_id).await?;
         let id = mapping::parse_msg_id(remote_msg_id)?;
 
         // Sending a reaction replaces this account's previous one, which is exactly the single
@@ -1265,7 +1467,7 @@ impl Connector for TelegramConnector {
         let mut inner = self.inner.lock().await;
         self.require_login()?;
         let client = self.ensure_pool(&mut inner).await?;
-        let peer = self.resolve_peer(remote_chat_id).await?;
+        let (peer, _) = self.resolve_forum_peer(remote_chat_id).await?;
         let id = mapping::parse_msg_id(remote_msg_id)?;
 
         // The remaining set after removing one of one is empty.
@@ -1283,9 +1485,21 @@ impl Connector for TelegramConnector {
         let mut inner = self.inner.lock().await;
         self.require_login()?;
         let client = self.ensure_pool(&mut inner).await?;
-        let peer = self.resolve_peer(remote_chat_id).await?;
+        let (peer, topic) = self.resolve_forum_peer(remote_chat_id).await?;
         let id = mapping::parse_msg_id(up_to_remote_msg_id)?;
 
+        if let Some(topic_id) = topic {
+            // A topic's read position is its own, which Telegram sets through `readDiscussion`.
+            client
+                .invoke(&tl::functions::messages::ReadDiscussion {
+                    peer: peer.into(),
+                    msg_id: topic_id,
+                    read_max_id: id,
+                })
+                .await
+                .map_err(error::map_invocation)?;
+            return Ok(());
+        }
         if peer.id.kind() == PeerKind::Channel {
             client
                 .invoke(&tl::functions::channels::ReadHistory {
@@ -1310,7 +1524,7 @@ impl Connector for TelegramConnector {
         let mut inner = self.inner.lock().await;
         self.require_login()?;
         let client = self.ensure_pool(&mut inner).await?;
-        let peer = self.resolve_peer(remote_chat_id).await?;
+        let (peer, topic) = self.resolve_forum_peer(remote_chat_id).await?;
 
         let action: tl::enums::SendMessageAction = if typing {
             tl::types::SendMessageTypingAction {}.into()
@@ -1320,7 +1534,7 @@ impl Connector for TelegramConnector {
         client
             .invoke(&tl::functions::messages::SetTyping {
                 peer: peer.into(),
-                top_msg_id: None,
+                top_msg_id: topic,
                 action,
             })
             .await
@@ -1556,6 +1770,25 @@ impl Shared {
     /// Caches a peer from a dialog response.
     pub(crate) fn remember_entry(&self, entry: &PeerEntry) {
         self.insert_peer(entry.kind, entry.bare_id, entry.auth);
+        if entry.is_forum {
+            self.remember_forum(&entry.id);
+        }
+    }
+
+    /// Records that a peer is a forum, so messages in it are filed under their topics.
+    pub(crate) fn remember_forum(&self, remote_chat_id: &str) {
+        self.forums
+            .write()
+            .unwrap_or_else(|error| error.into_inner())
+            .insert(remote_chat_id.to_string());
+    }
+
+    /// Whether a remote chat id is a known forum.
+    pub(crate) fn is_forum(&self, remote_chat_id: &str) -> bool {
+        self.forums
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .contains(remote_chat_id)
     }
 
     /// Remembers where a locally sent or observed message lives.
@@ -1640,6 +1873,47 @@ fn drop_pool(inner: &mut Inner) {
         drop(runtime);
     }
     inner.client = None;
+}
+
+/// A random id for a raw send, unique within this process.
+///
+/// Telegram uses it to drop duplicate sends, so it only has to differ between sends.
+fn next_random_id() -> i64 {
+    static NEXT: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos() as i64);
+    let base = NEXT.fetch_add(1, Ordering::Relaxed);
+    now.wrapping_add(base)
+}
+
+/// The id and send date of a message a raw send created, from the updates Telegram answered with.
+fn sent_from_updates(updates: &tl::enums::Updates) -> Result<(i32, i64), ConnectorError> {
+    match updates {
+        tl::enums::Updates::UpdateShortSentMessage(sent) => {
+            Ok((sent.id, mapping::seconds_to_ms(sent.date)))
+        }
+        tl::enums::Updates::Updates(batch) => batch
+            .updates
+            .iter()
+            .find_map(|update| match update {
+                tl::enums::Update::NewMessage(new) => Some(new.message.clone()),
+                tl::enums::Update::NewChannelMessage(new) => Some(new.message.clone()),
+                _ => None,
+            })
+            .and_then(|raw| {
+                Some((
+                    mapping::message_id(&raw),
+                    mapping::seconds_to_ms(mapping::raw_date(&raw)?),
+                ))
+            })
+            .ok_or_else(|| ConnectorError::Protocol {
+                message: "telegram accepted the topic message without its update".to_string(),
+            }),
+        _ => Err(ConnectorError::Protocol {
+            message: "telegram accepted the topic message without returning its id".to_string(),
+        }),
+    }
 }
 
 /// Wraps a resolved peer as the dialog reference the pin requests take.

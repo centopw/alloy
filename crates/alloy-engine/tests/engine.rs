@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use alloy_connector::Connector;
 use alloy_connector::fake::{
-    FAKE_CHAT_CHANNEL, FAKE_CHAT_DIRECT, FAKE_CHAT_GROUP, FAKE_CODE, FAKE_USER_ID,
+    FAKE_CHAT_CHANNEL, FAKE_CHAT_DIRECT, FAKE_CHAT_FORUM, FAKE_CHAT_GROUP, FAKE_CODE, FAKE_USER_ID,
 };
 use alloy_engine::factory::FakeConnectorFactory;
 use alloy_engine::{AppEngine, Engine, EngineContext};
@@ -24,6 +24,8 @@ use tokio::sync::broadcast;
 
 const KEY: [u8; 32] = [7; 32];
 const WAIT: Duration = Duration::from_secs(10);
+const FAKE_TOPIC_GENERAL: &str = "fake-chat-forum/t1";
+const FAKE_TOPIC_OTHER: &str = "fake-chat-forum/t2";
 
 struct Harness {
     engine: AppEngine,
@@ -313,16 +315,22 @@ async fn room_list_reset_contains_the_seeded_chats() {
     let VectorDiffDto::Reset { values } = *diff else {
         panic!("expected a reset")
     };
-    assert_eq!(values.len(), 3);
-    let titles: Vec<&str> = values
-        .iter()
-        .map(|summary| summary.name.as_deref().unwrap_or_default())
-        .collect();
-    assert_eq!(titles, ["Ada Lovelace", "Analytical Engine", "Alloy News"]);
+    // Three seeded chats, plus the forum and its two topics.
+    assert_eq!(values.len(), 6);
+    let row = |title: &str| {
+        values
+            .iter()
+            .find(|summary| summary.name.as_deref() == Some(title))
+            .unwrap_or_else(|| panic!("the row '{title}'"))
+    };
+    row("Analytical Engine");
     // The seeded channel is archived on the network; the list still carries it.
-    assert!(values[2].archived);
-    assert!(values[0].pinned);
-    assert_eq!(values[0].unread_notifications.notification_count, 2);
+    assert!(row("Alloy News").archived);
+    assert!(row("Ada Lovelace").pinned);
+    assert_eq!(
+        row("Ada Lovelace").unread_notifications.notification_count,
+        2
+    );
 }
 
 #[tokio::test]
@@ -820,12 +828,14 @@ async fn channel_post_is_authored_by_the_channel() {
     assert_eq!(post.sender_display_name.as_deref(), Some("Alloy News"));
 }
 
-/// The room list as the engine orders it now, by title.
+/// The top-level room list by title: the forum and its topics are left out, because the pin tests
+/// are about the three seeded chats.
 async fn room_titles(engine: &AppEngine) -> Vec<String> {
     alloy_engine::projection::query_room_list(engine.context(), None)
         .await
         .expect("room list")
         .into_iter()
+        .filter(|summary| !summary.is_forum && summary.parent_id.is_none())
         .map(|summary| summary.name.unwrap_or_default())
         .collect()
 }
@@ -1061,4 +1071,99 @@ async fn pinned_messages_round_trip_and_show_in_the_bar() {
         panic!("unexpected response: {response:?}")
     };
     assert!(items.is_empty());
+}
+
+/// The local id of a chat the account stores under its network id.
+async fn local_chat(engine: &AppEngine, account: &Account, remote_chat_id: &str) -> RoomId {
+    engine
+        .context()
+        .store
+        .find_chat(&account.id.0, remote_chat_id)
+        .await
+        .expect("find chat")
+        .map(|chat| RoomId(chat.chat_id))
+        .unwrap_or_else(|| panic!("chat '{remote_chat_id}' was not stored"))
+}
+
+#[tokio::test]
+async fn forum_topics_are_rooms_nested_under_the_forum() {
+    let harness = Harness::new();
+    let account = login(&harness.engine).await;
+    let forum = local_chat(&harness.engine, &account, FAKE_CHAT_FORUM).await;
+
+    let rooms = alloy_engine::projection::query_room_list(harness.engine.context(), None)
+        .await
+        .expect("room list");
+    let forum_row = rooms
+        .iter()
+        .find(|summary| summary.id == forum)
+        .expect("the forum row");
+    assert!(forum_row.is_forum);
+    assert_eq!(forum_row.parent_id, None);
+
+    for remote in [FAKE_TOPIC_GENERAL, FAKE_TOPIC_OTHER] {
+        let topic = local_chat(&harness.engine, &account, remote).await;
+        let row = rooms
+            .iter()
+            .find(|summary| summary.id == topic)
+            .unwrap_or_else(|| panic!("the topic row '{remote}'"));
+        assert_eq!(row.parent_id, Some(forum.clone()));
+        assert!(!row.is_forum);
+        assert!(!row.pinned, "a topic is never pinned on its own");
+    }
+}
+
+#[tokio::test]
+async fn timeline_of_a_topic_replays_only_that_topic() {
+    let harness = Harness::new();
+    let account = login(&harness.engine).await;
+    let topic = local_chat(&harness.engine, &account, FAKE_TOPIC_GENERAL).await;
+    let mut events = harness.events();
+    let _subscription = subscribe_timeline(&harness.engine, &topic).await;
+
+    let event = wait_for(&mut events, |event| {
+        matches!(
+            event,
+            EngineEvent::TimelineDiff { diff, .. }
+                if matches!(diff.as_ref(), VectorDiffDto::Reset { .. })
+        )
+    })
+    .await;
+    let EngineEvent::TimelineDiff { diff, .. } = event else {
+        panic!("unexpected event")
+    };
+    let VectorDiffDto::Reset { values } = *diff else {
+        panic!("expected a reset")
+    };
+
+    let fake = harness.factory.last().expect("the running connector");
+    let mut shown: Vec<String> = values
+        .iter()
+        .filter_map(text_body)
+        .map(str::to_string)
+        .collect();
+    shown.sort();
+    assert!(!shown.is_empty(), "the topic has history to replay");
+
+    let page = fake
+        .backfill(FAKE_TOPIC_GENERAL, None, 50)
+        .await
+        .expect("topic history");
+    let mut expected: Vec<String> = page.items.iter().filter_map(|m| m.body.clone()).collect();
+    expected.sort();
+    assert_eq!(
+        shown, expected,
+        "the timeline holds exactly this topic's messages"
+    );
+
+    let page = fake
+        .backfill(FAKE_TOPIC_OTHER, None, 50)
+        .await
+        .expect("other topic history");
+    for message in page.items.iter().filter_map(|m| m.body.as_deref()) {
+        assert!(
+            !shown.iter().any(|body| body == message),
+            "the other topic's message '{message}' must not appear here"
+        );
+    }
 }

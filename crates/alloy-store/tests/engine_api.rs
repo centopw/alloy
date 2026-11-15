@@ -36,6 +36,8 @@ async fn account_and_chat(store: &Store) -> (String, String) {
             avatar_media_id: None,
             last_message_id: None,
             last_activity_at: Some(1_000),
+            parent_remote_chat_id: None,
+            is_forum: false,
         })
         .await
         .expect("upsert chat");
@@ -376,6 +378,8 @@ async fn search_treats_fts_syntax_characters_literally() {
             avatar_media_id: None,
             last_message_id: None,
             last_activity_at: Some(2_000),
+            parent_remote_chat_id: None,
+            is_forum: false,
         })
         .await
         .expect("second chat");

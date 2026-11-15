@@ -154,7 +154,11 @@ async fn login_runs_through_the_sidecar() {
     wait_for_online(&mut events).await;
 
     let page = connector.list_chats(None, 10).await.expect("list_chats");
-    assert_eq!(page.items.len(), 3, "the fake seeds three chats");
+    assert_eq!(
+        page.items.len(),
+        6,
+        "the fake seeds three chats, a forum and its two topics"
+    );
     assert!(
         page.items
             .iter()
@@ -369,7 +373,7 @@ async fn crash_mid_session_fails_pending_and_resumes_after_respawn() {
         .list_chats(None, 10)
         .await
         .expect("the replayed session lists chats");
-    assert_eq!(page.items.len(), 3);
+    assert_eq!(page.items.len(), 6);
 
     let ack = connector
         .send(outgoing("txn-after-restart", "still here"))

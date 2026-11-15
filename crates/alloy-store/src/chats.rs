@@ -18,10 +18,12 @@ impl Store {
             let chat_id: String = tx.query_row(
                 "INSERT INTO chats
                      (chat_id, account_id, remote_chat_id, kind, title, avatar_media_id,
-                      last_message_id, last_activity_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                      last_message_id, last_activity_at, parent_remote_chat_id, is_forum)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
                  ON CONFLICT (account_id, remote_chat_id) DO UPDATE SET
                      kind = excluded.kind,
+                     parent_remote_chat_id = COALESCE(excluded.parent_remote_chat_id, chats.parent_remote_chat_id),
+                     is_forum = excluded.is_forum OR chats.is_forum,
                      title = COALESCE(excluded.title, chats.title),
                      avatar_media_id = COALESCE(excluded.avatar_media_id, chats.avatar_media_id),
                      last_message_id = COALESCE(excluded.last_message_id, chats.last_message_id),
@@ -41,7 +43,9 @@ impl Store {
                     chat.title,
                     chat.avatar_media_id,
                     chat.last_message_id,
-                    chat.last_activity_at
+                    chat.last_activity_at,
+                    chat.parent_remote_chat_id,
+                    chat.is_forum
                 ],
                 |row| row.get(0),
             )?;
@@ -107,6 +111,12 @@ impl Store {
         self.with_conn(move |conn| {
             let tx = conn.transaction()?;
             let mut record = rows::chat_by_id(&tx, &chat_id)?;
+            if update.is_pinned == Some(true) && record.parent_remote_chat_id.is_some() {
+                return Err(StoreError::InvalidValue {
+                    field: "is_pinned",
+                    value: record.chat_id.clone(),
+                });
+            }
             if let Some(value) = update.is_pinned
                 && value != record.is_pinned
             {
@@ -116,7 +126,7 @@ impl Store {
                 record.pin_order = if value {
                     tx.execute(
                         "UPDATE chats SET pin_order = pin_order + 1
-                         WHERE account_id = ?1 AND is_pinned = 1 AND is_archived = 0 AND pin_order IS NOT NULL",
+                         WHERE account_id = ?1 AND is_pinned = 1 AND is_archived = 0 AND parent_remote_chat_id IS NULL AND pin_order IS NOT NULL",
                         [&record.account_id],
                     )?;
                     Some(0)
@@ -124,7 +134,7 @@ impl Store {
                     if let Some(gone) = record.pin_order {
                         tx.execute(
                             "UPDATE chats SET pin_order = pin_order - 1
-                             WHERE account_id = ?1 AND is_pinned = 1 AND is_archived = 0 AND pin_order > ?2",
+                             WHERE account_id = ?1 AND is_pinned = 1 AND is_archived = 0 AND parent_remote_chat_id IS NULL AND pin_order > ?2",
                             rusqlite::params![&record.account_id, gone],
                         )?;
                     }
@@ -205,13 +215,13 @@ impl Store {
             let tx = conn.transaction()?;
             for chat_id in &chat_ids {
                 let record = rows::chat_by_id(&tx, chat_id)?;
-                if record.account_id != account_id || record.is_archived {
+                if record.account_id != account_id || record.is_archived || record.parent_remote_chat_id.is_some() {
                     return Err(StoreError::NotFound("chat"));
                 }
             }
             tx.execute(
                 "UPDATE chats SET is_pinned = 0, pin_order = NULL
-                 WHERE account_id = ?1 AND is_pinned = 1 AND is_archived = 0",
+                 WHERE account_id = ?1 AND is_pinned = 1 AND is_archived = 0 AND parent_remote_chat_id IS NULL",
                 [&account_id],
             )?;
             for (position, chat_id) in chat_ids.iter().enumerate() {
@@ -221,7 +231,7 @@ impl Store {
                 )?;
             }
             let mut stmt = tx.prepare(
-                "SELECT * FROM chats WHERE account_id = ?1 AND is_pinned = 1 AND is_archived = 0
+                "SELECT * FROM chats WHERE account_id = ?1 AND is_pinned = 1 AND is_archived = 0 AND parent_remote_chat_id IS NULL
                  ORDER BY pin_order ASC",
             )?;
             let records = stmt
@@ -299,10 +309,34 @@ impl Store {
         let account_id = account_id.to_owned();
         self.with_conn(move |conn| {
             let mut stmt = conn.prepare(
-                "SELECT * FROM chats WHERE account_id = ?1 AND is_pinned = 1 AND is_archived = 0
+                "SELECT * FROM chats WHERE account_id = ?1 AND is_pinned = 1 AND is_archived = 0 AND parent_remote_chat_id IS NULL
                  ORDER BY pin_order IS NULL, pin_order ASC, COALESCE(last_activity_at, 0) DESC",
             )?;
             let rows = stmt.query_map([&account_id], rows::chat)?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+        .await
+    }
+
+    /// The topics of one forum, newest activity first. Each topic is a chat of its own; the forum
+    /// is only the grouping it is listed under.
+    pub async fn list_topics(
+        &self,
+        account_id: &str,
+        forum_remote_chat_id: &str,
+    ) -> Result<Vec<ChatRecord>, StoreError> {
+        let account_id = account_id.to_owned();
+        let forum_remote_chat_id = forum_remote_chat_id.to_owned();
+        self.with_conn(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT * FROM chats
+                 WHERE account_id = ?1 AND parent_remote_chat_id = ?2
+                 ORDER BY COALESCE(last_activity_at, 0) DESC, chat_id ASC",
+            )?;
+            let rows = stmt.query_map(
+                rusqlite::params![account_id, forum_remote_chat_id],
+                rows::chat,
+            )?;
             Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
         })
         .await

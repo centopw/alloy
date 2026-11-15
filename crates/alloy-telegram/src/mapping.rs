@@ -69,6 +69,38 @@ pub(crate) fn decode_peer(id: &str) -> Option<(PeerKindTag, i64)> {
     Some((kind, bare_id))
 }
 
+/// The topic every forum message without a topic header belongs to: Telegram’s General topic.
+pub(crate) const GENERAL_TOPIC_ID: i32 = 1;
+
+/// The remote id of a forum topic: the forum’s id plus `/t<topic id>`.
+///
+/// The General topic of a forum is topic `1`, so it has the id `<forum>/t1`.
+pub(crate) fn encode_topic(forum_remote_id: &str, topic_id: i32) -> String {
+    format!("{forum_remote_id}/t{topic_id}")
+}
+
+/// Splits a remote chat id into its peer part and the topic id, when it names a topic.
+///
+/// `ch123/t45` becomes `("ch123", Some(45))`; a plain id is returned unchanged with `None`. The peer
+/// part must still pass [`decode_peer`]; a topic suffix that is not a positive number is rejected.
+pub(crate) fn split_topic(id: &str) -> Option<(&str, Option<i32>)> {
+    let Some((peer, suffix)) = id.split_once("/t") else {
+        decode_peer(id)?;
+        return Some((id, None));
+    };
+    decode_peer(peer)?;
+    let topic = suffix.parse::<i32>().ok().filter(|topic| *topic > 0)?;
+    Some((peer, Some(topic)))
+}
+
+/// The chat id a message is filed under: the topic when it names one, otherwise the forum itself.
+pub(crate) fn topic_chat_id(forum_remote_id: &str, topic: Option<i32>) -> String {
+    match topic {
+        Some(topic) => encode_topic(forum_remote_id, topic),
+        None => forum_remote_id.to_string(),
+    }
+}
+
 /// The grammers identity for a peer, or `None` when the id is outside the range Telegram uses for
 /// that kind.
 pub(crate) fn peer_id(kind: PeerKindTag, bare_id: i64) -> Option<PeerId> {
@@ -128,7 +160,7 @@ pub(crate) fn parse_msg_id(id: &str) -> Result<i32, ConnectorError> {
     })
 }
 
-/// The chat a TL message belongs to.
+/// The chat a TL message belongs to, as a peer: a forum’s own id, not one of its topics.
 pub(crate) fn message_chat(raw: &tl::enums::Message) -> Option<String> {
     let peer = match raw {
         tl::enums::Message::Empty(message) => message.peer_id.as_ref()?,
@@ -137,6 +169,38 @@ pub(crate) fn message_chat(raw: &tl::enums::Message) -> Option<String> {
     };
     let (kind, bare_id) = tl_peer(peer)?;
     Some(encode_peer(kind, bare_id))
+}
+
+/// The chat a TL message belongs to, filing a message of a known forum under its topic.
+///
+/// `is_forum` says whether the message’s channel is a forum; only then does its reply header name
+/// a topic. Everything else is filed under its peer, exactly as [`message_chat`] does.
+pub(crate) fn message_chat_in(raw: &tl::enums::Message, is_forum: bool) -> Option<String> {
+    let forum = message_chat(raw)?;
+    if !is_forum {
+        return Some(forum);
+    }
+    Some(topic_chat_id(&forum, Some(message_topic(raw))))
+}
+
+/// The topic a message of a forum belongs to.
+///
+/// A message whose reply header carries `forum_topic` belongs to the topic named by
+/// `reply_to_top_id`, or by `reply_to_msg_id` when there is no top id (the topic root itself). A
+/// message with no topic header is in the General topic, which is topic `1`.
+pub(crate) fn message_topic(raw: &tl::enums::Message) -> i32 {
+    let header = match raw {
+        tl::enums::Message::Message(message) => message.reply_to.as_ref(),
+        tl::enums::Message::Service(message) => message.reply_to.as_ref(),
+        tl::enums::Message::Empty(_) => None,
+    };
+    match header {
+        Some(tl::enums::MessageReplyHeader::Header(header)) if header.forum_topic => header
+            .reply_to_top_id
+            .or(header.reply_to_msg_id)
+            .unwrap_or(GENERAL_TOPIC_ID),
+        _ => GENERAL_TOPIC_ID,
+    }
 }
 
 /// The id of a TL message, whichever constructor it uses.
@@ -317,6 +381,11 @@ fn reply_id_of(header: Option<&tl::enums::MessageReplyHeader>) -> Option<String>
     let tl::enums::MessageReplyHeader::Header(header) = header? else {
         return None;
     };
+    // In a forum, `reply_to_msg_id` without `reply_to_top_id` names the topic root, not a quoted
+    // message: a topic’s own messages are not replies to its root.
+    if header.forum_topic && header.reply_to_top_id.is_none() {
+        return None;
+    }
     header.reply_to_msg_id.map(|id| id.to_string())
 }
 
@@ -502,6 +571,8 @@ pub(crate) struct PeerEntry {
     pub title: String,
     /// Avatar pointer, when the peer has a picture.
     pub avatar: Option<MediaRef>,
+    /// Whether this peer is a forum: its topics are chats of their own.
+    pub is_forum: bool,
 }
 
 impl From<PeerEntry> for RemoteUser {
@@ -557,6 +628,7 @@ pub(crate) fn entry_from_user(user: &tl::enums::User) -> Option<PeerEntry> {
         kind,
         auth,
         title: user_full_name(user),
+        is_forum: false,
     })
 }
 
@@ -576,6 +648,7 @@ pub(crate) fn entry_from_chat(chat: &tl::enums::Chat) -> Option<PeerEntry> {
                 kind: PeerKindTag::Chat,
                 auth: 0,
                 title: group.title.clone(),
+                is_forum: false,
             })
         }
         tl::enums::Chat::Forbidden(group) => {
@@ -588,6 +661,7 @@ pub(crate) fn entry_from_chat(chat: &tl::enums::Chat) -> Option<PeerEntry> {
                 kind: PeerKindTag::Chat,
                 auth: 0,
                 title: group.title.clone(),
+                is_forum: false,
             })
         }
         tl::enums::Chat::Channel(channel) => {
@@ -608,6 +682,7 @@ pub(crate) fn entry_from_chat(chat: &tl::enums::Chat) -> Option<PeerEntry> {
                     channel.access_hash.unwrap_or_default()
                 },
                 title: channel.title.clone(),
+                is_forum: channel.forum,
             })
         }
         tl::enums::Chat::ChannelForbidden(channel) => {
@@ -624,6 +699,7 @@ pub(crate) fn entry_from_chat(chat: &tl::enums::Chat) -> Option<PeerEntry> {
                 kind: PeerKindTag::Channel,
                 auth: channel.access_hash,
                 title: channel.title.clone(),
+                is_forum: false,
             })
         }
         _ => None,
@@ -703,7 +779,37 @@ pub(crate) fn chat_from_dialog(
         pin_order: if pinned { pin_order } else { None },
         is_archived,
         is_muted: i64::from(muted_until) > now_seconds,
+        parent_remote_chat_id: None,
+        is_forum: entry.is_forum,
     })
+}
+
+/// Converts one forum topic into the [`RemoteChat`] of its own conversation.
+///
+/// A topic inherits its forum’s id as `parent_remote_chat_id`. Its activity comes from the date of
+/// its top message, which the caller looked up in the same response.
+pub(crate) fn chat_from_topic(
+    topic: &tl::types::ForumTopic,
+    forum_id: &str,
+    activity_ms: i64,
+) -> RemoteChat {
+    let settings: tl::types::PeerNotifySettings = topic.notify_settings.clone().into();
+    let muted_until = settings.mute_until.unwrap_or_default();
+    let now_seconds = now_ms() / 1_000;
+    RemoteChat {
+        remote_chat_id: encode_topic(forum_id, topic.id),
+        kind: ChatKind::Group,
+        title: topic.title.clone(),
+        avatar: None,
+        last_activity_at: activity_ms,
+        unread_count: u32::try_from(topic.unread_count).unwrap_or_default(),
+        is_pinned: false,
+        pin_order: None,
+        is_archived: false,
+        is_muted: i64::from(muted_until) > now_seconds,
+        parent_remote_chat_id: Some(forum_id.to_string()),
+        is_forum: false,
+    }
 }
 
 /// A resume position inside the dialog list.
@@ -1130,6 +1236,7 @@ mod tests {
             chat_kind: ChatKind::Direct,
             title: "Ada Lovelace".to_string(),
             avatar: None,
+            is_forum: false,
         }
     }
 
@@ -1282,6 +1389,26 @@ mod tests {
     }
 
     #[test]
+    fn topic_ids_round_trip_and_keep_the_peer_valid() {
+        assert_eq!(encode_topic("ch123", 45), "ch123/t45");
+        assert_eq!(encode_topic("ch123", 1), "ch123/t1");
+        assert_eq!(split_topic("ch123/t45"), Some(("ch123", Some(45))));
+        assert_eq!(split_topic("ch123"), Some(("ch123", None)));
+        assert_eq!(split_topic("ch123/t1"), Some(("ch123", Some(1))));
+    }
+
+    #[test]
+    fn garbage_topic_ids_are_rejected() {
+        assert_eq!(split_topic("ch123/t0"), None);
+        assert_eq!(split_topic("ch123/tx"), None);
+        assert_eq!(split_topic("ch123/t"), None);
+        assert_eq!(split_topic("x123/t45"), None);
+        assert_eq!(split_topic("ch0/t45"), None);
+        assert_eq!(split_topic("garbage"), None);
+        assert_eq!(decode_peer("ch123/t45"), None);
+    }
+
+    #[test]
     fn peer_refs_carry_the_access_hash() {
         let reference = peer_ref("ch42", -99).expect("valid id");
 
@@ -1388,6 +1515,7 @@ mod tests {
             chat_kind: ChatKind::Direct,
             title: "Ada Lovelace".to_string(),
             avatar: Some(avatar_ref("u7", 5)),
+            is_forum: false,
         };
         let raw = text_message(10, "hello");
 
