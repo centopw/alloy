@@ -57,6 +57,21 @@ describe('message actions', () => {
     );
   });
 
+  it('gives pictures and albums a definite width so their bubble hugs them', () => {
+    // A shrink-to-fit message box makes a percentage-width picture contribute its natural width,
+    // so the bubble came out wider than the picture (or the album grid) and the content sat to one
+    // side of it with the timestamp far away. Both caps must be definite; a percentage may only
+    // appear in max-width, which shrinks them on a narrow screen.
+    const frame = mediaSource.match(/\n {2}\.frame \{[^}]*\}/)?.[0];
+    expect(frame, 'the picture frame has a rule').toBeTruthy();
+    expect(frame).toContain('width: min(400px, calc(360px * var(--ratio, 1.3333)));');
+    const album = rowSource.match(/\n {2}\.album-grid \{[^}]*\}/)?.[0];
+    expect(album, 'the album grid has a rule').toBeTruthy();
+    expect(album).toContain('width: 400px;');
+    expect(album).toContain('max-width: 100%;');
+    expect(album).not.toMatch(/width: min\([^;]*100%/);
+  });
+
   it('places the toolbar beside the bubble, on the inner side of each message', () => {
     const incoming = rowSource.match(
       /\n {2}\.row\[data-layout='bubbles'\] \.toolbar \{[^}]*\}/

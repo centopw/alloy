@@ -1568,11 +1568,16 @@
     font-size: var(--alloy-typography-size-sm);
     line-height: var(--alloy-typography-line-height-tight);
   }
+  /* A definite width, like a single picture's frame. It must not contain a percentage: `min(400px,
+     100%)` is resolved from the content when the message box is sized, and the pictures' natural
+     widths then make the bubble as wide as its cap with the grid sitting at one side of it. The
+     percentage lives in max-width, which only shrinks the grid on a narrow screen. */
   .album-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 2px;
-    max-width: min(400px, 100%);
+    width: 400px;
+    max-width: 100%;
   }
   .row[data-layout='bubbles'] .bubble {
     position: relative;
