@@ -160,12 +160,12 @@ pub async fn queue_message(
         .remote_user_id
         .clone()
         .ok_or_else(|| EngineError::unavailable("the account has no signed-in user yet"))?;
-    let reply_remote = match &draft.reply_to {
-        Some(event_id) => Some(remote_id(
-            &message_in_chat(ctx, &chat.chat_id, event_id).await?,
-        )?),
-        None => None,
-    };
+    // The reply target is stored by its local id and resolved to a network id when the message is
+    // actually sent: the parent may still be on its way out, and a user who replies to the message
+    // they just sent should not be told to wait. The quote on screen already resolves locally.
+    if let Some(event_id) = &draft.reply_to {
+        message_in_chat(ctx, &chat.chat_id, event_id).await?;
+    }
 
     let txn_id = draft.txn_id.unwrap_or_else(|| Uuid::new_v4().to_string());
     let sent_at = now_ms();
@@ -183,7 +183,7 @@ pub async fn queue_message(
             kind: draft.kind,
             body: draft.body.clone(),
             formatted: None,
-            reply_to_message_id: draft.reply_to.map(|event_id| event_id.0),
+            reply_to_message_id: draft.reply_to.as_ref().map(|event_id| event_id.0.clone()),
             media_id: None,
             send_state: Some(SendState::Queued),
             extra: None,
@@ -204,7 +204,7 @@ pub async fn queue_message(
 
     let payload = json!({
         "body": draft.send_body,
-        "reply_to": reply_remote,
+        "reply_to_local": draft.reply_to.as_ref().map(|event_id| event_id.0.clone()),
         "attachment": draft.attachment,
     });
     let queued = ctx

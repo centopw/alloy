@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use alloy_connector::{ConnectorError, LocalAttachment, OutgoingMessage};
-use alloy_store::{OutboxItem, OutboxOp, SendState, StoreError};
+use alloy_store::{MessageRecord, OutboxItem, OutboxOp, SendState, StoreError};
 use serde::Deserialize;
 use tokio::time::Instant;
 
@@ -46,7 +46,9 @@ enum PerformError {
 #[serde(default)]
 struct SendPayload {
     body: Option<String>,
-    reply_to: Option<String>,
+    /// Local id of the message this one replies to; resolved to a network id at send time, because
+    /// the parent may still be on its way out when the user replies to it.
+    reply_to_local: Option<String>,
     attachment: Option<OutboxAttachment>,
 }
 
@@ -233,12 +235,41 @@ async fn send(
         .as_ref()
         .filter(|attachment| attachment.temporary)
         .map(|attachment| attachment.path.clone());
+    // A reply's target is resolved now, not when the user replied: the parent may have been on its
+    // way out at that point.
+    let reply_to = match &payload.reply_to_local {
+        Some(parent_id) => match ctx
+            .store
+            .get_message(parent_id)
+            .await
+            .map_err(store_failure)?
+        {
+            Some(parent) => match reply_target(&parent) {
+                ReplyTarget::Ready(remote) => Some(remote),
+                ReplyTarget::Waiting => {
+                    return Err(PerformError::Retry {
+                        message: "waiting for the replied-to message to send".to_string(),
+                        next_attempt_at: now_ms().saturating_add(
+                            i64::try_from(retry_delay(item.attempts).as_millis())
+                                .unwrap_or(i64::MAX),
+                        ),
+                    });
+                }
+                ReplyTarget::Lost => {
+                    return Err(fatal("the message this replies to could not be sent"));
+                }
+            },
+            None => return Err(fatal("the replied-to message is gone")),
+        },
+        None => None,
+    };
+
     let outgoing = OutgoingMessage {
         txn_id: item.txn_id.clone(),
         remote_chat_id: remote_chat_id.to_string(),
         body: payload.body,
         formatted: None,
-        reply_to: payload.reply_to,
+        reply_to,
         attachment: payload.attachment.map(|attachment| LocalAttachment {
             path: attachment.path,
             mime: attachment.mime,
@@ -523,6 +554,28 @@ fn fatal(message: impl Into<String>) -> PerformError {
     }
 }
 
+/// What a reply needs from the message it answers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ReplyTarget {
+    /// The parent reached the network; the reply quotes this id.
+    Ready(String),
+    /// The parent is still on its way out; the reply waits for it instead of failing.
+    Waiting,
+    /// The parent never reached the network, so there is nothing to quote.
+    Lost,
+}
+
+/// Decides a reply's parent from its local row. The user may reply before the parent is
+/// acknowledged — replying to the message they just sent is ordinary — so the id is resolved here,
+/// when the reply is actually sent, rather than when the reply was queued.
+fn reply_target(parent: &MessageRecord) -> ReplyTarget {
+    match &parent.remote_msg_id {
+        Some(remote) => ReplyTarget::Ready(remote.clone()),
+        None if parent.send_state == Some(SendState::Failed) => ReplyTarget::Lost,
+        None => ReplyTarget::Waiting,
+    }
+}
+
 fn store_failure(err: StoreError) -> PerformError {
     fatal(map_store(err).message)
 }
@@ -538,4 +591,61 @@ fn remove_stored_file(path: &str) {
 fn instant_at(timestamp_ms: i64) -> Instant {
     let delay = (timestamp_ms - now_ms()).clamp(0, 3_600_000);
     Instant::now() + Duration::from_millis(u64::try_from(delay).unwrap_or(0))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_store::MessageKind;
+
+    fn parent(remote: Option<&str>, state: Option<SendState>) -> MessageRecord {
+        MessageRecord {
+            message_id: "parent".to_string(),
+            chat_id: "chat".to_string(),
+            remote_msg_id: remote.map(str::to_string),
+            txn_id: None,
+            sender_remote_id: "u1".to_string(),
+            is_own: true,
+            sent_at: 0,
+            edited_at: None,
+            deleted_at: None,
+            kind: MessageKind::Text,
+            body: Some("hello".to_string()),
+            formatted: None,
+            reply_to_message_id: None,
+            media_id: None,
+            send_state: state,
+            extra: None,
+            is_pinned: false,
+        }
+    }
+
+    #[test]
+    fn a_reply_quotes_a_parent_that_reached_the_network() {
+        assert_eq!(
+            reply_target(&parent(Some("remote-1"), Some(SendState::Sent))),
+            ReplyTarget::Ready("remote-1".to_string())
+        );
+    }
+
+    #[test]
+    fn a_reply_waits_while_its_parent_is_still_sending() {
+        // Replying to the message you just sent is ordinary; the reply must not be refused while
+        // the parent is on its way out (that used to surface as an engine error in the timeline).
+        for state in [None, Some(SendState::Queued), Some(SendState::Sending)] {
+            assert_eq!(
+                reply_target(&parent(None, state)),
+                ReplyTarget::Waiting,
+                "state {state:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_reply_to_a_failed_parent_is_lost_rather_than_retried_forever() {
+        assert_eq!(
+            reply_target(&parent(None, Some(SendState::Failed))),
+            ReplyTarget::Lost
+        );
+    }
 }

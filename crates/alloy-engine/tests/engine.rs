@@ -19,7 +19,7 @@ use alloy_protocol::{
     SubscriptionId, TimelineItemContent, TimelineItemDto, UserId, VectorDiffDto,
 };
 use alloy_storage::{InMemorySecretStore, SecretStore};
-use alloy_store::{SendState, Store};
+use alloy_store::{MessageKind, NewMessage, SendState, Store};
 use tempfile::TempDir;
 use tokio::sync::broadcast;
 
@@ -475,6 +475,61 @@ async fn incoming_message_updates_timeline_and_unread() {
         _ => false,
     })
     .await;
+}
+
+#[tokio::test]
+async fn a_reply_to_a_message_still_sending_is_queued_instead_of_refused() {
+    let harness = Harness::new();
+    login(&harness.engine).await;
+    let room = chat_id_by_title(&harness.engine, "Ada Lovelace").await;
+    let store = &harness.engine.context().store;
+    let chat_id = room.0.clone();
+
+    // A local message that has not been acknowledged by the network yet, exactly what replying to
+    // the message you just sent looks like. The old queue path asked for its network id here and
+    // failed the reply with "the message has not reached the network yet".
+    let pending = store
+        .upsert_message(NewMessage {
+            chat_id: chat_id.clone(),
+            message_id: None,
+            remote_msg_id: None,
+            txn_id: Some("txn-pending".to_string()),
+            sender_remote_id: "u-me".to_string(),
+            is_own: true,
+            sent_at: 1_700_000_500_000,
+            edited_at: None,
+            kind: MessageKind::Text,
+            body: Some("still on its way".to_string()),
+            formatted: None,
+            reply_to_message_id: None,
+            media_id: None,
+            send_state: Some(SendState::Sending),
+            extra: None,
+        })
+        .await
+        .expect("store the pending message");
+
+    let response = harness
+        .engine
+        .handle(EngineCommand::SendText {
+            room_id: room.clone(),
+            body: "replying to it".to_string(),
+            reply_to: Some(EventId(pending.message_id.clone())),
+            txn_id: None,
+        })
+        .await
+        .expect("a reply to a pending message is queued");
+    assert!(matches!(response, EngineResponse::MessageQueued { .. }));
+
+    let queued = store
+        .page_messages(&chat_id, None, 1)
+        .await
+        .expect("the reply is stored");
+    assert_eq!(
+        queued[0].reply_to_message_id.as_deref(),
+        Some(pending.message_id.as_str()),
+        "the quote stays linked to the local message it answers"
+    );
 }
 
 #[tokio::test]
