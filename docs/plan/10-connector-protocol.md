@@ -237,7 +237,7 @@ not replayed — history comes from `backfill`.
 
 | Event | Meaning |
 |---|---|
-| `Connection { state }` | `connecting`, `online`, `offline { reason }`, `needs_relogin` |
+| `Connection { state }` | `connecting`, `online`, `offline { reason, attempt, next_retry_millis }`, `needs_relogin`. `attempt` counts the connector's own consecutive failures (1-based, `null` when it does not count) and `next_retry_millis` is the delay that connector will really wait before the next attempt (`null` when it cannot say), so the host never has to guess another network's schedule. |
 | `ChatUpserted { chat }` | chat appeared or its metadata changed |
 | `ChatRemoved { remote_chat_id }` | chat no longer visible to the account |
 | `Message { message }` | new message, including the echo of a local send (`txn_id` set) |
