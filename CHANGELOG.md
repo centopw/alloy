@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.2 (pre-release)
+
+### Added
+- **Telegram forums show their topics the way Telegram does.** A forum supergroup used to be one chat that mixed every topic together. It is now a container row with a chevron: open it and each topic is its own conversation, indented beneath it, with its own messages, unread count and last-message preview. The forum row shows the topics' unread total and the number of topics, search lists a matching topic under its forum, and the chat header shows the topic's name over the forum's. Sending, replying, reacting, editing, reading and typing all reach the topic you are in.
+
+### Fixed
+- **A picture sat off to one side of its bubble.** The bubble came out wider than the picture and the timestamp sat far to the right of it. A picture now takes its own width, so the bubble fits it, for landscape, portrait and pictures of unknown size.
+
+### Known limits
+- A message deleted inside a forum topic, a pin, and the other side's read marker arrive from Telegram without naming the topic, so they are applied to the forum and not to the topic.
+- An attachment sent into a topic is not yet filed under that topic.
+
 ## 0.4.1 (pre-release)
 
 ### Added
