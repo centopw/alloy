@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.6 (pre-release)
+
+### Fixed
+- **The reconnecting countdown is the connector's own.** The banner guessed how long the next attempt would take, using one formula that fitted Messenger and was wrong for Telegram, which reported no attempt number at all. Each connector now states the delay it will actually wait and counts its own attempts, so both networks show honest progress.
+- **A forum counted as four unread chats.** A forum's topics are separate rooms, so the Chats header and the dock badge counted every topic as well as the forum row, which already showed their sum. A forum now counts once, and a topic counts on its own only when its forum is not in the list.
+
 ## 0.4.5 (pre-release)
 
 ### Changed
