@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.7 (pre-release)
+
+### Changed
+- **The interface has one rhythm.** Chat-list rows now read as a real list: 14px titles, 13px previews, 11px timestamps, one status mark per row in a single meta column, and a single 56px row height. Unread chats are told apart by weight and contrast instead of a colour flip.
+- **Conversations have room to breathe.** The header is one 56px row with the title and subtitle on a shared left edge, the pinned-message bar is a compact 36px bar with a pin glyph and its own close control, timestamps are 11px tabular figures, date dividers sit between rules, and a quoted message inside a bubble is a flat card with an accent edge instead of a bubble inside a bubble.
+- **The composer is one field.** Attachment, text, formatting, emoji and send sit in a single 44px field, the send control shows when it will send, and the formatting toggle shows its state. On a phone every control keeps a 44px touch target.
+- **A forum's topic rail has room for its labels.** 88px wide, two readable label lines, unread counts as ringed pills that cannot collide with the avatar, and a phone strip whose badges sit inside the chip.
+- **Settings and onboarding look like the rest of the app.** One 24px gutter, one 36px control height (44px on phones), a 15/13/12 type scale, and rows separated by hairlines instead of boxes inside boxes. The permissions list follows the same rules.
+- **Settings is reachable from the chat list header**, not only from the tag menu.
+
+### Fixed
+- **The empty state's hint broke a word.** "…pick one from the chat list." no longer wraps "list." onto a line of its own.
+
 ## 0.4.6 (pre-release)
 
 ### Fixed
