@@ -250,23 +250,31 @@ pub fn connection_status(state: ConnectionState) -> ConnectionStatus {
     match state {
         ConnectionState::Connecting => ConnectionStatus::Connecting,
         ConnectionState::Online => ConnectionStatus::Connected,
-        ConnectionState::Offline { attempt, .. } => {
+        ConnectionState::Offline {
+            attempt,
+            next_retry_millis,
+            ..
+        } => {
             let attempt = attempt.unwrap_or(1).max(1);
             ConnectionStatus::Reconnecting {
                 attempt,
-                next_retry_millis: reconnect_delay_millis(attempt),
+                // The connector knows its own backoff; only guess when it did not say.
+                next_retry_millis: next_retry_millis
+                    .unwrap_or_else(|| reconnect_delay_millis(attempt)),
             }
         }
         ConnectionState::NeedsRelogin => ConnectionStatus::Terminated,
     }
 }
 
-/// Delay the connector will wait before the attempt after `attempt` (1-based).
+/// Fallback delay before the attempt after `attempt` (1-based), for a connector that does not
+/// report its own.
 ///
-/// The connector retries on its own; this only mirrors its schedule so the banner can say when
-/// the next attempt is due instead of claiming an instant retry. Messenger's loop (`messagix`
-/// `Client.Connect`) doubles before it sleeps and stops at `MaxConnectBackoff`, so the wait after
-/// failed attempt `n` is `min(2^n s, 5 min)` — already two seconds after the first failure.
+/// The connector retries on its own and [`ConnectionState::Offline`] now carries the delay it will
+/// really wait, so this only covers a connector that stays silent about it. Messenger's loop
+/// (`messagix` `Client.Connect`) doubles before it sleeps and stops at `MaxConnectBackoff`, so the
+/// wait after failed attempt `n` is `min(2^n s, 5 min)` — already two seconds after the first
+/// failure.
 pub fn reconnect_delay_millis(attempt: u32) -> u64 {
     const MAX_MILLIS: u64 = 300_000;
     let doublings = attempt.clamp(1, 9);
@@ -393,6 +401,7 @@ mod tests {
             connection_status(ConnectionState::Offline {
                 reason: "network unreachable".to_string(),
                 attempt: Some(3),
+                next_retry_millis: None,
             }),
             ConnectionStatus::Reconnecting {
                 attempt: 3,
@@ -403,10 +412,39 @@ mod tests {
             connection_status(ConnectionState::Offline {
                 reason: "network unreachable".to_string(),
                 attempt: None,
+                next_retry_millis: None,
             }),
             ConnectionStatus::Reconnecting {
                 attempt: 1,
                 next_retry_millis: 2_000,
+            }
+        );
+    }
+
+    #[test]
+    fn the_connectors_own_retry_delay_wins_over_the_guess() {
+        assert_eq!(
+            connection_status(ConnectionState::Offline {
+                reason: "socket closed".to_string(),
+                attempt: Some(2),
+                // Telegram's stream waits 2 s after its second failure; Messenger would wait 4.
+                next_retry_millis: Some(2_000),
+            }),
+            ConnectionStatus::Reconnecting {
+                attempt: 2,
+                next_retry_millis: 2_000,
+            }
+        );
+        // A connector that names a delay without counting attempts still gets its number shown.
+        assert_eq!(
+            connection_status(ConnectionState::Offline {
+                reason: "socket closed".to_string(),
+                attempt: None,
+                next_retry_millis: Some(30_000),
+            }),
+            ConnectionStatus::Reconnecting {
+                attempt: 1,
+                next_retry_millis: 30_000,
             }
         );
     }

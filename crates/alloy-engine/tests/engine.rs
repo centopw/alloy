@@ -1368,13 +1368,14 @@ async fn forum_read_marker_lands_on_the_topic_that_holds_the_message() {
 
 // === Connection state ===
 
-/// One offline report as the Messenger sidecar sends it: the reason plus the attempt count of the
-/// connector's own retry loop.
-fn offline(reason: &str, attempt: u32) -> ConnectorEvent {
+/// One offline report as a connector sends it: the reason, the attempt count of its own retry loop,
+/// and the delay it will wait before the next attempt (`None` for a connector that does not say).
+fn offline(reason: &str, attempt: u32, next_retry_millis: Option<u64>) -> ConnectorEvent {
     ConnectorEvent::Connection {
         state: ConnectionState::Offline {
             reason: reason.to_string(),
             attempt: Some(attempt),
+            next_retry_millis,
         },
     }
 }
@@ -1402,7 +1403,7 @@ async fn one_outage_warns_once_and_reports_every_attempt() {
     let fake = harness.factory.last().expect("the running connector");
     let mut events = harness.events();
 
-    fake.emit_event(offline("network unreachable", 1))
+    fake.emit_event(offline("network unreachable", 1, None))
         .await
         .expect("report the first failed attempt");
     wait_for(&mut events, |event| {
@@ -1430,7 +1431,7 @@ async fn one_outage_warns_once_and_reports_every_attempt() {
 
     // The connector retries on its own and reports each failed attempt; the second report is the
     // same outage, so it updates the banner but must not warn again.
-    fake.emit_event(offline("network unreachable", 2))
+    fake.emit_event(offline("network unreachable", 2, None))
         .await
         .expect("report the second failed attempt");
     wait_for(&mut events, |event| {
@@ -1465,7 +1466,7 @@ async fn one_outage_warns_once_and_reports_every_attempt() {
     })
     .await;
 
-    fake.emit_event(offline("network unreachable", 1))
+    fake.emit_event(offline("network unreachable", 1, None))
         .await
         .expect("report the next outage");
     wait_for(&mut events, |event| {
@@ -1480,6 +1481,51 @@ async fn one_outage_warns_once_and_reports_every_attempt() {
     .await;
     wait_for(&mut events, |event| {
         matches!(event, EngineEvent::ToastNotice { .. })
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn an_offline_report_names_the_connectors_own_retry_delay() {
+    let harness = Harness::new();
+    login(&harness.engine).await;
+    let fake = harness.factory.last().expect("the running connector");
+    let mut events = harness.events();
+
+    // Telegram says it will wait 30 s; the host must show that number, not the 4 s its Messenger
+    // model would derive from the same second attempt.
+    fake.emit_event(offline("updates stalled", 2, Some(30_000)))
+        .await
+        .expect("report an outage with its own delay");
+    wait_for(&mut events, |event| {
+        matches!(
+            event,
+            EngineEvent::ConnectionStatus {
+                status: ConnectionStatus::Reconnecting {
+                    attempt: 2,
+                    next_retry_millis: 30_000,
+                },
+                ..
+            }
+        )
+    })
+    .await;
+
+    // A connector that names the attempt but not the delay still gets the documented fallback.
+    fake.emit_event(offline("updates stalled", 2, None))
+        .await
+        .expect("report an outage without a delay");
+    wait_for(&mut events, |event| {
+        matches!(
+            event,
+            EngineEvent::ConnectionStatus {
+                status: ConnectionStatus::Reconnecting {
+                    attempt: 2,
+                    next_retry_millis: 4_000,
+                },
+                ..
+            }
+        )
     })
     .await;
 }

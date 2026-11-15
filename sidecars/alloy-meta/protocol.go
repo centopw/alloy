@@ -151,12 +151,17 @@ func errInvalidInput(message string) *WireError {
 }
 
 // ConnectionState mirrors alloy_connector::ConnectionState. Attempt is the 1-based count of failed
-// attempts in this connector's own retry loop; 0 means the state has no attempt to report and is
-// left off the wire so the host applies its own default.
+// attempts in this connector's own retry loop; RetryAfterMs is the delay messagix will actually
+// wait before the next attempt. Both are 0 when the state has none to report and are left off the
+// wire so the host applies its own default.
+//
+// The delay goes over the wire as "next_retry_millis" because that is the field the Rust Offline
+// variant decodes; the Go field keeps the protocol's naming.
 type ConnectionState struct {
-	Type    string  `json:"type"`
-	Reason  *string `json:"reason,omitempty"`
-	Attempt uint32  `json:"attempt,omitempty"`
+	Type         string  `json:"type"`
+	Reason       *string `json:"reason,omitempty"`
+	Attempt      uint32  `json:"attempt,omitempty"`
+	RetryAfterMs *uint64 `json:"next_retry_millis,omitempty"`
 }
 
 func stateConnecting() ConnectionState { return ConnectionState{Type: "connecting"} }
@@ -165,8 +170,12 @@ func stateNeedsRelogin() ConnectionState {
 	return ConnectionState{Type: "needs_relogin"}
 }
 
-func stateOffline(reason string, attempt uint32) ConnectionState {
-	return ConnectionState{Type: "offline", Reason: &reason, Attempt: attempt}
+func stateOffline(reason string, attempt uint32, retryAfterMs uint64) ConnectionState {
+	state := ConnectionState{Type: "offline", Reason: &reason, Attempt: attempt}
+	if retryAfterMs > 0 {
+		state.RetryAfterMs = &retryAfterMs
+	}
+	return state
 }
 
 // ConnectionEvent is ConnectorEvent::Connection.

@@ -288,11 +288,13 @@ impl Runtime {
         }
 
         self.deliver(ConnectorEvent::Connection {
-            // The transport just closed; the relaunch below counts its own attempts and reports
-            // them, so this first report has none to name yet.
+            // The transport just closed. The relaunch loop below counts its own attempts and
+            // reports them, and only it knows each backoff step, so this first report names
+            // neither.
             state: ConnectionState::Offline {
                 reason,
                 attempt: None,
+                next_retry_millis: None,
             },
         })
         .await;
@@ -321,8 +323,10 @@ impl Runtime {
                         state: ConnectionState::Offline {
                             reason: CRASHED_REPEATEDLY.to_string(),
                             // How many relaunches were spent, which is the retry count the user
-                            // waited through; zero means nothing was retried.
+                            // waited through; zero means nothing was retried. Nothing follows this
+                            // report, so there is no next delay to name.
                             attempt: (attempt > 0).then_some(attempt),
+                            next_retry_millis: None,
                         },
                     })
                     .await;

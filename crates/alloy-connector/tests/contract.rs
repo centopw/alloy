@@ -188,6 +188,7 @@ fn every_frame_variant_round_trips() {
                 state: ConnectionState::Offline {
                     reason: "tls handshake failed".to_string(),
                     attempt: None,
+                    next_retry_millis: None,
                 },
             },
         },
@@ -196,6 +197,7 @@ fn every_frame_variant_round_trips() {
                 state: ConnectionState::Offline {
                     reason: "connection lost".to_string(),
                     attempt: Some(3),
+                    next_retry_millis: Some(8_000),
                 },
             },
         },
@@ -264,6 +266,32 @@ fn every_frame_variant_round_trips() {
 
     for frame in &frames {
         round_trip(frame);
+    }
+}
+
+#[test]
+fn a_sidecar_offline_frame_carries_the_attempt_and_the_delay() {
+    // The exact line `sidecars/alloy-meta` writes; `protocol_test.go` pins the same bytes from the
+    // Go side, so a rename on either side of the wire fails here or there.
+    let line = r#"{"type":"event","event":{"type":"connection","state":{"type":"offline","reason":"network unreachable","attempt":3,"next_retry_millis":8000}}}"#;
+
+    match decode_frame(line).unwrap() {
+        Frame::Event {
+            event:
+                ConnectorEvent::Connection {
+                    state:
+                        ConnectionState::Offline {
+                            reason,
+                            attempt,
+                            next_retry_millis,
+                        },
+                },
+        } => {
+            assert_eq!(reason, "network unreachable");
+            assert_eq!(attempt, Some(3));
+            assert_eq!(next_retry_millis, Some(8_000));
+        }
+        other => panic!("expected an offline event, got {other:?}"),
     }
 }
 

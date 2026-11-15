@@ -6,8 +6,10 @@
 //! never replayed” means — the host gets history from [`crate::mapping`]-backed backfill instead.
 //!
 //! On a transport error the task reports [`ConnectionState::Offline`] and retries with backoff;
-//! grammers re-establishes the connection underneath. On a dead session it reports
-//! [`ConnectionState::NeedsRelogin`] and stops, because no retry can succeed.
+//! grammers re-establishes the connection underneath. The report names the attempt it just failed
+//! and the delay it will really sleep, so the host shows this connector's own schedule instead of
+//! guessing one. On a dead session it reports [`ConnectionState::NeedsRelogin`] and stops, because
+//! no retry can succeed.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -36,12 +38,14 @@ const BACKOFF_MAX: Duration = Duration::from_secs(30);
 /// stream observable by the host. This task only reports a *recovery* to `Online` after an
 /// `Offline`, so the host never sees two identical transitions in a row.
 pub(crate) async fn run(shared: Arc<Shared>, mut stream: UpdateStream) {
-    let mut backoff = BACKOFF_START;
+    // Consecutive failures of the update read; `0` when the stream is healthy. The offline report
+    // names it, so the banner can count attempts instead of claiming "retrying" forever.
+    let mut failures: u32 = 0;
     let mut recovering = false;
     loop {
         match stream.next().await {
             Ok(update) => {
-                backoff = BACKOFF_START;
+                failures = 0;
                 if recovering {
                     recovering = false;
                     shared
@@ -68,21 +72,30 @@ pub(crate) async fn run(shared: Arc<Shared>, mut stream: UpdateStream) {
                 let reason = error.to_string();
                 warn!(error = %reason, "telegram update stream failed; retrying");
                 recovering = true;
+                failures = failures.saturating_add(1);
+                let retry_in = retry_delay(failures);
                 shared
                     .emit(ConnectorEvent::Connection {
                         state: ConnectionState::Offline {
                             reason,
-                            // The update stream retries with its own backoff but does not count
-                            // attempts; the host reports this as the first one.
-                            attempt: None,
+                            attempt: Some(failures),
+                            // The wait this very failure schedules: the banner never has to model
+                            // Telegram's backoff on its own.
+                            next_retry_millis: Some(retry_in.as_millis() as u64),
                         },
                     })
                     .await;
-                sleep(backoff).await;
-                backoff = (backoff * 2).min(BACKOFF_MAX);
+                sleep(retry_in).await;
             }
         }
     }
+}
+
+/// Delay before the attempt after the `failures`th consecutive failure: [`BACKOFF_START`] doubled
+/// once per failure, capped at [`BACKOFF_MAX`] — 1 s, 2 s, 4 s, ... 30 s.
+fn retry_delay(failures: u32) -> Duration {
+    let doublings = failures.saturating_sub(1).min(5);
+    (BACKOFF_START * (1_u32 << doublings)).min(BACKOFF_MAX)
 }
 
 /// Persists the update-state checkpoint so a restart resumes near the same point.
@@ -522,5 +535,19 @@ mod tests {
         assert!(is_typing(
             &tl::types::SendMessageUploadDocumentAction { progress: 40 }.into()
         ));
+    }
+
+    #[test]
+    fn retry_delay_doubles_from_one_second_to_the_cap() {
+        // The value reported is the value slept, so the banner shows this exact schedule.
+        assert_eq!(retry_delay(1), Duration::from_secs(1));
+        assert_eq!(retry_delay(2), Duration::from_secs(2));
+        assert_eq!(retry_delay(3), Duration::from_secs(4));
+        assert_eq!(retry_delay(4), Duration::from_secs(8));
+        assert_eq!(retry_delay(5), Duration::from_secs(16));
+        assert_eq!(retry_delay(6), BACKOFF_MAX);
+        assert_eq!(retry_delay(30), BACKOFF_MAX);
+        // A count of zero means the stream is healthy; it must not shift the base.
+        assert_eq!(retry_delay(0), Duration::from_secs(1));
     }
 }

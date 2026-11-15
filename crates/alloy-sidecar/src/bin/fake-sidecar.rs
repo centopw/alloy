@@ -11,8 +11,10 @@
 //! - `ALLOY_FAKE_SIDECAR_CRASH_AFTER=<n>` — exit without answering the `n + 1`th request, which
 //!   simulates a crash with a call in flight.
 //! - `ALLOY_FAKE_SIDECAR_PID_FILE=<path>` — write the process id there at startup.
-//! - `ALLOY_FAKE_SIDECAR_OFFLINE_ATTEMPT=<n>` — after `start`, emit an offline report carrying
-//!   attempt `n`, so the host's decoding of a counted retry can be tested.
+//! - `ALLOY_FAKE_SIDECAR_OFFLINE_ATTEMPT=<n>` and `ALLOY_FAKE_SIDECAR_OFFLINE_RETRY_MS=<ms>` —
+//!   after `start`, emit an offline report carrying attempt `n` and a next-retry delay of `ms`, so
+//!   the host's decoding of a counted retry and of the connector's own delay can be tested. Setting
+//!   either one injects the report; the unset one stays `null` on the wire.
 
 use std::env;
 use std::path::PathBuf;
@@ -35,8 +37,9 @@ const BAD_VERSION_ENV: &str = "ALLOY_FAKE_SIDECAR_BAD_VERSION";
 const CRASH_AFTER_ENV: &str = "ALLOY_FAKE_SIDECAR_CRASH_AFTER";
 const PID_FILE_ENV: &str = "ALLOY_FAKE_SIDECAR_PID_FILE";
 const OFFLINE_ATTEMPT_ENV: &str = "ALLOY_FAKE_SIDECAR_OFFLINE_ATTEMPT";
+const OFFLINE_RETRY_ENV: &str = "ALLOY_FAKE_SIDECAR_OFFLINE_RETRY_MS";
 
-/// Reason the injected offline report carries; the test only pins the attempt.
+/// Reason the injected offline report carries; the test only pins the attempt and the delay.
 const INJECTED_OFFLINE_REASON: &str = "simulated outage";
 
 /// Events the fake connector produces while one request runs. The host drains its own receiver
@@ -70,6 +73,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .ok()
         .and_then(|value| value.trim().parse().ok());
     let offline_attempt: Option<u32> = env::var(OFFLINE_ATTEMPT_ENV)
+        .ok()
+        .and_then(|value| value.trim().parse().ok());
+    let offline_retry_millis: Option<u64> = env::var(OFFLINE_RETRY_ENV)
         .ok()
         .and_then(|value| value.trim().parse().ok());
 
@@ -121,7 +127,15 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         let events = event_sender.clone();
         let writer = Arc::clone(&writer);
         tokio::spawn(async move {
-            let dispatched = dispatch(&connector, &method, params, &events, offline_attempt).await;
+            let dispatched = dispatch(
+                &connector,
+                &method,
+                params,
+                &events,
+                offline_attempt,
+                offline_retry_millis,
+            )
+            .await;
             let response = match dispatched {
                 Ok(result) => Frame::Response {
                     id,
@@ -158,6 +172,7 @@ async fn dispatch(
     params: Value,
     events: &Sender<ConnectorEvent>,
     offline_attempt: Option<u32>,
+    offline_retry_millis: Option<u64>,
 ) -> Result<Value, ConnectorError> {
     match method {
         "network" => encode_result(connector.network()),
@@ -173,14 +188,15 @@ async fn dispatch(
         }
         "start" => {
             connector.start(events.clone()).await?;
-            if let Some(attempt) = offline_attempt {
+            if offline_attempt.is_some() || offline_retry_millis.is_some() {
                 // Injected only when the test asks for it: it exercises the host's path for an
-                // offline report that names its retry attempt.
+                // offline report that names its retry attempt and the delay it will wait.
                 events
                     .send(ConnectorEvent::Connection {
                         state: ConnectionState::Offline {
                             reason: INJECTED_OFFLINE_REASON.to_string(),
-                            attempt: Some(attempt),
+                            attempt: offline_attempt,
+                            next_retry_millis: offline_retry_millis,
                         },
                     })
                     .await

@@ -101,28 +101,39 @@ func TestEventTypingFrame(t *testing.T) {
 }
 
 // TestEventConnectionOfflineFrame pins the offline state the Rust ConnectionState deserializer
-// reads, including the 1-based attempt count the engine derives its retry delay from.
+// reads: the 1-based attempt count and the delay the connector itself will wait before the next
+// attempt.
 func TestEventConnectionOfflineFrame(t *testing.T) {
 	got := encodeFrame(t, EventFrame{
 		Type:  "event",
-		Event: NewConnectionEvent(stateOffline("network unreachable", 3)),
+		Event: NewConnectionEvent(stateOffline("network unreachable", 3, 8000)),
 	})
-	want := `{"type":"event","event":{"type":"connection","state":{"type":"offline","reason":"network unreachable","attempt":3}}}`
+	want := `{"type":"event","event":{"type":"connection","state":{"type":"offline","reason":"network unreachable","attempt":3,"next_retry_millis":8000}}}`
 	if got != want {
 		t.Fatalf("offline connection event mismatch\n got: %s\nwant: %s", got, want)
 	}
 }
 
 // TestEventConnectionOfflineWithoutAttempt keeps the report valid for connectors that do not count
-// attempts: the host then assumes the first one.
+// attempts: the host then assumes the first one. A delay with no count still travels, so a banner
+// can show it.
 func TestEventConnectionOfflineWithoutAttempt(t *testing.T) {
 	got := encodeFrame(t, EventFrame{
 		Type:  "event",
-		Event: NewConnectionEvent(stateOffline("socket closed", 0)),
+		Event: NewConnectionEvent(stateOffline("socket closed", 0, 0)),
 	})
 	want := `{"type":"event","event":{"type":"connection","state":{"type":"offline","reason":"socket closed"}}}`
 	if got != want {
 		t.Fatalf("uncounted offline connection event mismatch\n got: %s\nwant: %s", got, want)
+	}
+
+	got = encodeFrame(t, EventFrame{
+		Type:  "event",
+		Event: NewConnectionEvent(stateOffline("socket closed", 0, 2000)),
+	})
+	want = `{"type":"event","event":{"type":"connection","state":{"type":"offline","reason":"socket closed","next_retry_millis":2000}}}`
+	if got != want {
+		t.Fatalf("delay without an attempt mismatch\n got: %s\nwant: %s", got, want)
 	}
 }
 

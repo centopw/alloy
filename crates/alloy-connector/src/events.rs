@@ -20,10 +20,17 @@ pub enum ConnectionState {
     /// `attempt` is the 1-based count of failed attempts in the connector's own retry loop, so a
     /// host can report real progress instead of a constant "retrying". It is `None` when the
     /// connector does not count its attempts; hosts then assume the first one.
+    ///
+    /// `next_retry_millis` is how long *this connector* will wait before that attempt, in
+    /// milliseconds. Only the connector knows its own backoff, so a number here is authoritative
+    /// and the host never guesses over it. It is `None` when the connector cannot say, and the
+    /// host then estimates from `attempt`.
     Offline {
         reason: String,
         #[serde(default)]
         attempt: Option<u32>,
+        #[serde(default)]
+        next_retry_millis: Option<u64>,
     },
     /// The stored session is dead. No automatic retry happens; the host must run login again.
     NeedsRelogin,

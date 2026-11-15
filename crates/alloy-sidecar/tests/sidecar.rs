@@ -387,11 +387,14 @@ async fn crash_mid_session_fails_pending_and_resumes_after_respawn() {
 }
 
 #[tokio::test]
-async fn offline_frames_carry_the_connector_attempt() {
+async fn offline_frames_carry_the_connector_attempt_and_retry_delay() {
     let directory = tempfile::tempdir().expect("temp dir");
     let connector = SidecarConnector::spawn(config(
         directory.path(),
-        &[("ALLOY_FAKE_SIDECAR_OFFLINE_ATTEMPT", "3")],
+        &[
+            ("ALLOY_FAKE_SIDECAR_OFFLINE_ATTEMPT", "3"),
+            ("ALLOY_FAKE_SIDECAR_OFFLINE_RETRY_MS", "8000"),
+        ],
     ))
     .await
     .expect("spawn");
@@ -402,13 +405,23 @@ async fn offline_frames_carry_the_connector_attempt() {
 
     loop {
         if let ConnectorEvent::Connection {
-            state: ConnectionState::Offline { reason, attempt },
+            state:
+                ConnectionState::Offline {
+                    reason,
+                    attempt,
+                    next_retry_millis,
+                },
         } = next_event(&mut events).await
         {
             assert_eq!(
                 attempt,
                 Some(3),
                 "the attempt the sidecar counted survives the wire"
+            );
+            assert_eq!(
+                next_retry_millis,
+                Some(8_000),
+                "the delay the connector will wait survives the wire"
             );
             assert_eq!(reason, "simulated outage");
             break;

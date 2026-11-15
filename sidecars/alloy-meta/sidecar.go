@@ -338,7 +338,7 @@ func (m *Messenger) start(ctx context.Context) *WireError {
 	cli.SetEventHandler(m.handleMessagixEvent)
 	if err := cli.Connect(runCtx); err != nil {
 		cli.SetEventHandler(nil)
-		m.emit(NewConnectionEvent(stateOffline(err.Error(), 1)))
+		m.emit(NewConnectionEvent(stateOffline(err.Error(), 1, connectBackoffMillis(1))))
 		return mapMetaError(err)
 	}
 
@@ -503,18 +503,35 @@ func (m *Messenger) handleMessagixEvent(_ context.Context, raw any) {
 		m.mu.Unlock()
 		// messagix retries on its own and counts the attempt it just failed (1-based since
 		// v0.2610.0). Forwarding the count lets the host show real progress instead of "attempt 1"
-		// for every report of one outage.
+		// for every report of one outage, and forwarding the wait it will sleep lets the banner
+		// show this connector's own schedule instead of a model of it.
 		attempt := uint32(0)
 		if evt.ConnectionAttempts > 0 {
 			attempt = uint32(evt.ConnectionAttempts)
 		}
-		m.emit(NewConnectionEvent(stateOffline(reason, attempt)))
+		m.emit(NewConnectionEvent(stateOffline(reason, attempt, connectBackoffMillis(attempt))))
 	case *messagix.PermanentErrorEvent:
 		m.mu.Lock()
 		m.online = false
 		m.mu.Unlock()
 		m.emit(NewConnectionEvent(stateNeedsRelogin()))
 	}
+}
+
+// connectBackoffMillis is the delay messagix waits before its next connect attempt after failed
+// attempt n (1-based). Its connection loop doubles the wait before sleeping and caps it at
+// messagix.MaxConnectBackoff, so the wait is min(2^n s, 5 min): two seconds after the first
+// failure. An uncounted attempt (0) is that first failure.
+func connectBackoffMillis(attempt uint32) uint64 {
+	if attempt == 0 {
+		attempt = 1
+	}
+	// Clamp before the shift so a large count cannot overflow the duration.
+	wait := time.Second << min(attempt, 9)
+	if wait > messagix.MaxConnectBackoff {
+		return uint64(messagix.MaxConnectBackoff / time.Millisecond)
+	}
+	return uint64(wait / time.Millisecond)
 }
 
 func (m *Messenger) backgroundCtx() context.Context {
