@@ -1,0 +1,36 @@
+diff --git a/lib/browser.js b/lib/browser.js
+index dc8a9998249e4d8814b38732190c7ed2bbc3b6aa..3cd21e2b62d278e72f0367ef6106f30b97f59ab4 100644
+--- a/lib/browser.js
++++ b/lib/browser.js
+@@ -71,6 +71,8 @@ exports.toCanvas = renderCanvas.bind(null, CanvasRenderer.render)
+ exports.toDataURL = renderCanvas.bind(null, CanvasRenderer.renderToDataURL)
+ 
+ // only svg for now.
+-exports.toString = renderCanvas.bind(null, function (data, _, opts) {
+-  return SvgRenderer.render(data, opts)
++Object.defineProperty(exports, 'toString', {
++  value: renderCanvas.bind(null, function (data, _, opts) {
++    return SvgRenderer.render(data, opts)
++  })
+ })
+diff --git a/lib/core/mode.js b/lib/core/mode.js
+index fd95a6ef72b2414042cb9cf73fd7f4fe7ce054fe..80c3016f6605dcefcfdf90268e4e5096f251275b 100644
+--- a/lib/core/mode.js
++++ b/lib/core/mode.js
+@@ -104,10 +104,12 @@ exports.getBestModeForData = function getBestModeForData (dataStr) {
+  * @param {Mode} mode Mode object
+  * @returns {String}  Mode name
+  */
+-exports.toString = function toString (mode) {
+-  if (mode && mode.id) return mode.id
+-  throw new Error('Invalid mode')
+-}
++Object.defineProperty(exports, 'toString', {
++  value: function toString (mode) {
++    if (mode && mode.id) return mode.id
++    throw new Error('Invalid mode')
++  }
++})
+ 
+ /**
+  * Check if input param is a valid mode object

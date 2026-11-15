@@ -1,8 +1,10 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { Button, TextField } from '../common';
+  import { Button, Select, TextArea, TextField } from '../common';
   import { openExternal } from '$lib/platform/links';
   import { toDataURL } from 'qrcode';
+  import { cookiesFromPaste } from '$lib/content/curlCookies';
+  import { COUNTRIES, defaultCountry, parsePhone } from '$lib/content/phone';
   import type {
     CookieFieldDto,
     LoginAlternativeDto,
@@ -11,7 +13,7 @@
     LoginStepDto
   } from '$lib/generated/index.js';
 
-  import { t } from '$lib/i18n';
+  import { currentLocale, t } from '$lib/i18n';
 
   interface Props {
     /** The step the engine returned; the parent remounts this component when it changes. */
@@ -44,12 +46,31 @@
     return Object.fromEntries(value.fields.map((field) => [field.name, '']));
   }
 
-  /** Digits and a leading `+`: the protocol wants international format. */
-  function normalisePhone(value: string): string {
-    return value.replace(/[^\d+]/g, '');
-  }
+  // The protocol wants international format; the country comes from the dropdown, or from the
+  // number itself when it is typed with a `+`.
+  let country = $state(defaultCountry(typeof navigator === 'undefined' ? [] : navigator.languages));
+  const dial = $derived(COUNTRIES.find((entry) => entry.iso === country)?.dial ?? '1');
+  const parsedPhone = $derived(parsePhone(phone, dial));
+  const phoneValid = $derived(/^\+\d{7,15}$/.test(parsedPhone.e164));
 
-  const phoneValid = $derived(/^\+\d{6,15}$/.test(normalisePhone(phone)));
+  const countryOptions = $derived.by(() => {
+    const locale = currentLocale() === 'rtl' ? 'en' : currentLocale();
+    const names = new Intl.DisplayNames([locale], { type: 'region', fallback: 'code' });
+    return COUNTRIES.map((entry) => ({
+      value: entry.iso,
+      label: `${names.of(entry.iso) ?? entry.iso} (+${entry.dial})`
+    })).sort((a, b) => a.label.localeCompare(b.label, locale));
+  });
+
+  // Calling codes several countries share: the one a typed `+` code selects.
+  const SHARED_DIAL: Record<string, string> = { '1': 'US', '7': 'RU', '39': 'IT' };
+
+  /** A number typed with its own country code moves the dropdown to that country. */
+  function followTypedCountry(e: Event & { currentTarget: HTMLInputElement }) {
+    const typed = parsePhone(e.currentTarget.value, dial).dial;
+    if (typed === dial) return;
+    country = SHARED_DIAL[typed] ?? COUNTRIES.find((entry) => entry.dial === typed)?.iso ?? country;
+  }
   const codeValid = $derived(
     step.type === 'code'
       ? step.length === null
@@ -70,7 +91,7 @@
   function submitPhone(e: SubmitEvent) {
     e.preventDefault();
     if (!phoneValid || busy) return;
-    onsubmit({ type: 'phone_number', phone: normalisePhone(phone) });
+    onsubmit({ type: 'phone_number', phone: parsedPhone.e164 });
   }
 
   function submitCode(e: SubmitEvent) {
@@ -102,6 +123,28 @@
         return t('onboarding-alternative-cookies');
     }
   }
+
+  // Browser sign-in: one request copied as cURL carries every cookie the step asks for.
+  let cookiePaste = $state('');
+  const missingCookies = $derived(
+    step.type === 'cookies'
+      ? step.fields
+          .filter((field) => field.required && !(cookieValues[field.name] ?? '').trim())
+          .map((field) => field.name)
+      : []
+  );
+
+  function readCookiePaste(e: Event & { currentTarget: HTMLTextAreaElement }) {
+    if (step.type !== 'cookies') return;
+    const found = cookiesFromPaste(e.currentTarget.value);
+    for (const field of step.fields) {
+      if (found[field.name]) cookieValues[field.name] = found[field.name];
+    }
+  }
+
+  // The cookie step is Messenger's (see LoginStep::Cookies in alloy-connector); its session
+  // cookies are the ones messenger.com sets.
+  const COOKIE_SIGN_IN_URL = 'https://www.messenger.com/';
 
   function submitCookies(e: SubmitEvent) {
     e.preventDefault();
@@ -227,18 +270,31 @@
     <h3>{t('onboarding-phone-title')}</h3>
     <p class="hint">{t('onboarding-phone-hint')}</p>
     <form onsubmit={submitPhone}>
+      <div class="field">
+        <span>{t('onboarding-phone-country-label')}</span>
+        <Select
+          bind:value={country}
+          options={countryOptions}
+          label={t('onboarding-phone-country-label')}
+        />
+      </div>
       <label>
         <span>{t('onboarding-phone-label')}</span>
         <TextField
           type="tel"
           bind:value={phone}
-          placeholder={t('onboarding-phone-placeholder')}
+          oninput={followTypedCountry}
           autocomplete="tel"
           inputmode="tel"
           autofocus
           required
         />
       </label>
+      {#if parsedPhone.e164}
+        <p class="hint" role="status">
+          {t('onboarding-phone-preview', { phone: parsedPhone.e164 })}
+        </p>
+      {/if}
       <div class="actions">
         <Button variant="ghost" type="button" onclick={oncancel}>{t('common-cancel')}</Button>
         <Button type="submit" disabled={busy || !phoneValid}>
@@ -322,27 +378,64 @@
     </div>
   {:else if step.type === 'cookies'}
     <h3>{t('onboarding-cookies-title')}</h3>
-    <p class="hint">{t('onboarding-cookies-reason')}</p>
-    <p class="hint">{t('onboarding-cookies-hint')}</p>
-    {#if step.help_url}
-      <button type="button" class="link" onclick={openCookiesHelp}>
-        {t('onboarding-cookies-help')}
-      </button>
-    {/if}
+    <p class="hint">{t('onboarding-cookies-reason', { network: networkName })}</p>
+    <ol class="steps">
+      <li>
+        <button type="button" class="link" onclick={() => void openExternal(COOKIE_SIGN_IN_URL)}>
+          {t('onboarding-cookies-open', { network: networkName })}
+        </button>
+        {t('onboarding-cookies-step-sign-in')}
+      </li>
+      <li>{t('onboarding-cookies-step-inspect')}</li>
+      <li>{t('onboarding-cookies-step-network')}</li>
+      <li>{t('onboarding-cookies-step-copy', { network: networkName })}</li>
+      <li>{t('onboarding-cookies-step-paste')}</li>
+    </ol>
     <form onsubmit={submitCookies}>
-      {#each step.fields as field (field.name)}
-        <label>
-          <span>{cookieFieldLabel(field)}</span>
-          <TextField
-            type="text"
-            bind:value={cookieValues[field.name]}
-            autocomplete="off"
-            autocapitalize="off"
-            spellcheck={false}
-            required={field.required}
-          />
-        </label>
-      {/each}
+      <label>
+        <span>{t('onboarding-cookies-paste-label')}</span>
+        <TextArea
+          bind:value={cookiePaste}
+          oninput={readCookiePaste}
+          rows={4}
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck={false}
+          autofocus
+        />
+      </label>
+      {#if cookiePaste.trim().length > 0}
+        {#if missingCookies.length === 0}
+          <p class="hint" role="status">{t('onboarding-cookies-paste-found')}</p>
+        {:else}
+          <p class="error" role="alert">
+            {t('onboarding-cookies-paste-missing', { names: missingCookies.join(', ') })}
+          </p>
+        {/if}
+      {/if}
+      <details>
+        <summary>{t('onboarding-cookies-manual')}</summary>
+        <div class="manual">
+          <p class="hint">{t('onboarding-cookies-hint')}</p>
+          {#if step.help_url}
+            <button type="button" class="link" onclick={openCookiesHelp}>
+              {t('onboarding-cookies-help')}
+            </button>
+          {/if}
+          {#each step.fields as field (field.name)}
+            <label>
+              <span>{cookieFieldLabel(field)}</span>
+              <TextField
+                type="text"
+                bind:value={cookieValues[field.name]}
+                autocomplete="off"
+                autocapitalize="off"
+                spellcheck={false}
+              />
+            </label>
+          {/each}
+        </div>
+      </details>
       <div class="actions">
         <Button variant="ghost" type="button" onclick={oncancel}>{t('common-cancel')}</Button>
         <Button type="submit" disabled={busy || !cookiesValid}>
@@ -439,7 +532,8 @@
     gap: var(--alloy-spacing-scale-4);
     margin-top: var(--alloy-spacing-scale-2);
   }
-  label {
+  label,
+  .field {
     display: flex;
     flex-direction: column;
     gap: var(--alloy-spacing-scale-1);
@@ -474,6 +568,36 @@
     width: 216px;
     height: 216px;
     max-width: 100%;
+  }
+  .steps {
+    margin: 0;
+    padding-inline-start: var(--alloy-spacing-scale-5);
+    display: flex;
+    flex-direction: column;
+    gap: var(--alloy-spacing-scale-2);
+    color: var(--alloy-color-text-secondary);
+    font-size: var(--alloy-typography-size-sm);
+    line-height: var(--alloy-typography-line-height-normal, 1.45);
+  }
+  .steps .link {
+    display: inline;
+  }
+  details {
+    font-size: var(--alloy-typography-size-sm);
+    color: var(--alloy-color-text-secondary);
+  }
+  summary {
+    cursor: pointer;
+  }
+  summary:focus-visible {
+    outline: 2px solid var(--alloy-color-accent-primary);
+    outline-offset: 2px;
+  }
+  .manual {
+    display: flex;
+    flex-direction: column;
+    gap: var(--alloy-spacing-scale-3);
+    margin-top: var(--alloy-spacing-scale-3);
   }
   .alternatives {
     display: flex;

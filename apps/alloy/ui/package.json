@@ -11,7 +11,8 @@
     "tauri": "tauri",
     "gen:themes": "cargo run -p alloy-theme --bin gen-css",
     "test": "vitest run",
-    "check:i18n": "node scripts/check-i18n.mjs"
+    "check:i18n": "node scripts/check-i18n.mjs",
+    "check:frozen": "vite build && node scripts/check-frozen-prototype.mjs"
   },
   "dependencies": {
     "@fluent/bundle": "^0.19.1",
