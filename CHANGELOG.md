@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.3 (pre-release)
+
+### Changed
+- **On macOS the window uses its title bar for the app.** The native bar was a 36px strip holding only the traffic lights and the word Alloy above a second header. The lights now sit inside the chat list's header, so the app starts at the top edge of the window. Drag the window by the chat list header, the conversation header or the empty state, and double-click one to maximize. With the chat list hidden the conversation header moves clear of the lights, the settings panel starts below them, and full screen gives the space back. Windows, Linux and the browser are unchanged.
+
+### Fixed
+- **Forum topics lost deletes, pins and read marks.** Telegram reports these for a forum without naming the topic, so they were applied to the forum and never reached the message. Alloy now finds the topic that holds the message and applies them there.
+- **Attachments sent into a forum topic landed outside it.** A photo, file or audio clip is now sent into the topic you are in.
+- **Hiding the chat list left the conversation in a zero-width column.** The conversation now takes the freed width.
+
 ## 0.4.2 (pre-release)
 
 ### Added
@@ -7,10 +17,6 @@
 
 ### Fixed
 - **A picture sat off to one side of its bubble.** The bubble came out wider than the picture and the timestamp sat far to the right of it. A picture now takes its own width, so the bubble fits it, for landscape, portrait and pictures of unknown size.
-
-### Known limits
-- A message deleted inside a forum topic, a pin, and the other side's read marker arrive from Telegram without naming the topic, so they are applied to the forum and not to the topic.
-- An attachment sent into a topic is not yet filed under that topic.
 
 ## 0.4.1 (pre-release)
 
