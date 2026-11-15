@@ -91,7 +91,10 @@ async fn get_media(
     }
 
     let runtime = support::runtime_for(ctx, &record.account_id).await?;
-    let extension = cache_extension(mime_type.as_deref().or(record.mime.as_deref()));
+    // The network's own type names the file; the caller's is only a fallback. A video asked for
+    // as a picture must not be cached as `.jpg`.
+    let mime = record.mime.as_deref().or(mime_type.as_deref());
+    let extension = cache_extension(mime);
     let media_dir = ctx.media_dir();
     std::fs::create_dir_all(&media_dir).map_err(|err| {
         EngineError::internal_error(format!(
@@ -100,12 +103,22 @@ async fn get_media(
         ))
     })?;
     let destination = media_dir.join(format!("{}.{}", record.media_id, extension));
-    let media = media_ref(&record, mime_type.as_deref());
-    runtime
-        .connector
-        .fetch_media(&media, &destination)
-        .await
-        .map_err(map_connector)?;
+    let media = media_ref(&record, mime);
+    // Download beside the final name and rename: two requests for the same media (an avatar at
+    // two sizes, a tile and its lightbox) must never truncate a file the webview is reading, and
+    // a failed download must not leave a partial file under the final name.
+    let partial = media_dir.join(format!("{}.{}.part", record.media_id, uuid::Uuid::new_v4()));
+    let fetched = runtime.connector.fetch_media(&media, &partial).await;
+    if let Err(err) = fetched {
+        let _ = std::fs::remove_file(&partial);
+        return Err(map_connector(err));
+    }
+    std::fs::rename(&partial, &destination).map_err(|err| {
+        EngineError::internal_error(format!(
+            "cannot store the media file {}: {err}",
+            destination.display()
+        ))
+    })?;
 
     let path = destination.to_string_lossy().into_owned();
     ctx.store
@@ -241,13 +254,10 @@ fn checked_file(ctx: &EngineContext, file_path: &str) -> Result<PathBuf, EngineE
     Ok(path)
 }
 
-fn media_ref(record: &MediaRecord, mime_override: Option<&str>) -> MediaRef {
+fn media_ref(record: &MediaRecord, mime: Option<&str>) -> MediaRef {
     MediaRef {
         remote_ref: record.remote_ref.clone(),
-        mime: mime_override
-            .map(str::to_string)
-            .or_else(|| record.mime.clone())
-            .unwrap_or_else(|| "application/octet-stream".to_string()),
+        mime: mime.unwrap_or("application/octet-stream").to_string(),
         size_bytes: record
             .size_bytes
             .and_then(|value| u64::try_from(value).ok()),

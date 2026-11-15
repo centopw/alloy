@@ -64,9 +64,10 @@
     return await localFileUrl(res.payload.path);
   }
 
-  // Pictures and videos show a cached thumbnail; autoplay videos fetch the file itself.
+  // Pictures show the cached file. The engine has no poster for a video (GetMedia serves the one
+  // file), so a video keeps its placeholder under the play badge until it is played.
   $effect(() => {
-    const mime = visual ? mimeType : video ? 'image/jpeg' : null;
+    const mime = visual ? mimeType : null;
     // Reading `attempt` makes a retry re-run the fetch for the same source.
     void attempt;
     if (mime === null) return;

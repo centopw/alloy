@@ -11,7 +11,7 @@ import java.io.File
 /**
  * Copies a cached media file into the public Downloads folder. The web UI calls it as
  * `AlloyAndroid.saveToDownloads(path, name, mime)`. Only regular files inside the app's own
- * `media_cache` directory are accepted, so page script cannot read anything else through it.
+ * `media` directory are accepted, so page script cannot read anything else through it.
  */
 class DownloadBridge(private val context: Context) {
   /** Returns an empty string on success, otherwise a message for the user. */
@@ -21,7 +21,7 @@ class DownloadBridge(private val context: Context) {
       val source = File(path).canonicalFile
       val root = context.dataDir.canonicalFile
       val allowed = source.isFile && source.path.startsWith(root.path + File.separator) &&
-        source.path.contains(File.separator + "media_cache" + File.separator)
+        source.path.contains(File.separator + "media" + File.separator)
       if (!allowed) return "That file cannot be saved."
       val safeName = cleanName(name)
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) saveWithMediaStore(source, safeName, mime)

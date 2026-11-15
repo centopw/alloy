@@ -8,8 +8,9 @@ use tauri_plugin_dialog::DialogExt;
 
 use crate::pick::sanitize_file_name;
 
-/// Directory under the app data dir where `alloy-core` caches fetched media.
-const MEDIA_CACHE_DIR: &str = "media_cache";
+/// Directory under the app data dir where the engine caches fetched media
+/// (`EngineContext::media_dir`). The asset protocol scope in `tauri.conf.json` names the same one.
+const MEDIA_CACHE_DIR: &str = "media";
 
 /// Copies a cached media file to a location the user picks. Resolves `Ok(false)` when the dialog is
 /// cancelled. Only files inside the media cache are accepted.
@@ -158,7 +159,7 @@ mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    /// Fresh scratch directory under the system temp dir, containing a `media_cache` directory.
+    /// Fresh scratch directory under the system temp dir, containing the media cache directory.
     fn scratch(tag: &str) -> (PathBuf, PathBuf) {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -169,6 +170,27 @@ mod tests {
         let cache = base.join(MEDIA_CACHE_DIR);
         std::fs::create_dir_all(&cache).unwrap();
         (base, cache)
+    }
+
+    /// The webview may only load files the asset protocol scope allows; a scope naming another
+    /// directory than the one media is cached in makes every image and avatar fail silently.
+    #[test]
+    fn asset_scope_covers_the_media_cache() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let security = &config["app"]["security"];
+        let scope = security["assetProtocol"]["scope"].as_array().unwrap();
+        let wanted = format!("$APPDATA/{MEDIA_CACHE_DIR}/**");
+        assert!(scope.iter().any(|entry| entry == wanted.as_str()));
+        // Windows and Android serve assets from `<scheme>://asset.localhost`, and the window
+        // sets `useHttpsScheme`.
+        let csp = security["csp"].as_str().unwrap();
+        for directive in ["img-src", "media-src"] {
+            let sources = csp
+                .split(';')
+                .find(|part| part.trim().starts_with(directive));
+            assert!(sources.unwrap().contains("https://asset.localhost"));
+        }
     }
 
     #[test]
