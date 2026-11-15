@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.5 (pre-release)
+
+### Changed
+- **The update bar under the chat list is a compact line.** It sat flush against the bottom of the window with its last line clipped, and at the list's usual width it could not finish its own title — "Update a…" — because a second line and a button competed for the space. It is now one inset line that always reads in full: on a narrow list the bar itself applies the update, and on a wide one the second line, the labelled button and the what's-new view stay. On a phone it keeps its full-size target and both lines.
+
+### Fixed
+- **The chat list could scroll sideways.** One row wider than the list painted a horizontal scrollbar along its bottom edge, which took a row's worth of height and left the list looking cut off.
+
 ## 0.4.4 (pre-release)
 
 ### Changed
