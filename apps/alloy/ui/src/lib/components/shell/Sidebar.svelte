@@ -490,6 +490,10 @@
       ? muteEndLabel(r.muted_until, Date.now(), (ms) => formatListTime(ms))
       : null}
   {@const reorderable = r.pinned && !viewport.isPhone && prefs.roomSort !== 'tag'}
+  {@const firstTag = r.tags.length > 0 ? tagById.get(r.tags[0]) : undefined}
+  {@const tagLabel = firstTag
+    ? t('sidebar-tags-label', { tags: r.tags.map((id) => tagById.get(id)?.name ?? id).join(', ') })
+    : ''}
   {@const dropBefore = dropTarget?.roomId === r.id && !dropTarget.after}
   {@const dropAfter = dropTarget?.roomId === r.id && dropTarget.after}
   <div
@@ -535,37 +539,25 @@
           <span class="preview">{r.latest_event.body}</span>
         {/if}
       </span>
-      <span class="end">
+      <!-- Time over at most one mark: unread badge, else mute, else marked-unread dot, else the
+           first tag's colour. Two marks never share the column. -->
+      <span class="meta">
         {#if r.latest_event}
           <time class="time" datetime={new Date(r.latest_event.timestamp_millis).toISOString()}>{formatListTime(r.latest_event.timestamp_millis)}</time>
         {/if}
-        <span class="marks">
-          {#if r.tags.length > 0}
-            <span class="tag-dots" role="img" aria-label={t('sidebar-tags-label', { tags: r.tags.map((id) => tagById.get(id)?.name ?? id).join(', ') })}>
-              {#each r.tags.slice(0, 3) as id (id)}
-                <span class="tag-dot" style:background={TAG_COLOUR_VARS[tagById.get(id)?.colour ?? 'grey']}></span>
-              {/each}
-            </span>
-          {/if}
-          {#if r.pinned}
-            <span class="pinned"><Icon icon={Pin} size={16} label={t('sidebar-pinned')} /></span>
-          {/if}
-          {#if r.archived}
-            <span class="pinned"><Icon icon={Archive} size={16} label={t('room-swipe-archive')} /></span>
-          {/if}
-          {#if muted}
-            <span class="pinned"><Icon icon={BellOff} size={16} label={until ?? t('sidebar-notifications-muted')} /></span>
-          {/if}
-          {#if unread > 0}
-            {#if muted}
-              <span class="pinned"><span class="dot" aria-hidden="true"></span></span>
-            {:else}
-              <span class="pinned"><Badge count={unread} /></span>
+        {#if unread > 0 || muted || markedUnread || firstTag}
+          <span class="mark">
+            {#if unread > 0}
+              <Badge count={unread} variant={muted ? 'muted' : 'default'} />
+            {:else if muted}
+              <Icon icon={BellOff} size={16} label={until ?? t('sidebar-notifications-muted')} />
+            {:else if markedUnread}
+              <span class="dot accent" role="img" aria-label={t('sidebar-marked-as-unread')}></span>
+            {:else if firstTag}
+              <span class="tag-dot" role="img" aria-label={tagLabel} style:background={TAG_COLOUR_VARS[firstTag.colour ?? 'grey']}></span>
             {/if}
-          {:else if markedUnread}
-            <span class="pinned"><span class="dot accent" role="img" aria-label={t('sidebar-marked-as-unread')}></span></span>
-          {/if}
-        </span>
+          </span>
+        {/if}
       </span>
     </button>
     {#if !viewport.isPhone}
@@ -663,6 +655,15 @@
         onclick={() => void refreshStore.run()}
       >
         <span class:spin={refreshStore.busy}><Icon icon={RefreshCw} size={20} /></span>
+      </button>
+      <button
+        type="button"
+        class="icon"
+        aria-label={t('common-settings')}
+        data-tooltip={t('common-settings')}
+        onclick={() => onsettings?.()}
+      >
+        <Icon icon={Settings} size={20} />
       </button>
     </div>
   </header>
@@ -1049,8 +1050,12 @@
        that eats a row's worth of height. The rows truncate their own text, so no row is ever
        meant to scroll sideways. */
     overflow-x: hidden;
-    padding: 0 var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-2);
+    /* 4px here plus 4px of row padding is the 8px inset the row highlight has always had; making the
+       row itself carry more of it is what buys the preview its width back. */
+    padding: 0 var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-2);
   }
+  /* Section label: 11px caps, muted, 8px above and 4px below the heading, on the same left rail as
+     the avatars (4px list inset + 4px label inset). */
   .group h3,
   .group h4 {
     display: flex;
@@ -1058,10 +1063,10 @@
     justify-content: space-between;
     gap: var(--alloy-spacing-scale-2);
     margin: 0;
-    padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-2) 2px;
-    font-size: var(--alloy-font-size-meta);
+    padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-1);
+    font-size: var(--alloy-typography-size-xs);
     font-weight: var(--alloy-typography-weight-semibold);
-    letter-spacing: var(--alloy-letter-spacing-caps);
+    letter-spacing: 0.06em; /* token-audit: caps tracking for the 11px section label, not a size step */
     text-transform: uppercase;
     color: var(--alloy-color-text-muted);
   }
@@ -1078,10 +1083,10 @@
     white-space: nowrap;
   }
   .section-count {
-    padding: 1px 6px; /* token-audit: kbd chip inset, set by the 10px meta text */
+    padding: 1px var(--alloy-spacing-scale-1);
     border-radius: var(--alloy-radii-full);
     background: var(--alloy-glass-control);
-    font-size: 10px;
+    font-size: var(--alloy-typography-size-xs);
     font-weight: var(--alloy-typography-weight-semibold);
     letter-spacing: 0;
     font-variant-numeric: tabular-nums;
@@ -1096,30 +1101,31 @@
     gap: 2px;
   }
   /* Named `.pinned`, not `.fixed`: Tailwind's utilities layer emits a global `.fixed{position:fixed}`
-     and a bare `.fixed` class would turn every avatar/marks container into a viewport-fixed box. */
+     and a bare `.fixed` class would turn the avatar container into a viewport-fixed box. */
   .pinned {
     flex: none;
     display: inline-flex;
-  }
-  .tag-dots {
-    display: inline-flex;
-    gap: var(--alloy-spacing-scale-1);
   }
   .tag-dot {
     width: var(--alloy-spacing-scale-2);
     height: var(--alloy-spacing-scale-2);
     border-radius: var(--alloy-radii-full);
   }
+  /* One row is avatar · text · meta. The first two columns are the same x on every row, so the
+     avatars, the titles and the previews read as three rails down the list. The meta column is
+     content-sized: a chat with no status mark gives that width back to the preview instead of
+     reserving an empty gutter for a mark it does not have. */
   .row {
     position: relative;
-    display: flex;
+    display: grid;
+    grid-template-columns: 36px minmax(0, 1fr) auto;
     align-items: center;
-    gap: var(--alloy-spacing-scale-2);
+    column-gap: var(--alloy-spacing-scale-2);
     width: 100%;
     min-width: 0;
-    min-height: 48px;
+    min-height: 56px;
     box-sizing: border-box;
-    padding: 6px var(--alloy-spacing-scale-2); /* token-audit: room row inset, tuned to the 34px row */
+    padding: 0 var(--alloy-spacing-scale-1);
     border: 1px solid transparent;
     border-radius: var(--alloy-radii-lg);
     background: transparent;
@@ -1137,19 +1143,20 @@
   button.row:hover {
     background: var(--alloy-glass-control);
   }
-  /* The open room keeps a solid accent rail instead of a second glass card: on a glass pane,
-     another translucent fill reads as a smudge, while the rail reads as a fixed position. */
+  /* The open room keeps the solid accent rail, but its fill stays neutral: an accent wash under an
+     accent unread badge is the one pair that reads as a rendering bug rather than a state. */
   button.row.active {
-    background: color-mix(in srgb, var(--alloy-color-accent-primary) 9%, transparent);
+    background: var(--alloy-glass-control-hover);
+    border-color: var(--alloy-glass-rim);
     color: var(--alloy-color-text-primary);
   }
   button.row.active::before {
     content: '';
     position: absolute;
     top: 50%;
-    left: 3px;
+    left: 0;
     width: 3px;
-    height: 20px;
+    height: var(--alloy-spacing-scale-5);
     border-radius: var(--alloy-radii-full);
     background: var(--alloy-color-accent-primary);
     translate: 0 -50%;
@@ -1157,31 +1164,35 @@
   .row.unread {
     color: var(--alloy-color-text-primary);
   }
-  .row.unread .title {
-    color: var(--alloy-color-text-primary);
+  /* The text column is two fixed lines — a 20px title over an 18px preview — and the meta column
+     repeats that rhythm (20px time over an 18px mark), so both columns share one baseline grid
+     and the preview never wraps to a third line. */
+  .text {
+    display: grid;
+    grid-template-rows: 20px 18px;
+    align-content: center;
+    gap: var(--alloy-spacing-scale-1);
+    min-width: 0;
   }
   .title {
-    flex: 1;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: var(--alloy-font-size-row);
-    font-weight: var(--alloy-typography-weight-semibold);
-    letter-spacing: -0.005em;
-  }
-  .row:not(.unread):not(.active) .title {
+    font-size: var(--alloy-typography-size-base);
     font-weight: var(--alloy-typography-weight-medium);
+    line-height: 20px;
+    letter-spacing: -0.005em;
+    color: var(--alloy-color-text-secondary);
   }
-  .text {
-    display: flex;
-    flex-direction: column;
-    gap: var(--alloy-spacing-scale-1);
-    flex: 1;
-    min-width: 0;
+  /* Unread is hierarchy rather than a colour flip: a heavier title in full-contrast text and the
+     accent timestamp, while a read row stays one step back on the same two lines. */
+  .row.unread .title {
+    font-weight: var(--alloy-typography-weight-semibold);
+    color: var(--alloy-color-text-primary);
   }
-  .text > .title {
-    flex: none;
+  button.row.active .title {
+    color: var(--alloy-color-text-primary);
   }
   /* The network a chat belongs to: a glyph on the avatar's corner, ringed in the list surface. */
   .avatar {
@@ -1203,12 +1214,13 @@
     display: none;
   }
   .preview {
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: var(--alloy-font-size-preview);
-    line-height: 1.35;
-    color: var(--alloy-color-text-secondary);
+    font-size: var(--alloy-font-size-row);
+    line-height: 18px;
+    color: var(--alloy-color-text-muted);
   }
   .row.muted .preview,
   .row.muted .title {
@@ -1216,6 +1228,30 @@
   }
   .row.muted {
     color: var(--alloy-color-text-muted);
+  }
+  /* Time over one status mark, on the same two rows as the title and the preview, so the stamp
+     sits on the title's baseline whether or not the row has a mark. The column is sized by its
+     widest line, so a badge appearing under an existing timestamp does not move the preview. */
+  .meta {
+    display: grid;
+    grid-template-rows: 20px 18px;
+    align-content: center;
+    justify-items: end;
+    gap: var(--alloy-spacing-scale-1);
+  }
+  .time {
+    font-size: var(--alloy-typography-size-xs);
+    line-height: 20px;
+    font-variant-numeric: tabular-nums;
+    color: var(--alloy-color-text-muted);
+    white-space: nowrap;
+  }
+  .row.unread .time {
+    color: var(--alloy-color-accent-primary);
+  }
+  .mark {
+    display: grid;
+    place-items: center;
   }
   .note {
     margin: 0;
@@ -1329,8 +1365,8 @@
     .more:focus-visible {
       display: grid;
     }
-    /* The hovered row hands its trailing marks over to the more button. */
-    .row-wrap:hover:has(> .more) .end {
+    /* The hovered row hands its trailing column over to the more button. */
+    .row-wrap:hover:has(> .more) .meta {
       visibility: hidden;
     }
   }
@@ -1343,7 +1379,6 @@
   .dot {
     width: var(--alloy-spacing-scale-2);
     height: var(--alloy-spacing-scale-2);
-    margin: 0 var(--alloy-spacing-scale-1);
     border-radius: var(--alloy-radii-full);
     background: var(--alloy-color-text-muted);
   }
@@ -1397,30 +1432,6 @@
     outline: 2px solid var(--alloy-color-accent-primary);
     outline-offset: 2px;
   }
-  /* The trailing column (time above the marks row) sits at the row's right edge on desktop and phone alike. */
-  .end {
-    display: flex;
-    flex: none;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: var(--alloy-spacing-scale-1);
-  }
-  .marks {
-    display: flex;
-    align-items: center;
-    gap: var(--alloy-spacing-scale-1);
-    min-height: 20px;
-  }
-  .time {
-    font-size: var(--alloy-font-size-meta);
-    font-variant-numeric: tabular-nums;
-    color: var(--alloy-color-text-muted);
-    white-space: nowrap;
-  }
-  .row.unread .time {
-    color: var(--alloy-color-accent-primary);
-    font-weight: var(--alloy-typography-weight-semibold);
-  }
   @media (max-width: 899px) {
     .head {
       height: 56px;
@@ -1467,7 +1478,7 @@
       border-radius: var(--alloy-radii-full);
     }
     .groups {
-      padding: 0 calc(var(--alloy-layout-gutter) - var(--alloy-layout-row-pad-x)) var(--alloy-spacing-scale-2);
+      padding: 0 var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-2);
       overscroll-behavior: contain;
       -webkit-overflow-scrolling: touch;
     }
@@ -1477,7 +1488,7 @@
       align-items: center;
       box-sizing: border-box;
       height: 40px;
-      padding: 0 var(--alloy-layout-row-pad-x);
+      padding: 0 var(--alloy-spacing-scale-1);
     }
     .group > h3:first-child {
       padding-top: 0;
@@ -1485,21 +1496,11 @@
     button.row {
       min-height: 56px;
       box-sizing: border-box;
-      padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x);
-    }
-    .title {
-      font-size: var(--alloy-typography-size-base);
-    }
-    .preview {
-      font-size: var(--alloy-font-size-row);
-    }
-    .time {
-      font-size: var(--alloy-font-size-preview);
     }
     button.row:active {
       background: var(--alloy-color-surface-hover);
     }
-    .marks :global(.alloy-badge) {
+    .mark :global(.alloy-badge) {
       min-width: 20px !important;
       height: 20px !important;
     }

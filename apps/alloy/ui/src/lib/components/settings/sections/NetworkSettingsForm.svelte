@@ -161,7 +161,6 @@
         {/if}
         <Button
           type="button"
-          size="sm"
           disabled={!saveable(setting)}
           onclick={() => void save(setting)}
         >
@@ -171,7 +170,6 @@
           <Button
             variant="ghost"
             type="button"
-            size="sm"
             disabled={busyKey !== null}
             onclick={() => void clear(setting)}
           >
@@ -196,17 +194,17 @@
   .network-settings {
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-spacing-scale-3);
-    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-row-pad-x);
+    gap: var(--alloy-spacing-scale-4);
+    padding: var(--alloy-spacing-scale-2) 0;
   }
   .setting {
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-spacing-scale-1);
+    gap: var(--alloy-spacing-scale-2);
   }
   .label {
-    font-size: var(--alloy-typography-size-sm);
-    color: var(--alloy-color-text-secondary);
+    font-size: var(--alloy-font-size-row);
+    color: var(--alloy-color-text-muted);
   }
   .controls {
     display: flex;
@@ -220,8 +218,8 @@
   .hint,
   .state {
     margin: 0;
-    font-size: var(--alloy-typography-size-sm);
-    color: var(--alloy-color-text-secondary);
+    font-size: var(--alloy-font-size-preview);
+    color: var(--alloy-color-text-muted);
     line-height: var(--alloy-typography-line-height-normal, 1.45);
   }
   .state {
@@ -230,7 +228,7 @@
   }
   .error {
     margin: 0;
-    font-size: var(--alloy-typography-size-sm);
+    font-size: var(--alloy-font-size-preview);
     color: var(--alloy-color-status-error);
     overflow-wrap: anywhere;
   }

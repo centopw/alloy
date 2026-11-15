@@ -128,7 +128,7 @@
           spellcheck={false}
           invalid={apiHash.trim() !== '' && !apiHashValid}
         />
-        <Button variant="ghost" size="sm" type="button" onclick={() => (showHash = !showHash)}>
+        <Button variant="ghost" type="button" onclick={() => (showHash = !showHash)}>
           {showHash ? t('telegram-app-hide') : t('telegram-app-show')}
         </Button>
       </div>
@@ -155,14 +155,14 @@
   .telegram-app {
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-spacing-scale-3);
-    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-row-pad-x);
+    gap: var(--alloy-spacing-scale-4);
+    padding: var(--alloy-spacing-scale-2) 0;
   }
   .hint,
   .state {
     margin: 0;
-    font-size: var(--alloy-typography-size-sm);
-    color: var(--alloy-color-text-secondary);
+    font-size: var(--alloy-font-size-preview);
+    color: var(--alloy-color-text-muted);
     line-height: var(--alloy-typography-line-height-normal, 1.45);
   }
   .state {
@@ -176,8 +176,12 @@
     background: none;
     color: var(--alloy-color-accent-primary);
     font: inherit;
+    font-size: var(--alloy-font-size-preview);
     text-decoration: underline;
     cursor: pointer;
+  }
+  .link:hover {
+    color: var(--alloy-color-accent-hover);
   }
   .link:focus-visible {
     outline: 2px solid var(--alloy-color-accent-primary);
@@ -186,16 +190,16 @@
   form {
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-spacing-scale-3);
+    gap: var(--alloy-spacing-scale-4);
   }
   .field {
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-spacing-scale-1);
+    gap: var(--alloy-spacing-scale-2);
   }
   .field-label {
-    font-size: var(--alloy-typography-size-sm);
-    color: var(--alloy-color-text-secondary);
+    font-size: var(--alloy-font-size-row);
+    color: var(--alloy-color-text-muted);
   }
   .secret {
     display: flex;
@@ -204,7 +208,7 @@
   }
   .error {
     margin: 0;
-    font-size: var(--alloy-typography-size-sm);
+    font-size: var(--alloy-font-size-preview);
     color: var(--alloy-color-status-error);
     overflow-wrap: anywhere;
   }

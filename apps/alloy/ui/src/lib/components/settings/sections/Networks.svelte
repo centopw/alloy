@@ -75,13 +75,13 @@
   .section {
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-layout-section-gap);
+    gap: var(--alloy-spacing-scale-6);
   }
   .section-head {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    gap: var(--alloy-layout-gutter);
+    gap: var(--alloy-spacing-scale-4);
   }
   .section-text {
     display: flex;
@@ -91,14 +91,14 @@
   }
   .section-title {
     margin: 0;
-    font-size: var(--alloy-typography-size-lg);
+    font-size: var(--alloy-font-size-title);
     font-weight: var(--alloy-typography-weight-semibold);
     color: var(--alloy-color-text-primary);
   }
   .muted {
     margin: 0;
-    font-size: var(--alloy-typography-size-sm);
-    color: var(--alloy-color-text-secondary);
+    font-size: var(--alloy-font-size-preview);
+    color: var(--alloy-color-text-muted);
   }
   .networks {
     list-style: none;
@@ -106,33 +106,31 @@
     padding: 0;
     display: flex;
     flex-direction: column;
-    background: var(--alloy-color-surface-subtle);
-    border-radius: var(--alloy-radii-lg);
-    overflow: hidden;
   }
   .network {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: var(--alloy-layout-gutter);
-    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-row-pad-x);
+    gap: var(--alloy-spacing-scale-4);
+    min-height: var(--alloy-layout-control-height);
+    padding: var(--alloy-spacing-scale-2) 0;
     border-top: 1px solid var(--alloy-color-border-subtle);
   }
   .network:first-child {
     border-top: none;
   }
   .network-name {
-    font-size: var(--alloy-typography-size-base);
+    font-size: var(--alloy-font-size-row);
     font-weight: var(--alloy-typography-weight-medium);
     color: var(--alloy-color-text-primary);
   }
   .network-state {
-    font-size: var(--alloy-typography-size-sm);
-    color: var(--alloy-color-text-secondary);
+    font-size: var(--alloy-font-size-preview);
+    color: var(--alloy-color-text-muted);
   }
   .error {
     margin: 0;
-    font-size: var(--alloy-typography-size-sm);
+    font-size: var(--alloy-font-size-preview);
     color: var(--alloy-color-status-error);
     overflow-wrap: anywhere;
   }

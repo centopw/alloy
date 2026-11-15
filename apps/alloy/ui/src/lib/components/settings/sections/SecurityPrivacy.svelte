@@ -54,18 +54,18 @@
   .section {
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-layout-section-gap);
+    gap: var(--alloy-spacing-scale-6);
   }
   .status {
     margin: 0;
-    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-row-pad-x);
-    font-size: var(--alloy-typography-size-sm);
+    padding: var(--alloy-spacing-scale-2) 0;
+    font-size: var(--alloy-font-size-preview);
     color: var(--alloy-color-text-secondary);
   }
   .error {
     margin: 0;
-    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-row-pad-x);
-    font-size: var(--alloy-typography-size-sm);
+    padding: var(--alloy-spacing-scale-2) 0;
+    font-size: var(--alloy-font-size-preview);
     color: var(--alloy-color-status-error);
     overflow-wrap: anywhere;
   }

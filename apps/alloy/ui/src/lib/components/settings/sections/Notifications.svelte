@@ -90,30 +90,34 @@
   .section {
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-layout-section-gap);
+    gap: var(--alloy-spacing-scale-6);
   }
   .notice {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
     gap: var(--alloy-spacing-scale-1);
-    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-row-pad-x);
+    padding: var(--alloy-spacing-scale-2) 0;
     border-top: 1px solid var(--alloy-color-border-subtle);
   }
   .notice p {
     margin: 0;
-    font-size: var(--alloy-typography-size-sm);
-    color: var(--alloy-color-text-secondary);
+    font-size: var(--alloy-font-size-preview);
+    color: var(--alloy-color-text-muted);
   }
   .permissions-link {
     padding: 0;
     border: 0;
     background: none;
     font: inherit;
-    font-size: var(--alloy-typography-size-sm);
+    font-size: var(--alloy-font-size-row);
     font-weight: var(--alloy-typography-weight-semibold);
     color: var(--alloy-color-accent-primary);
     cursor: pointer;
+  }
+  .permissions-link:hover {
+    color: var(--alloy-color-accent-hover);
+    text-decoration: underline;
   }
   .permissions-link:focus-visible {
     outline: 2px solid var(--alloy-color-accent-primary);

@@ -80,11 +80,10 @@
         {/if}
         <div class="update-actions">
           {#if available}
-            <Button variant="ghost" size="sm" onclick={() => updatesStore.openChangelog()}>{t('help-about-whats-new')}</Button>
+            <Button variant="ghost" onclick={() => updatesStore.openChangelog()}>{t('help-about-whats-new')}</Button>
           {/if}
           <Button
             variant="ghost"
-            size="sm"
             disabled={updatesStore.checking || updatesStore.busy}
             onclick={() => void updatesStore.check()}>{t('help-about-check-for-updates')}</Button
           >
@@ -138,25 +137,30 @@
   .section {
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-layout-section-gap);
+    gap: var(--alloy-spacing-scale-6);
   }
   .row {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
-    gap: var(--alloy-spacing-scale-3);
-    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-row-pad-x);
-    font-size: var(--alloy-typography-size-base);
+    gap: var(--alloy-spacing-scale-4);
+    min-height: var(--alloy-layout-control-height);
+    padding: var(--alloy-spacing-scale-2) 0;
+    font-size: var(--alloy-font-size-row);
     color: var(--alloy-color-text-primary);
   }
   .row + .row {
     border-top: 1px solid var(--alloy-color-border-subtle);
   }
   .label {
-    color: var(--alloy-color-text-secondary);
+    flex: none;
+    font-size: var(--alloy-font-size-row);
+    color: var(--alloy-color-text-muted);
   }
   .value {
     min-width: 0;
+    font-size: var(--alloy-font-size-row);
+    font-variant-numeric: tabular-nums;
     text-align: right;
     overflow-wrap: anywhere;
   }
@@ -174,9 +178,6 @@
     outline: 2px solid var(--alloy-color-accent-primary);
     outline-offset: 2px;
   }
-  .row + .row {
-    border-top: 1px solid var(--alloy-color-border-subtle);
-  }
   /* The label sits on the first line of the value column, like every other row; the actions go
      under the status, right-aligned to the same edge as the values above. */
   .update {
@@ -193,9 +194,6 @@
     justify-content: flex-end;
     gap: var(--alloy-spacing-scale-2);
   }
-  .label {
-    flex: none;
-  }
   .update-actions :global(.variant-ghost) {
     border-color: var(--alloy-color-border-prominent);
   }
@@ -203,13 +201,13 @@
     .link {
       display: inline-flex;
       align-items: center;
-      min-height: 44px;
+      min-height: var(--alloy-layout-control-height);
     }
   }
   .update-error {
     margin: 0;
     color: var(--alloy-color-status-error);
-    font-size: var(--alloy-typography-size-sm);
+    font-size: var(--alloy-font-size-preview);
     overflow-wrap: anywhere;
   }
 </style>

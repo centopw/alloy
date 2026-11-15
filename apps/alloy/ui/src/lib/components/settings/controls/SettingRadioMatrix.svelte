@@ -70,7 +70,7 @@
   .legend {
     padding: 0;
     margin-bottom: var(--alloy-spacing-scale-2);
-    font-size: var(--alloy-typography-size-base);
+    font-size: var(--alloy-font-size-row);
     font-weight: var(--alloy-typography-weight-medium);
     color: var(--alloy-color-text-primary);
   }
@@ -78,12 +78,12 @@
   table {
     width: 100%;
     border-collapse: collapse;
-    font-size: var(--alloy-typography-size-sm);
+    font-size: var(--alloy-font-size-row);
   }
 
   th,
   td {
-    padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
+    padding: var(--alloy-spacing-scale-2) 0;
     border-top: 1px solid var(--alloy-color-border-subtle);
     text-align: left;
   }
@@ -94,8 +94,9 @@
   }
 
   .col-head {
+    font-size: var(--alloy-font-size-preview);
     font-weight: var(--alloy-typography-weight-semibold);
-    color: var(--alloy-color-text-secondary);
+    color: var(--alloy-color-text-muted);
   }
 
   .row-head {
@@ -136,17 +137,13 @@
       display: block;
     }
 
-    table {
-      font-size: var(--alloy-typography-size-sm);
-    }
-
     tr {
       display: flex;
       flex-wrap: wrap;
       align-items: center;
       gap: var(--alloy-spacing-scale-2);
-      min-height: 56px;
-      padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x);
+      min-height: var(--alloy-layout-control-height);
+      padding: var(--alloy-spacing-scale-2) 0;
       border-top: 1px solid var(--alloy-color-border-subtle);
     }
 
@@ -154,7 +151,7 @@
       flex: 1 0 100%;
       padding: var(--alloy-spacing-scale-1) 0;
       border: none;
-      font-size: var(--alloy-typography-size-base);
+      font-size: var(--alloy-font-size-row);
       font-weight: var(--alloy-typography-weight-medium);
     }
 
@@ -171,11 +168,15 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      min-height: 44px;
+      min-height: var(--alloy-layout-control-height);
       border: 1px solid var(--alloy-color-border-prominent);
       border-radius: var(--alloy-radii-lg);
       color: var(--alloy-color-text-primary);
       cursor: pointer;
+    }
+
+    .choice:hover {
+      background: var(--alloy-color-surface-hover);
     }
 
     .choice:has(input:checked) {
@@ -200,7 +201,7 @@
     .choice-text {
       display: inline;
       padding: 0 var(--alloy-spacing-scale-2);
-      font-size: var(--alloy-typography-size-sm);
+      font-size: var(--alloy-font-size-preview);
       text-align: center;
     }
   }

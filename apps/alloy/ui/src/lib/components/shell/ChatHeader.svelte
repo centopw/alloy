@@ -101,19 +101,29 @@
     <Icon icon={ChevronLeft} size={20} />
   </button>
   <h1 class="heading" tabindex="-1" data-chat-entry data-tauri-drag-region>
-    <div class="identity" data-tauri-drag-region>
-      <button type="button" class="info-btn" aria-label={t('chat-header-room-info', { room: title })} data-tooltip={t('chat-header-room-info-2')} onclick={() => ui.toggleRoomInfo()}>
-        <span class="avatar-slot">{@render avatarEl()}</span>
-        <span class="title">{title}</span>
-        {#if !phone}
-          <span class="net" aria-label={networkName(room.network)} title={networkName(room.network)}>{networkBadge(room.network)}</span>
+    <button
+      type="button"
+      class="identity"
+      aria-label={t('chat-header-room-info', { room: title })}
+      data-tooltip={t('chat-header-room-info-2')}
+      onclick={() => ui.toggleRoomInfo()}
+    >
+      <span class="avatar-slot">{@render avatarEl()}</span>
+      <!-- The identity is one block: the name, then the one subtitle line directly under it, so the
+           two lines share a left edge on every viewport. -->
+      <span class="identity-text">
+        <span class="title-line">
+          <span class="title">{title}</span>
+          {#if !phone}
+            <span class="net" aria-label={networkName(room.network)} title={networkName(room.network)}>{networkBadge(room.network)}</span>
+          {/if}
+        </span>
+        {#if subtitle}
+          <!-- A topic reads topic over forum; a forum shows its topic count instead. -->
+          <span class="sub">{subtitle}</span>
         {/if}
-      </button>
-      {#if subtitle}
-        <!-- A topic reads topic over forum; a forum shows its topic count instead. -->
-        <span class="sub">{subtitle}</span>
-      {/if}
-    </div>
+      </span>
+    </button>
   </h1>
   <div class="actions">
     <button
@@ -155,37 +165,36 @@
 </header>
 
 <style>
+  /* One row, one rail: the header starts where the conversation's bubbles start, so the identity,
+     the pinned bar and the composer all share a left edge. 56px keeps the identity block (avatar,
+     name, subtitle) on a single line with room for the 32px controls beside it. */
   .head {
     display: flex;
     align-items: center;
     gap: var(--alloy-spacing-scale-2);
     flex-shrink: 0;
     min-width: 0;
-    height: var(--alloy-layout-header-height);
-    padding: 0 var(--alloy-layout-gutter) 0 max(var(--alloy-layout-gutter), var(--chat-header-lead, 0px));
+    height: 56px;
+    padding: 0 var(--conversation-rail, var(--alloy-layout-gutter)) 0
+      max(var(--conversation-rail, var(--alloy-layout-gutter)), var(--chat-header-lead, 0px));
     border-bottom: 1px solid var(--alloy-chat-rim);
     background: transparent;
   }
   .heading {
+    display: flex;
     flex: 1 1 0;
     min-width: 0;
     margin: 0;
     font-size: inherit;
     font-weight: inherit;
   }
+  /* The identity is a block: avatar column and a two-line text column. It hugs its content so the
+     rest of the `h1` stays a drag region and the window can still be moved from its own header. */
   .identity {
-    display: flex;
-    align-items: center;
-    gap: var(--alloy-spacing-scale-2);
-    width: 100%;
-    min-width: 0;
-    height: 100%;
-  }
-  .info-btn {
     display: flex;
     flex: 0 1 auto;
     align-items: center;
-    gap: var(--alloy-spacing-scale-2);
+    gap: var(--alloy-spacing-scale-3);
     min-width: 0;
     height: 100%;
     padding: 0;
@@ -200,21 +209,33 @@
     display: inline-flex;
     flex: none;
   }
-  .info-btn:hover .title {
+  .identity-text {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-width: 0;
+  }
+  .identity:hover .title {
     text-decoration: underline;
   }
-  .info-btn:focus-visible {
+  .identity:focus-visible {
     outline: 2px solid var(--alloy-color-accent-primary);
     outline-offset: 2px;
   }
+  .title-line {
+    display: flex;
+    align-items: center;
+    gap: var(--alloy-spacing-scale-2);
+    min-width: 0;
+  }
   .title {
-    flex: 0 1 auto;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     font-size: var(--alloy-font-size-title);
     font-weight: var(--alloy-typography-weight-semibold);
+    line-height: 20px;
     letter-spacing: -0.01em;
     color: var(--alloy-color-text-primary);
   }
@@ -229,28 +250,18 @@
     font-weight: var(--alloy-typography-weight-semibold);
     line-height: 15px;
   }
-  /* The second line: the topic's forum, or a forum's topic count. */
+  /* The one subtitle line: the topic's forum, or a forum's topic count. It sits directly under the
+     title inside the same text column, so it shares the title's left edge on every viewport. */
   .sub {
-    flex: 1 1 auto;
     min-width: 0;
     margin: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     font-size: var(--alloy-typography-size-sm);
-    color: var(--alloy-color-text-secondary);
+    line-height: var(--alloy-typography-line-height-tight);
+    color: var(--alloy-color-text-muted);
     text-align: left;
-  }
-  /* Desktop keeps the breadcrumb on one line, behind the dot the old static subtitle used. */
-  .identity > .sub::before {
-    content: '';
-    display: inline-block;
-    width: 3px;
-    height: 3px;
-    margin-right: var(--alloy-spacing-scale-2);
-    border-radius: var(--alloy-radii-full);
-    background: color-mix(in srgb, var(--alloy-color-text-muted) 70%, transparent);
-    vertical-align: middle;
   }
   .actions {
     display: flex;
@@ -292,41 +303,19 @@
       display: grid;
     }
   }
-  /* Phones: 56px minimum bar, 44px targets with 8px between them, a two-line identity. The bar
-     grows past 56px when the text scale is enlarged, so a 200% text/zoom check never clips the
-     room name into the fixed height (A11Y-03). */
+  /* Phones: same 56px row, but every control keeps the 44px touch target the mobile guardrail
+     requires. The bar grows past 56px when the text scale is enlarged, so a 200% text/zoom check
+     never clips the room name into a fixed height (A11Y-03). */
   @media (max-width: 899px) {
     .head {
       height: auto;
       min-height: 56px;
-      padding: 0 var(--alloy-spacing-scale-2);
+      padding: var(--alloy-spacing-scale-1) var(--conversation-rail, var(--alloy-layout-gutter));
     }
-    .actions {
-      gap: var(--alloy-spacing-scale-2);
-    }
-    .icon {
+    .icon,
+    .back {
       width: 44px;
       height: 44px;
-    }
-    .info-btn {
-      flex: 1 1 100%;
-      gap: var(--alloy-spacing-scale-3);
-    }
-    /* Two lines where there is a second one: the title, then the subtitle under its text. The
-       subtitle sits beside the info button, so it wraps instead of living inside it. */
-    .identity {
-      flex-wrap: wrap;
-      row-gap: 0;
-    }
-    .identity > .sub::before {
-      display: none;
-    }
-    .sub {
-      flex: 1 1 100%;
-      max-width: 100%;
-      padding-left: calc(28px + var(--alloy-spacing-scale-3));
-      font-size: var(--alloy-typography-size-xs);
-      color: var(--alloy-color-text-secondary);
     }
   }
 </style>

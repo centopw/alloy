@@ -91,15 +91,15 @@
     margin: 0;
     padding: 0;
     list-style: none;
-    border: 1px solid var(--alloy-color-border-subtle);
-    border-radius: var(--alloy-radii-lg);
-    background: var(--alloy-color-surface-panel);
+    /* Rows on the panel with hairlines between, like the settings sections: a bordered plate around
+       a bordered row is a box inside a box. */
   }
   .row {
     display: flex;
     align-items: center;
     gap: var(--alloy-spacing-scale-3);
-    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-row-pad-x);
+    min-height: var(--alloy-layout-control-height);
+    padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x);
     border-top: 1px solid var(--alloy-color-border-subtle);
   }
   .row:first-child {

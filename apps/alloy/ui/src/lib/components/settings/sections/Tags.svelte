@@ -98,16 +98,17 @@
   .tags {
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-layout-section-gap);
+    gap: var(--alloy-spacing-scale-6);
   }
   .intro,
   .empty {
     margin: 0;
-    font-size: var(--alloy-typography-size-sm);
-    color: var(--alloy-color-text-secondary);
+    font-size: var(--alloy-font-size-preview);
+    color: var(--alloy-color-text-muted);
   }
   .error {
     margin: 0;
+    font-size: var(--alloy-font-size-preview);
     color: var(--alloy-color-status-error);
   }
   .list {
@@ -116,16 +117,17 @@
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-spacing-scale-1);
   }
   .row {
     display: flex;
     align-items: center;
     gap: var(--alloy-spacing-scale-2);
-    min-height: 44px;
-    padding: 0 var(--alloy-spacing-scale-2);
-    border-radius: var(--alloy-radii-lg);
-    background: var(--alloy-color-surface-subtle);
+    min-height: var(--alloy-layout-control-height);
+    padding: var(--alloy-spacing-scale-2) 0;
+    border-top: 1px solid var(--alloy-color-border-subtle);
+  }
+  .row:first-child {
+    border-top: none;
   }
   .dot {
     width: 10px;
@@ -136,6 +138,7 @@
   .name {
     flex: 1 1 auto;
     min-width: 0;
+    font-size: var(--alloy-font-size-row);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

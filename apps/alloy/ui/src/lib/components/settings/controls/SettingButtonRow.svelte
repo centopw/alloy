@@ -30,8 +30,9 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: var(--alloy-layout-gutter);
-    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-row-pad-x);
+    gap: var(--alloy-spacing-scale-4);
+    min-height: var(--alloy-layout-control-height);
+    padding: var(--alloy-spacing-scale-2) 0;
     border-top: 1px solid var(--alloy-color-border-subtle);
   }
 
@@ -41,32 +42,24 @@
 
   .text {
     display: flex;
+    flex: 1;
     flex-direction: column;
     gap: var(--alloy-spacing-scale-1);
     min-width: 0;
   }
 
   .label {
-    font-size: var(--alloy-typography-size-base);
+    font-size: var(--alloy-font-size-row);
     font-weight: var(--alloy-typography-weight-medium);
     color: var(--alloy-color-text-primary);
   }
 
   .description {
-    font-size: var(--alloy-typography-size-sm);
-    color: var(--alloy-color-text-secondary);
+    font-size: var(--alloy-font-size-preview);
+    color: var(--alloy-color-text-muted);
   }
-  @media (max-width: 899px) {
-    .setting-row {
-      min-height: 56px;
-      padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x);
-    }
-    .label {
-      font-size: var(--alloy-typography-size-lg);
-    }
-    .setting-row :global(.alloy-button) {
-      flex-shrink: 0;
-      min-height: 44px;
-    }
+
+  .setting-row :global(.alloy-button) {
+    flex-shrink: 0;
   }
 </style>

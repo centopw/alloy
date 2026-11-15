@@ -127,7 +127,7 @@
   .section {
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-layout-section-gap);
+    gap: var(--alloy-spacing-scale-6);
   }
 
   .visually-hidden {
@@ -151,7 +151,7 @@
 
   .action,
   .keys {
-    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-row-pad-x);
+    padding: var(--alloy-spacing-scale-2) 0;
     text-align: left;
     vertical-align: middle;
   }
@@ -159,13 +159,13 @@
   .action {
     width: 60%;
     font-weight: var(--alloy-typography-weight-medium);
-    font-size: var(--alloy-typography-size-sm);
+    font-size: var(--alloy-font-size-row);
     color: var(--alloy-color-text-primary);
   }
 
   .keys {
-    font-size: var(--alloy-typography-size-sm);
-    color: var(--alloy-color-text-secondary);
+    font-size: var(--alloy-font-size-preview);
+    color: var(--alloy-color-text-muted);
     /* Keys are the control in this row: every other settings row puts its control on the right
        rail, so shortcuts do too, wrapping as whole alternatives instead of breaking mid-chord. */
     display: flex;
@@ -213,7 +213,7 @@
     color: var(--alloy-color-text-primary);
   }
 
-  /* Phone: each shortcut is a stacked 56px row (action above keys) instead of a three-column table. */
+  /* Phone: each shortcut is a stacked row (action above keys) instead of a three-column table. */
   @media (max-width: 899px) {
     .shortcuts,
     .shortcuts tbody {
@@ -224,8 +224,8 @@
       flex-direction: column;
       gap: var(--alloy-spacing-scale-1);
       box-sizing: border-box;
-      min-height: 56px;
-      padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x);
+      min-height: var(--alloy-layout-control-height);
+      padding: var(--alloy-spacing-scale-2) 0;
     }
     .shortcuts tr + tr {
       border-top: 1px solid var(--alloy-color-border-subtle);
@@ -241,10 +241,10 @@
       padding: 0;
     }
     .action {
-      font-size: var(--alloy-typography-size-lg);
+      font-size: var(--alloy-font-size-row);
     }
     .keys {
-      font-size: var(--alloy-typography-size-sm);
+      font-size: var(--alloy-font-size-preview);
       text-align: left;
     }
     .alt + .alt {

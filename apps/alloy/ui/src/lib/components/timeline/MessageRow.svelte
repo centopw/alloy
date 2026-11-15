@@ -1026,6 +1026,7 @@
   .ts {
     font-size: var(--alloy-typography-size-xs);
     color: var(--alloy-color-text-muted);
+    font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
   .body {
@@ -1435,7 +1436,8 @@
     display: flex;
     align-items: center;
     gap: var(--alloy-spacing-scale-3);
-    padding: var(--alloy-spacing-scale-4) var(--alloy-spacing-scale-4);
+    /* 16px above the date, 8px below: the same 8pt rhythm as the rows around it. */
+    padding: var(--alloy-spacing-scale-4) var(--alloy-spacing-scale-4) var(--alloy-spacing-scale-2);
   }
   /* A date is a rule across the conversation, not another floating chip. */
   .divider::before,
@@ -1452,9 +1454,9 @@
     padding: 0;
     border: 0;
     background: none;
-    font-size: var(--alloy-font-size-meta);
+    font-size: var(--alloy-typography-size-xs);
     font-weight: var(--alloy-typography-weight-semibold);
-    letter-spacing: var(--alloy-letter-spacing-caps);
+    letter-spacing: 0.16em;
     text-transform: uppercase;
     color: var(--alloy-color-text-muted);
     white-space: nowrap;
@@ -1517,6 +1519,22 @@
     flex: 0 0 calc(100% - var(--irc-name-width));
     margin-left: var(--irc-name-width);
     min-width: 0;
+  }
+
+  /* A quote rendered inside the message is a flat card, never a second surface: the quoted sender's
+     colour is a 2px start border, the fill is at most the subtle surface, and the excerpt stays on
+     two lines. The stacked reply variant keeps its own anatomy above the bubble. */
+  .row .reply-slot :global(.reply-quote) {
+    gap: 2px;
+    margin: 0 0 var(--alloy-spacing-scale-1) 0;
+    padding: var(--alloy-spacing-scale-2);
+    border-left: 2px solid var(--quote-border-color, var(--alloy-color-border-prominent));
+    border-radius: var(--alloy-bubble-radius-nested);
+    background: var(--alloy-color-surface-subtle);
+  }
+  .row .reply-slot :global(.reply-quote .sender),
+  .row .reply-slot :global(.reply-quote .excerpt) {
+    font-size: var(--alloy-typography-size-xs);
   }
 
   .row[data-layout='bubbles'] {
@@ -1684,13 +1702,16 @@
   /* The time is always present: showing it only on hover grew the bubble and shifted every message below. */
   .row[data-layout='bubbles'] .bubble-time {
     display: block;
+    /* A line of its own under the body, so it never sits over the last line of text. */
+    margin-top: var(--alloy-spacing-scale-1);
     text-align: right;
     font-size: var(--alloy-typography-size-xs);
-    color: var(--alloy-color-text-secondary);
+    font-variant-numeric: tabular-nums;
+    color: var(--alloy-color-text-muted);
   }
-  /* The sent tick inherits the muted token by default; on a bubble it must use the secondary one. */
+  /* Ticks follow the timestamp's muted token; on the own bubble they take the bubble's own text. */
   .row[data-layout='bubbles'] .bubble-time .tick {
-    color: var(--alloy-color-text-secondary);
+    color: var(--alloy-color-text-muted);
   }
   .row[data-layout='bubbles'] .bubble-time .tick.read {
     color: var(--alloy-color-accent-primary);
@@ -1762,8 +1783,10 @@
   @media (max-width: 899px) {
     .row {
       margin: 0;
-      padding-left: var(--alloy-spacing-scale-3);
-      padding-right: var(--alloy-spacing-scale-3);
+      /* Phones drop the highlight inset, so the row pads to the conversation rail itself: bubbles,
+         the header and the composer share one left edge. */
+      padding-left: var(--conversation-rail, var(--alloy-layout-gutter));
+      padding-right: var(--conversation-rail, var(--alloy-layout-gutter));
       border-radius: 0;
     }
     .gutter {

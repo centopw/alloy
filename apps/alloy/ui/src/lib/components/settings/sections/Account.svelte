@@ -68,7 +68,7 @@
       <h2 class="section-title">{t('account-connected-accounts')}</h2>
       <p class="muted">{t('account-connected-accounts-hint')}</p>
     </div>
-    <Button size="sm" onclick={() => session.openAddAccount()}>{t('account-add')}</Button>
+    <Button onclick={() => session.openAddAccount()}>{t('account-add')}</Button>
   </div>
 
   {#if accounts.length === 0}
@@ -86,7 +86,6 @@
           <div class="row-actions">
             {#if account.state === 'needs_relogin'}
               <Button
-                size="sm"
                 disabled={session.busy}
                 onclick={() => session.openReconnect(account.network)}
                 >{t('account-reconnect')}</Button
@@ -94,7 +93,6 @@
             {/if}
             <Button
               variant="ghost"
-              size="sm"
               disabled={session.busy}
               onclick={() => void logOut(account.id)}
               >{t('account-log-out')}</Button
@@ -116,13 +114,13 @@
   .section {
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-spacing-scale-4);
+    gap: var(--alloy-spacing-scale-6);
   }
   .section-head {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    gap: var(--alloy-layout-gutter);
+    gap: var(--alloy-spacing-scale-4);
   }
   .section-text {
     display: flex;
@@ -132,14 +130,14 @@
   }
   .section-title {
     margin: 0;
-    font-size: var(--alloy-typography-size-lg);
+    font-size: var(--alloy-font-size-title);
     font-weight: var(--alloy-typography-weight-semibold);
     color: var(--alloy-color-text-primary);
   }
   .muted {
     margin: 0;
-    font-size: var(--alloy-typography-size-sm);
-    color: var(--alloy-color-text-secondary);
+    font-size: var(--alloy-font-size-preview);
+    color: var(--alloy-color-text-muted);
   }
   .accounts {
     list-style: none;
@@ -147,16 +145,14 @@
     padding: 0;
     display: flex;
     flex-direction: column;
-    background: var(--alloy-color-surface-subtle);
-    border-radius: var(--alloy-radii-lg);
-    overflow: hidden;
   }
   .account {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: var(--alloy-layout-gutter);
-    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-row-pad-x);
+    gap: var(--alloy-spacing-scale-4);
+    min-height: var(--alloy-layout-control-height);
+    padding: var(--alloy-spacing-scale-2) 0;
     border-top: 1px solid var(--alloy-color-border-subtle);
   }
   .account:first-child {
@@ -169,14 +165,15 @@
     min-width: 0;
   }
   .name {
-    font-size: var(--alloy-typography-size-base);
+    font-size: var(--alloy-font-size-row);
     font-weight: var(--alloy-typography-weight-medium);
     color: var(--alloy-color-text-primary);
     overflow-wrap: anywhere;
   }
   .meta {
-    font-size: var(--alloy-typography-size-sm);
-    color: var(--alloy-color-text-secondary);
+    font-size: var(--alloy-font-size-preview);
+    font-variant-numeric: tabular-nums;
+    color: var(--alloy-color-text-muted);
   }
   .row-actions {
     display: flex;
@@ -187,7 +184,7 @@
   .error {
     margin: 0;
     color: var(--alloy-color-status-error);
-    font-size: var(--alloy-typography-size-sm);
+    font-size: var(--alloy-font-size-preview);
   }
   @media (max-width: 899px) {
     .section-head {
@@ -197,8 +194,6 @@
     .account {
       flex-direction: column;
       align-items: stretch;
-      min-height: 56px;
-      padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x);
     }
     .row-actions {
       justify-content: flex-end;

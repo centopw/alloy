@@ -69,8 +69,9 @@
   .setting-row {
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-spacing-scale-3);
-    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-row-pad-x);
+    gap: var(--alloy-spacing-scale-2);
+    min-height: var(--alloy-layout-control-height);
+    padding: var(--alloy-spacing-scale-2) 0;
     border-top: 1px solid var(--alloy-color-border-subtle);
   }
 
@@ -82,14 +83,14 @@
   }
 
   .label {
-    font-size: var(--alloy-typography-size-base);
+    font-size: var(--alloy-font-size-row);
     font-weight: var(--alloy-typography-weight-medium);
     color: var(--alloy-color-text-primary);
   }
 
   .description {
-    font-size: var(--alloy-typography-size-sm);
-    color: var(--alloy-color-text-secondary);
+    font-size: var(--alloy-font-size-preview);
+    color: var(--alloy-color-text-muted);
   }
 
   .chips {
@@ -101,8 +102,8 @@
 
   .chip,
   .reset {
-    min-width: 44px;
-    height: 44px;
+    min-width: var(--alloy-layout-control-height);
+    height: var(--alloy-layout-control-height);
     border: 0;
     border-radius: var(--alloy-radii-md);
     background: var(--alloy-color-surface-subtle);
@@ -139,14 +140,15 @@
   }
 
   .chip:disabled {
-    cursor: default;
+    cursor: not-allowed;
+    opacity: 0.5;
   }
 
   .reset {
     padding: 0 var(--alloy-spacing-scale-3);
     background: transparent;
     color: var(--alloy-color-text-link);
-    font-size: var(--alloy-typography-size-sm);
+    font-size: var(--alloy-font-size-row);
   }
 
   .chip.add:hover,

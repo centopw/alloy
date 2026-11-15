@@ -17,6 +17,6 @@
   .section {
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-spacing-scale-5);
+    gap: var(--alloy-spacing-scale-6);
   }
 </style>

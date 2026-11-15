@@ -149,7 +149,7 @@
   .section {
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-layout-section-gap);
+    gap: var(--alloy-spacing-scale-6);
   }
 
   /* Child switches of the theme group sit inside an indented rail. */
@@ -163,19 +163,20 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: var(--alloy-layout-gutter);
-    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-row-pad-x);
+    gap: var(--alloy-spacing-scale-4);
+    min-height: var(--alloy-layout-control-height);
+    padding: var(--alloy-spacing-scale-2) 0;
     border-top: 1px solid var(--alloy-color-border-subtle);
   }
 
   .row-label {
-    font-size: var(--alloy-typography-size-base);
+    font-size: var(--alloy-font-size-row);
     font-weight: var(--alloy-typography-weight-medium);
     color: var(--alloy-color-text-primary);
   }
 
   .padded {
-    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-row-pad-x);
+    padding: var(--alloy-spacing-scale-2) 0;
   }
 
   /* Previews fill the tile the parent control provides; they paint no background of their own,
@@ -184,7 +185,7 @@
     display: flex;
     width: 100%;
     min-width: 0;
-    font-size: var(--alloy-typography-size-sm);
+    font-size: var(--alloy-font-size-preview);
     color: var(--alloy-color-text-primary);
   }
 

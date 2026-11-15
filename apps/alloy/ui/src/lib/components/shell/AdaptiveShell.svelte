@@ -621,6 +621,9 @@
     min-height: 0;
     overflow: hidden;
     --alloy-layout-gutter: 12px;
+    /* One vertical rail per conversation: the chat header, the pinned bar, the composer and the
+       message bubbles all start at the same inset (the gutter plus the row's own padding). */
+    --conversation-rail: calc(var(--alloy-layout-gutter) + var(--alloy-layout-row-pad-x));
     /* Top padding of the forum rail; only a chat at the window edge under an overlay title bar
        has to clear the traffic lights, and that scope raises it below. */
     --chat-rail-lead: var(--alloy-spacing-scale-2);
@@ -689,21 +692,23 @@
     box-shadow: var(--alloy-glass-shadow);
   }
 
+  /* Empty pane: one centred column capped at 420px, read top to bottom as eyebrow, title, hint,
+     then the quick switcher. Vertical rhythm is 12px inside the text, 16px before the switcher. */
   .empty {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: var(--alloy-spacing-scale-2);
+    gap: var(--alloy-spacing-scale-3);
     margin: auto;
-    padding: var(--alloy-spacing-scale-7);
+    padding: var(--alloy-spacing-scale-6);
     max-width: 420px;
     text-align: center;
-    color: var(--alloy-color-text-secondary);
+    color: var(--alloy-color-text-muted);
   }
   .empty .eyebrow {
-    margin: 0 0 var(--alloy-spacing-scale-1);
-    font-size: var(--alloy-font-size-meta);
+    margin: 0;
+    font-size: var(--alloy-typography-size-xs);
     font-weight: var(--alloy-typography-weight-semibold);
     letter-spacing: 0.16em;
     text-transform: uppercase;
@@ -711,16 +716,20 @@
   }
   .empty h2 {
     margin: 0;
-    font-size: var(--alloy-typography-size-xxl);
+    font-size: 20px; /* No 20px step in the type scale; the empty-state title sits between lg and xxl. */
     font-weight: var(--alloy-typography-weight-semibold);
+    line-height: var(--alloy-typography-line-height-tight);
     letter-spacing: -0.02em;
     color: var(--alloy-color-text-primary);
   }
   .empty p {
     margin: 0;
-    max-width: 34ch;
-    font-size: var(--alloy-typography-size-base);
+    /* Wide enough for the two-line hint to break at a word boundary: at 34ch the sentence broke
+       after "chat", leaving "list." alone on its own line. */
+    max-width: 46ch;
+    font-size: var(--alloy-font-size-row);
     line-height: var(--alloy-typography-line-height-normal);
+    text-wrap: pretty;
   }
   /* A forum with no topics yet: the header names it, the pane says why it is empty. */
   .forum-empty {
@@ -742,7 +751,8 @@
     align-items: center;
     gap: var(--alloy-spacing-scale-2);
     height: 40px;
-    margin-top: var(--alloy-spacing-scale-3);
+    /* 12px flex gap + 4px here keeps the switcher 16px below the hint. */
+    margin-top: var(--alloy-spacing-scale-1);
     padding: 0 var(--alloy-spacing-scale-2) 0 var(--alloy-spacing-scale-4);
     border: 1px solid var(--alloy-glass-rim);
     border-radius: var(--alloy-radii-full);
@@ -750,12 +760,16 @@
     color: var(--alloy-color-text-secondary);
     font: inherit;
     font-size: var(--alloy-font-size-row);
+    white-space: nowrap;
     cursor: pointer;
     box-shadow: var(--alloy-glass-highlight);
     transition:
       background var(--alloy-motion-duration-fast) var(--alloy-motion-easing-ease),
       border-color var(--alloy-motion-duration-fast) var(--alloy-motion-easing-ease),
       color var(--alloy-motion-duration-fast) var(--alloy-motion-easing-ease);
+  }
+  .jump span {
+    white-space: nowrap;
   }
   .jump:hover {
     border-color: var(--alloy-glass-rim-strong);
@@ -803,6 +817,8 @@
   /* Phones get the roomier phone gutter back; the desktop 12px is for a narrow chat column. */
   .shell[data-layout='narrow'] .chat {
     --alloy-layout-gutter: var(--alloy-spacing-scale-4);
+    /* The phone rail is the gutter itself: rows are full-bleed, so their own padding lands here. */
+    --conversation-rail: var(--alloy-layout-gutter);
     /* The topic rail becomes a horizontal strip above the header on a phone. */
     flex-direction: column;
   }

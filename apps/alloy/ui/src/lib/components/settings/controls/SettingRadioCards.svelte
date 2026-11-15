@@ -70,7 +70,7 @@
   .legend {
     padding: 0;
     margin-bottom: var(--alloy-spacing-scale-2);
-    font-size: var(--alloy-typography-size-base);
+    font-size: var(--alloy-font-size-row);
     font-weight: var(--alloy-typography-weight-medium);
     color: var(--alloy-color-text-primary);
   }
@@ -144,14 +144,14 @@
   }
 
   .card-label {
-    font-size: var(--alloy-typography-size-base);
+    font-size: var(--alloy-font-size-row);
     font-weight: var(--alloy-typography-weight-semibold);
     color: var(--alloy-color-text-primary);
   }
 
   .card-description {
-    font-size: var(--alloy-typography-size-sm);
-    color: var(--alloy-color-text-secondary);
+    font-size: var(--alloy-font-size-preview);
+    color: var(--alloy-color-text-muted);
   }
 
   /* The slot is always reserved, so labels keep the same width whether or not a tile is picked. */

@@ -751,13 +751,15 @@
     ></textarea>
 
     {#if viewport.isPhone}
+      <!-- `mousedown` (not `pointerdown`) keeps the field's selection without suppressing the
+           touch-generated click that opens the row. -->
       <button
         type="button"
         class="round"
         aria-label={t('composer-text-formatting')}
         aria-pressed={formatOpen}
         data-tooltip={t('composer-formatting')}
-        onpointerdown={(e) => e.preventDefault()}
+        onmousedown={(e) => e.preventDefault()}
         onclick={() => (formatOpen = !formatOpen)}
       >
         <Icon icon={Type} size={20} />
@@ -826,7 +828,8 @@
 <style>
   .composer {
     position: relative;
-    padding: var(--alloy-spacing-scale-2) var(--alloy-layout-gutter) var(--alloy-spacing-scale-3);
+    padding: var(--alloy-spacing-scale-2) var(--conversation-rail, var(--alloy-layout-gutter))
+      var(--alloy-spacing-scale-3);
     background: transparent;
   }
   .format.floating {
@@ -935,13 +938,15 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  /* One field holds the whole composer: attachment, text, emoji and send sit on the field's centre
+     line, 4px apart, at a 32px target on desktop and 44px on a phone (the mobile guardrail). */
   .field {
     position: relative;
     display: flex;
-    align-items: flex-end;
+    align-items: center;
     gap: var(--alloy-spacing-scale-1);
-    padding: var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-1)
-      var(--alloy-spacing-scale-1);
+    min-height: 44px;
+    padding: var(--alloy-spacing-scale-1);
     background: var(--alloy-glass-control);
     border: 1px solid var(--alloy-chat-rim);
     border-radius: var(--alloy-radii-2xl);
@@ -980,7 +985,7 @@
     background: transparent;
     color: var(--alloy-color-text-primary);
     font: inherit;
-    padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-1);
+    padding: var(--alloy-spacing-scale-1);
     max-height: 160px;
     line-height: var(--alloy-typography-line-height-normal);
   }
@@ -989,18 +994,23 @@
     background: transparent;
     color: var(--alloy-color-text-secondary);
     border-radius: var(--alloy-radii-full);
-    width: 36px;
-    height: 36px;
+    width: 32px;
+    height: 32px;
     display: inline-grid;
     place-items: center;
     cursor: pointer;
     flex: none;
   }
+  /* The formatting toggle shows its state: the row it controls is open. */
+  .round[aria-pressed='true'] {
+    background: var(--alloy-color-accent-subtle);
+    color: var(--alloy-color-accent-primary);
+  }
   .send {
     border: 0;
     border-radius: var(--alloy-radii-full);
-    width: 36px;
-    height: 36px;
+    width: 32px;
+    height: 32px;
     display: inline-grid;
     place-items: center;
     cursor: pointer;
@@ -1038,15 +1048,17 @@
   }
   @media (max-width: 899px) {
     .composer {
-      padding: var(--alloy-spacing-scale-2) var(--alloy-layout-gutter)
+      padding: var(--alloy-spacing-scale-2) var(--conversation-rail, var(--alloy-layout-gutter))
         calc(var(--alloy-spacing-scale-2) + var(--alloy-safe-area-bottom));
     }
+    /* Phones keep the 44px touch target the mobile guardrail requires; the 44px field grows to
+       hold them and the text keeps its 16px token. */
     .round,
-    .banner .round {
+    .send {
       width: 44px;
       height: 44px;
     }
-    .send {
+    .banner .round {
       width: 44px;
       height: 44px;
     }
@@ -1055,9 +1067,9 @@
       flex: 1 1 0;
       width: 100%;
       min-width: 0;
-      min-height: 44px;
+      min-height: 0;
       font-size: var(--alloy-typography-size-lg);
-      padding: var(--alloy-spacing-scale-2) 0;
+      padding: var(--alloy-spacing-scale-1);
     }
   }
 </style>

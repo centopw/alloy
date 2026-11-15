@@ -6,7 +6,7 @@
   import { getUserColorValue } from '$lib/identity/userColor';
   import { messagePreview } from './a11y';
   import Icon from '$lib/icons/Icon.svelte';
-  import { X } from '$lib/icons';
+  import { Pin, X } from '$lib/icons';
   import { t } from '$lib/i18n';
 
   interface Props {
@@ -54,23 +54,19 @@
 
 {#if current}
   <div class="pinned-bar" style="--pin-color: {userColor};" role="group" aria-label={t('pinned-bar-pinned-messages')}>
+    <span class="pin-glyph" aria-hidden="true"><Icon icon={Pin} size={16} /></span>
     <button
       type="button"
       class="jump"
       onclick={show}
       aria-label={t('pinned-bar-show-pinned-message', { position, count: pinned.length, name: senderName })}
     >
-      <span class="spine" aria-hidden="true"></span>
-      <span class="text">
-        <span class="title">
-          <span class="sender" style="color: {userColor};">{senderName}</span>
-          {#if pinned.length > 1}
-            <span class="counter">{t('pinned-bar-position', { position, count: pinned.length })}</span>
-          {/if}
-        </span>
-        <span class="preview">{preview}</span>
-      </span>
+      <span class="sender" style="color: {userColor};">{senderName}:</span>
+      <span class="preview">{preview}</span>
     </button>
+    {#if pinned.length > 1}
+      <span class="counter" aria-hidden="true">{t('pinned-bar-position', { position, count: pinned.length })}</span>
+    {/if}
     <button type="button" class="unpin" onclick={unpin} aria-label={t('pinned-bar-unpin')} data-tooltip={t('pinned-bar-unpin')}>
       <Icon icon={X} size={16} />
     </button>
@@ -78,23 +74,34 @@
 {/if}
 
 <style>
-  /* One slim row over the conversation: the sender colour is the spine, as on a reply quote. */
+  /* A real bar between the header and the timeline: one 36px row on its own hairline, inset on the
+     conversation rail so its pin, its text and its close button line up with the header and the
+     bubbles. The header's icon cluster never shares it. */
   .pinned-bar {
     display: flex;
+    flex-shrink: 0;
     align-items: center;
-    gap: var(--alloy-spacing-scale-1);
-    padding: var(--alloy-spacing-scale-1) var(--alloy-layout-gutter);
+    gap: var(--alloy-spacing-scale-2);
+    height: 36px;
+    padding: 0 var(--conversation-rail, var(--alloy-layout-gutter));
     border-bottom: 1px solid var(--alloy-chat-rim, var(--alloy-color-border-subtle));
     background: color-mix(in srgb, var(--alloy-color-surface-hover) 35%, transparent);
     min-width: 0;
   }
+  .pin-glyph {
+    display: inline-flex;
+    flex: none;
+    color: var(--pin-color);
+  }
+  /* The one line: `author: preview`, truncated with an ellipsis before the counter. */
   .jump {
     display: flex;
-    flex: 1;
+    flex: 1 1 0;
+    align-items: center;
+    gap: var(--alloy-spacing-scale-1);
     min-width: 0;
-    align-items: stretch;
-    gap: var(--alloy-spacing-scale-2);
-    padding: var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-1) 0;
+    height: 100%;
+    padding: 0 var(--alloy-spacing-scale-1);
     border: 0;
     border-radius: var(--alloy-radii-sm);
     background: transparent;
@@ -103,45 +110,29 @@
     text-align: start;
     cursor: pointer;
   }
-  .spine {
-    flex: none;
-    width: 3px;
-    border-radius: var(--alloy-radii-sm);
-    background: var(--pin-color);
-  }
-  .text {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 0;
-  }
-  .title {
-    display: flex;
-    align-items: baseline;
-    gap: var(--alloy-spacing-scale-2);
-    min-width: 0;
-  }
   .sender,
   .preview {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    line-height: var(--alloy-typography-line-height-tight);
   }
   .sender {
+    flex: none;
+    max-width: 45%;
     font-size: var(--alloy-typography-size-sm);
     font-weight: var(--alloy-typography-weight-semibold);
-    line-height: var(--alloy-typography-line-height-tight);
+  }
+  .preview {
+    min-width: 0;
+    font-size: var(--alloy-typography-size-sm);
+    color: var(--alloy-color-text-secondary);
   }
   .counter {
     flex: none;
     font-size: var(--alloy-typography-size-xs);
-    color: var(--alloy-color-text-secondary);
+    color: var(--alloy-color-text-muted);
     font-variant-numeric: tabular-nums;
-  }
-  .preview {
-    font-size: var(--alloy-typography-size-sm);
-    line-height: var(--alloy-typography-line-height-normal);
-    color: var(--alloy-color-text-secondary);
   }
   .unpin {
     display: inline-grid;
@@ -170,10 +161,10 @@
     outline: 2px solid var(--alloy-color-accent-primary);
     outline-offset: -2px;
   }
+  /* Phones: one step taller (40px) and the close button keeps its 28px mark inside the bar. */
   @media (max-width: 899px) {
-    .unpin {
-      width: 44px;
-      height: 44px;
+    .pinned-bar {
+      height: 40px;
     }
   }
 </style>

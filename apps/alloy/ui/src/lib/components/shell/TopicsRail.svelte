@@ -1,8 +1,6 @@
 <script lang="ts">
   import type { RoomSummary } from '$lib/generated/protocol';
   import { Avatar, Badge } from '../common';
-  import Icon from '$lib/icons/Icon.svelte';
-  import { BellOff } from '$lib/icons';
   import { isRoomMuted, roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
   import { topicsOf } from './forumTopics';
@@ -22,6 +20,32 @@
   const currentId = $derived(roomsStore.activeRoomId);
   const forumTitle = $derived(roomTitle(forum));
   const phone = $derived(viewport.isPhone);
+
+  let railEl = $state<HTMLElement | null>(null);
+  /** The first placement is instant: a rail that animates before the reader touches it reads as lag. */
+  let placed = false;
+
+  /**
+   * Selection can land on a topic the rail is not showing (a deep link, a notification, or the
+   * newest activity moving the open topic), so the rail brings it into view. It animates only when
+   * the reader has not asked for reduced motion.
+   */
+  $effect(() => {
+    const id = currentId;
+    const rail = railEl;
+    if (!id || !rail) return;
+    const topic = rail.querySelector<HTMLElement>(`[data-topic-id="${CSS.escape(id)}"]`);
+    if (!topic) return;
+    const reduced =
+      document.documentElement.dataset.reducedMotion === 'true' ||
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    topic.scrollIntoView({
+      block: 'nearest',
+      inline: 'nearest',
+      behavior: placed && !reduced ? 'smooth' : 'auto'
+    });
+    placed = true;
+  });
 
   /**
    * The accessible name carries the state the small marks cannot: the full topic name, its unread
@@ -61,6 +85,7 @@
 <nav
   class="rail"
   class:phone
+  bind:this={railEl}
   aria-label={t('topics-rail-label', { name: forumTitle })}
   onkeydown={onRailKeydown}
 >
@@ -83,25 +108,21 @@
             aria-current={current ? 'true' : undefined}
             aria-label={labelOf(topic, unread)}
             title={name}
+            data-topic-id={topic.id}
             onclick={() => onpick(topic.id)}
           >
-            <span class="badge">
-              <Avatar userId={topic.id} displayName={name} size={32} />
-              <span class="mark">
-                {#if unread > 0}
-                  {#if muted}
-                    <span class="dot"></span>
-                  {:else}
-                    <Badge count={unread} />
-                  {/if}
-                {:else if topic.marked_unread}
+            <Avatar userId={topic.id} displayName={name} size={phone ? 24 : 32} />
+            <span class="label">{name}</span>
+            {#if unread > 0 || topic.marked_unread}
+              <span class="mark" aria-hidden="true">
+                {#if unread > 0 && !muted}
+                  <Badge count={unread} />
+                {:else if unread > 0}
+                  <span class="dot"></span>
+                {:else}
                   <span class="dot accent"></span>
                 {/if}
               </span>
-            </span>
-            <span class="label">{name}</span>
-            {#if muted}
-              <span class="quiet"><Icon icon={BellOff} size={16} /></span>
             {/if}
           </button>
         </li>
@@ -118,70 +139,87 @@
     flex: none;
     flex-direction: column;
     min-height: 0;
-    width: 84px; /* control metric: an avatar plus two lines of label, narrower than a room row */
+    width: 88px; /* 8pt grid: 8px gutters around a 72px item, an avatar plus two lines of label */
     /* `--chat-rail-lead` clears the macOS traffic lights when the chat starts at the window edge. */
     padding: var(--chat-rail-lead, var(--alloy-spacing-scale-2)) 0 var(--alloy-spacing-scale-2);
     overflow-x: hidden;
     overflow-y: auto;
     overscroll-behavior: contain;
     border-right: 1px solid var(--alloy-chat-rim);
+    scroll-padding-block: var(--alloy-spacing-scale-2);
   }
   .items {
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-spacing-scale-1);
+    gap: var(--alloy-spacing-scale-2);
     margin: 0;
-    padding: 0 var(--alloy-spacing-scale-1);
+    padding: 0 var(--alloy-spacing-scale-2);
     list-style: none;
   }
   .slot {
     display: flex;
   }
   .topic {
+    /* The opaque surface behind an item, so the unread mark can ring itself in it and read as a
+       gap between the avatar and the count rather than as a halo. */
+    --rail-item-surface: var(--alloy-color-surface-canvas);
+    position: relative;
     display: flex;
     flex: 1;
     flex-direction: column;
     align-items: center;
+    justify-content: center;
     gap: var(--alloy-spacing-scale-1);
     box-sizing: border-box;
     width: 100%;
-    padding: var(--alloy-spacing-scale-2) 0;
-    border: 1px solid transparent;
-    border-radius: var(--alloy-radii-lg);
+    /* 8pt grid: avatar 32 + 4 + two 11px lines 28 + 8 padding. Two-line labels grow it by a hair. */
+    min-height: 72px;
+    padding: var(--alloy-spacing-scale-1);
+    border: 0;
+    border-radius: calc(var(--alloy-radii-2xl) + var(--alloy-spacing-scale-1)); /* 20px */
     background: transparent;
     color: var(--alloy-color-text-secondary);
     font: inherit;
     text-align: center;
     cursor: pointer;
-    transition: background var(--alloy-motion-duration-fast) ease;
+    scroll-margin-block: var(--alloy-spacing-scale-2);
+    transition: background var(--alloy-motion-duration-fast) var(--alloy-motion-easing-ease);
   }
   .topic:hover {
     background: var(--alloy-glass-control);
   }
+  /* The open topic is a filled surface with a start bar, so it is unmistakable at a glance. */
+  .topic.current {
+    background: var(--alloy-color-accent-subtle);
+    --rail-item-surface: var(--alloy-color-accent-subtle);
+  }
+  .topic.current::before {
+    content: '';
+    position: absolute;
+    /* Inset past the 20px corner curve so the bar never breaks the item's edge. */
+    inset-block: var(--alloy-spacing-scale-5);
+    inset-inline-start: 0;
+    width: calc(var(--alloy-spacing-scale-1) / 2);
+    border-radius: var(--alloy-radii-full);
+    background: var(--alloy-color-accent-primary);
+  }
   .topic:focus-visible {
     outline: 2px solid var(--alloy-color-accent-primary);
-    outline-offset: -2px;
+    outline-offset: 2px;
   }
-  /* The open topic keeps the accent the chat list uses for the open chat. */
-  .topic.current {
-    background: color-mix(in srgb, var(--alloy-color-accent-primary) 10%, transparent);
-  }
-  .topic.current .badge {
-    box-shadow: 0 0 0 2px var(--alloy-color-accent-primary);
-  }
-  .badge {
-    position: relative;
-    display: inline-flex;
-    border-radius: var(--alloy-radii-full);
-  }
+  /* The unread mark rides the avatar's top corner, clear of the circle and of the next item, and
+     is ringed in the item's own surface so the avatar never shows through. */
   .mark {
     position: absolute;
-    top: -4px;
-    right: -6px;
+    inset-block-start: var(--alloy-spacing-scale-1);
+    inset-inline-end: var(--alloy-spacing-scale-4);
     display: inline-flex;
     align-items: center;
+    justify-content: center;
+    box-shadow: 0 0 0 2px var(--rail-item-surface);
+    border-radius: var(--alloy-radii-full);
   }
-  /* The count rides the badge, so the label keeps the full width of the column. */
+  /* The count stays on the mark, so the label keeps the full width of the column. */
   .mark :global(.alloy-badge) {
     min-width: 16px !important;
     height: 16px !important;
@@ -189,8 +227,8 @@
     font-size: 10px !important;
   }
   .dot {
-    width: var(--alloy-spacing-scale-2);
-    height: var(--alloy-spacing-scale-2);
+    width: 6px;
+    height: 6px;
     border-radius: var(--alloy-radii-full);
     background: var(--alloy-color-text-muted);
   }
@@ -203,31 +241,30 @@
     -webkit-line-clamp: 2;
     line-clamp: 2;
     overflow: hidden;
-    max-width: 100%;
+    width: 100%;
+    /* 11px: two lines of a topic name fit a 64px column without clipping at the rail edge. */
     font-size: var(--alloy-typography-size-xs);
-    line-height: 1.25;
-    overflow-wrap: anywhere;
+    line-height: var(--alloy-typography-line-height-tight);
+    overflow-wrap: break-word;
+    text-wrap: pretty;
     color: var(--alloy-color-text-secondary);
   }
   .topic.unread .label {
     font-weight: var(--alloy-typography-weight-semibold);
     color: var(--alloy-color-text-primary);
   }
-  .topic.current .label {
-    color: var(--alloy-color-text-primary);
-  }
   .topic.muted .label {
     color: var(--alloy-color-text-muted);
   }
-  .quiet {
-    display: inline-flex;
-    color: var(--alloy-color-text-muted);
+  /* The open topic reads at full strength even when its notifications are muted. */
+  .topic.current .label {
+    color: var(--alloy-color-text-primary);
   }
   .empty {
     margin: 0;
     padding: var(--alloy-spacing-scale-2);
     font-size: var(--alloy-typography-size-xs);
-    line-height: 1.3;
+    line-height: var(--alloy-typography-line-height-tight);
     text-align: center;
     color: var(--alloy-color-text-muted);
   }
@@ -243,6 +280,8 @@
     border-right: 0;
     border-bottom: 1px solid var(--alloy-chat-rim);
     scrollbar-width: none;
+    scroll-padding-inline: var(--alloy-spacing-scale-4);
+    scroll-padding-block: 0;
   }
   .rail.phone .items {
     flex-direction: row;
@@ -254,15 +293,45 @@
     flex: none;
     gap: var(--alloy-spacing-scale-2);
     width: auto;
-    max-width: 200px; /* control metric: a chip long enough for a two-word topic */
-    min-height: var(--alloy-touch-target, 44px);
-    padding: 0 var(--alloy-spacing-scale-3) 0 var(--alloy-spacing-scale-1);
-    border-color: var(--alloy-glass-rim);
+    max-width: 220px; /* control metric: a chip long enough for a two-word topic plus its count */
+    height: 36px;
+    min-height: 36px;
+    padding: 0 var(--alloy-spacing-scale-2) 0 var(--alloy-spacing-scale-1);
+    border: 1px solid var(--alloy-glass-rim);
     border-radius: var(--alloy-radii-full);
+    text-align: start;
+    scroll-margin-block: 0;
+    scroll-margin-inline: var(--alloy-spacing-scale-2);
+  }
+  /* The chip keeps its 36px shape while the hit area still clears the 44px touch minimum. */
+  .rail.phone .topic::after {
+    content: '';
+    position: absolute;
+    inset: calc(-1 * var(--alloy-spacing-scale-1)) 0;
+  }
+  /* A chip is too short for a start bar: the accent edge outlines the capsule instead. */
+  .rail.phone .topic.current::before {
+    content: none;
+  }
+  .rail.phone .topic.current {
+    border-color: var(--alloy-color-accent-primary);
+  }
+  /* A chip carries its count after the label, in the flow, so nothing sits on the avatar. */
+  .rail.phone .mark {
+    position: static;
+    inset: auto;
+    flex: none;
+    box-shadow: none;
   }
   .rail.phone .label {
-    -webkit-line-clamp: 1;
-    line-clamp: 1;
-    text-align: left;
+    display: block;
+    -webkit-line-clamp: unset;
+    line-clamp: unset;
+    flex: none;
+    width: auto;
+    max-width: 150px; /* control metric: keeps a long topic from swallowing the strip */
+    font-size: var(--alloy-typography-size-sm);
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 </style>

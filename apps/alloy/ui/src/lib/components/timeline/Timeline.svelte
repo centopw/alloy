@@ -636,6 +636,16 @@
   .cell :global(.divider) {
     margin: 0 calc(var(--alloy-layout-row-inset) * -1);
   }
+  /* Phones drop the row inset (the highlight is full-bleed), so the cell adds nothing and the row
+     itself pads to the conversation rail. */
+  @media (max-width: 899px) {
+    .cell {
+      padding: 0;
+    }
+    .cell :global(.divider) {
+      margin: 0;
+    }
+  }
   .status {
     margin: 0;
     padding: var(--alloy-spacing-scale-8) var(--alloy-layout-gutter);

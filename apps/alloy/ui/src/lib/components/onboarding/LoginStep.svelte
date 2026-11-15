@@ -270,26 +270,28 @@
     <h3>{t('onboarding-phone-title')}</h3>
     <p class="hint">{t('onboarding-phone-hint')}</p>
     <form onsubmit={submitPhone}>
-      <div class="field">
-        <span>{t('onboarding-phone-country-label')}</span>
-        <Select
-          bind:value={country}
-          options={countryOptions}
-          label={t('onboarding-phone-country-label')}
-        />
+      <div class="phone-row">
+        <div class="field">
+          <span>{t('onboarding-phone-country-label')}</span>
+          <Select
+            bind:value={country}
+            options={countryOptions}
+            label={t('onboarding-phone-country-label')}
+          />
+        </div>
+        <label class="field">
+          <span>{t('onboarding-phone-label')}</span>
+          <TextField
+            type="tel"
+            bind:value={phone}
+            oninput={followTypedCountry}
+            autocomplete="tel"
+            inputmode="tel"
+            autofocus
+            required
+          />
+        </label>
       </div>
-      <label>
-        <span>{t('onboarding-phone-label')}</span>
-        <TextField
-          type="tel"
-          bind:value={phone}
-          oninput={followTypedCountry}
-          autocomplete="tel"
-          inputmode="tel"
-          autofocus
-          required
-        />
-      </label>
       {#if parsedPhone.e164}
         <p class="hint" role="status">
           {t('onboarding-phone-preview', { phone: parsedPhone.e164 })}
@@ -522,8 +524,8 @@
   }
   .hint {
     margin: 0;
-    color: var(--alloy-color-text-secondary);
-    font-size: var(--alloy-typography-size-sm);
+    color: var(--alloy-color-text-muted);
+    font-size: var(--alloy-font-size-preview);
     line-height: var(--alloy-typography-line-height-normal, 1.45);
   }
   form {
@@ -532,26 +534,38 @@
     gap: var(--alloy-spacing-scale-4);
     margin-top: var(--alloy-spacing-scale-2);
   }
+  /* Labels sit 13px above their field with 8px of air, matching a settings row label. */
   label,
   .field {
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-spacing-scale-1);
-    font-size: var(--alloy-typography-size-sm);
-    font-weight: var(--alloy-typography-weight-medium, 500);
+    gap: var(--alloy-spacing-scale-2);
+    min-width: 0;
+    font-size: var(--alloy-font-size-row);
+    font-weight: var(--alloy-typography-weight-medium);
     color: var(--alloy-color-text-secondary);
+  }
+  /* The number is typed on one line with its country on wide columns; phones stack the pair. */
+  .phone-row {
+    display: grid;
+    grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+    gap: var(--alloy-spacing-scale-2);
   }
   .actions {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--alloy-spacing-scale-3);
+    flex-direction: column-reverse;
+    align-items: stretch;
+    gap: var(--alloy-spacing-scale-2);
     margin-top: var(--alloy-spacing-scale-2);
+  }
+  .actions :global(.alloy-button) {
+    width: 100%;
+    min-height: var(--alloy-layout-control-height);
   }
   .error {
     margin: 0;
     color: var(--alloy-color-status-error);
-    font-size: var(--alloy-typography-size-sm);
+    font-size: var(--alloy-font-size-preview);
   }
   .qr {
     display: grid;
@@ -576,18 +590,21 @@
     flex-direction: column;
     gap: var(--alloy-spacing-scale-2);
     color: var(--alloy-color-text-secondary);
-    font-size: var(--alloy-typography-size-sm);
+    font-size: var(--alloy-font-size-preview);
     line-height: var(--alloy-typography-line-height-normal, 1.45);
   }
   .steps .link {
     display: inline;
   }
   details {
-    font-size: var(--alloy-typography-size-sm);
+    font-size: var(--alloy-font-size-preview);
     color: var(--alloy-color-text-secondary);
   }
   summary {
     cursor: pointer;
+  }
+  summary:hover {
+    color: var(--alloy-color-text-primary);
   }
   summary:focus-visible {
     outline: 2px solid var(--alloy-color-accent-primary);
@@ -612,28 +629,27 @@
     background: none;
     color: var(--alloy-color-accent-primary);
     font: inherit;
-    font-size: var(--alloy-typography-size-sm);
+    font-size: var(--alloy-font-size-row);
     text-decoration: underline;
     cursor: pointer;
+  }
+  .link:hover:not(:disabled) {
+    color: var(--alloy-color-accent-hover);
+  }
+  .link:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
   }
   .link:focus-visible {
     outline: 2px solid var(--alloy-color-accent-primary);
     outline-offset: 2px;
   }
   @media (max-width: 899px) {
-    .hint,
-    label {
-      font-size: var(--alloy-typography-size-base);
-    }
-    .actions {
-      flex-direction: column-reverse;
-      align-items: stretch;
-    }
-    .actions :global(button) {
-      width: 100%;
+    .phone-row {
+      grid-template-columns: minmax(0, 1fr);
     }
     .link {
-      min-height: 44px;
+      min-height: var(--alloy-layout-control-height);
     }
   }
 </style>

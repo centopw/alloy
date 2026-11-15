@@ -272,7 +272,7 @@ import Permissions from './sections/Permissions.svelte';
     display: flex;
     width: 100%;
     height: 100%;
-    /* A settings window, not a second app: cap it so the 640px reading column sits in a
+    /* A settings window, not a second app: cap it so the 720px reading column sits in a
        deliberate frame instead of floating in a full-bleed pane. */
     max-width: 1040px;
     max-height: 760px;
@@ -289,22 +289,30 @@ import Permissions from './sections/Permissions.svelte';
   .nav {
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-spacing-scale-4);
+    gap: 0;
     width: 240px;
     flex-shrink: 0;
-    padding: 0 var(--alloy-layout-row-inset) var(--alloy-layout-row-inset);
+    padding: 0 var(--alloy-layout-gutter) var(--alloy-layout-gutter);
     overflow-y: auto;
     background: color-mix(in srgb, var(--alloy-color-surface-panel) 42%, transparent);
     border-right: 1px solid var(--alloy-glass-rim);
   }
-  .nav-title {
-    margin: 0;
+  .nav-header {
     display: flex;
     align-items: center;
+    justify-content: space-between;
+    gap: var(--alloy-spacing-scale-2);
     min-height: var(--alloy-layout-header-height);
-    padding: 0 calc(var(--alloy-layout-row-inset) + var(--alloy-layout-row-pad-x));
-    font-size: var(--alloy-typography-size-lg);
+    padding: 0 var(--alloy-spacing-scale-2);
+  }
+  .nav-title {
+    margin: 0;
+    min-width: 0;
+    overflow: hidden;
+    font-size: var(--alloy-font-size-title);
     font-weight: var(--alloy-typography-weight-semibold);
+    white-space: nowrap;
+    text-overflow: ellipsis;
     color: var(--alloy-color-text-primary);
   }
   .group {
@@ -312,25 +320,36 @@ import Permissions from './sections/Permissions.svelte';
     flex-direction: column;
     gap: var(--alloy-spacing-scale-1);
   }
+  /* Groups are separated by air; the first one starts on the same 24px offset as the section
+     column, so the two panes' first rows line up under the shared header band. */
+  .group + .group {
+    margin-top: var(--alloy-spacing-scale-2);
+  }
+  .group:first-of-type .group-label {
+    padding-top: var(--alloy-spacing-scale-6);
+  }
   .group-label {
     margin: 0;
-    padding: var(--alloy-spacing-scale-2) calc(var(--alloy-layout-row-inset) + var(--alloy-layout-row-pad-x)) var(--alloy-spacing-scale-1);
+    padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-1);
     font-size: var(--alloy-typography-size-xs);
     font-weight: var(--alloy-typography-weight-semibold);
-    letter-spacing: 0.04em;
+    letter-spacing: var(--alloy-letter-spacing-caps);
     text-transform: uppercase;
     color: var(--alloy-color-text-muted);
   }
   .nav-item {
-    display: block;
+    display: flex;
+    align-items: center;
+    gap: var(--alloy-spacing-scale-2);
     width: 100%;
+    min-height: var(--alloy-layout-control-height);
     margin: 0;
-    padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x);
+    padding: var(--alloy-spacing-scale-2);
     border: 1px solid transparent;
     border-radius: var(--alloy-glass-radius-control);
     background: transparent;
     font: inherit;
-    font-size: var(--alloy-typography-size-base);
+    font-size: var(--alloy-font-size-row);
     text-align: left;
     color: var(--alloy-color-text-secondary);
     cursor: pointer;
@@ -346,10 +365,25 @@ import Permissions from './sections/Permissions.svelte';
     font-weight: var(--alloy-typography-weight-medium);
     box-shadow: var(--alloy-glass-highlight);
   }
+  .nav-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .nav-item:focus-visible,
-  .close:focus-visible {
+  .nav-close:focus-visible,
+  .close:focus-visible,
+  .back:focus-visible {
     outline: 2px solid var(--alloy-color-accent-primary);
     outline-offset: 2px;
+  }
+  .nav-close:hover,
+  .close:hover,
+  .back:hover {
+    background: var(--alloy-glass-control);
+    color: var(--alloy-color-text-primary);
   }
   .content {
     display: flex;
@@ -358,20 +392,23 @@ import Permissions from './sections/Permissions.svelte';
     flex-direction: column;
     background: transparent;
   }
+  /* One measure, one gutter: the reading column is capped at 720px of content inside its 24px
+     side padding, and the header band above it uses the same 24px gutter, so the title, the
+     section headings and every row start on the same line whatever the scrollbar does. */
   .header {
     display: flex;
     flex-shrink: 0;
     align-items: center;
     gap: var(--alloy-spacing-scale-2);
     min-height: var(--alloy-layout-header-height);
-    padding: 0 calc(var(--alloy-layout-row-inset) + var(--alloy-layout-row-pad-x));
+    padding: 0 var(--alloy-spacing-scale-6);
   }
   .header-title {
     flex: 1;
     min-width: 0;
     margin: 0;
     overflow: hidden;
-    font-size: var(--alloy-typography-size-lg);
+    font-size: var(--alloy-font-size-title);
     font-weight: var(--alloy-typography-weight-semibold);
     white-space: nowrap;
     text-overflow: ellipsis;
@@ -389,10 +426,6 @@ import Permissions from './sections/Permissions.svelte';
     background: transparent;
     color: var(--alloy-color-text-secondary);
     cursor: pointer;
-  }
-  .close:hover {
-    background: var(--alloy-glass-control);
-    color: var(--alloy-color-text-primary);
   }
   .scroll {
     flex: 1;
@@ -432,16 +465,8 @@ import Permissions from './sections/Permissions.svelte';
       -webkit-overflow-scrolling: touch;
     }
     .nav-header {
-      display: flex;
-      align-items: center;
-      gap: var(--alloy-spacing-scale-2);
       min-height: 56px;
       padding: 0 var(--alloy-spacing-scale-2) 0 var(--alloy-layout-gutter);
-    }
-    .nav-header .nav-title {
-      flex: 1;
-      min-height: 0;
-      padding: 0;
     }
     .nav-close {
       display: inline-flex;
@@ -457,30 +482,22 @@ import Permissions from './sections/Permissions.svelte';
       color: var(--alloy-color-text-secondary);
       cursor: pointer;
     }
+    .group:first-of-type .group-label {
+      padding-top: var(--alloy-spacing-scale-4);
+    }
     .group-label {
       padding: var(--alloy-spacing-scale-4) var(--alloy-layout-gutter) var(--alloy-spacing-scale-2);
     }
     .nav-item {
-      display: flex;
-      align-items: center;
       gap: var(--alloy-spacing-scale-3);
       min-height: 56px;
       padding: 0 var(--alloy-layout-gutter);
       border-bottom: 1px solid var(--alloy-color-border-subtle);
       border-radius: 0;
-      font-size: var(--alloy-typography-size-lg);
-      color: var(--alloy-color-text-primary);
-    }
-    .nav-item:hover {
-      background: transparent;
       color: var(--alloy-color-text-primary);
     }
     .nav-item:active {
       background: var(--alloy-color-surface-hover);
-    }
-    .nav-item[aria-current='page'] {
-      background: transparent;
-      font-weight: var(--alloy-typography-weight-medium);
     }
     .nav-icon,
     .nav-chevron {
@@ -492,10 +509,6 @@ import Permissions from './sections/Permissions.svelte';
     }
     .nav-chevron {
       color: var(--alloy-color-text-muted);
-    }
-    .nav-label {
-      flex: 1;
-      min-width: 0;
     }
     .panel[data-view='nav'] .content {
       display: none;
@@ -519,7 +532,7 @@ import Permissions from './sections/Permissions.svelte';
     }
     .header {
       min-height: 56px;
-      padding: 0 var(--alloy-spacing-scale-2);
+      padding: 0 var(--alloy-spacing-scale-2) 0 var(--alloy-spacing-scale-4);
     }
     .close {
       display: none;
@@ -531,29 +544,16 @@ import Permissions from './sections/Permissions.svelte';
     .column {
       max-width: none;
       margin: 0;
-      padding: var(--alloy-spacing-scale-4) var(--alloy-layout-gutter)
+      padding: var(--alloy-spacing-scale-6) var(--alloy-layout-gutter)
         calc(var(--alloy-spacing-scale-6) + var(--alloy-safe-area-bottom));
     }
-    .column :global(input:not([type='checkbox']):not([type='radio'])),
-    .column :global(select),
-    .column :global(textarea) {
-      min-height: 44px;
-      font-size: var(--alloy-typography-size-lg);
-    }
-    .column :global(.alloy-button) {
-      min-height: 44px;
-    }
-    .column :global(.icon-button) {
-      width: 44px;
-      height: 44px;
-    }
-    .column :global(.row) {
-      min-height: 56px;
-    }
   }
+  /* One measure, one gutter: the column is a 768px box carrying 24px side padding, so the reading
+     width is 720px and the header band's 24px gutter starts every title, heading and row on the
+     same line. */
   .column {
-    max-width: 640px;
-    margin: 0 auto;
-    padding: var(--alloy-spacing-scale-6) var(--alloy-layout-gutter);
+    max-width: 768px;
+    margin: 0;
+    padding: var(--alloy-spacing-scale-6);
   }
 </style>

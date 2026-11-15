@@ -299,7 +299,7 @@
   }
   .points li {
     color: var(--alloy-color-text-secondary);
-    font-size: var(--alloy-typography-size-sm);
+    font-size: var(--alloy-font-size-preview);
     line-height: var(--alloy-typography-line-height-normal, 1.45);
   }
   .points strong {
@@ -319,8 +319,8 @@
     position: relative;
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-spacing-scale-5);
-    padding: var(--alloy-spacing-scale-8);
+    gap: var(--alloy-spacing-scale-4);
+    padding: var(--alloy-spacing-scale-6);
     background: color-mix(in srgb, var(--alloy-color-surface-panel) 55%, transparent);
   }
   .panel-close {
@@ -331,7 +331,7 @@
     background: none;
     color: var(--alloy-color-text-secondary);
     font: inherit;
-    font-size: var(--alloy-typography-size-sm);
+    font-size: var(--alloy-font-size-preview);
     cursor: pointer;
   }
   .panel-close:hover {
@@ -364,14 +364,14 @@
   }
   .hint {
     margin: 0;
-    color: var(--alloy-color-text-secondary);
-    font-size: var(--alloy-typography-size-sm);
+    color: var(--alloy-color-text-muted);
+    font-size: var(--alloy-font-size-preview);
     line-height: var(--alloy-typography-line-height-normal, 1.45);
   }
   .error {
     margin: 0;
     color: var(--alloy-color-status-error);
-    font-size: var(--alloy-typography-size-sm);
+    font-size: var(--alloy-font-size-preview);
   }
   .notice {
     margin: 0;
@@ -380,7 +380,7 @@
     border-radius: var(--alloy-radii-sm);
     background: var(--alloy-color-accent-subtle);
     color: var(--alloy-color-text-secondary);
-    font-size: var(--alloy-typography-size-sm);
+    font-size: var(--alloy-font-size-preview);
     line-height: var(--alloy-typography-line-height-normal, 1.45);
   }
   .link {
@@ -392,6 +392,9 @@
     font: inherit;
     text-decoration: underline;
     cursor: pointer;
+  }
+  .link:hover {
+    color: var(--alloy-color-accent-hover);
   }
   .link:focus-visible {
     outline: 2px solid var(--alloy-color-accent-primary);
@@ -411,6 +414,7 @@
     display: flex;
     flex-direction: column;
     gap: var(--alloy-spacing-scale-1);
+    min-height: var(--alloy-layout-control-height);
     padding: var(--alloy-spacing-scale-3) var(--alloy-spacing-scale-4);
     border: 1px solid var(--alloy-color-border-subtle);
     border-radius: var(--alloy-radii-md);
@@ -433,22 +437,22 @@
     outline-offset: 2px;
   }
   .network-name {
-    font-size: var(--alloy-typography-size-base);
+    font-size: var(--alloy-font-size-row);
     font-weight: var(--alloy-typography-weight-semibold);
   }
   .network-detail {
-    font-size: var(--alloy-typography-size-sm);
-    color: var(--alloy-color-text-secondary);
+    font-size: var(--alloy-font-size-preview);
+    color: var(--alloy-color-text-muted);
   }
   .network-setup {
-    font-size: var(--alloy-typography-size-sm);
+    font-size: var(--alloy-font-size-preview);
     font-weight: var(--alloy-typography-weight-medium);
     color: var(--alloy-color-accent-primary);
   }
   .actions {
     display: flex;
     align-items: center;
-    gap: var(--alloy-spacing-scale-3);
+    gap: var(--alloy-spacing-scale-2);
   }
 
   /* Phone: the sheet becomes the screen and the story column steps aside. */
@@ -471,23 +475,19 @@
       border-right: 0;
       border-bottom: 1px solid var(--alloy-glass-rim);
       padding: calc(var(--alloy-spacing-scale-6) + var(--alloy-safe-area-top))
-        var(--alloy-spacing-scale-5) var(--alloy-spacing-scale-6);
+        var(--alloy-spacing-scale-4) var(--alloy-spacing-scale-6);
     }
     .panel[data-step='login'] .story {
       display: none;
     }
     .step {
       flex: 1 1 auto;
-      padding: var(--alloy-spacing-scale-6) var(--alloy-spacing-scale-5)
+      padding: var(--alloy-spacing-scale-6) var(--alloy-spacing-scale-4)
         calc(var(--alloy-spacing-scale-6) + var(--alloy-safe-area-bottom));
       background: none;
     }
     .step h2 {
       font-size: 1.5rem;
-    }
-    .hint,
-    .network-detail {
-      font-size: var(--alloy-typography-size-base);
     }
     h1 {
       font-size: 1.6rem;
@@ -495,12 +495,9 @@
     .footnote {
       display: none;
     }
-    .network {
-      min-height: 56px;
-    }
     .panel-close,
     .link {
-      min-height: 44px;
+      min-height: var(--alloy-layout-control-height);
       display: inline-flex;
       align-items: center;
     }
