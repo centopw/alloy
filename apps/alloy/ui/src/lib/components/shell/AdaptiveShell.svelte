@@ -89,7 +89,9 @@
   const phone = $derived(viewport.isPhone);
   const caps = $derived(capabilities(currentEnv(viewport.isPhone)));
   const tabActive = $derived<'chats' | 'settings'>(settingsOpen ? 'settings' : 'chats');
-  const unreadTotal = $derived(roomsStore.rooms.reduce((sum, r) => sum + roomsStore.unreadOf(r), 0));
+  // One count for the badge, the tab bar and the window title: the store's chat count, so a forum
+  // counts once for its topics instead of once per topic (`unreadChatCount`).
+  const unreadTotal = $derived(roomsStore.unreadChatCount);
 
   // Skip links: only offer a pane that is actually on screen. On phones the list and the
   // conversation replace each other, so the link to the hidden pane is not rendered at all. The
@@ -97,8 +99,8 @@
   const roomListVisible = $derived(!phone ? !layout.sidebarCollapsed : pane === 'list');
   const conversationVisible = $derived(phone ? pane === 'chat' : true);
 
-  // The window/task-switcher title names the open room and shows unread messages only while the
-  // app is in the background (a focused window already shows its badges).
+  // The window/task-switcher title names the open room and shows the unread chat count only while
+  // the app is in the background (a focused window already shows its badges).
   $effect(() => {
     if (typeof document === 'undefined') return;
     applyWindowTitle({

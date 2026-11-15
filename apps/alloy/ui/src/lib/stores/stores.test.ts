@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Subscription } from './subscription';
-import { orderPinned, roomsStore, roomTitle } from './rooms.svelte';
+import { orderPinned, roomsStore, roomTitle, unreadChats } from './rooms.svelte';
 import { timelineStore } from './timeline.svelte';
 import { session } from './session.svelte';
 import type { EngineEvent, RoomSummary } from '../generated/index.js';
@@ -156,6 +156,108 @@ describe('stores against the mock engine', () => {
     await timelineStore.close();
     expect(timelineStore.items).toHaveLength(0);
     expect(timelineStore.roomId).toBeNull();
+  });
+
+  it('counts the mock Rust Forum and its topics as one unread chat', async () => {
+    await roomsStore.start();
+    await until(() => roomsStore.rooms.some((r) => r.is_forum));
+    const forum = roomsStore.rooms.find((r) => r.is_forum);
+    if (!forum) throw new Error('mock room list has no forum');
+    const subtree = roomsStore.rooms.filter((r) => r.id === forum.id || r.parent_id === forum.id);
+    expect(subtree.length).toBeGreaterThan(1);
+    // Several rows carry unread topics; the header and the shell badge show the forum once.
+    expect(unreadChats(subtree, (r) => roomsStore.isUnread(r))).toBe(1);
+  });
+});
+
+describe('unread chat count', () => {
+  /** Only the fields the counting rule reads; the rest is filler a room summary always carries. */
+  const chat = (id: string, patch: Partial<RoomSummary> = {}): RoomSummary =>
+    ({
+      id,
+      account_id: 'acc',
+      network: 'telegram',
+      name: id,
+      avatar: null,
+      kind: 'group',
+      is_direct: false,
+      unread_notifications: { highlight_count: 0, notification_count: 0 },
+      latest_event: null,
+      pinned: false,
+      pin_order: null,
+      archived: false,
+      muted_until: null,
+      marked_unread: false,
+      tags: [],
+      draft: null,
+      ...patch,
+    }) as RoomSummary;
+
+  beforeEach(() => {
+    roomsStore.rooms = [];
+  });
+
+  it('counts a forum with three unread topics and an unread forum as one chat', () => {
+    const rooms = [
+      chat('forum', { is_forum: true, unread_notifications: { highlight_count: 0, notification_count: 2 } }),
+      chat('t1', { parent_id: 'forum', unread_notifications: { highlight_count: 0, notification_count: 1 } }),
+      chat('t2', { parent_id: 'forum', unread_notifications: { highlight_count: 0, notification_count: 1 } }),
+      chat('t3', { parent_id: 'forum', unread_notifications: { highlight_count: 0, notification_count: 1 } }),
+      chat('dm', { kind: 'direct', is_direct: true }),
+    ];
+    expect(unreadChats(rooms, (r) => r.unread_notifications.notification_count > 0)).toBe(1);
+    roomsStore.rooms = rooms;
+    expect(roomsStore.unreadChatCount).toBe(1);
+  });
+
+  it('counts a read forum with one unread topic once', () => {
+    const rooms = [
+      chat('forum', { is_forum: true }),
+      chat('t1', { parent_id: 'forum', unread_notifications: { highlight_count: 0, notification_count: 3 } }),
+      chat('other', { unread_notifications: { highlight_count: 0, notification_count: 1 } }),
+    ];
+    expect(unreadChats(rooms, (r) => r.unread_notifications.notification_count > 0)).toBe(2);
+    roomsStore.rooms = rooms;
+    expect(roomsStore.unreadChatCount).toBe(2);
+  });
+
+  it('counts a topic on its own when its forum is archived or absent from the list', () => {
+    const archivedForum = [
+      chat('forum', { is_forum: true, archived: true }),
+      chat('t1', { parent_id: 'forum', unread_notifications: { highlight_count: 0, notification_count: 1 } }),
+    ];
+    expect(unreadChats(archivedForum, (r) => r.unread_notifications.notification_count > 0)).toBe(1);
+
+    // Filtered out, or not yet synced: the topic is a chat of its own and must not vanish.
+    const absentForum = [
+      chat('t1', { parent_id: 'forum', unread_notifications: { highlight_count: 0, notification_count: 1 } }),
+    ];
+    expect(unreadChats(absentForum, (r) => r.unread_notifications.notification_count > 0)).toBe(1);
+
+    roomsStore.rooms = archivedForum;
+    expect(roomsStore.unreadChatCount).toBe(1);
+  });
+
+  it('counts a marked-unread topic through its forum and skips archived chats', () => {
+    roomsStore.rooms = [
+      chat('forum', { is_forum: true }),
+      chat('t1', { parent_id: 'forum', marked_unread: true }),
+      chat('old', { archived: true, unread_notifications: { highlight_count: 0, notification_count: 4 } }),
+    ];
+    expect(roomsStore.unreadChatCount).toBe(1);
+  });
+
+  it('leaves the per-room badges alone: every row keeps its own count', () => {
+    roomsStore.rooms = [
+      chat('forum', { is_forum: true, unread_notifications: { highlight_count: 0, notification_count: 2 } }),
+      chat('t1', { parent_id: 'forum', unread_notifications: { highlight_count: 0, notification_count: 1 } }),
+      chat('t2', { parent_id: 'forum', unread_notifications: { highlight_count: 0, notification_count: 1 } }),
+      chat('t3', { parent_id: 'forum', unread_notifications: { highlight_count: 0, notification_count: 1 } }),
+    ];
+    expect(roomsStore.rooms.map((r) => roomsStore.unreadOf(r))).toEqual([2, 1, 1, 1]);
+    // The forum row still shows the sum of its topics (`forumTotals`); only the chat count folds.
+    expect(roomsStore.rooms.reduce((n, r) => n + roomsStore.unreadOf(r), 0)).toBe(5);
+    expect(roomsStore.unreadChatCount).toBe(1);
   });
 });
 

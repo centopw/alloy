@@ -83,6 +83,36 @@ export function orderPinned<T extends Pick<RoomSummary, 'pin_order'>>(pinned: re
     .map((entry) => entry.room);
 }
 
+/**
+ * Chats that read as unread in `rooms`: archived chats are left out, and a room whose `parent_id`
+ * names a forum in `rooms` is not counted on its own — the forum row already carries its topics
+ * (`forumTotals`), so a forum with three unread topics is one unread chat, not four. A topic whose
+ * forum is not listed (archived, filtered out, not yet synced) counts on its own, so it never
+ * vanishes from the total.
+ */
+export function unreadChats(
+  rooms: readonly RoomSummary[],
+  isUnread: (room: RoomSummary) => boolean,
+): number {
+  const listed = new Set(rooms.filter((r) => !r.archived).map((r) => r.id));
+  const owned = new Set<string>();
+  const unread = new Set<string>();
+  for (const r of rooms) {
+    if (r.archived) continue;
+    const parent = r.parent_id ?? null;
+    if (parent !== null && parent !== r.id && listed.has(parent)) {
+      // The forum row already carries this topic: it counts through the forum, once.
+      owned.add(r.id);
+      if (isUnread(r)) unread.add(parent);
+    } else if (isUnread(r)) {
+      unread.add(r.id);
+    }
+  }
+  let chats = 0;
+  for (const id of unread) if (!owned.has(id)) chats += 1;
+  return chats;
+}
+
 /** Live room list plus selection, search and filter chips. */
 class RoomsStore {
   rooms = $state<RoomSummary[]>([]);
@@ -124,7 +154,11 @@ class RoomsStore {
     return [...orderPinned(sorted.filter((r) => r.pinned)), ...sorted.filter((r) => !r.pinned)];
   });
 
-  unreadTotal = $derived(this.rooms.reduce((n, r) => n + (!r.archived && this.isUnread(r) ? 1 : 0), 0));
+  /**
+   * Chats that read as unread, the one number the sidebar header and the shell badge show: a
+   * forum counts once for all of its topics, and archived chats stay out.
+   */
+  unreadChatCount = $derived(unreadChats(this.rooms, (r) => this.isUnread(r)));
 
   /** Forum room ids whose topics the sidebar shows. Survives list updates; not persisted. */
   expandedForums = $state<Set<string>>(new Set());

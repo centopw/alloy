@@ -285,7 +285,8 @@
 
   const filterLabel = $derived(ROOM_FILTERS.find((f) => f.value === roomsStore.filter)?.label ?? t('room-filter-all'));
   const moreFilterActive = $derived(!PRIMARY_FILTERS.some((f) => f.value === roomsStore.filter));
-  const unreadRoomsCount = $derived(roomsStore.rooms.filter((r) => !r.archived && roomsStore.unreadOf(r) > 0).length);
+  // The same count the shell badge shows: a forum counts once for its topics (`unreadChatCount`).
+  const unreadRoomsCount = $derived(roomsStore.unreadChatCount);
   const multipleAccounts = $derived(roomsStore.accounts.length > 1);
 
   const joined = $derived(roomsStore.visible);
