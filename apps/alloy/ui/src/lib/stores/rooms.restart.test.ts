@@ -11,7 +11,7 @@ vi.mock('../ipc/index.js', () => ({
   applyDiff: vi.fn(),
 }));
 vi.mock('./prefs.svelte.js', () => ({
-  prefs: { roomSort: 'activity', roomListPeople: true },
+  prefs: { roomSort: 'activity' },
   registerFlushHandler: () => () => {},
 }));
 vi.mock('./drafts.svelte.js', () => ({ draftsStore: { previewOf: () => null } }));

@@ -12,10 +12,12 @@ use std::time::Duration;
 
 use alloy_connector::{
     ChatKind, CodeChannel, ConnectorError, MediaRef, MessageKind, RemoteChat, RemoteMessage,
+    RemoteUser,
 };
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use grammers_client::media::Downloadable;
+use grammers_client::peer::Peer;
 use grammers_session::types::{PeerAuth, PeerId, PeerRef};
 use grammers_tl_types as tl;
 use serde::{Deserialize, Serialize};
@@ -238,6 +240,7 @@ fn chat_message(
             self_id,
             chat_id,
         ),
+        sender: None,
         is_own: message.out,
         sent_at: seconds_to_ms(message.date),
         edited_at: message.edit_date.map(seconds_to_ms),
@@ -246,6 +249,7 @@ fn chat_message(
         formatted,
         reply_to_remote_msg_id: reply_id_of(message.reply_to.as_ref()),
         media,
+        pinned: message.pinned,
     }
 }
 
@@ -265,6 +269,7 @@ fn service_message(
             self_id,
             chat_id,
         ),
+        sender: None,
         is_own: message.out,
         sent_at: seconds_to_ms(message.date),
         edited_at: None,
@@ -273,6 +278,8 @@ fn service_message(
         formatted: None,
         reply_to_remote_msg_id: reply_id_of(message.reply_to.as_ref()),
         media: None,
+        // A service message is never pinned; `messageService` carries no pinned flag.
+        pinned: false,
     }
 }
 
@@ -497,6 +504,39 @@ pub(crate) struct PeerEntry {
     pub avatar: Option<MediaRef>,
 }
 
+impl From<PeerEntry> for RemoteUser {
+    fn from(entry: PeerEntry) -> Self {
+        Self {
+            remote_user_id: entry.id,
+            display_name: entry.title,
+            avatar: entry.avatar,
+        }
+    }
+}
+
+/// The peer Telegram returned alongside a message as its sender, as an entry.
+pub(crate) fn entry_from_peer(peer: &Peer) -> Option<PeerEntry> {
+    match peer {
+        Peer::User(user) => entry_from_user(&user.raw),
+        Peer::Group(group) => entry_from_chat(&group.raw),
+        Peer::Channel(channel) => entry_from_chat(&channel.raw.clone().into()),
+        Peer::Community(_) => None,
+    }
+}
+
+/// The profile to deliver with `message`, given the entry of its sender.
+///
+/// A sender that is the chat itself (the other side of a direct chat, a channel's own post) has
+/// no profile of its own: the chat already carries that name and picture.
+pub(crate) fn sender_profile(
+    entry: Option<PeerEntry>,
+    message: &RemoteMessage,
+) -> Option<RemoteUser> {
+    let entry = entry?;
+    (entry.id == message.sender_remote_id && entry.id != message.remote_chat_id)
+        .then(|| entry.into())
+}
+
 /// Builds a peer entry from a TL user.
 pub(crate) fn entry_from_user(user: &tl::enums::User) -> Option<PeerEntry> {
     let tl::enums::User::User(user) = user else {
@@ -598,6 +638,14 @@ pub(crate) fn dialog_top_message(dialog: &tl::enums::Dialog) -> i32 {
     }
 }
 
+/// Whether a dialog is pinned in its folder; the archive pseudo-dialog never is.
+pub(crate) fn dialog_pinned(dialog: &tl::enums::Dialog) -> bool {
+    match dialog {
+        tl::enums::Dialog::Dialog(dialog) => dialog.pinned,
+        _ => false,
+    }
+}
+
 /// The peer a dialog entry belongs to, or `None` for the archive-folder pseudo-dialogs.
 pub(crate) fn dialog_peer(dialog: &tl::enums::Dialog) -> Option<(PeerKindTag, i64)> {
     match dialog {
@@ -624,17 +672,26 @@ pub(crate) fn dialog_activity(
 }
 
 /// Converts a dialog plus its peer entry into a [`RemoteChat`].
+///
+/// `pin_order` is the dialog's position among the pinned dialogs of its folder, which only the
+/// caller knows: `messages.getDialogs` lists pinned dialogs first in pin order but the dialog
+/// itself carries no index. It is ignored for an unpinned dialog.
 pub(crate) fn chat_from_dialog(
     dialog: &tl::enums::Dialog,
     entry: &PeerEntry,
     activity_ms: i64,
     now_seconds: i64,
+    pin_order: Option<u32>,
 ) -> Option<RemoteChat> {
     let tl::enums::Dialog::Dialog(dialog) = dialog else {
         return None;
     };
     let settings: tl::types::PeerNotifySettings = dialog.notify_settings.clone().into();
     let muted_until = settings.mute_until.unwrap_or_default();
+    // The archive folder keeps its own pin flags, but the host shows no pinned block inside it,
+    // so archived dialogs are never pinned and never take a main-folder pin order.
+    let is_archived = dialog.folder_id == Some(1);
+    let pinned = dialog.pinned && !is_archived;
     Some(RemoteChat {
         remote_chat_id: entry.id.clone(),
         kind: entry.chat_kind,
@@ -642,8 +699,9 @@ pub(crate) fn chat_from_dialog(
         avatar: entry.avatar.clone(),
         last_activity_at: activity_ms,
         unread_count: u32::try_from(dialog.unread_count).unwrap_or_default(),
-        is_pinned: dialog.pinned,
-        is_archived: dialog.folder_id == Some(1),
+        is_pinned: pinned,
+        pin_order: if pinned { pin_order } else { None },
+        is_archived,
         is_muted: i64::from(muted_until) > now_seconds,
     })
 }
@@ -1055,6 +1113,60 @@ mod tests {
         })
     }
 
+    fn pinned_message(id: i32, text: &str) -> tl::enums::Message {
+        tl::enums::Message::Message(tl::types::Message {
+            message: text.to_string(),
+            pinned: true,
+            ..base_message(id, false)
+        })
+    }
+
+    fn user_entry(id: i64) -> PeerEntry {
+        PeerEntry {
+            id: encode_peer(PeerKindTag::User, id),
+            bare_id: id,
+            kind: PeerKindTag::User,
+            auth: 1,
+            chat_kind: ChatKind::Direct,
+            title: "Ada Lovelace".to_string(),
+            avatar: None,
+        }
+    }
+
+    fn dialog(peer_id: i64, pinned: bool) -> tl::enums::Dialog {
+        tl::enums::Dialog::Dialog(tl::types::Dialog {
+            pinned,
+            unread_mark: false,
+            view_forum_as_messages: false,
+            peer: user_peer(peer_id),
+            top_message: 31,
+            read_inbox_max_id: 31,
+            read_outbox_max_id: 31,
+            unread_count: 2,
+            unread_mentions_count: 0,
+            unread_reactions_count: 0,
+            unread_poll_votes_count: 0,
+            notify_settings: tl::types::PeerNotifySettings {
+                show_previews: None,
+                silent: None,
+                mute_until: None,
+                ios_sound: None,
+                android_sound: None,
+                other_sound: None,
+                stories_muted: None,
+                stories_hide_sender: None,
+                stories_ios_sound: None,
+                stories_android_sound: None,
+                stories_other_sound: None,
+            }
+            .into(),
+            pts: None,
+            draft: None,
+            folder_id: None,
+            ttl_period: None,
+        })
+    }
+
     fn photo(id: i64) -> tl::enums::Photo {
         tl::enums::Photo::Photo(tl::types::Photo {
             has_stickers: false,
@@ -1193,6 +1305,108 @@ mod tests {
         assert_eq!(message.sent_at, 1_700_000_000_000);
         assert!(!message.is_own);
         assert_eq!(message.txn_id, None);
+        assert!(!message.pinned);
+    }
+
+    #[test]
+    fn pinned_messages_keep_the_flag_and_service_messages_never_have_it() {
+        let pinned = message_from_raw(&pinned_message(32, "keep"), "u7", None, None)
+            .expect("pinned messages map");
+        assert!(pinned.pinned);
+
+        let service = tl::enums::Message::Service(tl::types::MessageService {
+            out: false,
+            mentioned: false,
+            media_unread: false,
+            reactions_are_possible: false,
+            silent: false,
+            post: false,
+            legacy: false,
+            id: 33,
+            from_id: Some(user_peer(7)),
+            peer_id: user_peer(7),
+            saved_peer_id: None,
+            reply_to: None,
+            date: 1_700_000_000,
+            action: tl::enums::MessageAction::PinMessage,
+            reactions: None,
+            ttl_period: None,
+        });
+        let service = message_from_raw(&service, "u7", None, None).expect("service messages map");
+        assert!(!service.pinned);
+    }
+
+    #[test]
+    fn pinned_dialogs_take_the_callers_pin_order() {
+        let entry = user_entry(7);
+
+        let pinned = chat_from_dialog(&dialog(7, true), &entry, 5, 1_700_000_000, Some(2))
+            .expect("dialogs map");
+        assert!(pinned.is_pinned);
+        assert_eq!(pinned.pin_order, Some(2));
+
+        // A pinned dialog on a resumed page has no known position.
+        let unknown = chat_from_dialog(&dialog(7, true), &entry, 5, 1_700_000_000, None)
+            .expect("dialogs map");
+        assert!(unknown.is_pinned);
+        assert_eq!(unknown.pin_order, None);
+
+        // An unpinned dialog never carries an order, whatever the caller counted.
+        let unpinned = chat_from_dialog(&dialog(7, false), &entry, 5, 1_700_000_000, Some(0))
+            .expect("dialogs map");
+        assert!(!unpinned.is_pinned);
+        assert_eq!(unpinned.pin_order, None);
+        assert_eq!(unpinned.remote_chat_id, "u7");
+        assert_eq!(unpinned.unread_count, 2);
+    }
+
+    #[test]
+    fn archived_dialogs_are_never_pinned_or_ordered() {
+        let entry = user_entry(7);
+
+        // The archive keeps its own pinned flag; the host shows no pinned block there.
+        let mut archived = dialog(7, true);
+        let tl::enums::Dialog::Dialog(raw) = &mut archived else {
+            panic!("test dialog is a plain dialog");
+        };
+        raw.folder_id = Some(1);
+
+        let chat =
+            chat_from_dialog(&archived, &entry, 5, 1_700_000_000, Some(0)).expect("dialogs map");
+        assert!(chat.is_archived);
+        assert!(!chat.is_pinned);
+        assert_eq!(chat.pin_order, None);
+    }
+
+    #[test]
+    fn group_messages_carry_the_sender_profile_and_direct_ones_do_not() {
+        let ada = PeerEntry {
+            id: "u7".to_string(),
+            bare_id: 7,
+            kind: PeerKindTag::User,
+            auth: 1,
+            chat_kind: ChatKind::Direct,
+            title: "Ada Lovelace".to_string(),
+            avatar: Some(avatar_ref("u7", 5)),
+        };
+        let raw = text_message(10, "hello");
+
+        let in_group = message_from_raw(&raw, "c55", None, None).expect("mapped");
+        let profile = sender_profile(Some(ada.clone()), &in_group).expect("a profile");
+        assert_eq!(profile.remote_user_id, in_group.sender_remote_id);
+        assert_eq!(profile.display_name, "Ada Lovelace");
+        assert_eq!(profile.avatar, ada.avatar);
+
+        // In the direct chat the sender is the chat; someone else's entry never names a sender.
+        let direct = message_from_raw(&raw, "u7", None, None).expect("mapped");
+        assert_eq!(sender_profile(Some(ada.clone()), &direct), None);
+        let other = PeerEntry {
+            id: "u8".to_string(),
+            bare_id: 8,
+            ..ada
+        };
+        assert_eq!(sender_profile(Some(other), &in_group), None);
+        assert_eq!(sender_profile(None, &in_group), None);
     }
 
     #[test]

@@ -74,7 +74,8 @@ impl Store {
         .await
     }
 
-    /// Chats for one account (or all accounts), pinned first, then most recent activity.
+    /// Chats for one account (or all accounts): pinned first in their pin order, then every
+    /// other chat by most recent activity.
     pub async fn list_chats(
         &self,
         account_id: Option<String>,
@@ -85,7 +86,8 @@ impl Store {
             let mut stmt = conn.prepare(
                 "SELECT * FROM chats
                  WHERE (?1 IS NULL OR account_id = ?1) AND is_archived = ?2
-                 ORDER BY is_pinned DESC, COALESCE(last_activity_at, 0) DESC, chat_id ASC
+                 ORDER BY is_pinned DESC, pin_order IS NULL, pin_order ASC,
+                          COALESCE(last_activity_at, 0) DESC, chat_id ASC
                  LIMIT ?3",
             )?;
             let rows =
@@ -105,8 +107,29 @@ impl Store {
         self.with_conn(move |conn| {
             let tx = conn.transaction()?;
             let mut record = rows::chat_by_id(&tx, &chat_id)?;
-            if let Some(value) = update.is_pinned {
+            if let Some(value) = update.is_pinned
+                && value != record.is_pinned
+            {
                 record.is_pinned = value;
+                // A chat pinned now goes to the top, which is what every network does; the
+                // others move down one. Unpinning closes the gap it leaves.
+                record.pin_order = if value {
+                    tx.execute(
+                        "UPDATE chats SET pin_order = pin_order + 1
+                         WHERE account_id = ?1 AND is_pinned = 1 AND is_archived = 0 AND pin_order IS NOT NULL",
+                        [&record.account_id],
+                    )?;
+                    Some(0)
+                } else {
+                    if let Some(gone) = record.pin_order {
+                        tx.execute(
+                            "UPDATE chats SET pin_order = pin_order - 1
+                             WHERE account_id = ?1 AND is_pinned = 1 AND is_archived = 0 AND pin_order > ?2",
+                            rusqlite::params![&record.account_id, gone],
+                        )?;
+                    }
+                    None
+                };
             }
             if let Some(value) = update.is_archived {
                 record.is_archived = value;
@@ -138,7 +161,8 @@ impl Store {
                      is_marked_unread = ?6,
                      draft = ?7,
                      local_tags = ?8,
-                     note = ?9
+                     note = ?9,
+                     pin_order = ?10
                  WHERE chat_id = ?1",
                 rusqlite::params![
                     chat_id,
@@ -149,7 +173,8 @@ impl Store {
                     record.is_marked_unread,
                     record.draft,
                     tags,
-                    record.note
+                    record.note,
+                    record.pin_order
                 ],
             )?;
             events::append(
@@ -162,6 +187,123 @@ impl Store {
             )?;
             tx.commit()?;
             Ok(record)
+        })
+        .await
+    }
+
+    /// Replaces the pinned list of one account with `chat_ids`, top to bottom. Every chat named
+    /// becomes pinned in that position; a pinned chat of the account that is not named is
+    /// unpinned. Ids of other accounts or unknown chats are refused, so a stale list from the
+    /// UI never half-applies.
+    pub async fn set_pinned_chats(
+        &self,
+        account_id: &str,
+        chat_ids: Vec<String>,
+    ) -> Result<Vec<ChatRecord>, StoreError> {
+        let account_id = account_id.to_owned();
+        self.with_conn(move |conn| {
+            let tx = conn.transaction()?;
+            for chat_id in &chat_ids {
+                let record = rows::chat_by_id(&tx, chat_id)?;
+                if record.account_id != account_id || record.is_archived {
+                    return Err(StoreError::NotFound("chat"));
+                }
+            }
+            tx.execute(
+                "UPDATE chats SET is_pinned = 0, pin_order = NULL
+                 WHERE account_id = ?1 AND is_pinned = 1 AND is_archived = 0",
+                [&account_id],
+            )?;
+            for (position, chat_id) in chat_ids.iter().enumerate() {
+                tx.execute(
+                    "UPDATE chats SET is_pinned = 1, pin_order = ?2 WHERE chat_id = ?1",
+                    rusqlite::params![chat_id, position as i64],
+                )?;
+            }
+            let mut stmt = tx.prepare(
+                "SELECT * FROM chats WHERE account_id = ?1 AND is_pinned = 1 AND is_archived = 0
+                 ORDER BY pin_order ASC",
+            )?;
+            let records = stmt
+                .query_map([&account_id], rows::chat)?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            drop(stmt);
+            let now = now_ms();
+            for record in &records {
+                events::append(
+                    &tx,
+                    &record.account_id,
+                    Some(record.chat_id.as_str()),
+                    "chat.flags",
+                    serde_json::to_value(record)?,
+                    now,
+                )?;
+            }
+            tx.commit()?;
+            Ok(records)
+        })
+        .await
+    }
+
+    /// Sets one pinned chat's position without touching the others, for a position the network
+    /// reported with the chat itself. The chat must already be pinned.
+    pub async fn set_pin_order(&self, chat_id: &str, pin_order: i64) -> Result<(), StoreError> {
+        let chat_id = chat_id.to_owned();
+        self.with_conn(move |conn| {
+            let updated = conn.execute(
+                "UPDATE chats SET pin_order = ?2 WHERE chat_id = ?1 AND is_pinned = 1",
+                rusqlite::params![&chat_id, pin_order],
+            )?;
+            if updated == 0 {
+                return Err(StoreError::NotFound("chat"));
+            }
+            Ok(())
+        })
+        .await
+    }
+
+    /// Pins a chat at a position the network reported, or unpins it with `None`, without shifting
+    /// the other pinned chats: the network's own orders are authoritative, so writing them one
+    /// chat at a time must leave each at exactly the position it was given.
+    pub async fn set_chat_pin_state(
+        &self,
+        chat_id: &str,
+        pin_order: Option<i64>,
+    ) -> Result<ChatRecord, StoreError> {
+        let chat_id = chat_id.to_owned();
+        self.with_conn(move |conn| {
+            let tx = conn.transaction()?;
+            let mut record = rows::chat_by_id(&tx, &chat_id)?;
+            record.is_pinned = pin_order.is_some();
+            record.pin_order = pin_order;
+            tx.execute(
+                "UPDATE chats SET is_pinned = ?2, pin_order = ?3 WHERE chat_id = ?1",
+                rusqlite::params![chat_id, record.is_pinned, record.pin_order],
+            )?;
+            events::append(
+                &tx,
+                &record.account_id,
+                Some(record.chat_id.as_str()),
+                "chat.flags",
+                serde_json::to_value(&record)?,
+                now_ms(),
+            )?;
+            tx.commit()?;
+            Ok(record)
+        })
+        .await
+    }
+
+    /// The pinned chats of one account, top to bottom.
+    pub async fn pinned_chats(&self, account_id: &str) -> Result<Vec<ChatRecord>, StoreError> {
+        let account_id = account_id.to_owned();
+        self.with_conn(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT * FROM chats WHERE account_id = ?1 AND is_pinned = 1 AND is_archived = 0
+                 ORDER BY pin_order IS NULL, pin_order ASC, COALESCE(last_activity_at, 0) DESC",
+            )?;
+            let rows = stmt.query_map([&account_id], rows::chat)?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
         })
         .await
     }

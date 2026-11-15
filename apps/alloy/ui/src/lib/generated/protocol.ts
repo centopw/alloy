@@ -79,6 +79,16 @@ export type CapabilitiesDto = {
 	max_upload_bytes: number | null,
 	/**  The network renders formatted text (`TimelineItemContent::TextMessage::formatted_body`). */
 	formatted_text: boolean,
+	/**
+	 *  Pinned chats and their order are kept on the network (`SetRoomPinned`,
+	 *  `ReorderPinnedRooms` reach the official apps). `false`: pins are local to this device.
+	 */
+	pin_chats?: boolean,
+	/**
+	 *  Messages can be pinned for every participant (`SetMessagePinned`). `false`: a pinned
+	 *  message is local to this device.
+	 */
+	pin_messages?: boolean,
 };
 
 /**  Kind of a chat, in network-neutral terms. */
@@ -233,9 +243,35 @@ export type EngineCommand =
 { action: "MarkRoomRead"; params: {
 	room_id: RoomId,
 } } | 
-/**  Pins or unpins the chat in the room list. */
+/**
+ *  Pins or unpins the chat in the room list. A newly pinned chat goes to the top of its
+ *  account's pinned chats. When the account's network keeps pins (`CapabilitiesDto::pin_chats`)
+ *  the change is sent there too and the official apps follow.
+ */
 { action: "SetRoomPinned"; params: {
 	room_id: RoomId,
+	pinned: boolean,
+} } | 
+/**
+ *  Sets the order of one account's pinned chats, top to bottom. `room_ids` must name every
+ *  pinned chat of the account exactly once and nothing else; a stale list is refused rather
+ *  than unpinning what it omits. Sent to the network when it keeps pins.
+ */
+{ action: "ReorderPinnedRooms"; params: {
+	account_id: AccountId,
+	room_ids: RoomId[],
+} } | 
+/**  Lists the pinned messages of a chat, newest first, for the pinned-message bar. */
+{ action: "GetPinnedMessages"; params: {
+	room_id: RoomId,
+} } | 
+/**
+ *  Pins or unpins a message. Sent to the network when it pins messages
+ *  (`CapabilitiesDto::pin_messages`); local to this device otherwise.
+ */
+{ action: "SetMessagePinned"; params: {
+	room_id: RoomId,
+	event_id: EventId,
 	pinned: boolean,
 } } | 
 /**  Archives or unarchives the chat. */
@@ -471,7 +507,19 @@ export type EngineResponse = { type: "AccountsList"; payload: {
  *  A chat flag changed (pinned, archived, marked unread, muted or read); the room list diff
  *  carries the new values.
  */
-{ type: "RoomFlagsUpdated" } | { type: "RoomMedia"; payload: {
+{ type: "RoomFlagsUpdated" } | 
+/**  The pinned chats of the account, in their new order; the room list diff follows. */
+{ type: "PinnedRoomsReordered"; payload: {
+	room_ids: RoomId[],
+} } | 
+/**  The pinned messages of a chat, newest first. */
+{ type: "PinnedMessages"; payload: {
+	items: TimelineItemDto[],
+} } | 
+/**  The message's pin state after the change; the timeline diff carries it too. */
+{ type: "MessagePinSet"; payload: {
+	pinned: boolean,
+} } | { type: "RoomMedia"; payload: {
 	items: RoomMediaItem[],
 	/**  Cursor for the next page, `None` when this was the last one. */
 	next: string | null,
@@ -874,6 +922,12 @@ export type RoomSummary = {
 	unread_notifications: NotificationCount,
 	latest_event: TimelineItemPreview | null,
 	pinned: boolean,
+	/**
+	 *  Position among the account's pinned chats, `0` at the top; `None` when not pinned. The
+	 *  room list is already delivered in this order; the UI uses it to render drag handles and
+	 *  to compute the list it sends back with `ReorderPinnedRooms`.
+	 */
+	pin_order?: number | null,
 	archived: boolean,
 	/**
 	 *  `None` when not muted, `u64::MAX` when muted forever, otherwise the end of the mute in
@@ -965,6 +1019,8 @@ export type TimelineItemDto = {
 	reactions: ReactionSummary[],
 	/**  Transaction id for local echoes (use with RetrySend/CancelSend). */
 	transaction_id: string | null,
+	/**  Whether the message is pinned in its chat. */
+	pinned?: boolean,
 };
 
 /**  Last message of a chat, for the room list row. */

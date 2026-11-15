@@ -41,5 +41,6 @@ pub use events::{ConnectionState, ConnectorEvent};
 pub use login::{CodeChannel, CookieField, LoginAlternative, LoginFailure, LoginInput, LoginStep};
 pub use rpc::{Frame, PROTOCOL_VERSION, decode_frame, encode_frame};
 pub use types::{
-    ChatKind, MediaRef, MessageKind, Network, RemoteChat, RemoteMessage, RemoteUser, SessionBlob,
+    ChatKind, MediaRef, MessageKind, Network, RemoteChat, RemoteMember, RemoteMessage, RemoteUser,
+    SessionBlob,
 };

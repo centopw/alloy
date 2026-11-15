@@ -18,6 +18,7 @@ function room(
     latest_event:
       p.ts === undefined ? null : { sender: 'user-a', timestamp_millis: p.ts, body: '' },
     pinned: false,
+    pin_order: null,
     archived: false,
     muted_until: null,
     tags: p.tags ?? [],

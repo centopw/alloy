@@ -260,6 +260,14 @@ pub struct CapabilitiesDto {
     pub max_upload_bytes: Option<u64>,
     /// The network renders formatted text (`TimelineItemContent::TextMessage::formatted_body`).
     pub formatted_text: bool,
+    /// Pinned chats and their order are kept on the network (`SetRoomPinned`,
+    /// `ReorderPinnedRooms` reach the official apps). `false`: pins are local to this device.
+    #[serde(default)]
+    pub pin_chats: bool,
+    /// Messages can be pinned for every participant (`SetMessagePinned`). `false`: a pinned
+    /// message is local to this device.
+    #[serde(default)]
+    pub pin_messages: bool,
 }
 
 /// One connected account, as listed by `ListAccounts`.
@@ -490,6 +498,12 @@ pub struct RoomSummary {
     pub unread_notifications: NotificationCount,
     pub latest_event: Option<TimelineItemPreview>,
     pub pinned: bool,
+    /// Position among the account's pinned chats, `0` at the top; `None` when not pinned. The
+    /// room list is already delivered in this order; the UI uses it to render drag handles and
+    /// to compute the list it sends back with `ReorderPinnedRooms`.
+    #[serde(default)]
+    #[specta(type = Option<Number>)]
+    pub pin_order: Option<u32>,
     pub archived: bool,
     /// `None` when not muted, `u64::MAX` when muted forever, otherwise the end of the mute in
     /// milliseconds since the Unix epoch.
@@ -636,6 +650,9 @@ pub struct TimelineItemDto {
     pub reactions: Vec<ReactionSummary>,
     /// Transaction id for local echoes (use with RetrySend/CancelSend).
     pub transaction_id: Option<String>,
+    /// Whether the message is pinned in its chat.
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 /// One incremental change to a streamed vector (the room list or one timeline).
@@ -903,9 +920,29 @@ pub enum EngineCommand {
     MarkRoomRead {
         room_id: RoomId,
     },
-    /// Pins or unpins the chat in the room list.
+    /// Pins or unpins the chat in the room list. A newly pinned chat goes to the top of its
+    /// account's pinned chats. When the account's network keeps pins (`CapabilitiesDto::pin_chats`)
+    /// the change is sent there too and the official apps follow.
     SetRoomPinned {
         room_id: RoomId,
+        pinned: bool,
+    },
+    /// Sets the order of one account's pinned chats, top to bottom. `room_ids` must name every
+    /// pinned chat of the account exactly once and nothing else; a stale list is refused rather
+    /// than unpinning what it omits. Sent to the network when it keeps pins.
+    ReorderPinnedRooms {
+        account_id: AccountId,
+        room_ids: Vec<RoomId>,
+    },
+    /// Lists the pinned messages of a chat, newest first, for the pinned-message bar.
+    GetPinnedMessages {
+        room_id: RoomId,
+    },
+    /// Pins or unpins a message. Sent to the network when it pins messages
+    /// (`CapabilitiesDto::pin_messages`); local to this device otherwise.
+    SetMessagePinned {
+        room_id: RoomId,
+        event_id: EventId,
         pinned: bool,
     },
     /// Archives or unarchives the chat.
@@ -1133,6 +1170,18 @@ pub enum EngineResponse {
     /// A chat flag changed (pinned, archived, marked unread, muted or read); the room list diff
     /// carries the new values.
     RoomFlagsUpdated,
+    /// The pinned chats of the account, in their new order; the room list diff follows.
+    PinnedRoomsReordered {
+        room_ids: Vec<RoomId>,
+    },
+    /// The pinned messages of a chat, newest first.
+    PinnedMessages {
+        items: Vec<TimelineItemDto>,
+    },
+    /// The message's pin state after the change; the timeline diff carries it too.
+    MessagePinSet {
+        pinned: bool,
+    },
     RoomMedia {
         items: Vec<RoomMediaItem>,
         /// Cursor for the next page, `None` when this was the last one.
@@ -1496,6 +1545,7 @@ mod tests {
                 body: "Hello world".into(),
             }),
             pinned: false,
+            pin_order: None,
             archived: false,
             muted_until: None,
             marked_unread: true,

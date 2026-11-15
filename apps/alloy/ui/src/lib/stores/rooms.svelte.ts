@@ -62,13 +62,26 @@ export function networkName(network: Network): string {
   }
 }
 
-/** One account and the chats it owns, in list order. */
-export interface AccountGroup {
-  account: Account | null;
-  rooms: RoomSummary[];
-}
-
 type RoomDiffEvent = Extract<EngineEvent, { type: 'RoomListDiff' }>;
+
+/**
+ * Pinned chats in the order the user arranged them: `pin_order` ascending, chats without an
+ * order (pinned before the network reported one) after them in the list's own sort. Stable, so
+ * two chats with the same order keep their relative position.
+ */
+export function orderPinned<T extends Pick<RoomSummary, 'pin_order'>>(pinned: readonly T[]): T[] {
+  return pinned
+    .map((room, index) => ({ room, index }))
+    .sort((a, b) => {
+      const ao = a.room.pin_order ?? null;
+      const bo = b.room.pin_order ?? null;
+      if (ao === null && bo === null) return a.index - b.index;
+      if (ao === null) return 1;
+      if (bo === null) return -1;
+      return ao - bo || a.index - b.index;
+    })
+    .map((entry) => entry.room);
+}
 
 /** Live room list plus selection, search and filter chips. */
 class RoomsStore {
@@ -108,23 +121,7 @@ class RoomsStore {
       titleOf: roomTitle,
       tagOrder: displayTags(tags.defs, this.rooms).map((d) => d.id),
     });
-    return [...sorted.filter((r) => r.pinned), ...sorted.filter((r) => !r.pinned)];
-  });
-
-  /** The visible chats split per account, in account order; empty groups are dropped. */
-  accountGroups = $derived.by((): AccountGroup[] => {
-    if (this.accounts.length <= 1) return [];
-    const byId = new Map(this.accounts.map((a) => [a.id, a] as const));
-    const groups = new Map<string, AccountGroup>();
-    for (const id of byId.keys()) groups.set(id, { account: byId.get(id) ?? null, rooms: [] });
-    const orphan: AccountGroup = { account: null, rooms: [] };
-    for (const room of this.visible) {
-      const group = groups.get(room.account_id);
-      if (group) group.rooms.push(room);
-      else orphan.rooms.push(room);
-    }
-    const filled = [...groups.values()].filter((g) => g.rooms.length > 0);
-    return orphan.rooms.length > 0 ? [...filled, orphan] : filled;
+    return [...orderPinned(sorted.filter((r) => r.pinned)), ...sorted.filter((r) => !r.pinned)];
   });
 
   unreadTotal = $derived(this.rooms.reduce((n, r) => n + (!r.archived && this.isUnread(r) ? 1 : 0), 0));
@@ -258,6 +255,33 @@ class RoomsStore {
     return this.#flag(roomId, { pinned }, () =>
       client.invoke({ action: 'SetRoomPinned', params: { room_id: roomId, pinned } })
     );
+  }
+
+  /**
+   * Rearranges one account's pinned chats: `roomIds` is the complete pinned block of `accountId` in
+   * its new order. Shown at once (`pin_order` rewritten by position) and put back if the engine
+   * refuses; the room diff stays authoritative either way.
+   */
+  async reorderPinned(accountId: string, roomIds: readonly string[]): Promise<void> {
+    const previous = new Map<string, number | null>();
+    for (const r of this.rooms) {
+      if (r.account_id === accountId && roomIds.includes(r.id)) previous.set(r.id, r.pin_order ?? null);
+    }
+    if (previous.size === 0) return;
+    this.#setPinOrders(new Map(roomIds.map((id, index) => [id, index])));
+    try {
+      await client.invoke({ action: 'ReorderPinnedRooms', params: { account_id: accountId, room_ids: [...roomIds] } });
+    } catch {
+      this.#setPinOrders(previous);
+    }
+  }
+
+  /** Replaces the `pin_order` of each listed room. Looked up by id each time because diffs replace entries by index. */
+  #setPinOrders(orders: ReadonlyMap<string, number | null>) {
+    for (const [roomId, pin_order] of orders) {
+      const index = this.rooms.findIndex((r) => r.id === roomId);
+      if (index !== -1) this.rooms[index] = { ...this.rooms[index], pin_order };
+    }
   }
 
   /** Moves a chat to or from the Archive. */

@@ -39,8 +39,8 @@ use std::sync::Arc;
 
 use alloy_connector::{
     Capabilities, Connector, ConnectorError, ConnectorEvent, LoginFailure, LoginInput, LoginStep,
-    MediaRef, Network, OutgoingMessage, Page, RemoteChat, RemoteMessage, RemoteUser, SendAck,
-    SessionBlob,
+    MediaRef, Network, OutgoingMessage, Page, RemoteChat, RemoteMember, RemoteMessage, RemoteUser,
+    SendAck, SessionBlob,
 };
 use async_trait::async_trait;
 use serde_json::json;
@@ -129,6 +129,14 @@ impl Connector for SidecarConnector {
     ) -> Result<Page<RemoteChat>, ConnectorError> {
         let params = json!({ "cursor": cursor, "limit": limit });
         self.runtime.call("list_chats", params).await
+    }
+
+    async fn list_members(
+        &self,
+        remote_chat_id: &str,
+    ) -> Result<Vec<RemoteMember>, ConnectorError> {
+        let params = json!({ "remote_chat_id": remote_chat_id });
+        self.runtime.call("list_members", params).await
     }
 
     async fn backfill(
@@ -223,6 +231,34 @@ impl Connector for SidecarConnector {
     async fn set_typing(&self, remote_chat_id: &str, typing: bool) -> Result<(), ConnectorError> {
         let params = json!({ "remote_chat_id": remote_chat_id, "typing": typing });
         self.runtime.call_unit("set_typing", params).await
+    }
+
+    async fn set_chat_pinned(
+        &self,
+        remote_chat_id: &str,
+        pinned: bool,
+    ) -> Result<(), ConnectorError> {
+        let params = json!({ "remote_chat_id": remote_chat_id, "pinned": pinned });
+        self.runtime.call_unit("set_chat_pinned", params).await
+    }
+
+    async fn reorder_pinned_chats(&self, remote_chat_ids: &[String]) -> Result<(), ConnectorError> {
+        let params = json!({ "remote_chat_ids": remote_chat_ids });
+        self.runtime.call_unit("reorder_pinned_chats", params).await
+    }
+
+    async fn set_message_pinned(
+        &self,
+        remote_chat_id: &str,
+        remote_msg_id: &str,
+        pinned: bool,
+    ) -> Result<(), ConnectorError> {
+        let params = json!({
+            "remote_chat_id": remote_chat_id,
+            "remote_msg_id": remote_msg_id,
+            "pinned": pinned,
+        });
+        self.runtime.call_unit("set_message_pinned", params).await
     }
 
     async fn fetch_media(&self, media: &MediaRef, dest_path: &Path) -> Result<u64, ConnectorError> {

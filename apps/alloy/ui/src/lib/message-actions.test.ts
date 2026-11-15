@@ -20,8 +20,16 @@ const audioSource = readFileSync(
   resolve(process.cwd(), 'src/lib/components/timeline/AudioPlayer.svelte'),
   'utf8'
 );
+const storeSource = readFileSync(resolve(process.cwd(), 'src/lib/stores/timeline.svelte.ts'), 'utf8');
 
 describe('message actions', () => {
+  it('never loads a video file as its own poster image', () => {
+    // GetMedia serves one file per media object: asking for a video "thumbnail" downloaded the
+    // whole video, the <img> rejected it and every video showed "couldn't load".
+    expect(mediaSource).not.toContain("video ? 'image/jpeg'");
+    expect(mediaSource).toContain('const mime = visual ? mimeType : null;');
+  });
+
   it('renders the toolbar inside the anchor sized to the message', () => {
     const anchorStart = rowSource.indexOf('<div class="message-anchor">');
     const anchorEnd = rowSource.indexOf('{#if seenAvatars}', anchorStart);
@@ -82,18 +90,43 @@ describe('message actions', () => {
     expect(rowSource).not.toContain('if (!compact && bar.offsetWidth > available)');
   });
 
-  it('keeps reactions, reply and an overflow in the compact bar', () => {
-    // Compact used to drop the quick reactions — the most-used action — and keep thread/edit/delete.
-    expect(rowSource).toContain('limit={compact ? COMPACT_REACTIONS : undefined}');
-    expect(rowSource).toContain('const COMPACT_REACTIONS = 3;');
+  it('keeps reply and an overflow in the compact bar', () => {
     // Asserted by message id: the English words live in the catalog, and pinning them here breaks the
     // test every time a string is extracted for translation.
     expect(rowSource).toContain("aria-label={t('message-row-more-actions')}");
     // The overflow opens the same menu right-click offers, so thread/edit/delete stay reachable.
     expect(rowSource).toContain('contextMenu.open(menuItems(), { x: rect.left, y: rect.bottom }, menuOptions())');
     expect(rowSource).toMatch(/\{:else\}[\s\S]*?aria-label=\{t\('message-row-more-actions'\)\}/);
-    expect(rowSource).toContain('class="quick"');
-    expect(rowSource).toContain('.quick {\n    display: contents;');
+  });
+
+  it('floats the quick reactions over the message on desktop and leaves touch to the long-press menu', () => {
+    // The reactions left the toolbar: they float above the bubble on hover/focus, inside the anchor so
+    // they belong to the message, and only when the account supports reactions.
+    const anchorStart = rowSource.indexOf('<div class="message-anchor">');
+    const anchorEnd = rowSource.indexOf('{#if seenAvatars}', anchorStart);
+    const float = rowSource.indexOf('<div class="quick-float"', anchorStart);
+    expect(float).toBeGreaterThan(anchorStart);
+    expect(float).toBeLessThan(anchorEnd);
+    expect(rowSource).toContain('{#if canAct && canReact}');
+    // One ToggleReaction path for every entry point: hover bar, long-press menu and double-tap.
+    expect(rowSource.slice(float, anchorEnd)).toContain('onpick={reactWith}');
+    expect(rowSource).toContain('onpick: reactWith,');
+    expect(rowSource).toContain('.row:hover .quick-float,\n    .row:focus-within .quick-float {');
+    expect(rowSource).toMatch(/@media \(pointer: coarse\) \{\s*\.quick-float \{\s*display: none;/);
+    expect(rowSource).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.quick-float,/);
+    // The toolbar no longer carries a reaction strip.
+    expect(rowSource).not.toContain('class="quick"');
+    expect(rowSource).not.toContain('COMPACT_REACTIONS');
+  });
+
+  it('offers pin and unpin through SetMessagePinned', () => {
+    expect(rowSource).toContain("id: 'pin', label: t('message-row-pin')");
+    expect(rowSource).toContain("id: 'unpin', label: t('message-row-unpin')");
+    expect(rowSource).toContain('timelineStore.setPinned(item, true)');
+    expect(rowSource).toContain('timelineStore.setPinned(item, false)');
+    // Unpinning never needs the capability; pinning does.
+    expect(rowSource).toContain("(item.pinned || capabilities?.pin_messages === true)");
+    expect(storeSource).toContain("action: 'SetMessagePinned'");
   });
 
   it('hides the bar while the context menu is open', () => {

@@ -10,12 +10,13 @@ use std::time::{Duration, Instant};
 use alloy_connector::{
     Capabilities, ConnectionState, Connector, ConnectorError, ConnectorEvent, LocalAttachment,
     LoginFailure, LoginInput, LoginStep, MediaRef, Network, OutgoingMessage, Page, RemoteChat,
-    RemoteMessage, RemoteUser, SendAck, SessionBlob,
+    RemoteMember, RemoteMessage, RemoteUser, SendAck, SessionBlob,
 };
 use async_trait::async_trait;
 use grammers_client::client::{Client, PasswordToken};
 use grammers_client::media::Attribute;
 use grammers_client::message::{InputMessage, InputReactions};
+use grammers_client::peer::Role;
 use grammers_mtsender::{
     ConnectionParams, InvocationError, NoRetries, SenderPool, SenderPoolFatHandle,
     UpdatesConfiguration,
@@ -38,6 +39,8 @@ use crate::updates::MessageIndex;
 
 /// Largest page `messages.getDialogs` accepts.
 const MAX_DIALOG_PAGE: usize = 100;
+/// Most members listed for one chat: one page of `channels.getParticipants`.
+const MAX_MEMBERS: usize = 200;
 /// How many message ids the delete/echo index remembers.
 const MESSAGE_INDEX_CAPACITY: usize = 4_096;
 /// Download attempts: the first with the stored reference, one more after refreshing it.
@@ -694,6 +697,11 @@ impl TelegramConnector {
         let returned = dialogs.len();
         let mut mapped = Vec::with_capacity(returned);
         let mut resume = None;
+        // Pinned dialogs come first in pin order, but only the first page of the main folder starts
+        // at the top of that list; a resumed page excludes them, so their index is unknowable there.
+        // The archive has its own pin flags and no pinned block in the host, so it gets no order.
+        let first_page = position.is_none() && folder == 0;
+        let mut pinned_seen: u32 = 0;
         for dialog in &dialogs {
             let Some((kind, bare_id)) = mapping::dialog_peer(dialog) else {
                 continue;
@@ -702,7 +710,16 @@ impl TelegramConnector {
                 continue;
             };
             let activity = mapping::dialog_activity(dialog, &dates);
-            if let Some(chat) = mapping::chat_from_dialog(dialog, entry, activity, now_seconds) {
+            let pin_order = if first_page && mapping::dialog_pinned(dialog) {
+                let order = pinned_seen;
+                pinned_seen += 1;
+                Some(order)
+            } else {
+                None
+            };
+            if let Some(chat) =
+                mapping::chat_from_dialog(dialog, entry, activity, now_seconds, pin_order)
+            {
                 // The cursor follows a peer we can resolve again, never the archive pseudo-entry.
                 resume = Some(mapping::ChatCursor {
                     folder,
@@ -851,6 +868,8 @@ impl Connector for TelegramConnector {
             location: false,
             max_upload_bytes: Some(2_097_152_000),
             formatted_text: true,
+            pin_chats: true,
+            pin_messages: true,
         }
     }
 
@@ -1013,6 +1032,43 @@ impl Connector for TelegramConnector {
         Ok(Page { items, next_cursor })
     }
 
+    async fn list_members(
+        &self,
+        remote_chat_id: &str,
+    ) -> Result<Vec<RemoteMember>, ConnectorError> {
+        let mut inner = self.inner.lock().await;
+        self.require_login()?;
+        let client = self.ensure_pool(&mut inner).await?;
+        let peer = self.resolve_peer(remote_chat_id).await?;
+
+        // A basic group answers with everyone at once; a supergroup or channel pages through its
+        // recent members, and a direct chat yields nothing.
+        let mut iterator = client.iter_participants(peer);
+        let mut members = Vec::new();
+        while members.len() < MAX_MEMBERS {
+            let Some(participant) = iterator.next().await.map_err(error::map_invocation)? else {
+                break;
+            };
+            let role = match participant.role {
+                Role::Creator(_) => Some("owner".to_string()),
+                Role::Admin(_) => Some("admin".to_string()),
+                Role::User(_) => None,
+                // Banned, left, or a role this connector does not know: not a member to list.
+                _ => continue,
+            };
+            let Some(entry) = mapping::entry_from_user(&participant.user.raw) else {
+                continue;
+            };
+            // The member's picture is fetched through the member's own peer.
+            self.shared.remember_entry(&entry);
+            members.push(RemoteMember {
+                user: entry.into(),
+                role,
+            });
+        }
+        Ok(members)
+    }
+
     async fn backfill(
         &self,
         remote_chat_id: &str,
@@ -1042,12 +1098,17 @@ impl Connector for TelegramConnector {
                 break;
             };
             let txn_id = self.shared.txn_of(mapping::message_id(&message.raw));
-            if let Some(mapped) = mapping::message_from_raw(
+            if let Some(mut mapped) = mapping::message_from_raw(
                 &message.raw,
                 remote_chat_id,
                 self.shared.self_bare_id(),
                 txn_id,
             ) {
+                // Telegram returns the senders with the page, so this costs no request.
+                mapped.sender = mapping::sender_profile(
+                    message.sender().and_then(mapping::entry_from_peer),
+                    &mapped,
+                );
                 items.push(mapped);
             }
         }
@@ -1261,6 +1322,77 @@ impl Connector for TelegramConnector {
                 peer: peer.into(),
                 top_msg_id: None,
                 action,
+            })
+            .await
+            .map_err(error::map_invocation)?;
+        Ok(())
+    }
+
+    async fn set_chat_pinned(
+        &self,
+        remote_chat_id: &str,
+        pinned: bool,
+    ) -> Result<(), ConnectorError> {
+        let mut inner = self.inner.lock().await;
+        self.require_login()?;
+        let client = self.ensure_pool(&mut inner).await?;
+        let peer = self.resolve_peer(remote_chat_id).await?;
+
+        // Telegram puts a newly pinned dialog at the top of the main folder's pinned list.
+        client
+            .invoke(&tl::functions::messages::ToggleDialogPin {
+                pinned,
+                peer: dialog_peer(peer),
+            })
+            .await
+            .map_err(map_pin_error)?;
+        Ok(())
+    }
+
+    async fn reorder_pinned_chats(&self, remote_chat_ids: &[String]) -> Result<(), ConnectorError> {
+        let mut inner = self.inner.lock().await;
+        self.require_login()?;
+        let client = self.ensure_pool(&mut inner).await?;
+        let mut order = Vec::with_capacity(remote_chat_ids.len());
+        for remote_chat_id in remote_chat_ids {
+            // An id that cannot be resolved is the caller's mistake, reported before any request.
+            order.push(dialog_peer(self.resolve_peer(remote_chat_id).await?));
+        }
+
+        // `force` makes the list authoritative: dialogs not named here are unpinned, which is the
+        // contract's definition of a reorder. The archive keeps its own list and is left alone.
+        client
+            .invoke(&tl::functions::messages::ReorderPinnedDialogs {
+                force: true,
+                folder_id: 0,
+                order,
+            })
+            .await
+            .map_err(map_pin_error)?;
+        Ok(())
+    }
+
+    async fn set_message_pinned(
+        &self,
+        remote_chat_id: &str,
+        remote_msg_id: &str,
+        pinned: bool,
+    ) -> Result<(), ConnectorError> {
+        let mut inner = self.inner.lock().await;
+        self.require_login()?;
+        let client = self.ensure_pool(&mut inner).await?;
+        let peer = self.resolve_peer(remote_chat_id).await?;
+        let id = mapping::parse_msg_id(remote_msg_id)?;
+
+        // The returned updates are also delivered on the update stream, where the pump maps them
+        // to `MessagePinned`; nothing in them is needed here.
+        client
+            .invoke(&tl::functions::messages::UpdatePinnedMessage {
+                silent: false,
+                unpin: !pinned,
+                pm_oneside: false,
+                peer: peer.into(),
+                id,
             })
             .await
             .map_err(error::map_invocation)?;
@@ -1508,6 +1640,23 @@ fn drop_pool(inner: &mut Inner) {
         drop(runtime);
     }
     inner.client = None;
+}
+
+/// Wraps a resolved peer as the dialog reference the pin requests take.
+fn dialog_peer(peer: PeerRef) -> tl::enums::InputDialogPeer {
+    tl::enums::InputDialogPeer::Peer(tl::types::InputDialogPeer { peer: peer.into() })
+}
+
+/// Maps a failed pin request: the pin limit is a refusal of the input, not a transport problem.
+fn map_pin_error(error: InvocationError) -> ConnectorError {
+    match error {
+        InvocationError::Rpc(rpc) if rpc.name == "PINNED_DIALOGS_TOO_MUCH" => {
+            ConnectorError::InvalidInput {
+                message: "Telegram's pinned chat limit is reached".to_string(),
+            }
+        }
+        other => error::map_invocation(other),
+    }
 }
 
 /// Telegram’s `303` migration code carries the datacenter to move to.

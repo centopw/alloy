@@ -118,6 +118,8 @@ export const TELEGRAM_CAPABILITIES: CapabilitiesDto = {
   location: false,
   max_upload_bytes: 2_097_152_000,
   formatted_text: true,
+  pin_chats: true,
+  pin_messages: true,
 };
 
 /** Messenger: 15-minute edit window, 25 MiB attachments, polls but no shared locations. */
@@ -137,6 +139,8 @@ export const MESSENGER_CAPABILITIES: CapabilitiesDto = {
   location: false,
   max_upload_bytes: 26_214_400,
   formatted_text: false,
+  pin_chats: true,
+  pin_messages: false,
 };
 
 /** The deterministic test connector: enough to exercise the flows, nothing network-specific. */
@@ -156,6 +160,8 @@ export const FAKE_CAPABILITIES: CapabilitiesDto = {
   location: false,
   max_upload_bytes: null,
   formatted_text: false,
+  pin_chats: true,
+  pin_messages: true,
 };
 
 const CAPABILITIES_BY_NETWORK: Record<Account['network'], CapabilitiesDto> = {
@@ -176,6 +182,12 @@ export function capabilitiesFor(network: Account['network']): CapabilitiesDto {
 export function sortRoomList(rooms: RoomSummary[]): RoomSummary[] {
   return rooms.sort((a, b) => {
     if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+    if (a.pinned && a.pin_order !== b.pin_order) {
+      // The user's own arrangement of the pinned block; a pin without an order goes after the ordered ones.
+      if (a.pin_order == null) return 1;
+      if (b.pin_order == null) return -1;
+      return a.pin_order - b.pin_order;
+    }
     if (a.archived !== b.archived) return a.archived ? 1 : -1;
     const aTs = a.latest_event?.timestamp_millis ?? 0;
     const bTs = b.latest_event?.timestamp_millis ?? 0;
@@ -230,6 +242,7 @@ export function dayDivider(millis: number): TimelineItemDto {
     read_by: [],
     reactions: [],
     edited: false,
+    pinned: false,
     transaction_id: null,
   };
 }
@@ -316,6 +329,7 @@ interface TextInit {
   read_by?: UserId[];
   reactions?: TimelineItemDto['reactions'];
   edited?: boolean;
+  pinned?: boolean;
 }
 
 interface MediaInit {
@@ -371,6 +385,7 @@ export function seedDemo(): DemoState {
       read_by: init.read_by ?? [],
       edited: init.edited ?? false,
       reactions: init.reactions ?? [],
+      pinned: init.pinned ?? false,
       transaction_id: null,
     };
   };
@@ -412,6 +427,7 @@ export function seedDemo(): DemoState {
       read_by: init.read_by ?? [],
       edited: false,
       reactions: [],
+      pinned: false,
       transaction_id: null,
     };
   };
@@ -435,6 +451,7 @@ export function seedDemo(): DemoState {
   );
   const devMerged = text(dev, TG_MARA, 'dev-6', TG_JONAS, 355, 'Merged. CI is green on all five targets.', {
     reactions: [{ key: '👍', count: 1, senders: [TG_PRIYA], by_me: false }],
+    pinned: true,
   });
   const devTimeline = withDayDividers([
     text(dev, TG_MARA, 'dev-1', TG_JONAS, 1_470, 'Store migration landed: accounts, chats and messages are all in SQLite now.'),
@@ -644,6 +661,7 @@ export function seedDemo(): DemoState {
     kind: ChatKind;
     unread: NotificationCount;
     pinned?: boolean;
+    pin_order?: number | null;
     archived?: boolean;
     muted_until?: number | null;
     marked_unread?: boolean;
@@ -661,6 +679,7 @@ export function seedDemo(): DemoState {
     unread_notifications: init.unread,
     latest_event: latestPreview(timelines.get(init.id) ?? []),
     pinned: init.pinned ?? false,
+    pin_order: init.pin_order ?? null,
     archived: init.archived ?? false,
     muted_until: init.muted_until ?? null,
     marked_unread: init.marked_unread ?? false,
@@ -677,6 +696,7 @@ export function seedDemo(): DemoState {
       kind: 'group',
       unread: { highlight_count: 0, notification_count: 2 },
       pinned: true,
+      pin_order: 0,
       tags: [DEMO_TAG.work],
     }),
     room({

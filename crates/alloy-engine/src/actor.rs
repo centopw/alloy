@@ -4,7 +4,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use alloy_connector::{ConnectionState, ConnectorEvent, MediaRef, RemoteChat, RemoteMessage};
+use alloy_connector::{
+    ConnectionState, ConnectorEvent, MediaRef, RemoteChat, RemoteMessage, RemoteUser,
+};
 use alloy_protocol::{
     AccountId, ConnectionStatus as ConnectionStatusDto, EngineEvent, RoomId, UserId,
 };
@@ -94,6 +96,59 @@ async fn apply(
             remote_chat_id,
             remote_msg_id,
         } => apply_deleted(ctx, &account_id, &remote_chat_id, &remote_msg_id).await,
+        ConnectorEvent::ChatPinned {
+            remote_chat_id,
+            pinned,
+        } => {
+            if let Some(chat) = ctx
+                .store
+                .find_chat(&account_id, &remote_chat_id)
+                .await
+                .map_err(map_store)?
+                && chat.is_pinned != pinned
+            {
+                ctx.store
+                    .update_chat_flags(
+                        &chat.chat_id,
+                        ChatFlagsUpdate {
+                            is_pinned: Some(pinned),
+                            ..ChatFlagsUpdate::default()
+                        },
+                    )
+                    .await
+                    .map_err(map_store)?;
+                ctx.bus.chats();
+            }
+            Ok(())
+        }
+        ConnectorEvent::PinnedChatsReordered { remote_chat_ids } => {
+            // Only unarchived chats the store knows can be ordered; the UI's pinned list leaves
+            // archived chats out, so the network's list must not unpin them. A chat the list names
+            // before its upsert arrives is picked up by the next `ChatUpserted` carrying its `pin_order`.
+            let mut chat_ids = Vec::with_capacity(remote_chat_ids.len());
+            for remote_chat_id in &remote_chat_ids {
+                if let Some(chat) = ctx
+                    .store
+                    .find_chat(&account_id, remote_chat_id)
+                    .await
+                    .map_err(map_store)?
+                    && !chat.is_archived
+                {
+                    chat_ids.push(chat.chat_id);
+                }
+            }
+            ctx.store
+                .set_pinned_chats(&account_id, chat_ids)
+                .await
+                .map_err(map_store)?;
+            ctx.bus.chats();
+            Ok(())
+        }
+        ConnectorEvent::MessagePinned {
+            remote_chat_id,
+            remote_msg_id,
+            pinned,
+        } => apply_message_pinned(ctx, &account_id, &remote_chat_id, &remote_msg_id, pinned).await,
         ConnectorEvent::Reaction {
             remote_chat_id,
             remote_msg_id,
@@ -223,8 +278,23 @@ pub(crate) async fn apply_chat(
     }
 
     let mut flags = ChatFlagsUpdate::default();
-    if record.is_pinned != chat.is_pinned {
-        flags.is_pinned = Some(chat.is_pinned);
+    // A pin the network placed with its position keeps that position. Writing it through
+    // `update_chat_flags` would move it to the top and shift every other pinned chat.
+    match chat.is_pinned.then_some(chat.pin_order).flatten() {
+        Some(order) => {
+            let order = i64::from(order);
+            if !record.is_pinned || record.pin_order != Some(order) {
+                ctx.store
+                    .set_chat_pin_state(&chat_id, Some(order))
+                    .await
+                    .map_err(map_store)?;
+            }
+        }
+        None => {
+            if record.is_pinned != chat.is_pinned {
+                flags.is_pinned = Some(chat.is_pinned);
+            }
+        }
     }
     if record.is_archived != chat.is_archived {
         flags.is_archived = Some(chat.is_archived);
@@ -238,6 +308,41 @@ pub(crate) async fn apply_chat(
             .await
             .map_err(map_store)?;
     }
+    Ok(())
+}
+
+/// Mirrors the pin state of one message as the network reports it.
+async fn apply_message_pinned(
+    ctx: &EngineContext,
+    account_id: &str,
+    remote_chat_id: &str,
+    remote_msg_id: &str,
+    pinned: bool,
+) -> Result<(), EngineError> {
+    let Some(chat) = ctx
+        .store
+        .find_chat(account_id, remote_chat_id)
+        .await
+        .map_err(map_store)?
+    else {
+        return Ok(());
+    };
+    let Some(record) = ctx
+        .store
+        .find_message_by_remote(&chat.chat_id, remote_msg_id)
+        .await
+        .map_err(map_store)?
+    else {
+        return Ok(());
+    };
+    if record.is_pinned == pinned {
+        return Ok(());
+    }
+    ctx.store
+        .set_message_pinned(&record.message_id, pinned)
+        .await
+        .map_err(map_store)?;
+    ctx.bus.timeline(&chat.chat_id);
     Ok(())
 }
 
@@ -300,6 +405,33 @@ pub(crate) async fn apply_message(
         .await
         .map_err(map_store)?;
 
+    if let Some(sender) = &message.sender
+        && let Err(err) = remember_sender(ctx, account_id, &chat.chat_id, sender).await
+    {
+        tracing::warn!(chat = %chat.chat_id, error = %err.message, "failed to store a sender");
+    }
+    // A network that keeps message pins is authoritative in both directions: a message unpinned
+    // there while this device was offline must come back unpinned. A network without them keeps
+    // device-local pins, so an unpinned arrival must not clear one made here.
+    let network_pins = ctx
+        .accounts
+        .get(account_id)
+        .await
+        .is_some_and(|runtime| runtime.capabilities.pin_messages);
+    if network_pins {
+        if message.pinned != record.is_pinned {
+            ctx.store
+                .set_message_pinned(&record.message_id, message.pinned)
+                .await
+                .map_err(map_store)?;
+        }
+    } else if message.pinned && !record.is_pinned {
+        ctx.store
+            .set_message_pinned(&record.message_id, true)
+            .await
+            .map_err(map_store)?;
+    }
+
     // The preview follows the newest stored message, not the chat's activity clock: a chat can
     // report activity newer than the history we have, and a preview must still exist.
     let previous_preview = match &chat.last_message_id {
@@ -328,6 +460,44 @@ pub(crate) async fn apply_message(
 
     ctx.bus.chats();
     ctx.bus.timeline(&chat.chat_id);
+    Ok(())
+}
+
+/// Stores the name and picture a message carried for its sender, so the timeline can name
+/// someone the member list never reported (it is capped, and people leave). The role is left
+/// alone: only the member list knows it.
+async fn remember_sender(
+    ctx: &EngineContext,
+    account_id: &str,
+    chat_id: &str,
+    sender: &RemoteUser,
+) -> Result<(), EngineError> {
+    let avatar = match &sender.avatar {
+        Some(media) => Some(store_media_ref(ctx, account_id, media).await?),
+        None => None,
+    };
+    // Most messages come from someone already stored as they are now; skip the write then.
+    let known = ctx
+        .store
+        .get_participant(chat_id, &sender.remote_user_id)
+        .await
+        .map_err(map_store)?;
+    if known.is_some_and(|known| {
+        known.display_name.as_deref() == Some(sender.display_name.as_str())
+            && (avatar.is_none() || known.avatar_media_id == avatar)
+    }) {
+        return Ok(());
+    }
+    ctx.store
+        .upsert_participant(
+            chat_id,
+            &sender.remote_user_id,
+            Some(sender.display_name.clone()),
+            avatar,
+            None,
+        )
+        .await
+        .map_err(map_store)?;
     Ok(())
 }
 
@@ -532,7 +702,7 @@ pub(crate) async fn ensure_chat(
 }
 
 /// Records a network media reference and returns its local row id.
-async fn store_media_ref(
+pub(crate) async fn store_media_ref(
     ctx: &EngineContext,
     account_id: &str,
     media: &MediaRef,

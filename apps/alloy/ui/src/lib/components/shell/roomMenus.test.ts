@@ -37,6 +37,7 @@ function room(overrides: Partial<RoomSummary> = {}): RoomSummary {
     unread_notifications: { highlight_count: 0, notification_count: 0 },
     latest_event: null,
     pinned: false,
+    pin_order: null,
     archived: false,
     muted_until: null,
     tags: [],

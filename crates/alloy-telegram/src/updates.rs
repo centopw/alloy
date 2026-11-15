@@ -103,11 +103,15 @@ async fn handle(shared: &Shared, update: Update) {
                 return;
             };
             let txn_id = shared.txn_of(message.id());
-            let Some(mapped) =
+            let Some(mut mapped) =
                 mapping::message_from_raw(&message.raw, &chat_id, shared.self_bare_id(), txn_id)
             else {
                 return;
             };
+            mapped.sender = mapping::sender_profile(
+                message.sender().and_then(mapping::entry_from_peer),
+                &mapped,
+            );
             shared
                 .emit(ConnectorEvent::Message { message: mapped })
                 .await;
@@ -262,10 +266,74 @@ async fn handle_raw(shared: &Shared, update: &tl::enums::Update) {
                     .await;
             }
         }
+        tl::enums::Update::DialogPinned(change) => {
+            // The archive keeps a pinned list of its own that the host does not show.
+            if change.folder_id == Some(1) {
+                return;
+            }
+            let Some(remote_chat_id) = dialog_peer_id(&change.peer) else {
+                return;
+            };
+            shared
+                .emit(ConnectorEvent::ChatPinned {
+                    remote_chat_id,
+                    pinned: change.pinned,
+                })
+                .await;
+        }
+        tl::enums::Update::PinnedDialogs(change) => {
+            if change.folder_id == Some(1) {
+                return;
+            }
+            // Without `order` Telegram only says the list changed; the next dialog listing
+            // carries the actual order, so there is nothing to report yet.
+            let Some(order) = &change.order else {
+                return;
+            };
+            let remote_chat_ids: Vec<String> = order.iter().filter_map(dialog_peer_id).collect();
+            shared
+                .emit(ConnectorEvent::PinnedChatsReordered { remote_chat_ids })
+                .await;
+        }
+        tl::enums::Update::PinnedMessages(change) => {
+            let Some((kind, bare_id)) = mapping::tl_peer(&change.peer) else {
+                return;
+            };
+            let chat = mapping::encode_peer(kind, bare_id);
+            emit_message_pins(shared, &chat, &change.messages, change.pinned).await;
+        }
+        tl::enums::Update::PinnedChannelMessages(change) => {
+            let chat = mapping::encode_peer(PeerKindTag::Channel, change.channel_id);
+            emit_message_pins(shared, &chat, &change.messages, change.pinned).await;
+        }
         // The outstanding QR token changed because another client asked for one. The host refreshes
         // by submitting `QrRefresh`, which always re-exports, so nothing is forwarded here.
         tl::enums::Update::LoginToken => debug!("telegram login token changed"),
         _ => {}
+    }
+}
+
+/// The connector id of a dialog peer, or `None` for the archive folder and community pseudo-peers.
+fn dialog_peer_id(peer: &tl::enums::DialogPeer) -> Option<String> {
+    match peer {
+        tl::enums::DialogPeer::Peer(dialog) => {
+            let (kind, bare_id) = mapping::tl_peer(&dialog.peer)?;
+            Some(mapping::encode_peer(kind, bare_id))
+        }
+        tl::enums::DialogPeer::Folder(_) | tl::enums::DialogPeer::Community(_) => None,
+    }
+}
+
+/// Reports one `MessagePinned` per message id of a pin update.
+async fn emit_message_pins(shared: &Shared, chat: &str, messages: &[i32], pinned: bool) {
+    for id in messages {
+        shared
+            .emit(ConnectorEvent::MessagePinned {
+                remote_chat_id: chat.to_string(),
+                remote_msg_id: id.to_string(),
+                pinned,
+            })
+            .await;
     }
 }
 

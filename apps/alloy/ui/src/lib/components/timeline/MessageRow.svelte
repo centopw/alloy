@@ -3,7 +3,7 @@
   import type { MediaSource, TimelineItemDto } from '$lib/generated';
   import { Avatar, QuickReactions, UserName } from '../common';
   import Icon from '$lib/icons/Icon.svelte';
-  import { Reply, Pencil, Trash2, Copy, Download, Check, CheckCheck, Users, Forward, Ellipsis } from '$lib/icons';
+  import { Reply, Pencil, Trash2, Copy, Download, Check, CheckCheck, Users, Forward, Ellipsis, Pin, PinOff } from '$lib/icons';
   import {
     canDeleteForEveryone,
     canEditItem,
@@ -130,6 +130,8 @@
   const canEdit = $derived(canEditItem(item, capabilities));
   const canDelete = $derived(canDeleteForEveryone(item, capabilities));
   const canAct = $derived(!!item.event_id && (kind === 'TextMessage' || kind === 'Media' || kind === 'Location'));
+  /** Pinning needs the network's support; unpinning a message that is pinned is always offered. */
+  const canPin = $derived(canAct && item.send_state.status === 'Sent' && (item.pinned || capabilities?.pin_messages === true));
   const canCopy = $derived(kind === 'TextMessage');
   /** A failed send can be retried when the engine says so; queued or sending rows can be cancelled. */
   const canRetry = $derived(item.send_state.status === 'Failed' && item.send_state.data.can_retry);
@@ -173,10 +175,8 @@
    */
   let toolbarLeft = $state<number | null>(null);
   let toolbarTop = $state<number | null>(null);
-  /** Compact = three reactions, reply and an overflow menu; derived on every show, never remembered. */
+  /** Compact = reply and an overflow menu only; derived on every show, never remembered. */
   let compact = $state(false);
-  /** Compact keeps the three most-used reactions; the picker chevron still reaches the rest. */
-  const COMPACT_REACTIONS = 3;
 
   $effect(() => {
     // A layout switch invalidates a measured position; the CSS fallback takes over again.
@@ -561,6 +561,14 @@
       });
     }
 
+    if (canPin) {
+      actions.push(
+        item.pinned
+          ? { id: 'unpin', label: t('message-row-unpin'), icon: PinOff, onselect: () => void timelineStore.setPinned(item, false) }
+          : { id: 'pin', label: t('message-row-pin'), icon: Pin, onselect: () => void timelineStore.setPinned(item, true) }
+      );
+    }
+
     if (canAct && item.event_id) {
       const eventId = item.event_id;
       actions.push({ id: 'select', label: t('message-row-select'), icon: Check, onselect: () => timelineStore.beginSelect(eventId) });
@@ -773,22 +781,20 @@
           <span class="bubble-time">{time}{@render readTicks()}</span>
           </div>
         </div>
+      {#if canAct && canReact}
+        <!-- Desktop: the quick reactions float over the message's top edge on hover or keyboard focus.
+             Touch devices get the same bar from the long-press menu (`menuOptions().reactions`). -->
+        <div class="quick-float" class:hidden={contextMenu.isOpen}>
+          <QuickReactions
+            emojis={prefs.quickReactions}
+            active={myReactions}
+            onpick={reactWith}
+            onmore={() => rowEl && openReactions(rowEl.getBoundingClientRect())}
+          />
+        </div>
+      {/if}
       {#if canAct}
         <div class="toolbar" class:hidden={contextMenu.isOpen} role="toolbar" aria-label={t('message-row-message-actions')}>
-          <!-- Reactions lead in both states. Compact narrows them to the three the user put first and
-               keeps the picker chevron, so the full emoji set is never more than one click away. -->
-          {#if canReact}
-            <span class="quick">
-              <QuickReactions
-                emojis={prefs.quickReactions}
-                limit={compact ? COMPACT_REACTIONS : undefined}
-                active={myReactions}
-                onpick={reactWith}
-                onmore={() => rowEl && openReactions(rowEl.getBoundingClientRect())}
-              />
-              <span class="tool-sep" aria-hidden="true"></span>
-            </span>
-          {/if}
           {#if canReply}
             <button type="button" aria-label={t('message-row-reply')} title={t('message-row-reply')} onclick={() => timelineStore.startReply(item)}>
               <Icon icon={Reply} size={16} />
@@ -1323,15 +1329,67 @@
   .toolbar.hidden {
     display: none;
   }
-  .tool-sep {
-    width: 1px;
-    height: 16px;
-    margin: 0 2px;
-    background: var(--alloy-color-border-subtle);
+  /* The quick reactions hang over the message's top edge, on the inner side of the bubble (the side
+     the text starts from), and reveal with the toolbar. Laid out while hidden, like the toolbar. */
+  .quick-float {
+    position: absolute;
+    bottom: calc(100% + var(--alloy-spacing-scale-1));
+    left: 0;
+    display: flex;
+    opacity: 0;
+    visibility: hidden;
+    translate: 0 4px;
+    transition:
+      opacity 80ms cubic-bezier(0.4, 0, 1, 1),
+      visibility 0s linear 80ms;
+    padding: 3px;
+    background: var(--alloy-glass-sheen), var(--alloy-glass-fill-strong);
+    -webkit-backdrop-filter: var(--alloy-glass-filter);
+    backdrop-filter: var(--alloy-glass-filter);
+    border: 1px solid var(--alloy-glass-rim);
+    border-radius: var(--alloy-radii-full);
+    box-shadow: var(--alloy-glass-shadow-soft), var(--alloy-glass-highlight);
+    z-index: 2;
   }
-  /* The group is only a wrapper for the compact rule: its children stay in the toolbar's flex row. */
-  .quick {
-    display: contents;
+  .row.own[data-layout='bubbles'] .quick-float {
+    left: auto;
+    right: 0;
+  }
+  .quick-float.hidden {
+    display: none;
+  }
+  @media (min-width: 900px) and (hover: hover) {
+    .row:hover .quick-float,
+    .row:focus-within .quick-float {
+      opacity: 1;
+      visibility: visible;
+      translate: 0 0;
+      transition:
+        opacity 120ms cubic-bezier(0.2, 0, 0, 1),
+        translate 120ms cubic-bezier(0.2, 0, 0, 1),
+        visibility 0s;
+    }
+  }
+  .row:focus-visible .quick-float {
+    opacity: 1;
+    visibility: visible;
+    translate: 0 0;
+  }
+  /* Touch: no hover to reveal it, and the long-press menu already offers the same bar. */
+  @media (pointer: coarse) {
+    .quick-float {
+      display: none;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .quick-float,
+    .row:hover .quick-float,
+    .row:focus-within .quick-float {
+      translate: none;
+      transition:
+        opacity 1ms linear,
+        visibility 0s;
+    }
   }
   .toolbar > button {
     display: inline-grid;

@@ -296,6 +296,7 @@ func (m *Messenger) handleE2EEContent(ctx context.Context, chatID string, chatJI
 			msg.ReplyToRemoteMsgID = replyTo
 		}
 		m.mu.Lock()
+		msg.Sender = m.profileLocked(int64(sender.UserInt()))
 		m.rememberMessageLocked(msg.RemoteMsgID, &msgMeta{
 			ThreadKey:   -1,
 			ChatID:      msg.RemoteChatID,
@@ -396,6 +397,7 @@ func (m *Messenger) emitE2EEMedia(chatID string, chatJID waTypes.JID, evt *event
 		msg.Body = &caption
 	}
 	m.mu.Lock()
+	msg.Sender = m.profileLocked(int64(senderJID.UserInt()))
 	m.rememberMessageLocked(msg.RemoteMsgID, &msgMeta{
 		ThreadKey:   -1,
 		ChatID:      chatID,

@@ -44,7 +44,7 @@ vi.mock('./subscription.js', () => ({
   },
 }));
 
-import { mergeTimelineReset, timelineStore, TIMELINE_CACHE_LIMIT } from './timeline.svelte';
+import { mergePinned, mergeTimelineReset, timelineStore, TIMELINE_CACHE_LIMIT } from './timeline.svelte';
 
 function item(id: string, ts: number, eventId: string | null = `$e${id}`): TimelineItemDto {
   return {
@@ -61,6 +61,7 @@ function item(id: string, ts: number, eventId: string | null = `$e${id}`): Timel
     read_by: [],
     edited: false,
     reactions: [],
+    pinned: false,
     transaction_id: null,
   } as unknown as TimelineItemDto;
 }
@@ -81,6 +82,7 @@ function divider(id: string): TimelineItemDto {
     read_by: [],
     edited: false,
     reactions: [],
+    pinned: false,
     transaction_id: null,
   } as unknown as TimelineItemDto;
 }
@@ -100,6 +102,28 @@ beforeEach(() => {
   timelineStore.items = [];
   timelineStore.roomId = null;
   timelineStore.pendingScroll = null;
+});
+
+describe('mergePinned', () => {
+  const pin = (id: string, ts: number) => ({ ...item(id, ts), pinned: true });
+
+  it('lists the fetched pins newest first and takes the loaded copy of a row when it has one', () => {
+    const fetched = [pin('a', 1), pin('b', 2)];
+    const loaded = [{ ...pin('b', 2), edited: true }, item('c', 3)];
+    const merged = mergePinned(fetched, loaded);
+    expect(merged.map((i) => i.internal_id)).toEqual(['b', 'a']);
+    expect(merged[0].edited).toBe(true);
+  });
+
+  it('adds a loaded row pinned since the fetch and drops one unpinned since', () => {
+    const fetched = [pin('a', 1)];
+    const loaded = [item('a', 1), pin('d', 4)];
+    expect(mergePinned(fetched, loaded).map((i) => i.internal_id)).toEqual(['d']);
+  });
+
+  it('ignores rows without an event id', () => {
+    expect(mergePinned([{ ...pin('x', 9), event_id: null }], [{ ...pin('y', 8), event_id: null }])).toEqual([]);
+  });
 });
 
 describe('mergeTimelineReset', () => {

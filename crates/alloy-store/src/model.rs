@@ -152,6 +152,9 @@ pub struct ChatRecord {
     pub unread_count: i64,
     pub mention_count: i64,
     pub is_pinned: bool,
+    /// Position among the account's pinned chats, `0` at the top; `None` when not pinned.
+    #[serde(default)]
+    pub pin_order: Option<i64>,
     pub is_archived: bool,
     pub is_muted: bool,
     pub muted_until: Option<i64>,
@@ -217,6 +220,9 @@ pub struct MessageRecord {
     pub media_id: Option<String>,
     pub send_state: Option<SendState>,
     pub extra: Option<serde_json::Value>,
+    /// Whether the message is pinned in its chat.
+    #[serde(default)]
+    pub is_pinned: bool,
 }
 
 /// Message fields for insert-or-update. Identity resolution order: `message_id`, then `txn_id`

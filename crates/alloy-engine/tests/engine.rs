@@ -6,7 +6,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use alloy_connector::fake::{FAKE_CHAT_DIRECT, FAKE_CODE, FAKE_USER_ID};
+use alloy_connector::Connector;
+use alloy_connector::fake::{
+    FAKE_CHAT_CHANNEL, FAKE_CHAT_DIRECT, FAKE_CHAT_GROUP, FAKE_CODE, FAKE_USER_ID,
+};
 use alloy_engine::factory::FakeConnectorFactory;
 use alloy_engine::{AppEngine, Engine, EngineContext};
 use alloy_protocol::{
@@ -641,4 +644,421 @@ async fn capability_gate_rejects_unsupported_commands() {
         .expect_err("typing is not supported on this connector");
     assert_eq!(error.code, "not_supported");
     assert_eq!(error.reason.as_deref(), Some("typing"));
+}
+
+#[tokio::test]
+async fn get_media_caches_the_whole_file_under_its_final_name() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let secrets: Arc<dyn SecretStore> = Arc::new(InMemorySecretStore::new());
+    let factory = Arc::new(FakeConnectorFactory::new());
+    let store = Store::open_in_memory(KEY).expect("open store");
+    let ctx = EngineContext::with_store(store.clone(), dir.path().to_path_buf(), secrets, factory);
+    let engine = AppEngine::new(ctx);
+    let account = login(&engine).await;
+    let media_id = store
+        .insert_media(alloy_store::NewMedia {
+            account_id: account.id.0.clone(),
+            remote_ref: "clip-1".to_string(),
+            mime: Some("video/mp4".to_string()),
+            size_bytes: None,
+            width: None,
+            height: None,
+            duration_ms: None,
+            file_name: None,
+        })
+        .await
+        .expect("insert media");
+
+    let get = || EngineCommand::GetMedia {
+        source: alloy_protocol::MediaSource {
+            media_id: media_id.clone(),
+        },
+        kind: "thumbnail".to_string(),
+        // The caller's type never renames what the network says the file is.
+        mime_type: Some("image/jpeg".to_string()),
+    };
+    // One media object is requested several times at once (an avatar at two sizes, a tile and
+    // its full view); every request must see the whole file.
+    let (first, second) = tokio::join!(engine.handle(get()), engine.handle(get()));
+    for response in [first, second] {
+        let EngineResponse::Media { path } = response.expect("get media") else {
+            panic!("unexpected response");
+        };
+        assert_eq!(
+            std::path::Path::new(&path),
+            dir.path().join("media").join(format!("{media_id}.mp4"))
+        );
+        assert_eq!(
+            std::fs::read(&path).expect("cached file"),
+            b"fake-media:clip-1:video/mp4"
+        );
+    }
+    // Only the finished file stays in the cache: no partial download is left behind.
+    let names: Vec<_> = std::fs::read_dir(dir.path().join("media"))
+        .expect("media dir")
+        .map(|entry| entry.expect("entry").file_name())
+        .collect();
+    assert_eq!(names, [std::ffi::OsString::from(format!("{media_id}.mp4"))]);
+}
+
+#[tokio::test]
+async fn room_members_come_from_the_network() {
+    let harness = Harness::new();
+    login(&harness.engine).await;
+    let room = chat_id_by_title(&harness.engine, "Analytical Engine").await;
+
+    let response = harness
+        .engine
+        .handle(EngineCommand::GetRoomMembers {
+            room_id: room.clone(),
+        })
+        .await
+        .expect("list members");
+    let EngineResponse::RoomMembers { members } = response else {
+        panic!("unexpected response: {response:?}")
+    };
+    let listed: Vec<(&str, Option<&str>, Option<&str>)> = members
+        .iter()
+        .map(|member| {
+            (
+                member.user_id.0.as_str(),
+                member.display_name.as_deref(),
+                member.role.as_deref(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        listed,
+        [
+            ("fake-user-charles", Some("Charles Babbage"), Some("owner")),
+            (FAKE_USER_ID, Some("Fake User"), None),
+        ]
+    );
+
+    // The answer is stored, so the timeline can name the senders it already listed.
+    let stored = harness
+        .engine
+        .context()
+        .store
+        .list_participants(&room.0)
+        .await
+        .expect("stored members");
+    assert_eq!(stored.len(), 2);
+}
+
+#[tokio::test]
+async fn a_group_sender_is_named_without_the_member_list() {
+    let harness = Harness::new();
+    login(&harness.engine).await;
+    let room = chat_id_by_title(&harness.engine, "Analytical Engine").await;
+    let mut events = harness.events();
+    let _subscription = subscribe_timeline(&harness.engine, &room).await;
+
+    // Ada is not among the members the network lists for this group, and the member list was
+    // never asked for: the profile delivered with her message is all there is.
+    let fake = harness.factory.last().expect("the running connector");
+    fake.inject_incoming(FAKE_CHAT_GROUP, "fake-user-ada", "late reply")
+        .await
+        .expect("inject a message");
+
+    let event = wait_for(&mut events, |event| match event {
+        EngineEvent::TimelineDiff { diff, .. } => has_incoming_message(diff, "late reply"),
+        _ => false,
+    })
+    .await;
+    let EngineEvent::TimelineDiff { diff, .. } = event else {
+        panic!("unexpected event")
+    };
+    let message = timeline_values(&diff)
+        .into_iter()
+        .find(|item| text_body(item) == Some("late reply"))
+        .expect("the message");
+    assert_eq!(message.sender_display_name.as_deref(), Some("Ada Lovelace"));
+
+    // Naming a sender does not make her a member.
+    let response = harness
+        .engine
+        .handle(EngineCommand::GetRoomMembers { room_id: room })
+        .await
+        .expect("list members");
+    let EngineResponse::RoomMembers { members } = response else {
+        panic!("unexpected response: {response:?}")
+    };
+    assert!(
+        members
+            .iter()
+            .all(|member| member.user_id.0 != "fake-user-ada")
+    );
+}
+
+#[tokio::test]
+async fn channel_post_is_authored_by_the_channel() {
+    let harness = Harness::new();
+    login(&harness.engine).await;
+    let room = chat_id_by_title(&harness.engine, "Alloy News").await;
+    let mut events = harness.events();
+    let _subscription = subscribe_timeline(&harness.engine, &room).await;
+
+    let fake = harness.factory.last().expect("the running connector");
+    // A broadcast post carries no user: the connector names the channel as its sender.
+    fake.inject_incoming(FAKE_CHAT_CHANNEL, FAKE_CHAT_CHANNEL, "release notes")
+        .await
+        .expect("inject a post");
+
+    let event = wait_for(&mut events, |event| match event {
+        EngineEvent::TimelineDiff { diff, .. } => has_incoming_message(diff, "release notes"),
+        _ => false,
+    })
+    .await;
+    let EngineEvent::TimelineDiff { diff, .. } = event else {
+        panic!("unexpected event")
+    };
+    let post = timeline_values(&diff)
+        .into_iter()
+        .find(|item| text_body(item) == Some("release notes"))
+        .expect("the post");
+    assert_eq!(post.sender_display_name.as_deref(), Some("Alloy News"));
+}
+
+/// The room list as the engine orders it now, by title.
+async fn room_titles(engine: &AppEngine) -> Vec<String> {
+    alloy_engine::projection::query_room_list(engine.context(), None)
+        .await
+        .expect("room list")
+        .into_iter()
+        .map(|summary| summary.name.unwrap_or_default())
+        .collect()
+}
+
+#[tokio::test]
+async fn pinning_a_chat_reaches_the_network_and_tops_the_list() {
+    let harness = Harness::new();
+    let account = login(&harness.engine).await;
+    let group = chat_id_by_title(&harness.engine, "Analytical Engine").await;
+    let direct = chat_id_by_title(&harness.engine, "Ada Lovelace").await;
+
+    // The direct chat is seeded pinned; the group is pinned by the user and goes to the top.
+    let response = harness
+        .engine
+        .handle(EngineCommand::SetRoomPinned {
+            room_id: group.clone(),
+            pinned: true,
+        })
+        .await
+        .expect("pin");
+    assert_eq!(response, EngineResponse::RoomFlagsUpdated);
+    assert_eq!(
+        room_titles(&harness.engine).await,
+        ["Analytical Engine", "Ada Lovelace", "Alloy News"]
+    );
+    let summaries = alloy_engine::projection::query_room_list(harness.engine.context(), None)
+        .await
+        .expect("room list");
+    assert_eq!(summaries[0].pin_order, Some(0));
+    assert_eq!(summaries[1].pin_order, Some(1));
+    assert_eq!(summaries[2].pin_order, None);
+
+    // The network was told: the fake's own list now has the group first.
+    let fake = harness.factory.last().expect("the running connector");
+    let page = fake.list_chats(None, 10).await.expect("chats");
+    let group_remote = page
+        .items
+        .iter()
+        .find(|chat| chat.title == "Analytical Engine")
+        .expect("the group");
+    assert!(group_remote.is_pinned);
+    assert_eq!(group_remote.pin_order, Some(0));
+
+    // The user drags the direct chat back above the group.
+    let response = harness
+        .engine
+        .handle(EngineCommand::ReorderPinnedRooms {
+            account_id: account.id.clone(),
+            room_ids: vec![direct.clone(), group.clone()],
+        })
+        .await
+        .expect("reorder");
+    assert_eq!(
+        response,
+        EngineResponse::PinnedRoomsReordered {
+            room_ids: vec![direct.clone(), group.clone()],
+        }
+    );
+    assert_eq!(
+        room_titles(&harness.engine).await,
+        ["Ada Lovelace", "Analytical Engine", "Alloy News"]
+    );
+    let page = fake.list_chats(None, 10).await.expect("chats");
+    let orders: Vec<(String, Option<u32>)> = page
+        .items
+        .iter()
+        .filter(|chat| chat.is_pinned)
+        .map(|chat| (chat.title.clone(), chat.pin_order))
+        .collect();
+    assert!(orders.contains(&("Ada Lovelace".to_string(), Some(0))));
+    assert!(orders.contains(&("Analytical Engine".to_string(), Some(1))));
+
+    // A stale list (one pinned chat missing) is refused and changes nothing.
+    let refused = harness
+        .engine
+        .handle(EngineCommand::ReorderPinnedRooms {
+            account_id: account.id.clone(),
+            room_ids: vec![group.clone()],
+        })
+        .await
+        .expect_err("a stale list");
+    assert_eq!(refused.code, "invalid_argument");
+    assert_eq!(
+        room_titles(&harness.engine).await,
+        ["Ada Lovelace", "Analytical Engine", "Alloy News"]
+    );
+
+    // Unpinning closes the gap and the group falls back into the activity order.
+    harness
+        .engine
+        .handle(EngineCommand::SetRoomPinned {
+            room_id: direct,
+            pinned: false,
+        })
+        .await
+        .expect("unpin");
+    let summaries = alloy_engine::projection::query_room_list(harness.engine.context(), None)
+        .await
+        .expect("room list");
+    assert_eq!(summaries[0].name.as_deref(), Some("Analytical Engine"));
+    assert_eq!(summaries[0].pin_order, Some(0));
+    assert!(!summaries[1].pinned);
+}
+
+#[tokio::test]
+async fn pins_made_in_the_official_app_follow_the_events() {
+    let harness = Harness::new();
+    login(&harness.engine).await;
+    let mut events = harness.events();
+    let _rooms = subscribe_room_list(&harness.engine).await;
+    wait_for(&mut events, |event| {
+        matches!(event, EngineEvent::RoomListDiff { diff, .. } if matches!(diff.as_ref(), VectorDiffDto::Reset { .. }))
+    })
+    .await;
+
+    // The network reorders: the group first, then the direct chat. Archived chats are outside the
+    // pinned block, so the archived channel is not used here.
+    let fake = harness.factory.last().expect("the running connector");
+    fake.reorder_pinned_chats(&[FAKE_CHAT_GROUP.to_string(), FAKE_CHAT_DIRECT.to_string()])
+        .await
+        .expect("reorder on the network");
+    wait_for(&mut events, |event| match event {
+        EngineEvent::RoomListDiff { diff, .. } => room_values(diff)
+            .first()
+            .is_some_and(|room| room.name.as_deref() == Some("Analytical Engine") && room.pinned),
+        _ => false,
+    })
+    .await;
+    assert_eq!(
+        room_titles(&harness.engine).await,
+        ["Analytical Engine", "Ada Lovelace", "Alloy News"]
+    );
+
+    // Unpinned on the network: the chat drops into the activity order, below the pinned direct chat.
+    fake.set_chat_pinned(FAKE_CHAT_GROUP, false)
+        .await
+        .expect("unpin on the network");
+    wait_for(&mut events, |event| match event {
+        EngineEvent::RoomListDiff { diff, .. } => room_values(diff)
+            .iter()
+            .any(|room| room.name.as_deref() == Some("Analytical Engine") && !room.pinned),
+        _ => false,
+    })
+    .await;
+    assert_eq!(
+        room_titles(&harness.engine).await,
+        ["Ada Lovelace", "Analytical Engine", "Alloy News"]
+    );
+}
+
+#[tokio::test]
+async fn pinned_messages_round_trip_and_show_in_the_bar() {
+    let harness = Harness::new();
+    login(&harness.engine).await;
+    let room = chat_id_by_title(&harness.engine, "Analytical Engine").await;
+    let mut events = harness.events();
+    let _subscription = subscribe_timeline(&harness.engine, &room).await;
+    let event = wait_for(&mut events, |event| {
+        matches!(event, EngineEvent::TimelineDiff { diff, .. } if matches!(diff.as_ref(), VectorDiffDto::Reset { .. }))
+    })
+    .await;
+    let EngineEvent::TimelineDiff { diff, .. } = event else {
+        panic!("unexpected event")
+    };
+    let items = timeline_values(&diff);
+    let target = items
+        .iter()
+        .find(|item| text_body(item) == Some("Works for me."))
+        .expect("a seeded message");
+    assert!(!target.pinned);
+    let event_id = target.event_id.clone().expect("a stored message");
+
+    let response = harness
+        .engine
+        .handle(EngineCommand::SetMessagePinned {
+            room_id: room.clone(),
+            event_id: event_id.clone(),
+            pinned: true,
+        })
+        .await
+        .expect("pin the message");
+    assert_eq!(response, EngineResponse::MessagePinSet { pinned: true });
+
+    // The timeline carries the flag and the bar lists the message.
+    wait_for(&mut events, |event| match event {
+        EngineEvent::TimelineDiff { diff, .. } => timeline_values(diff)
+            .iter()
+            .any(|item| item.event_id.as_ref() == Some(&event_id) && item.pinned),
+        _ => false,
+    })
+    .await;
+    let response = harness
+        .engine
+        .handle(EngineCommand::GetPinnedMessages {
+            room_id: room.clone(),
+        })
+        .await
+        .expect("list pinned");
+    let EngineResponse::PinnedMessages { items } = response else {
+        panic!("unexpected response: {response:?}")
+    };
+    assert_eq!(items.len(), 1);
+    assert_eq!(text_body(&items[0]), Some("Works for me."));
+
+    // The network was told, and its own unpin comes back through the event stream.
+    let fake = harness.factory.last().expect("the running connector");
+    let page = fake
+        .backfill(FAKE_CHAT_GROUP, None, 10)
+        .await
+        .expect("history");
+    let remote = page
+        .items
+        .iter()
+        .find(|message| message.body.as_deref() == Some("Works for me."))
+        .expect("the message on the network");
+    assert!(remote.pinned);
+    fake.set_message_pinned(FAKE_CHAT_GROUP, &remote.remote_msg_id, false)
+        .await
+        .expect("unpin on the network");
+    wait_for(&mut events, |event| match event {
+        EngineEvent::TimelineDiff { diff, .. } => timeline_values(diff)
+            .iter()
+            .any(|item| item.event_id.as_ref() == Some(&event_id) && !item.pinned),
+        _ => false,
+    })
+    .await;
+    let response = harness
+        .engine
+        .handle(EngineCommand::GetPinnedMessages { room_id: room })
+        .await
+        .expect("list pinned");
+    let EngineResponse::PinnedMessages { items } = response else {
+        panic!("unexpected response: {response:?}")
+    };
+    assert!(items.is_empty());
 }

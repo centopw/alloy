@@ -261,10 +261,18 @@ pub async fn query_room_list(
             .await
             .map_err(map_store)?,
     );
+    // One list for people and groups alike: pinned chats first in the order the user (or the
+    // network) gave them, then everything else by the time of its latest message.
     chats.sort_by(|left, right| {
         right
             .is_pinned
             .cmp(&left.is_pinned)
+            .then_with(|| match (left.is_pinned, left.pin_order, right.pin_order) {
+                (true, Some(a), Some(b)) => a.cmp(&b),
+                (true, Some(_), None) => std::cmp::Ordering::Less,
+                (true, None, Some(_)) => std::cmp::Ordering::Greater,
+                _ => std::cmp::Ordering::Equal,
+            })
             .then_with(|| {
                 right
                     .last_activity_at
@@ -329,6 +337,10 @@ async fn room_summary(
         },
         latest_event,
         pinned: chat.is_pinned,
+        pin_order: chat
+            .pin_order
+            .filter(|_| chat.is_pinned)
+            .and_then(|order| u32::try_from(order).ok()),
         archived: chat.is_archived,
         muted_until: muted_until(chat),
         marked_unread: chat.is_marked_unread,
@@ -483,7 +495,7 @@ pub async fn map_messages(
     if records.is_empty() {
         return Ok(Vec::new());
     }
-    let participants: HashMap<String, ParticipantRecord> = ctx
+    let mut participants: HashMap<String, ParticipantRecord> = ctx
         .store
         .list_participants(chat_id)
         .await
@@ -491,6 +503,19 @@ pub async fn map_messages(
         .into_iter()
         .map(|participant| (participant.remote_user_id.clone(), participant))
         .collect();
+    // A channel post has no user behind it: the connector names the chat itself as the sender,
+    // so the chat's own title and picture are the author's.
+    if let Some(chat) = ctx.store.get_chat(chat_id).await.map_err(map_store)? {
+        participants
+            .entry(chat.remote_chat_id.clone())
+            .or_insert(ParticipantRecord {
+                chat_id: chat.chat_id,
+                remote_user_id: chat.remote_chat_id,
+                display_name: chat.title,
+                avatar_media_id: chat.avatar_media_id,
+                role: None,
+            });
+    }
     let ids: Vec<String> = records
         .iter()
         .map(|record| record.message_id.clone())
@@ -601,6 +626,7 @@ async fn map_item(
         edited: record.edited_at.is_some(),
         reactions: summaries,
         transaction_id: record.txn_id.clone(),
+        pinned: record.is_pinned,
     })
 }
 
@@ -628,6 +654,7 @@ async fn reply_preview(
         edited: record.edited_at.is_some(),
         reactions: Vec::new(),
         transaction_id: record.txn_id.clone(),
+        pinned: record.is_pinned,
     })
 }
 
@@ -742,6 +769,7 @@ fn day_divider(timestamp_millis: i64) -> TimelineItemDto {
         edited: false,
         reactions: Vec::new(),
         transaction_id: None,
+        pinned: false,
     }
 }
 

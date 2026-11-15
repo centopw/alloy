@@ -15,19 +15,6 @@
       checked={prefs.roomListPreviews}
       onchange={(v) => prefs.set('roomListPreviews', v)}
     />
-    <SettingToggle
-      label={t('sidebar-prefs-group-chats-into-sections')}
-      description={t('sidebar-prefs-group-chats-into-sections-description')}
-      checked={prefs.roomListSections}
-      onchange={(v) => prefs.set('roomListSections', v)}
-    />
-    <SettingToggle
-      label={t('sidebar-prefs-show-direct-messages-as-a-separate-section')}
-      checked={prefs.roomListPeople}
-      disabled={!prefs.roomListSections}
-      disabledReason={t('sidebar-prefs-group-chats-required')}
-      onchange={(v) => prefs.set('roomListPeople', v)}
-    />
   </SettingGroup>
 </div>
 

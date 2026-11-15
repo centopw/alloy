@@ -111,6 +111,30 @@ export function mergeTimelineReset(
   return out;
 }
 
+/**
+ * The pinned messages of a room, newest first: what `GetPinnedMessages` returned, corrected by the
+ * loaded timeline rows. A loaded row is fresher than the fetched copy (edits, reactions), a loaded
+ * row pinned after the fetch joins the list, and one unpinned since leaves it.
+ */
+export function mergePinned(
+  fetched: readonly TimelineItemDto[],
+  items: readonly TimelineItemDto[]
+): TimelineItemDto[] {
+  const loaded = new Map<string, TimelineItemDto>();
+  for (const item of items) if (item.event_id) loaded.set(item.event_id, item);
+  const result = new Map<string, TimelineItemDto>();
+  for (const item of fetched) {
+    if (!item.event_id) continue;
+    const current = loaded.get(item.event_id);
+    if (current === undefined) result.set(item.event_id, item);
+    else if (current.pinned) result.set(item.event_id, current);
+  }
+  for (const item of items) {
+    if (item.event_id && item.pinned && !result.has(item.event_id)) result.set(item.event_id, item);
+  }
+  return [...result.values()].sort((a, b) => b.timestamp_millis - a.timestamp_millis);
+}
+
 /** The open room's timeline plus message-level actions (reply/edit/react/delete/retry). */
 class TimelineStore {
   roomId = $state<string | null>(null);
@@ -128,6 +152,10 @@ class TimelineStore {
   selectedIds = $state<string[]>([]);
   /** Messages waiting for the "Delete for everyone?" confirmation. */
   pendingDelete = $state<TimelineItemDto[] | null>(null);
+  /** What `GetPinnedMessages` returned for the open room; see `pinned` for the live view. */
+  fetchedPinned = $state<TimelineItemDto[]>([]);
+  /** The open room's pinned messages, newest first, kept in step with the loaded rows. */
+  pinned = $derived(mergePinned(this.fetchedPinned, this.items));
 
   /** Who has read each of your messages, by event id. */
   readers = $derived(readersByEvent(this.items));
@@ -165,6 +193,7 @@ class TimelineStore {
     void closing;
     this.roomId = roomId;
     this.error = null;
+    this.fetchedPinned = [];
     const cached = this.cache.get(roomId);
     if (cached) {
       // Touch the entry so it is the last to be evicted, and start from what was on screen.
@@ -246,7 +275,43 @@ class TimelineStore {
     this.selecting = false;
     this.selectedIds = [];
     this.pendingDelete = null;
+    this.fetchedPinned = [];
     if (id) await client.unsubscribe(id).catch(() => {});
+  }
+
+  /** Fetches the open room's pinned messages; a failure leaves the bar empty rather than raising a toast. */
+  async loadPinned() {
+    const roomId = this.roomId;
+    if (!roomId) return;
+    try {
+      const res = expect(
+        await client.invoke({ action: 'GetPinnedMessages', params: { room_id: roomId } }),
+        'PinnedMessages'
+      );
+      // The user may have switched rooms meanwhile.
+      if (this.roomId === roomId) this.fetchedPinned = res.payload.items;
+    } catch {
+      if (this.roomId === roomId) this.fetchedPinned = [];
+    }
+  }
+
+  /** Pins or unpins a message; the timeline diff carries the new flag, the fetched list follows it here. */
+  async setPinned(item: TimelineItemDto, pinned: boolean) {
+    const roomId = this.roomId;
+    const eventId = item.event_id;
+    if (!roomId || !eventId) return;
+    try {
+      await client.invoke({ action: 'SetMessagePinned', params: { room_id: roomId, event_id: eventId, pinned } });
+      if (this.roomId !== roomId) return;
+      // The engine's diff carries the flag too; setting the row here keeps the bar from lagging one frame behind.
+      const index = this.items.findIndex((i) => i.event_id === eventId);
+      if (index !== -1 && this.items[index].pinned !== pinned) this.items[index] = { ...this.items[index], pinned };
+      this.fetchedPinned = pinned
+        ? [{ ...item, pinned: true }, ...this.fetchedPinned.filter((p) => p.event_id !== eventId)]
+        : this.fetchedPinned.filter((p) => p.event_id !== eventId);
+    } catch (e) {
+      if (this.roomId === roomId) this.error = errorMessage(e);
+    }
   }
 
   /** The timeline reports its scroll offset, so reopening the room can put the reader back. */

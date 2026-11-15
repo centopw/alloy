@@ -172,6 +172,10 @@ async fn dispatch(
             let params = read_params::<ListChatsParams>(params)?;
             encode_result(connector.list_chats(params.cursor, params.limit).await?)
         }
+        "list_members" => {
+            let params = read_params::<ListMembersParams>(params)?;
+            encode_result(connector.list_members(&params.remote_chat_id).await?)
+        }
         "backfill" => {
             let params = read_params::<BackfillParams>(params)?;
             encode_result(
@@ -235,6 +239,27 @@ async fn dispatch(
                 .await?;
             Ok(Value::Null)
         }
+        "set_chat_pinned" => {
+            let params = read_params::<ChatPinnedParams>(params)?;
+            connector
+                .set_chat_pinned(&params.remote_chat_id, params.pinned)
+                .await?;
+            Ok(Value::Null)
+        }
+        "reorder_pinned_chats" => {
+            let params = read_params::<ReorderPinnedChatsParams>(params)?;
+            connector
+                .reorder_pinned_chats(&params.remote_chat_ids)
+                .await?;
+            Ok(Value::Null)
+        }
+        "set_message_pinned" => {
+            let params = read_params::<MessagePinnedParams>(params)?;
+            connector
+                .set_message_pinned(&params.remote_chat_id, &params.remote_msg_id, params.pinned)
+                .await?;
+            Ok(Value::Null)
+        }
         "fetch_media" => {
             let params = read_params::<FetchMediaParams>(params)?;
             let dest_path = PathBuf::from(&params.dest_path);
@@ -276,6 +301,11 @@ struct RestoreParams {
 struct ListChatsParams {
     cursor: Option<String>,
     limit: usize,
+}
+
+#[derive(Deserialize)]
+struct ListMembersParams {
+    remote_chat_id: String,
 }
 
 #[derive(Deserialize)]
@@ -322,6 +352,24 @@ struct MarkReadParams {
 struct TypingParams {
     remote_chat_id: String,
     typing: bool,
+}
+
+#[derive(Deserialize)]
+struct ChatPinnedParams {
+    remote_chat_id: String,
+    pinned: bool,
+}
+
+#[derive(Deserialize)]
+struct ReorderPinnedChatsParams {
+    remote_chat_ids: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct MessagePinnedParams {
+    remote_chat_id: String,
+    remote_msg_id: String,
+    pinned: bool,
 }
 
 #[derive(Deserialize)]

@@ -1,6 +1,8 @@
 //! Timeline commands: subscriptions, pagination, sends and message-level mutations.
 
-use alloy_protocol::{AccountId, EngineCommand, EngineResponse, EventId, ForwardFailure, RoomId};
+use alloy_protocol::{
+    AccountId, EngineCommand, EngineResponse, EventId, ForwardFailure, RoomId, TimelineItemContent,
+};
 use alloy_store::{MessageKind as StoreMessageKind, OutboxOp, SendState, StoreError};
 
 use crate::context::EngineContext;
@@ -72,6 +74,14 @@ impl GroupHandler for TimelineHandler {
                 event_id,
                 key,
             } => toggle_reaction(ctx, &room_id, &event_id, key).await,
+            EngineCommand::GetPinnedMessages { room_id } => {
+                get_pinned_messages(ctx, &room_id).await
+            }
+            EngineCommand::SetMessagePinned {
+                room_id,
+                event_id,
+                pinned,
+            } => set_message_pinned(ctx, &room_id, &event_id, pinned).await,
             EngineCommand::ForwardEvents {
                 room_id,
                 event_ids,
@@ -246,6 +256,79 @@ async fn toggle_reaction(
     )
     .await?;
     Ok(EngineResponse::ReactionToggled)
+}
+
+/// The pinned messages of a chat, newest first, in the timeline's own shape.
+async fn get_pinned_messages(
+    ctx: &EngineContext,
+    room_id: &RoomId,
+) -> Result<EngineResponse, EngineError> {
+    let chat = support::chat_record(ctx, room_id).await?;
+    let account = support::account_record(ctx, &AccountId(chat.account_id.clone())).await?;
+    let records = ctx
+        .store
+        .pinned_messages(&chat.chat_id)
+        .await
+        .map_err(map_store)?;
+    let items = projection::map_messages(ctx, &chat.chat_id, records, Some(&account))
+        .await?
+        .into_iter()
+        // The bar lists messages only; `map_messages` also interleaves day dividers.
+        .filter(|item| !matches!(item.content, TimelineItemContent::DayDivider { .. }))
+        .collect();
+    Ok(EngineResponse::PinnedMessages { items })
+}
+
+/// Pins or unpins a message. The store changes first so the bar answers at once; a network that
+/// pins messages is told too and a refusal rolls the store back. A network without message pins
+/// keeps the pin on this device only.
+async fn set_message_pinned(
+    ctx: &EngineContext,
+    room_id: &RoomId,
+    event_id: &EventId,
+    pinned: bool,
+) -> Result<EngineResponse, EngineError> {
+    let chat = support::chat_record(ctx, room_id).await?;
+    let message = support::message_in_chat(ctx, &chat.chat_id, event_id).await?;
+    if message.deleted_at.is_some() && pinned {
+        return Err(EngineError::invalid_argument(
+            "a deleted message cannot be pinned",
+        ));
+    }
+    if message.is_pinned == pinned {
+        return Ok(EngineResponse::MessagePinSet { pinned });
+    }
+    // Resolved before the store write: a local echo that never reached the network must fail
+    // without leaving a device-only pin behind.
+    let network_pins = ctx
+        .accounts
+        .get(&chat.account_id)
+        .await
+        .filter(|runtime| runtime.capabilities.pin_messages);
+    let remote_msg_id = match &network_pins {
+        Some(_) => Some(support::remote_id(&message)?),
+        None => None,
+    };
+    ctx.store
+        .set_message_pinned(&message.message_id, pinned)
+        .await
+        .map_err(map_store)?;
+    ctx.bus.timeline(&chat.chat_id);
+
+    if let (Some(runtime), Some(remote_msg_id)) = (network_pins, remote_msg_id)
+        && let Err(err) = runtime
+            .connector
+            .set_message_pinned(&chat.remote_chat_id, &remote_msg_id, pinned)
+            .await
+    {
+        ctx.store
+            .set_message_pinned(&message.message_id, !pinned)
+            .await
+            .map_err(map_store)?;
+        ctx.bus.timeline(&chat.chat_id);
+        return Err(crate::error::map_connector(err));
+    }
+    Ok(EngineResponse::MessagePinSet { pinned })
 }
 
 async fn forward_events(

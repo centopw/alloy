@@ -39,7 +39,8 @@ use crate::error::ConnectorError;
 use crate::events::{ConnectionState, ConnectorEvent};
 use crate::login::{CodeChannel, LoginFailure, LoginInput, LoginStep};
 use crate::types::{
-    ChatKind, MediaRef, MessageKind, Network, RemoteChat, RemoteMessage, RemoteUser, SessionBlob,
+    ChatKind, MediaRef, MessageKind, Network, RemoteChat, RemoteMember, RemoteMessage, RemoteUser,
+    SessionBlob,
 };
 
 /// The only login code the fake accepts.
@@ -59,6 +60,8 @@ pub const FAKE_CHAT_GROUP: &str = "fake-chat-group";
 pub const FAKE_CHAT_CHANNEL: &str = "fake-chat-channel";
 
 const MAX_REACTIONS_PER_USER: u8 = 3;
+/// The fake's pin limit, so the engine's handling of a refused list can be tested.
+pub const MAX_PINNED_CHATS: usize = 5;
 
 type ReactionKey = (String, String);
 type ReactionSet = BTreeSet<(String, String)>;
@@ -101,6 +104,7 @@ impl FakeConnector {
             remote_msg_id: format!("fake-msg-sent-{seq}"),
             txn_id: None,
             sender_remote_id: sender_remote_id.to_string(),
+            sender: fake_profile(sender_remote_id),
             is_own: false,
             sent_at,
             edited_at: None,
@@ -109,6 +113,7 @@ impl FakeConnector {
             formatted: None,
             reply_to_remote_msg_id: None,
             media: None,
+            pinned: false,
         };
 
         inner
@@ -179,6 +184,8 @@ impl Connector for FakeConnector {
             location: false,
             max_upload_bytes: Some(50 * 1024 * 1024),
             formatted_text: false,
+            pin_chats: true,
+            pin_messages: true,
         }
     }
 
@@ -305,6 +312,28 @@ impl Connector for FakeConnector {
         Ok(Page { items, next_cursor })
     }
 
+    async fn list_members(
+        &self,
+        remote_chat_id: &str,
+    ) -> Result<Vec<RemoteMember>, ConnectorError> {
+        let inner = self.inner.lock().await;
+        let me = logged_in_user(&inner)?.clone();
+        inner.chat_index(remote_chat_id)?;
+        if remote_chat_id != FAKE_CHAT_GROUP {
+            return Ok(Vec::new());
+        }
+        Ok(vec![
+            RemoteMember {
+                user: fake_profile("fake-user-charles").expect("a seeded profile"),
+                role: Some("owner".to_string()),
+            },
+            RemoteMember {
+                user: me,
+                role: None,
+            },
+        ])
+    }
+
     async fn backfill(
         &self,
         remote_chat_id: &str,
@@ -412,6 +441,7 @@ impl Connector for FakeConnector {
             remote_msg_id: remote_msg_id.clone(),
             txn_id: Some(message.txn_id.clone()),
             sender_remote_id,
+            sender: None,
             is_own: true,
             sent_at,
             edited_at: None,
@@ -420,6 +450,7 @@ impl Connector for FakeConnector {
             formatted: message.formatted,
             reply_to_remote_msg_id: message.reply_to,
             media,
+            pinned: false,
         };
         chat_messages.push(echo.clone());
         inner.chats[chat_index].last_activity_at = sent_at;
@@ -649,6 +680,121 @@ impl Connector for FakeConnector {
         Ok(())
     }
 
+    async fn set_chat_pinned(
+        &self,
+        remote_chat_id: &str,
+        pinned: bool,
+    ) -> Result<(), ConnectorError> {
+        let mut inner = self.inner.lock().await;
+        logged_in_user(&inner)?;
+        let index = inner.chat_index(remote_chat_id)?;
+        if inner.chats[index].is_pinned == pinned {
+            return Ok(());
+        }
+        if pinned {
+            // The newly pinned chat goes to the top; the others move down one.
+            for chat in inner.chats.iter_mut().filter(|chat| chat.is_pinned) {
+                chat.pin_order = chat.pin_order.map(|order| order + 1);
+            }
+            inner.chats[index].is_pinned = true;
+            inner.chats[index].pin_order = Some(0);
+        } else {
+            let gone = inner.chats[index].pin_order;
+            inner.chats[index].is_pinned = false;
+            inner.chats[index].pin_order = None;
+            if let Some(gone) = gone {
+                for chat in inner.chats.iter_mut().filter(|chat| chat.is_pinned) {
+                    chat.pin_order = chat
+                        .pin_order
+                        .map(|order| if order > gone { order - 1 } else { order });
+                }
+            }
+        }
+        let events = inner.events.clone();
+        drop(inner);
+        if let Some(events) = events {
+            emit(
+                &events,
+                ConnectorEvent::ChatPinned {
+                    remote_chat_id: remote_chat_id.to_string(),
+                    pinned,
+                },
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
+    async fn reorder_pinned_chats(&self, remote_chat_ids: &[String]) -> Result<(), ConnectorError> {
+        let mut inner = self.inner.lock().await;
+        logged_in_user(&inner)?;
+        for id in remote_chat_ids {
+            inner.chat_index(id)?;
+        }
+        if remote_chat_ids.len() > MAX_PINNED_CHATS {
+            return Err(ConnectorError::InvalidInput {
+                message: format!("at most {MAX_PINNED_CHATS} chats can be pinned"),
+            });
+        }
+        for chat in &mut inner.chats {
+            let position = remote_chat_ids
+                .iter()
+                .position(|id| *id == chat.remote_chat_id);
+            chat.is_pinned = position.is_some();
+            chat.pin_order = position.map(|value| value as u32);
+        }
+        let events = inner.events.clone();
+        drop(inner);
+        if let Some(events) = events {
+            emit(
+                &events,
+                ConnectorEvent::PinnedChatsReordered {
+                    remote_chat_ids: remote_chat_ids.to_vec(),
+                },
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
+    async fn set_message_pinned(
+        &self,
+        remote_chat_id: &str,
+        remote_msg_id: &str,
+        pinned: bool,
+    ) -> Result<(), ConnectorError> {
+        let mut inner = self.inner.lock().await;
+        logged_in_user(&inner)?;
+        inner.require_message(remote_chat_id, remote_msg_id)?;
+        let message = inner
+            .messages
+            .get_mut(remote_chat_id)
+            .and_then(|messages| {
+                messages
+                    .iter_mut()
+                    .find(|message| message.remote_msg_id == remote_msg_id)
+            })
+            .expect("require_message checked the message exists");
+        if message.pinned == pinned {
+            return Ok(());
+        }
+        message.pinned = pinned;
+        let events = inner.events.clone();
+        drop(inner);
+        if let Some(events) = events {
+            emit(
+                &events,
+                ConnectorEvent::MessagePinned {
+                    remote_chat_id: remote_chat_id.to_string(),
+                    remote_msg_id: remote_msg_id.to_string(),
+                    pinned,
+                },
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
     async fn fetch_media(&self, media: &MediaRef, dest_path: &Path) -> Result<u64, ConnectorError> {
         {
             let inner = self.inner.lock().await;
@@ -702,6 +848,7 @@ impl Inner {
                 last_activity_at: 1_700_000_300_000,
                 unread_count: 2,
                 is_pinned: true,
+                pin_order: Some(0),
                 is_archived: false,
                 is_muted: false,
             },
@@ -713,6 +860,7 @@ impl Inner {
                 last_activity_at: 1_700_000_200_000,
                 unread_count: 0,
                 is_pinned: false,
+                pin_order: None,
                 is_archived: false,
                 is_muted: true,
             },
@@ -724,6 +872,7 @@ impl Inner {
                 last_activity_at: 1_700_000_100_000,
                 unread_count: 5,
                 is_pinned: false,
+                pin_order: None,
                 is_archived: true,
                 is_muted: false,
             },
@@ -809,6 +958,21 @@ fn fake_user() -> RemoteUser {
     }
 }
 
+/// The profile the fake network delivers with a message from one of its seeded people. Any
+/// other sender arrives as a bare id, as a network that sends no profile would deliver it.
+fn fake_profile(remote_user_id: &str) -> Option<RemoteUser> {
+    let display_name = match remote_user_id {
+        "fake-user-ada" => "Ada Lovelace",
+        "fake-user-charles" => "Charles Babbage",
+        _ => return None,
+    };
+    Some(RemoteUser {
+        remote_user_id: remote_user_id.to_string(),
+        display_name: display_name.to_string(),
+        avatar: None,
+    })
+}
+
 fn logged_in_user(inner: &Inner) -> Result<&RemoteUser, ConnectorError> {
     match &inner.login {
         LoginState::LoggedIn { user } => Ok(user),
@@ -861,6 +1025,7 @@ fn seed_messages(
             remote_msg_id: format!("fake-msg-{slug}-{}", index + 1),
             txn_id: None,
             sender_remote_id: sender_remote_id.to_string(),
+            sender: fake_profile(sender_remote_id),
             is_own: false,
             sent_at: 1_700_000_000_000 + (index as i64) * 60_000,
             edited_at: None,
@@ -869,6 +1034,7 @@ fn seed_messages(
             formatted: None,
             reply_to_remote_msg_id: None,
             media: None,
+            pinned: false,
         })
         .collect()
 }

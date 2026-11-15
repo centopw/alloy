@@ -45,4 +45,13 @@ pub struct Capabilities {
     pub max_upload_bytes: Option<u64>,
     /// The network renders formatted text (markup in [`crate::RemoteMessage::formatted`]).
     pub formatted_text: bool,
+    /// The network keeps its own pinned-chat list and order
+    /// ([`crate::Connector::set_chat_pinned`], [`crate::Connector::reorder_pinned_chats`]).
+    /// `false` means the host pins chats locally only.
+    #[serde(default)]
+    pub pin_chats: bool,
+    /// The network pins messages inside a chat ([`crate::Connector::set_message_pinned`]).
+    /// `false` means the host pins messages locally only.
+    #[serde(default)]
+    pub pin_messages: bool,
 }

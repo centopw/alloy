@@ -49,6 +49,7 @@ function row(
     read_by: [],
     edited: false,
     reactions: [],
+    pinned: false,
     transaction_id: null,
     send_state: { status: 'Sent', data: { event_id: `$${id}` } },
     content,

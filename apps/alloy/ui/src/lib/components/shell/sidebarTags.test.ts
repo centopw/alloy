@@ -59,6 +59,12 @@ describe('room-list tag grouping', () => {
     expect(grouped).not.toContain('aria-label="People"');
   });
 
+  it('shows one list for every account, with the network as an icon on the avatar', () => {
+    expect(sidebar).not.toContain('accountGroups');
+    expect(sidebar).not.toContain('networkBadge');
+    expect(sidebar).toContain('<NetworkIcon network={r.network} label={networkName(r.network)} />');
+  });
+
   it('lets a chip carry hover text the label alone cannot', () => {
     expect(chip).toContain('title?: string;');
     expect(chip).toContain('{title}');

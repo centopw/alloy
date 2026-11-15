@@ -140,11 +140,13 @@ pub fn run() {
             // The Telegram application pair is the user's own, sealed in this same secret store;
             // the factory reads it on every `ListNetworks`/`BeginLogin`, so a pair entered while
             // the app runs takes effect without a restart (ADR 0016).
-            let factory: Arc<dyn ConnectorFactory> = Arc::new(DefaultConnectorFactory::new(
+            let mut factory = DefaultConnectorFactory::new(
                 secret_store.clone(),
                 messenger_sidecar(),
                 data_dir.clone(),
-            ));
+            );
+            factory.app_version = Some(app.package_info().version.to_string());
+            let factory: Arc<dyn ConnectorFactory> = Arc::new(factory);
             // The database is opened before the window is shown so the first `ListChats` is served
             // from the stored projection instead of racing the migrations.
             let ctx = tauri::async_runtime::block_on(EngineContext::open(

@@ -211,6 +211,8 @@ pub fn capabilities_dto(capabilities: &ConnectorCapabilities) -> CapabilitiesDto
         location: capabilities.location,
         max_upload_bytes: capabilities.max_upload_bytes,
         formatted_text: capabilities.formatted_text,
+        pin_chats: capabilities.pin_chats,
+        pin_messages: capabilities.pin_messages,
     }
 }
 
@@ -235,6 +237,8 @@ pub fn no_capabilities() -> CapabilitiesDto {
         location: false,
         max_upload_bytes: None,
         formatted_text: false,
+        pin_chats: false,
+        pin_messages: false,
     }
 }
 

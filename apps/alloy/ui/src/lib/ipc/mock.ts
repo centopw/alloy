@@ -971,10 +971,53 @@ export class MockTransport implements Transport {
         });
         return { type: 'RoomFlagsUpdated' };
 
-      case 'SetRoomPinned':
-        this.roomById(command.params.room_id);
-        this.touchRoom(command.params.room_id, { pinned: command.params.pinned });
+      case 'SetRoomPinned': {
+        const room = this.roomById(command.params.room_id);
+        // Mirrors the engine: a new pin goes to 0 and pushes the account's other pins down;
+        // unpinning clears the order and closes the gap it leaves. Renumber the block in one pass.
+        const others = this.rooms
+          .filter((r) => r.account_id === room.account_id && r.pinned && r.id !== room.id)
+          .sort((a, b) => (a.pin_order ?? Number.MAX_SAFE_INTEGER) - (b.pin_order ?? Number.MAX_SAFE_INTEGER));
+        if (command.params.pinned) {
+          this.touchRoom(room.id, { pinned: true, pin_order: 0 });
+          for (const [index, other] of others.entries()) {
+            this.touchRoom(other.id, { pin_order: index + 1 });
+          }
+        } else {
+          this.touchRoom(room.id, { pinned: false, pin_order: null });
+          for (const [index, other] of others.entries()) {
+            this.touchRoom(other.id, { pin_order: index });
+          }
+        }
         return { type: 'RoomFlagsUpdated' };
+      }
+
+      case 'ReorderPinnedRooms': {
+        const accountId = command.params.account_id;
+        this.accountById(accountId);
+        const ids = command.params.room_ids;
+        const block = this.rooms.filter((r) => r.account_id === accountId && r.pinned).map((r) => r.id);
+        const permutation = ids.length === block.length && block.every((id) => ids.includes(id));
+        if (!permutation) throw invalidArgument('room_ids must list the pinned chats of the account exactly once');
+        for (const [index, id] of ids.entries()) this.touchRoom(id, { pin_order: index });
+        return { type: 'PinnedRoomsReordered', payload: { room_ids: [...ids] } };
+      }
+
+      case 'GetPinnedMessages': {
+        const items = this.items(command.params.room_id).filter((item) => item.pinned && item.event_id !== null);
+        return { type: 'PinnedMessages', payload: { items } };
+      }
+
+      case 'SetMessagePinned': {
+        const roomId = command.params.room_id;
+        const items = this.items(roomId);
+        const index = items.findIndex((item) => item.event_id === command.params.event_id);
+        if (index === -1) throw notFound(`no message ${command.params.event_id}`);
+        const updated: TimelineItemDto = { ...items[index], pinned: command.params.pinned };
+        items[index] = updated;
+        this.emitTimelineDiff(roomId, { type: 'Set', content: { index, value: updated } });
+        return { type: 'MessagePinSet', payload: { pinned: command.params.pinned } };
+      }
 
       case 'SetRoomArchived':
         this.roomById(command.params.room_id);
@@ -1128,6 +1171,7 @@ export class MockTransport implements Transport {
           read_by: [],
           edited: false,
           reactions: [],
+          pinned: false,
           transaction_id: txnId,
         };
         this.queueOutgoing(roomId, item, txnId);
@@ -1229,6 +1273,7 @@ export class MockTransport implements Transport {
               read_by: [],
               edited: false,
               reactions: [],
+              pinned: false,
               transaction_id: txnId,
             };
             this.queueOutgoing(target, item, txnId);
@@ -1346,6 +1391,7 @@ export class MockTransport implements Transport {
           read_by: [],
           edited: false,
           reactions: [],
+          pinned: false,
           transaction_id: txnId,
         };
         this.queueOutgoing(roomId, item, txnId, DEMO_UPLOAD_BYTES);
@@ -1386,6 +1432,7 @@ export class MockTransport implements Transport {
           read_by: [],
           edited: false,
           reactions: [],
+          pinned: false,
           transaction_id: txnId,
         };
         this.queueOutgoing(roomId, item, txnId, dataUrl.length);

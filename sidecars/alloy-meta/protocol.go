@@ -34,6 +34,8 @@ type Capabilities struct {
 	Location            bool    `json:"location"`
 	MaxUploadBytes      *uint64 `json:"max_upload_bytes"`
 	FormattedText       bool    `json:"formatted_text"`
+	PinChats            bool    `json:"pin_chats"`
+	PinMessages         bool    `json:"pin_messages"`
 }
 
 // MessengerCapabilities is the fixed capability set this sidecar promises. Changing a value
@@ -55,6 +57,10 @@ func MessengerCapabilities() Capabilities {
 		Location:            false,
 		MaxUploadBytes:      new(uint64(26214400)),
 		FormattedText:       false,
+		// messagix exposes no pin API, so the sidecar keeps the pinned list on this device
+		// (see chats.go); message pins have no such fallback.
+		PinChats:    true,
+		PinMessages: false,
 	}
 }
 
@@ -190,6 +196,7 @@ type RemoteChat struct {
 	LastActivityAt int64     `json:"last_activity_at"`
 	UnreadCount    uint32    `json:"unread_count"`
 	IsPinned       bool      `json:"is_pinned"`
+	PinOrder       *uint32   `json:"pin_order"`
 	IsArchived     bool      `json:"is_archived"`
 	IsMuted        bool      `json:"is_muted"`
 }
@@ -201,20 +208,29 @@ type RemoteUser struct {
 	Avatar       *MediaRef `json:"avatar"`
 }
 
+// RemoteMember mirrors alloy_connector::RemoteMember. Role is "admin" or absent: Messenger has
+// no owner role. An empty display name means the sidecar has not seen the person's contact row.
+type RemoteMember struct {
+	User RemoteUser `json:"user"`
+	Role *string    `json:"role"`
+}
+
 // RemoteMessage mirrors alloy_connector::RemoteMessage.
 type RemoteMessage struct {
-	RemoteChatID       string    `json:"remote_chat_id"`
-	RemoteMsgID        string    `json:"remote_msg_id"`
-	TxnID              *string   `json:"txn_id"`
-	SenderRemoteID     string    `json:"sender_remote_id"`
-	IsOwn              bool      `json:"is_own"`
-	SentAt             int64     `json:"sent_at"`
-	EditedAt           *int64    `json:"edited_at"`
-	Kind               string    `json:"kind"`
-	Body               *string   `json:"body"`
-	Formatted          *string   `json:"formatted"`
-	ReplyToRemoteMsgID *string   `json:"reply_to_remote_msg_id"`
-	Media              *MediaRef `json:"media"`
+	RemoteChatID       string      `json:"remote_chat_id"`
+	RemoteMsgID        string      `json:"remote_msg_id"`
+	TxnID              *string     `json:"txn_id"`
+	SenderRemoteID     string      `json:"sender_remote_id"`
+	Sender             *RemoteUser `json:"sender"`
+	IsOwn              bool        `json:"is_own"`
+	SentAt             int64       `json:"sent_at"`
+	EditedAt           *int64      `json:"edited_at"`
+	Kind               string      `json:"kind"`
+	Body               *string     `json:"body"`
+	Formatted          *string     `json:"formatted"`
+	ReplyToRemoteMsgID *string     `json:"reply_to_remote_msg_id"`
+	Media              *MediaRef   `json:"media"`
+	Pinned             bool        `json:"pinned"`
 }
 
 // ChatUpsertedEvent is ConnectorEvent::ChatUpserted.
@@ -235,6 +251,31 @@ type ChatRemovedEvent struct {
 
 func NewChatRemovedEvent(chatID string) ChatRemovedEvent {
 	return ChatRemovedEvent{Type: "chat_removed", RemoteChatID: chatID}
+}
+
+// ChatPinnedEvent is ConnectorEvent::ChatPinned.
+type ChatPinnedEvent struct {
+	Type         string `json:"type"`
+	RemoteChatID string `json:"remote_chat_id"`
+	Pinned       bool   `json:"pinned"`
+}
+
+func NewChatPinnedEvent(chatID string, pinned bool) ChatPinnedEvent {
+	return ChatPinnedEvent{Type: "chat_pinned", RemoteChatID: chatID, Pinned: pinned}
+}
+
+// PinnedChatsReorderedEvent is ConnectorEvent::PinnedChatsReordered: the full pinned list, top
+// first. The slice is never nil so the host reads an array, not null.
+type PinnedChatsReorderedEvent struct {
+	Type          string   `json:"type"`
+	RemoteChatIDs []string `json:"remote_chat_ids"`
+}
+
+func NewPinnedChatsReorderedEvent(ids []string) PinnedChatsReorderedEvent {
+	if ids == nil {
+		ids = []string{}
+	}
+	return PinnedChatsReorderedEvent{Type: "pinned_chats_reordered", RemoteChatIDs: ids}
 }
 
 // MessageEvent is ConnectorEvent::Message.
@@ -494,6 +535,10 @@ type ListChatsParams struct {
 	Limit  uint64  `json:"limit"`
 }
 
+type ListMembersParams struct {
+	RemoteChatID string `json:"remote_chat_id"`
+}
+
 type BackfillParams struct {
 	RemoteChatID string  `json:"remote_chat_id"`
 	Before       *string `json:"before"`
@@ -531,6 +576,21 @@ type MarkReadParams struct {
 type TypingParams struct {
 	RemoteChatID string `json:"remote_chat_id"`
 	Typing       bool   `json:"typing"`
+}
+
+type SetChatPinnedParams struct {
+	RemoteChatID string `json:"remote_chat_id"`
+	Pinned       bool   `json:"pinned"`
+}
+
+type ReorderPinnedChatsParams struct {
+	RemoteChatIDs []string `json:"remote_chat_ids"`
+}
+
+type SetMessagePinnedParams struct {
+	RemoteChatID string `json:"remote_chat_id"`
+	RemoteMsgID  string `json:"remote_msg_id"`
+	Pinned       bool   `json:"pinned"`
 }
 
 type FetchMediaParams struct {

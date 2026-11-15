@@ -382,6 +382,53 @@ impl Store {
         .await
     }
 
+    /// Pins or unpins a message in its chat. Idempotent; a no-op write still returns the row.
+    pub async fn set_message_pinned(
+        &self,
+        message_id: &str,
+        pinned: bool,
+    ) -> Result<MessageRecord, StoreError> {
+        let message_id = message_id.to_owned();
+        self.with_conn(move |conn| {
+            let tx = conn.transaction()?;
+            let updated = tx.execute(
+                "UPDATE messages SET is_pinned = ?2 WHERE message_id = ?1",
+                rusqlite::params![&message_id, pinned],
+            )?;
+            if updated == 0 {
+                return Err(StoreError::NotFound("message"));
+            }
+            let record = rows::message_by_id(&tx, &message_id)?;
+            let account_id = rows::account_for_chat(&tx, &record.chat_id)?;
+            events::append(
+                &tx,
+                &account_id,
+                Some(record.chat_id.as_str()),
+                "message.updated",
+                serde_json::to_value(&record)?,
+                now_ms(),
+            )?;
+            tx.commit()?;
+            Ok(record)
+        })
+        .await
+    }
+
+    /// The pinned messages of one chat, newest first. Deleted messages are not listed.
+    pub async fn pinned_messages(&self, chat_id: &str) -> Result<Vec<MessageRecord>, StoreError> {
+        let chat_id = chat_id.to_owned();
+        self.with_conn(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT * FROM messages
+                 WHERE chat_id = ?1 AND is_pinned = 1 AND deleted_at IS NULL
+                 ORDER BY sent_at DESC, message_id DESC",
+            )?;
+            let rows = stmt.query_map([&chat_id], rows::message)?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+        .await
+    }
+
     /// Hard delete a message that never reached the network (CancelSend). Reactions go with it
     /// through the foreign key; the row is gone rather than tombstoned, so nothing can resolve it
     /// by `message_id`, `txn_id` or `remote_msg_id` afterwards.

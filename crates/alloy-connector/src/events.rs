@@ -50,6 +50,21 @@ pub enum ConnectorEvent {
         remote_chat_id: String,
         remote_msg_id: String,
     },
+    /// A chat was pinned or unpinned on the network. A newly pinned chat goes to the top of the
+    /// pinned list, as every network does it; the order of the others is unchanged.
+    ChatPinned {
+        remote_chat_id: String,
+        pinned: bool,
+    },
+    /// The network reported the full pinned list, top to bottom. Every chat named is pinned in
+    /// that order; a chat the host had pinned on this network and is not named here is unpinned.
+    PinnedChatsReordered { remote_chat_ids: Vec<String> },
+    /// A message was pinned or unpinned in its chat.
+    MessagePinned {
+        remote_chat_id: String,
+        remote_msg_id: String,
+        pinned: bool,
+    },
     /// A participant added or removed a reaction.
     Reaction {
         remote_chat_id: String,

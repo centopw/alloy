@@ -261,8 +261,9 @@ describe('room list stream', () => {
 
     expectResponse(await client.setRoomPinned(DEMO_ROOM.telegramPriya, true), 'RoomFlagsUpdated');
     expect(rowOf(DEMO_ROOM.telegramPriya).pinned).toBe(true);
-    expect(rows[0].id).toBe(DEMO_ROOM.telegramDev);
-    expect(rows[1].id).toBe(DEMO_ROOM.telegramPriya);
+    // A new pin goes to the top of the account's pinned block, as in the engine.
+    expect(rows[0].id).toBe(DEMO_ROOM.telegramPriya);
+    expect(rows[1].id).toBe(DEMO_ROOM.telegramDev);
 
     expectResponse(await client.setRoomArchived(DEMO_ROOM.telegramJonas, true), 'RoomFlagsUpdated');
     expect(rowOf(DEMO_ROOM.telegramJonas).archived).toBe(true);

@@ -30,6 +30,7 @@ function media(id: string, at: number, extra: Partial<TimelineItemDto> = {}): Ti
     read_by: [],
     edited: false,
     reactions: [],
+    pinned: false,
     transaction_id: null,
   };
   return Object.assign(item, extra);

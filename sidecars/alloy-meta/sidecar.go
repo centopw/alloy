@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -62,6 +63,12 @@ type threadInfo struct {
 	MuteExpireMs   int64
 }
 
+// contactInfo is the name and profile picture URL of one person.
+type contactInfo struct {
+	Name    string
+	Picture string
+}
+
 // Messenger is the connector instance. The host drives it from many goroutines, so every
 // mutable field below is guarded by mu.
 type Messenger struct {
@@ -83,11 +90,20 @@ type Messenger struct {
 	loggedOut  bool
 	online     bool
 
-	threads          map[int64]*threadInfo
+	threads map[int64]*threadInfo
+	// contacts holds what contact rows say about people: one-to-one threads carry no name or
+	// picture of their own, so both come from the other person's contact row.
+	contacts map[int64]contactInfo
+	// members holds who is in each group thread, by thread key then contact id; the value says
+	// whether that person is an admin.
+	members          map[int64]map[int64]bool
 	e2eeThreads      map[string]*threadInfo
 	threadsExhausted bool
 	messages         map[string]*msgMeta
 	txns             map[string]string
+	// pinned is the ordered pinned-chat list, top first, by remote chat id. messagix exposes no
+	// pin API, so the list lives on this device: see chats.go and pins.json in dataDir.
+	pinned []string
 
 	pendingLogin bool
 	lite         *liteLogin
@@ -116,6 +132,8 @@ func newMessenger(log zerolog.Logger, out *writer, cfg settings) *Messenger {
 		dataDir:     dataDir,
 		settings:    cfg,
 		threads:     make(map[int64]*threadInfo),
+		contacts:    make(map[int64]contactInfo),
+		members:     make(map[int64]map[int64]bool),
 		e2eeThreads: make(map[string]*threadInfo),
 		messages:    make(map[string]*msgMeta),
 		txns:        make(map[string]string),
@@ -150,6 +168,8 @@ func (m *Messenger) handle(method string, params json.RawMessage) (any, *WireErr
 		return nil, m.stop()
 	case "list_chats":
 		return m.listChats(ctx, params)
+	case "list_members":
+		return m.listMembers(ctx, params)
 	case "backfill":
 		return m.backfill(ctx, params)
 	case "send":
@@ -166,6 +186,13 @@ func (m *Messenger) handle(method string, params json.RawMessage) (any, *WireErr
 		return m.markRead(ctx, params)
 	case "set_typing":
 		return m.setTyping(ctx, params)
+	case "set_chat_pinned":
+		return m.setChatPinned(params)
+	case "reorder_pinned_chats":
+		return m.reorderPinnedChats(params)
+	case "set_message_pinned":
+		// Messenger has no message-pin API the sidecar can reach; the host pins locally.
+		return nil, errNotSupported("pin_messages")
 	case "fetch_media":
 		return m.fetchMedia(ctx, params)
 	case "logout":
@@ -207,6 +234,7 @@ func (m *Messenger) loadInboxLocked(ctx context.Context) *WireError {
 	m.display = user.GetName()
 	m.initial = initial
 	m.applyThreadTableLocked(initial)
+	m.loadPinsLocked()
 	return nil
 }
 
@@ -275,6 +303,9 @@ func (m *Messenger) start(ctx context.Context) *WireError {
 		m.mu.Unlock()
 		return err
 	}
+	// A fresh login arrives here with the inbox already loaded, so the pinned list is read
+	// again: it is this device's own file and re-reading it is harmless after a restore.
+	m.loadPinsLocked()
 	initial := m.initial
 	m.initial = nil
 	cli := m.cli
@@ -431,12 +462,18 @@ func (m *Messenger) logout(ctx context.Context) {
 	m.loggedOut = true
 	m.messages = make(map[string]*msgMeta)
 	m.threads = make(map[int64]*threadInfo)
+	m.contacts = make(map[int64]contactInfo)
+	m.members = make(map[int64]map[int64]bool)
 	m.e2eeThreads = make(map[string]*threadInfo)
+	m.pinned = nil
 	m.mu.Unlock()
 	if user != "" {
 		if err := os.RemoveAll(filepath.Join(m.dataDir, user)); err != nil {
 			m.log.Warn().Err(err).Msg("Failed to remove the E2EE store")
 		}
+	}
+	if err := os.Remove(m.pinsPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
+		m.log.Warn().Err(err).Msg("Failed to remove the pinned-chat list")
 	}
 }
 
@@ -516,13 +553,26 @@ func (t *threadInfo) chatID() string {
 
 func (m *Messenger) chatForThreadLocked(t *threadInfo) RemoteChat {
 	var title = t.Name
+	var picture = t.Picture
+	key := strconv.FormatInt(t.Key, 10)
+	if t.Type.IsOneToOne() {
+		// The thread key of a one-to-one chat is the other person's id.
+		contact := m.contacts[t.Key]
+		if (title == "" || title == key) && contact.Name != "" {
+			title = contact.Name
+		}
+		if picture == "" {
+			picture = contact.Picture
+		}
+	}
 	if title == "" {
-		title = strconv.FormatInt(t.Key, 10)
+		title = key
 	}
 	var avatar *MediaRef
-	if t.Picture != "" {
-		avatar = &MediaRef{RemoteRef: t.Picture, Mime: "image/jpeg"}
+	if picture != "" {
+		avatar = &MediaRef{RemoteRef: picture, Mime: "image/jpeg"}
 	}
+	pinned, pinOrder := m.pinOrderLocked(t.chatID())
 	return RemoteChat{
 		RemoteChatID:   t.chatID(),
 		Kind:           chatKind(t.Type),
@@ -530,7 +580,8 @@ func (m *Messenger) chatForThreadLocked(t *threadInfo) RemoteChat {
 		Avatar:         avatar,
 		LastActivityAt: t.LastActivityMs,
 		UnreadCount:    uint32(max(t.UnreadCount, 0)),
-		IsPinned:       false,
+		IsPinned:       pinned,
+		PinOrder:       pinOrder,
 		IsArchived:     strings.Contains(strings.ToLower(t.Folder), "archived"),
 		IsMuted:        t.MuteExpireMs > time.Now().UnixMilli(),
 	}
@@ -615,6 +666,30 @@ func (m *Messenger) applyThreadTableLocked(tbl *table.LSTable) {
 	if tbl == nil {
 		return
 	}
+	m.applyContactsLocked(tbl)
+	// A resync clears a thread's participants and adds them again in the same table.
+	for _, row := range tbl.LSRemoveAllParticipantsForThread {
+		delete(m.members, row.ThreadKey)
+	}
+	for _, row := range tbl.LSAddParticipantIdToGroupThread {
+		if m.members[row.ThreadKey] == nil {
+			m.members[row.ThreadKey] = make(map[int64]bool)
+		}
+		m.members[row.ThreadKey][row.ContactId] = row.IsAdmin || row.IsSuperAdmin
+	}
+	for _, row := range tbl.LSRemoveParticipantFromThread {
+		delete(m.members[row.ThreadKey], row.ParticipantId)
+	}
+	for _, row := range tbl.LSUpdateThreadParticipantAdminStatus {
+		if _, ok := m.members[row.ThreadKey][row.ContactId]; ok {
+			m.members[row.ThreadKey][row.ContactId] = row.IsAdmin
+		}
+	}
+	for _, row := range tbl.LSOverwriteAllThreadParticipantsAdminStatus {
+		for id := range m.members[row.ThreadKey] {
+			m.members[row.ThreadKey][id] = row.IsAdmin
+		}
+	}
 	for _, row := range tbl.LSDeleteThenInsertThread {
 		m.upsertThreadLocked(row.ThreadKey, row.ThreadType, row.ThreadName, row.ThreadPictureUrl,
 			row.FolderName, row.LastActivityTimestampMs, row.LastReadWatermarkTimestampMs,
@@ -631,6 +706,46 @@ func (m *Messenger) applyThreadTableLocked(tbl *table.LSTable) {
 		}
 		m.upsertThreadLocked(row.ThreadKey, row.ThreadType, "", "", row.FolderName, 0, 0, 0, 0)
 	}
+}
+
+// applyContactsLocked folds the contact rows of a table into the contact index. mu must be held.
+func (m *Messenger) applyContactsLocked(tbl *table.LSTable) {
+	for _, row := range tbl.LSVerifyContactRowExists {
+		m.upsertContactLocked(row.ContactId, row.Name, row.ProfilePictureUrl)
+	}
+	for _, row := range tbl.LSDeleteThenInsertContact {
+		m.upsertContactLocked(row.Id, row.Name, row.ProfilePictureUrl)
+	}
+}
+
+// profileLocked is what the contact rows say about one person, or nil while their name is
+// unknown. mu must be held.
+func (m *Messenger) profileLocked(id int64) *RemoteUser {
+	contact := m.contacts[id]
+	name := contact.Name
+	if name == "" && id == m.ownID {
+		name = m.display
+	}
+	if name == "" {
+		return nil
+	}
+	user := &RemoteUser{RemoteUserID: strconv.FormatInt(id, 10), DisplayName: name}
+	if contact.Picture != "" {
+		user.Avatar = &MediaRef{RemoteRef: contact.Picture, Mime: "image/jpeg"}
+	}
+	return user
+}
+
+// upsertContactLocked remembers a person's name and picture; empty fields keep what is known.
+func (m *Messenger) upsertContactLocked(id int64, name, picture string) {
+	contact := m.contacts[id]
+	if name != "" {
+		contact.Name = name
+	}
+	if picture != "" {
+		contact.Picture = picture
+	}
+	m.contacts[id] = contact
 }
 
 func (m *Messenger) upsertThreadLocked(key int64, threadType table.ThreadType, name, picture, folder string, activity, read, unread, mute int64) {
@@ -680,6 +795,13 @@ func (m *Messenger) applyTable(ctx context.Context, tbl *table.LSTable) {
 	for _, row := range tbl.LSVerifyThreadExists {
 		touched[row.ThreadKey] = true
 	}
+	// A contact row changes the title and picture of that person's one-to-one chat.
+	for _, row := range tbl.LSVerifyContactRowExists {
+		touched[row.ContactId] = true
+	}
+	for _, row := range tbl.LSDeleteThenInsertContact {
+		touched[row.Id] = true
+	}
 	before := make(map[int64]string, len(touched))
 	for key := range touched {
 		if t := m.threads[key]; t != nil {
@@ -726,6 +848,14 @@ func (m *Messenger) removeThreadLocked(key int64) any {
 		return nil
 	}
 	delete(m.threads, key)
+	delete(m.members, key)
+	if index := slices.Index(m.pinned, t.chatID()); index >= 0 {
+		// A chat that is gone leaves the pinned list so the others keep contiguous positions.
+		m.pinned = slices.Delete(slices.Clone(m.pinned), index, index+1)
+		if werr := m.persistPinsLocked(); werr != nil {
+			m.log.Warn().Str("error", werr.Error()).Msg("Failed to persist the pinned-chat list")
+		}
+	}
 	return NewChatRemovedEvent(t.chatID())
 }
 

@@ -34,6 +34,7 @@ function row(
     read_by: [],
     edited: false,
     reactions: [],
+    pinned: false,
     transaction_id: null,
   };
 }

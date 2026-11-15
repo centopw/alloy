@@ -641,6 +641,9 @@ pub struct DefaultConnectorFactory {
     pub messenger_sidecar: Option<PathBuf>,
     /// Data directory holding [`NETWORK_SETTINGS_FILE`].
     pub data_dir: PathBuf,
+    /// The app's own version, reported to Telegram in place of the connector crate's. The shell
+    /// sets it; without it Telegram's device list would show the crate version.
+    pub app_version: Option<String>,
 }
 
 impl DefaultConnectorFactory {
@@ -653,6 +656,7 @@ impl DefaultConnectorFactory {
             secrets,
             messenger_sidecar,
             data_dir: data_dir.into(),
+            app_version: None,
         }
     }
 
@@ -664,6 +668,7 @@ impl DefaultConnectorFactory {
             secrets,
             messenger_sidecar,
             data_dir: data_dir.into(),
+            app_version: None,
         }
     }
 
@@ -690,7 +695,13 @@ impl DefaultConnectorFactory {
     pub async fn telegram_config(&self) -> Result<TelegramConfig, ConnectorError> {
         resolve_telegram_app(self.secrets.as_ref())
             .await
-            .map(|resolved| resolved.config)
+            .map(|resolved| {
+                let mut config = resolved.config;
+                if let Some(version) = &self.app_version {
+                    config.app_version.clone_from(version);
+                }
+                config
+            })
             .ok_or_else(|| ConnectorError::NotSupported {
                 feature: TELEGRAM_APP_FEATURE.to_string(),
             })
@@ -1020,6 +1031,39 @@ mod testing {
             typing: bool,
         ) -> Result<(), ConnectorError> {
             self.inner.set_typing(remote_chat_id, typing).await
+        }
+
+        async fn list_members(
+            &self,
+            remote_chat_id: &str,
+        ) -> Result<Vec<alloy_connector::RemoteMember>, ConnectorError> {
+            self.inner.list_members(remote_chat_id).await
+        }
+
+        async fn set_chat_pinned(
+            &self,
+            remote_chat_id: &str,
+            pinned: bool,
+        ) -> Result<(), ConnectorError> {
+            self.inner.set_chat_pinned(remote_chat_id, pinned).await
+        }
+
+        async fn reorder_pinned_chats(
+            &self,
+            remote_chat_ids: &[String],
+        ) -> Result<(), ConnectorError> {
+            self.inner.reorder_pinned_chats(remote_chat_ids).await
+        }
+
+        async fn set_message_pinned(
+            &self,
+            remote_chat_id: &str,
+            remote_msg_id: &str,
+            pinned: bool,
+        ) -> Result<(), ConnectorError> {
+            self.inner
+                .set_message_pinned(remote_chat_id, remote_msg_id, pinned)
+                .await
         }
 
         async fn fetch_media(

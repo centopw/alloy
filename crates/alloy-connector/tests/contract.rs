@@ -6,12 +6,13 @@ use std::collections::BTreeMap;
 
 use alloy_connector::fake::{
     FAKE_CHAT_CHANNEL, FAKE_CHAT_DIRECT, FAKE_CHAT_GROUP, FAKE_CODE, FAKE_USER_ID, FakeConnector,
+    MAX_PINNED_CHATS,
 };
 use alloy_connector::{
     ChatKind, CodeChannel, ConnectionState, Connector, ConnectorError, ConnectorEvent, Frame,
     LoginAlternative, LoginFailure, LoginInput, LoginStep, MediaRef, MessageKind, Network,
-    OutgoingMessage, PROTOCOL_VERSION, RemoteChat, RemoteMessage, SessionBlob, decode_frame,
-    encode_frame,
+    OutgoingMessage, PROTOCOL_VERSION, RemoteChat, RemoteMessage, RemoteUser, SessionBlob,
+    decode_frame, encode_frame,
 };
 use tokio::sync::mpsc::Receiver;
 
@@ -24,6 +25,7 @@ fn direct_chat() -> RemoteChat {
         last_activity_at: 1_700_000_000_000,
         unread_count: 2,
         is_pinned: false,
+        pin_order: None,
         is_archived: false,
         is_muted: false,
     }
@@ -35,6 +37,11 @@ fn text_message() -> RemoteMessage {
         remote_msg_id: "msg-1".to_string(),
         txn_id: Some("txn-1".to_string()),
         sender_remote_id: "user-1".to_string(),
+        sender: Some(RemoteUser {
+            remote_user_id: "user-1".to_string(),
+            display_name: "Ada".to_string(),
+            avatar: None,
+        }),
         is_own: true,
         sent_at: 1_700_000_000_000,
         edited_at: None,
@@ -51,6 +58,7 @@ fn text_message() -> RemoteMessage {
             duration_ms: None,
             file_name: Some("look.png".to_string()),
         }),
+        pinned: false,
     }
 }
 
@@ -594,6 +602,237 @@ async fn inject_incoming_emits_message_and_chat_update() {
         }
         other => panic!("expected the chat update, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn messages_carry_the_sender_profile_the_network_delivered() {
+    let connector = logged_in().await;
+
+    // History and live updates both name a sender the network sent a profile for.
+    let history = connector.backfill(FAKE_CHAT_GROUP, None, 1).await.unwrap();
+    let sender = history.items[0].sender.as_ref().expect("a sender profile");
+    assert_eq!(sender.remote_user_id, history.items[0].sender_remote_id);
+    assert_eq!(sender.display_name, "Charles Babbage");
+    let live = connector
+        .inject_incoming(FAKE_CHAT_GROUP, "fake-user-ada", "ping")
+        .await
+        .unwrap();
+    assert_eq!(live.sender.unwrap().display_name, "Ada Lovelace");
+
+    // A sender without one arrives as a bare id.
+    let bare = connector
+        .inject_incoming(FAKE_CHAT_GROUP, "fake-user-unknown", "ping")
+        .await
+        .unwrap();
+    assert_eq!(bare.sender, None);
+}
+
+#[test]
+fn a_message_frame_without_a_sender_profile_decodes() {
+    let Frame::Event {
+        event: ConnectorEvent::Message { message },
+    } = decode_frame(
+        r#"{"type":"event","event":{"type":"message","message":{"remote_chat_id":"chat-1","remote_msg_id":"msg-1","txn_id":null,"sender_remote_id":"user-1","is_own":false,"sent_at":1,"edited_at":null,"kind":"text","body":"hi","formatted":null,"reply_to_remote_msg_id":null,"media":null}}}"#,
+    )
+    .unwrap() else {
+        panic!("expected a message event")
+    };
+    assert_eq!(message.sender, None);
+}
+
+#[tokio::test]
+async fn list_members_reports_group_members_with_roles() {
+    let connector = logged_in().await;
+    let members = connector.list_members(FAKE_CHAT_GROUP).await.unwrap();
+    let roles: Vec<(&str, Option<&str>)> = members
+        .iter()
+        .map(|member| (member.user.remote_user_id.as_str(), member.role.as_deref()))
+        .collect();
+    assert_eq!(
+        roles,
+        [("fake-user-charles", Some("owner")), (FAKE_USER_ID, None)]
+    );
+
+    assert!(
+        connector
+            .list_members(FAKE_CHAT_DIRECT)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let unknown = connector.list_members("chat-does-not-exist").await;
+    assert!(matches!(unknown, Err(ConnectorError::InvalidInput { .. })));
+}
+
+#[tokio::test]
+async fn pinning_a_chat_puts_it_on_top_and_reports_it() {
+    let connector = logged_in().await;
+    assert!(connector.capabilities().pin_chats);
+    let (sender, mut events) = tokio::sync::mpsc::channel(16);
+    connector.start(sender).await.unwrap();
+    next_event(&mut events).await;
+    next_event(&mut events).await;
+
+    // The direct chat is seeded pinned at the top; pinning the group pushes it down.
+    connector
+        .set_chat_pinned(FAKE_CHAT_GROUP, true)
+        .await
+        .unwrap();
+    match next_event(&mut events).await {
+        ConnectorEvent::ChatPinned {
+            remote_chat_id,
+            pinned,
+        } => {
+            assert_eq!(remote_chat_id, FAKE_CHAT_GROUP);
+            assert!(pinned);
+        }
+        other => panic!("expected ChatPinned, got {other:?}"),
+    }
+    let orders = pin_orders(&connector).await;
+    assert_eq!(orders[FAKE_CHAT_GROUP], Some(0));
+    assert_eq!(orders[FAKE_CHAT_DIRECT], Some(1));
+    assert_eq!(orders[FAKE_CHAT_CHANNEL], None);
+
+    // Pinning again is idempotent and silent; unpinning closes the gap.
+    connector
+        .set_chat_pinned(FAKE_CHAT_GROUP, true)
+        .await
+        .unwrap();
+    connector
+        .set_chat_pinned(FAKE_CHAT_GROUP, false)
+        .await
+        .unwrap();
+    match next_event(&mut events).await {
+        ConnectorEvent::ChatPinned { pinned, .. } => assert!(!pinned),
+        other => panic!("expected ChatPinned, got {other:?}"),
+    }
+    let orders = pin_orders(&connector).await;
+    assert_eq!(orders[FAKE_CHAT_GROUP], None);
+    assert_eq!(orders[FAKE_CHAT_DIRECT], Some(0));
+
+    let unknown = connector.set_chat_pinned("chat-does-not-exist", true).await;
+    assert!(matches!(unknown, Err(ConnectorError::InvalidInput { .. })));
+}
+
+#[tokio::test]
+async fn reordering_pinned_chats_replaces_the_list() {
+    let connector = logged_in().await;
+    let (sender, mut events) = tokio::sync::mpsc::channel(16);
+    connector.start(sender).await.unwrap();
+    next_event(&mut events).await;
+    next_event(&mut events).await;
+
+    let wanted = vec![FAKE_CHAT_CHANNEL.to_string(), FAKE_CHAT_GROUP.to_string()];
+    connector.reorder_pinned_chats(&wanted).await.unwrap();
+    match next_event(&mut events).await {
+        ConnectorEvent::PinnedChatsReordered { remote_chat_ids } => {
+            assert_eq!(remote_chat_ids, wanted);
+        }
+        other => panic!("expected PinnedChatsReordered, got {other:?}"),
+    }
+    // The chat that was pinned and is not named any more is unpinned.
+    let orders = pin_orders(&connector).await;
+    assert_eq!(orders[FAKE_CHAT_CHANNEL], Some(0));
+    assert_eq!(orders[FAKE_CHAT_GROUP], Some(1));
+    assert_eq!(orders[FAKE_CHAT_DIRECT], None);
+
+    let too_many: Vec<String> = (0..=MAX_PINNED_CHATS)
+        .map(|_| FAKE_CHAT_GROUP.to_string())
+        .collect();
+    let refused = connector.reorder_pinned_chats(&too_many).await;
+    assert!(matches!(refused, Err(ConnectorError::InvalidInput { .. })));
+    let unknown = connector
+        .reorder_pinned_chats(&["chat-does-not-exist".to_string()])
+        .await;
+    assert!(matches!(unknown, Err(ConnectorError::InvalidInput { .. })));
+}
+
+#[tokio::test]
+async fn pinning_a_message_is_reported_and_shows_in_history() {
+    let connector = logged_in().await;
+    assert!(connector.capabilities().pin_messages);
+    let (sender, mut events) = tokio::sync::mpsc::channel(16);
+    connector.start(sender).await.unwrap();
+    next_event(&mut events).await;
+    next_event(&mut events).await;
+
+    let page = connector.backfill(FAKE_CHAT_GROUP, None, 1).await.unwrap();
+    let target = page.items[0].remote_msg_id.clone();
+    assert!(!page.items[0].pinned);
+
+    connector
+        .set_message_pinned(FAKE_CHAT_GROUP, &target, true)
+        .await
+        .unwrap();
+    match next_event(&mut events).await {
+        ConnectorEvent::MessagePinned {
+            remote_chat_id,
+            remote_msg_id,
+            pinned,
+        } => {
+            assert_eq!(remote_chat_id, FAKE_CHAT_GROUP);
+            assert_eq!(remote_msg_id, target);
+            assert!(pinned);
+        }
+        other => panic!("expected MessagePinned, got {other:?}"),
+    }
+    let page = connector.backfill(FAKE_CHAT_GROUP, None, 1).await.unwrap();
+    assert!(page.items[0].pinned);
+
+    // Idempotent: pinning a pinned message emits nothing more.
+    connector
+        .set_message_pinned(FAKE_CHAT_GROUP, &target, true)
+        .await
+        .unwrap();
+    connector
+        .set_message_pinned(FAKE_CHAT_GROUP, &target, false)
+        .await
+        .unwrap();
+    match next_event(&mut events).await {
+        ConnectorEvent::MessagePinned { pinned, .. } => assert!(!pinned),
+        other => panic!("expected MessagePinned, got {other:?}"),
+    }
+    let unknown = connector
+        .set_message_pinned(FAKE_CHAT_GROUP, "msg-does-not-exist", true)
+        .await;
+    assert!(matches!(unknown, Err(ConnectorError::InvalidInput { .. })));
+}
+
+#[test]
+fn chat_and_message_frames_without_pin_fields_decode() {
+    let Frame::Event {
+        event: ConnectorEvent::ChatUpserted { chat },
+    } = decode_frame(
+        r#"{"type":"event","event":{"type":"chat_upserted","chat":{"remote_chat_id":"chat-1","kind":"direct","title":"Ada","avatar":null,"last_activity_at":1,"unread_count":0,"is_pinned":true,"is_archived":false,"is_muted":false}}}"#,
+    )
+    .unwrap() else {
+        panic!("expected a chat event")
+    };
+    assert!(chat.is_pinned);
+    assert_eq!(chat.pin_order, None);
+    let Frame::Event {
+        event: ConnectorEvent::MessagePinned { pinned, .. },
+    } = decode_frame(
+        r#"{"type":"event","event":{"type":"message_pinned","remote_chat_id":"chat-1","remote_msg_id":"msg-1","pinned":true}}"#,
+    )
+    .unwrap() else {
+        panic!("expected a message_pinned event")
+    };
+    assert!(pinned);
+}
+
+/// Pin order of every seeded chat by remote id, as `list_chats` reports it.
+async fn pin_orders(connector: &FakeConnector) -> BTreeMap<String, Option<u32>> {
+    let page = connector.list_chats(None, 10).await.unwrap();
+    page.items
+        .into_iter()
+        .map(|chat| {
+            (
+                chat.remote_chat_id,
+                chat.is_pinned.then_some(chat.pin_order).flatten(),
+            )
+        })
+        .collect()
 }
 
 #[tokio::test]

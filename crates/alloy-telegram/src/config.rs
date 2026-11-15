@@ -29,14 +29,29 @@ pub struct TelegramConfig {
     pub lang_code: String,
 }
 
+/// What Telegram's "new login" notice and Settings > Devices show for this client. The first word
+/// of that line is the title of the user's own application at <https://my.telegram.org/apps>, which
+/// only they can change; these are the device and the system that follow it.
+const CLIENT: (&str, &str) = if cfg!(target_os = "macos") {
+    ("Mac", "macOS")
+} else if cfg!(target_os = "windows") {
+    ("PC", "Windows")
+} else if cfg!(target_os = "android") {
+    ("Android device", "Android")
+} else {
+    ("PC", "Linux")
+};
+const DEVICE_MODEL: &str = CLIENT.0;
+const SYSTEM_NAME: &str = CLIENT.1;
+
 impl TelegramConfig {
     /// Builds a configuration with Alloy's defaults for the client fields.
     pub fn new(api_id: i32, api_hash: impl Into<String>) -> Self {
         Self {
             api_id,
             api_hash: api_hash.into(),
-            device_model: "Alloy".to_string(),
-            system_version: std::env::consts::OS.to_string(),
+            device_model: DEVICE_MODEL.to_string(),
+            system_version: SYSTEM_NAME.to_string(),
             app_version: env!("CARGO_PKG_VERSION").to_string(),
             lang_code: "en".to_string(),
         }
@@ -131,7 +146,12 @@ mod tests {
 
         assert_eq!(config.api_id, 42);
         assert_eq!(config.api_hash, "hash");
-        assert_eq!(config.device_model, "Alloy");
+        assert_eq!(config.device_model, DEVICE_MODEL);
+        assert_ne!(
+            config.system_version,
+            std::env::consts::OS,
+            "a name people read, not a triple"
+        );
         assert_eq!(config.app_version, env!("CARGO_PKG_VERSION"));
         assert!(!config.lang_code.is_empty());
     }

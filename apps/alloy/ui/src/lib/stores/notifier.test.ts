@@ -69,6 +69,7 @@ function summary(overrides: Partial<RoomSummary> = {}): RoomSummary {
     unread_notifications: { highlight_count: 0, notification_count: 2 },
     latest_event: { sender: 'u1', timestamp_millis: 1_700_000_000_000, body: 'hello' },
     pinned: false,
+    pin_order: null,
     archived: false,
     muted_until: null,
     tags: [],

@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Subscription } from './subscription';
-import { roomsStore, roomTitle } from './rooms.svelte';
+import { orderPinned, roomsStore, roomTitle } from './rooms.svelte';
 import { timelineStore } from './timeline.svelte';
 import { session } from './session.svelte';
-import type { EngineEvent } from '../generated/index.js';
+import type { EngineEvent, RoomSummary } from '../generated/index.js';
 
 type Diff = Extract<EngineEvent, { type: 'RoomListDiff' }>;
 const ev = (id: string, _tag: string): Diff => ({
@@ -99,6 +99,42 @@ describe('stores against the mock engine', () => {
     expect(roomsStore.visible).toHaveLength(0);
     roomsStore.query = '';
     expect(roomsStore.visible).toHaveLength(all);
+  });
+
+  it('lists the chats of every account as one list: pinned first, then newest activity', async () => {
+    await roomsStore.start();
+    await until(() => roomsStore.visible.length > 0 && roomsStore.accounts.length > 1);
+    const list = roomsStore.visible;
+    expect(new Set(list.map((r) => r.account_id)).size).toBeGreaterThan(1);
+
+    const firstUnpinned = list.findIndex((r) => !r.pinned);
+    expect(list.slice(firstUnpinned).some((r) => r.pinned)).toBe(false);
+    const times = list.slice(firstUnpinned).map((r) => r.latest_event?.timestamp_millis ?? 0);
+    expect(times).toEqual([...times].sort((a, b) => b - a));
+    // Not account by account: the networks interleave in activity order.
+    const networks = list.slice(firstUnpinned).map((r) => r.network);
+    expect(networks.filter((n, i) => i > 0 && n !== networks[i - 1]).length).toBeGreaterThan(1);
+  });
+
+  it('orders the pinned block by pin_order, unordered pins last in list order', () => {
+    const pin = (id: string, pin_order: number | null) => ({ id, pin_order }) as RoomSummary;
+    const ordered = orderPinned([pin('c', 2), pin('n1', null), pin('a', 0), pin('n2', null), pin('b', 1)]);
+    expect(ordered.map((r) => r.id)).toEqual(['a', 'b', 'c', 'n1', 'n2']);
+  });
+
+  it('keeps the pinned chats in pin_order ahead of the unpinned ones', async () => {
+    await roomsStore.start();
+    await until(() => roomsStore.visible.length > 0);
+    const pinnedIds = roomsStore.visible.filter((r) => r.pinned).map((r) => r.id);
+    expect(pinnedIds.length).toBeGreaterThan(0);
+    // Rewrite the order in reverse: the view must follow pin_order, not the engine's list order.
+    const reversed = [...pinnedIds].reverse();
+    for (const [index, id] of reversed.entries()) {
+      const at = roomsStore.rooms.findIndex((r) => r.id === id);
+      roomsStore.rooms[at] = { ...roomsStore.rooms[at], pin_order: index };
+    }
+    expect(roomsStore.visible.slice(0, reversed.length).map((r) => r.id)).toEqual(reversed);
+    expect(roomsStore.visible.slice(reversed.length).some((r) => r.pinned)).toBe(false);
   });
 
   it('timeline opens a room, shows a local echo for a sent message and closes cleanly', async () => {

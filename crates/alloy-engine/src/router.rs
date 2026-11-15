@@ -51,6 +51,7 @@ impl CommandGroup {
             | EngineCommand::DeleteRoomTag { .. }
             | EngineCommand::MarkRoomRead { .. }
             | EngineCommand::SetRoomPinned { .. }
+            | EngineCommand::ReorderPinnedRooms { .. }
             | EngineCommand::SetRoomArchived { .. }
             | EngineCommand::SetRoomMarkedUnread { .. }
             | EngineCommand::SetRoomMuted { .. }
@@ -70,6 +71,8 @@ impl CommandGroup {
             | EngineCommand::EditMessage { .. }
             | EngineCommand::DeleteMessage { .. }
             | EngineCommand::ToggleReaction { .. }
+            | EngineCommand::GetPinnedMessages { .. }
+            | EngineCommand::SetMessagePinned { .. }
             | EngineCommand::ForwardEvents { .. }
             | EngineCommand::RetrySend { .. }
             | EngineCommand::CancelSend { .. }

@@ -89,8 +89,6 @@ describe('defaults', () => {
       notifyPreview: true,
       notifyOnlyWhenUnfocused: true,
       roomListPreviews: true,
-      roomListSections: true,
-      roomListPeople: true,
       showTyping: true,
       sendTyping: true,
       announceMessages: true,

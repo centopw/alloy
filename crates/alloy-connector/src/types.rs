@@ -102,6 +102,11 @@ pub struct RemoteChat {
     /// Unread count as the network reports it; Telegram counts notifications, not messages.
     pub unread_count: u32,
     pub is_pinned: bool,
+    /// Position among the pinned chats as the network orders them, `0` at the top. `None` when
+    /// the chat is not pinned or the network keeps no order the connector can see; the host then
+    /// keeps whatever order it already has.
+    #[serde(default)]
+    pub pin_order: Option<u32>,
     pub is_archived: bool,
     pub is_muted: bool,
 }
@@ -113,6 +118,14 @@ pub struct RemoteUser {
     pub remote_user_id: String,
     pub display_name: String,
     pub avatar: Option<MediaRef>,
+}
+
+/// A member of a group or channel, as [`crate::Connector::list_members`] reports it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoteMember {
+    pub user: RemoteUser,
+    /// `"owner"` or `"admin"`; `None` for an ordinary member.
+    pub role: Option<String>,
 }
 
 /// A message as the network describes it.
@@ -127,6 +140,11 @@ pub struct RemoteMessage {
     pub txn_id: Option<String>,
     /// Opaque id of the sender.
     pub sender_remote_id: String,
+    /// The sender's name and picture, when the network delivered them with the message. The id
+    /// repeats `sender_remote_id`. The host stores it so a timeline can name a sender it has
+    /// never listed as a member; `None` leaves what the host already knows untouched.
+    #[serde(default)]
+    pub sender: Option<RemoteUser>,
     /// Whether the message was authored by the account this connector is logged in as.
     pub is_own: bool,
     /// Milliseconds since the Unix epoch, as the network reports it.
@@ -142,6 +160,10 @@ pub struct RemoteMessage {
     pub reply_to_remote_msg_id: Option<String>,
     /// Attached media, when the message carries any.
     pub media: Option<MediaRef>,
+    /// Whether the message is pinned in its chat, as the network reports it. Networks without
+    /// message pins never set it.
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 /// Opaque credential material produced by a connector and persisted by the host.

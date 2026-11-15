@@ -1,16 +1,17 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { Avatar, Badge } from '../common';
   import ConfirmDialog from '../common/ConfirmDialog.svelte';
   import TagChip from '../tags/TagChip.svelte';
   import TagEditDialog from '../tags/TagEditDialog.svelte';
   import Icon from '$lib/icons/Icon.svelte';
+  import NetworkIcon from '$lib/icons/NetworkIcon.svelte';
   import { Archive, ArchiveRestore, ArrowUpDown, Bell, BellOff, CheckCheck, ChevronDown, ChevronUp, Copy, Ellipsis, Info, Mail, Palette, Pencil, Pin, PinOff, RefreshCw, Search, Settings, StickyNote, Tag, Trash2 } from '$lib/icons';
   import { contextmenu } from '$lib/platform/contextmenu';
   import { pullToRefresh } from '$lib/platform/pullToRefresh';
   import { shortcutLabel } from '$lib/platform/shortcuts';
   import type { MenuItem } from '$lib/stores/contextmenu.svelte';
-  import { isRoomMuted, MUTE_FOREVER, networkBadge, networkName, ROOM_FILTERS, roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
+  import { isRoomMuted, MUTE_FOREVER, networkName, ROOM_FILTERS, roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
   import { prefs } from '$lib/stores/prefs.svelte';
   import { displayTags, TAG_COLOUR_VARS, TAG_COLOURS } from '$lib/stores/tags';
   import { tags } from '$lib/stores/tags.svelte';
@@ -20,12 +21,13 @@
   import { groupRoomsByTag, ROOM_SORTS, sortForGroupToggle, type RoomSort } from '$lib/stores/roomSort';
   import { rovingTabStop, rovingTargetIndex } from '$lib/platform/rovingFocus';
   import { roomRowSelector } from '$lib/platform/shellFocus';
-  import type { Network, TagColour } from '$lib/generated';
+  import type { TagColour } from '$lib/generated';
   import { ui } from '$lib/stores/ui.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
   import { formatListTime } from '$lib/content/format';
   import { highlightRuns } from '$lib/content/searchHighlight';
   import { copyItems, notifyItems, openMenuFrom } from './roomMenus';
+  import { movePinned, orderChanged } from './pinOrder';
   import RoomSwipe from './RoomSwipe.svelte';
   import { draftsStore } from '$lib/stores/drafts.svelte';
   import { muteRoom, unmuteRoom } from '$lib/stores/muteTimer.svelte';
@@ -80,9 +82,13 @@
   function roomItems(r: RoomItem): MenuItem[] {
     const unread = roomsStore.unreadOf(r);
     const muted = isRoomMuted(r);
+    // Pinning needs the network's support (`pin_chats`); an already pinned chat can always be unpinned.
+    const canPin = r.pinned || roomsStore.capabilitiesFor(r.account_id)?.pin_chats !== false;
     return [
       { id: 'mark-unread', label: unread > 0 || r.marked_unread ? t('common-mark-as-read') : t('sidebar-mark-as-unread'), icon: unread > 0 || r.marked_unread ? CheckCheck : Mail, onselect: () => (unread > 0 ? roomsStore.markRead(r.id) : void roomsStore.setMarkedUnread(r.id, !r.marked_unread)) },
-      { id: 'pin', label: r.pinned ? t('sidebar-unpin-from-top') : t('sidebar-pin-to-top'), icon: r.pinned ? PinOff : Pin, onselect: () => void roomsStore.setPinned(r.id, !r.pinned) },
+      ...(canPin
+        ? [{ id: 'pin', label: r.pinned ? t('sidebar-unpin-from-top') : t('sidebar-pin-to-top'), icon: r.pinned ? PinOff : Pin, onselect: () => void roomsStore.setPinned(r.id, !r.pinned) }]
+        : []),
       { id: 'archive', label: r.archived ? t('room-swipe-unarchive') : t('room-swipe-archive'), icon: r.archived ? ArchiveRestore : Archive, onselect: () => void roomsStore.setArchived(r.id, !r.archived) },
       { id: 'mute', label: muted ? t('room-swipe-unmute') : t('room-swipe-mute'), icon: BellOff, onselect: () => void (muted ? unmuteRoom(r.id) : muteRoom(r.id, null)) },
       { separator: true },
@@ -285,10 +291,7 @@
   // Pinned chats sit above everything else; the Archive view lists them in place.
   const pinned = $derived(roomsStore.filter === 'archive' ? [] : joined.filter((r) => r.pinned));
   const unpinned = $derived(roomsStore.filter === 'archive' ? joined : joined.filter((r) => !r.pinned));
-  // With sections, direct messages get their own People section when roomListPeople is on; otherwise they sit with Rooms.
-  const rooms = $derived(unpinned.filter((r) => !prefs.roomListPeople || !r.is_direct));
-  const direct = $derived(prefs.roomListPeople ? unpinned.filter((r) => r.is_direct) : []);
-  // Without sections: pinned chats first, then every other room in the engine's activity order.
+  // One list for people and groups alike: pinned chats first, then every other chat in the store's order.
   const flat = $derived([...pinned, ...unpinned]);
   const searching = $derived(isSearchable(roomsStore.query));
   const nothing = $derived(roomsStore.visible.length === 0 && !searching);
@@ -301,7 +304,7 @@
 
   // Roving tabindex: the desktop room list is a single Tab stop and arrows move between rows. The
   // ids are the `button.row` ids in visual order, so the model matches the markup in every grouping
-  // mode (flat, sections, tags). Phones keep every row a normal button (touch-first UI).
+  // mode (flat, tags). Phones keep every row a normal button (touch-first UI).
   let rovingId = $state<string | null>(null);
   function roomButtonIds(list: readonly RoomItem[]): string[] {
     return list.map((r) => r.id);
@@ -310,7 +313,6 @@
     if (prefs.roomSort === 'tag') {
       return roomButtonIds(groupRoomsByTag(flat, tagDefs).flatMap((g) => g.rooms));
     }
-    if (prefs.roomListSections) return roomButtonIds([...pinned, ...rooms, ...direct]);
     return roomButtonIds(flat);
   });
   const rovingStopId = $derived(rovingTabStop(rovingIds, rovingId, roomsStore.activeRoomId));
@@ -326,7 +328,22 @@
    * per-row "more" button (one Tab stop per list instead of two per room).
    */
   function onRoomKeydown(e: KeyboardEvent, roomId: string) {
-    if (viewport.isPhone || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
+    if (viewport.isPhone || e.defaultPrevented || e.ctrlKey || e.metaKey) return;
+    if (e.altKey) {
+      // Alt+Arrow rearranges a pinned chat inside its account's pinned block.
+      if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+      const room = roomsStore.rooms.find((r) => r.id === roomId);
+      if (!room?.pinned) return;
+      e.preventDefault();
+      const block = pinnedBlockOf(room.account_id);
+      const index = block.indexOf(roomId);
+      if (index === -1) return;
+      const target = e.currentTarget instanceof HTMLElement ? e.currentTarget : null;
+      void reorderPinnedTo(room.account_id, roomId, index + (e.key === 'ArrowUp' ? -1 : 1));
+      // The keyed row moves in the DOM; keep the keyboard on it.
+      void tick().then(() => target?.focus());
+      return;
+    }
     const next = rovingTargetIndex(rovingIds.length, rovingIds.indexOf(roomId), e.key);
     if (next === null) return;
     const list = e.currentTarget instanceof Element ? e.currentTarget.closest('.groups') : null;
@@ -334,6 +351,80 @@
     if (!row) return;
     e.preventDefault();
     row.focus();
+  }
+
+  // Pinned chats can be rearranged by hand, but only inside the pinned block of their own account:
+  // each network keeps its own pin order, so a Telegram chat has no place among Messenger pins.
+  // The pinned block is the ordered pinned rows of one account as the list shows them now.
+  function pinnedBlockOf(accountId: string): string[] {
+    return pinned.filter((r) => r.account_id === accountId).map((r) => r.id);
+  }
+
+  /** Moves `roomId` to `toIndex` within its account's pinned block and tells the store. */
+  function reorderPinnedTo(accountId: string, roomId: string, toIndex: number): Promise<void> {
+    const before = pinnedBlockOf(accountId);
+    const after = movePinned(before, roomId, toIndex);
+    if (!orderChanged(before, after)) return Promise.resolve();
+    return roomsStore.reorderPinned(accountId, after);
+  }
+
+  /** The pinned row being dragged, and where it would land: the row under the pointer plus the half it is over. */
+  let dragging = $state<{ roomId: string; accountId: string } | null>(null);
+  let dropTarget = $state<{ roomId: string; after: boolean } | null>(null);
+
+  /** Whether `r` can accept the current drag: a pinned chat of the same account that is not the dragged one. */
+  function acceptsDrop(r: RoomItem): boolean {
+    return dragging !== null && r.pinned && r.account_id === dragging.accountId && r.id !== dragging.roomId;
+  }
+
+  function onRowDragStart(e: DragEvent, r: RoomItem) {
+    if (viewport.isPhone || !r.pinned || prefs.roomSort === 'tag') {
+      e.preventDefault();
+      return;
+    }
+    dragging = { roomId: r.id, accountId: r.account_id };
+    dropTarget = null;
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = 'move';
+      // Some webviews drop the drag without a payload; the id is also what the drop handler reads.
+      e.dataTransfer.setData('text/plain', r.id);
+    }
+  }
+
+  function onRowDragOver(e: DragEvent, r: RoomItem) {
+    if (!acceptsDrop(r)) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const after = e.clientY >= rect.top + rect.height / 2;
+    if (dropTarget?.roomId !== r.id || dropTarget.after !== after) dropTarget = { roomId: r.id, after };
+  }
+
+  function onRowDragLeave(e: DragEvent, r: RoomItem) {
+    // Leaving for a child element is not leaving the row.
+    const next = e.relatedTarget;
+    if (next instanceof Node && (e.currentTarget as HTMLElement).contains(next)) return;
+    if (dropTarget?.roomId === r.id) dropTarget = null;
+  }
+
+  function onRowDrop(e: DragEvent, r: RoomItem) {
+    if (!dragging || !acceptsDrop(r)) return;
+    e.preventDefault();
+    const { roomId, accountId } = dragging;
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const after = e.clientY >= rect.top + rect.height / 2;
+    const block = pinnedBlockOf(accountId);
+    const from = block.indexOf(roomId);
+    let to = block.indexOf(r.id) + (after ? 1 : 0);
+    // Removing the dragged row first shifts every index behind it by one.
+    if (from !== -1 && from < to) to -= 1;
+    endDrag();
+    void reorderPinnedTo(accountId, roomId, to);
+  }
+
+  function endDrag() {
+    dragging = null;
+    dropTarget = null;
   }
 
   // A filter on a tag that no longer exists (deleted here or elsewhere) would hide every room.
@@ -364,10 +455,6 @@
   );
 </script>
 
-{#snippet accountBadge(network: Network)}
-  <span class="net" aria-label={networkName(network)} title={networkName(network)}>{networkBadge(network)}</span>
-{/snippet}
-
 {#snippet roomRow(r: RoomItem)}
   {@const unread = roomsStore.unreadOf(r)}
   {@const active = r.id === roomsStore.activeRoomId}
@@ -378,7 +465,15 @@
     r.muted_until !== null && r.muted_until < MUTE_FOREVER
       ? muteEndLabel(r.muted_until, Date.now(), (ms) => formatListTime(ms))
       : null}
-  <div class="row-wrap">
+  {@const reorderable = r.pinned && !viewport.isPhone && prefs.roomSort !== 'tag'}
+  {@const dropBefore = dropTarget?.roomId === r.id && !dropTarget.after}
+  {@const dropAfter = dropTarget?.roomId === r.id && dropTarget.after}
+  <div
+    class="row-wrap"
+    class:dragging={dragging?.roomId === r.id}
+    class:drop-before={dropBefore}
+    class:drop-after={dropAfter}
+  >
     <button
       type="button"
       class="row"
@@ -387,21 +482,27 @@
       class:muted
       data-room-id={r.id}
       aria-current={active ? 'true' : undefined}
-      aria-keyshortcuts="Shift+F10"
+      aria-keyshortcuts={reorderable ? 'Shift+F10 Alt+ArrowUp Alt+ArrowDown' : 'Shift+F10'}
       tabindex={viewport.isPhone ? undefined : r.id === rovingStopId ? 0 : -1}
+      draggable={reorderable ? 'true' : undefined}
       use:contextmenu={() => roomItems(r)}
       onclick={() => openRoom(r.id)}
       onfocus={() => onRoomFocus(r.id)}
       onkeydown={(e) => onRoomKeydown(e, r.id)}
+      ondragstart={reorderable ? (e) => onRowDragStart(e, r) : undefined}
+      ondragend={reorderable ? endDrag : undefined}
+      ondragover={(e) => onRowDragOver(e, r)}
+      ondragleave={(e) => onRowDragLeave(e, r)}
+      ondrop={(e) => onRowDrop(e, r)}
     >
-      <span class="pinned">
+      <span class="pinned avatar">
         <Avatar userId={r.id} displayName={roomTitle(r)} src={avatars[r.id] ?? null} size={36} shape={r.is_direct ? 'circle' : 'rounded'} />
+        {#if multipleAccounts}
+          <span class="net"><NetworkIcon network={r.network} label={networkName(r.network)} /></span>
+        {/if}
       </span>
       <span class="text">
-        <span class="title">
-          {#if multipleAccounts}{@render accountBadge(r.network)}{/if}
-          {roomTitle(r)}
-        </span>
+        <span class="title">{roomTitle(r)}</span>
         {#if draft}
           <span class="preview"><span class="draft">{t('sidebar-draft')}</span> {draft}</span>
         {:else if prefs.roomListPreviews && r.latest_event}
@@ -598,45 +699,9 @@
 
   <div class="groups" use:contextmenu={paneItems} use:pullToRefresh={{ onrefresh: () => void refreshStore.run(), enabled: viewport.isPhone }}>
     {#if prefs.roomSort === 'tag'}
-      <!-- Tag groups are the sections; grouping replaces Pinned/Chats/People instead of nesting. -->
       {#if flat.length > 0}
         <section class="group" aria-label={t('sidebar-rooms-by-tag')}>
           {@render roomList([...pinned, ...unpinned])}
-        </section>
-      {/if}
-    {:else if multipleAccounts}
-      <!-- One section per account, so a chat from Telegram is never mistaken for one from Messenger. -->
-      {#each roomsStore.accountGroups as group (group.account?.id ?? 'orphan')}
-        <section class="group" aria-label={group.account ? `${group.account.display_name ?? networkName(group.account.network)}` : t('sidebar-rooms')}>
-          <h3>
-            <span>
-              {group.account ? (group.account.display_name ?? networkName(group.account.network)) : t('sidebar-rooms')}
-              {#if group.account}{@render accountBadge(group.account.network)}{/if}
-            </span>
-            <span class="section-count">{group.rooms.length}</span>
-          </h3>
-          {@render roomList(group.rooms)}
-        </section>
-      {/each}
-    {:else if prefs.roomListSections}
-      {#if pinned.length > 0}
-        <section class="group" aria-label={t('sidebar-pinned')}>
-          <h3><span>{t('sidebar-pinned')}</span><span class="section-count">{pinned.length}</span></h3>
-          {@render roomList(pinned)}
-        </section>
-      {/if}
-
-      {#if rooms.length > 0}
-        <section class="group" aria-label={t('sidebar-rooms')}>
-          <h3><span>{t('sidebar-rooms')}</span><span class="section-count">{rooms.length}</span></h3>
-          {@render roomList(rooms)}
-        </section>
-      {/if}
-
-      {#if direct.length > 0}
-        <section class="group" aria-label={t('sidebar-people')}>
-          <h3><span>{t('sidebar-people')}</span><span class="section-count">{direct.length}</span></h3>
-          {@render roomList(direct)}
         </section>
       {/if}
     {:else if flat.length > 0}
@@ -1047,19 +1112,24 @@
   .text > .title {
     flex: none;
   }
-  /* The network a chat belongs to, as text (ADR 0001: no decorative icons). */
+  /* The network a chat belongs to: a glyph on the avatar's corner, ringed in the list surface. */
+  .avatar {
+    position: relative;
+  }
   .net {
-    flex: none;
-    margin-inline-end: var(--alloy-spacing-scale-1);
-    padding: 0 var(--alloy-spacing-scale-1);
-    border: 1px solid var(--alloy-chat-rim);
-    border-radius: var(--alloy-radii-sm);
-    color: var(--alloy-color-text-muted);
-    font-size: 10px;
-    font-weight: var(--alloy-typography-weight-semibold);
-    letter-spacing: 0;
-    line-height: 15px;
-    vertical-align: 1px;
+    position: absolute;
+    right: -3px;
+    bottom: -3px;
+    display: grid;
+    place-items: center;
+    width: 16px;
+    height: 16px;
+    border-radius: var(--alloy-radii-full);
+    background: var(--alloy-color-surface-panel);
+    color: var(--alloy-color-text-secondary);
+  }
+  .net:empty {
+    display: none;
   }
   .preview {
     overflow: hidden;
@@ -1144,6 +1214,28 @@
   }
   .row-wrap {
     position: relative;
+  }
+  /* Rearranging pinned chats: the dragged row fades, and an accent rule marks the slot the drop would take. */
+  .row-wrap.dragging {
+    opacity: 0.45;
+  }
+  .row-wrap.drop-before::before,
+  .row-wrap.drop-after::after {
+    content: '';
+    position: absolute;
+    left: var(--alloy-spacing-scale-2);
+    right: var(--alloy-spacing-scale-2);
+    height: 2px;
+    border-radius: var(--alloy-radii-full);
+    background: var(--alloy-color-accent-primary);
+    pointer-events: none;
+    z-index: 1;
+  }
+  .row-wrap.drop-before::before {
+    top: -2px;
+  }
+  .row-wrap.drop-after::after {
+    bottom: -2px;
   }
   .more {
     position: absolute;

@@ -9,7 +9,7 @@
 use std::path::Path;
 use std::time::Duration;
 
-use alloy_connector::fake::{FAKE_CHAT_DIRECT, FAKE_CODE, FAKE_USER_ID};
+use alloy_connector::fake::{FAKE_CHAT_DIRECT, FAKE_CHAT_GROUP, FAKE_CODE, FAKE_USER_ID};
 use alloy_connector::{
     ConnectionState, Connector, ConnectorError, ConnectorEvent, LoginInput, LoginStep, Network,
     OutgoingMessage, RemoteMessage,
@@ -162,6 +162,108 @@ async fn login_runs_through_the_sidecar() {
         "the seeded direct chat is listed"
     );
     assert_eq!(page.next_cursor, None, "one page covers the seeded chats");
+
+    connector.stop().await.expect("stop");
+}
+
+#[tokio::test]
+async fn members_and_sender_profiles_cross_the_sidecar() {
+    let directory = tempfile::tempdir().expect("temp dir");
+    let connector = SidecarConnector::spawn(config(directory.path(), &[]))
+        .await
+        .expect("spawn");
+    login(&connector).await;
+
+    let members = connector
+        .list_members(FAKE_CHAT_GROUP)
+        .await
+        .expect("list_members");
+    let roles: Vec<(&str, Option<&str>)> = members
+        .iter()
+        .map(|member| (member.user.remote_user_id.as_str(), member.role.as_deref()))
+        .collect();
+    assert_eq!(
+        roles,
+        [("fake-user-charles", Some("owner")), (FAKE_USER_ID, None)]
+    );
+    let unknown = connector.list_members("chat-does-not-exist").await;
+    assert!(matches!(unknown, Err(ConnectorError::InvalidInput { .. })));
+
+    let page = connector
+        .backfill(FAKE_CHAT_GROUP, None, 1)
+        .await
+        .expect("backfill");
+    let sender = page.items[0].sender.as_ref().expect("a sender profile");
+    assert_eq!(sender.display_name, "Charles Babbage");
+
+    connector.stop().await.expect("stop");
+}
+
+#[tokio::test]
+async fn pins_cross_the_sidecar() {
+    let directory = tempfile::tempdir().expect("temp dir");
+    let connector = SidecarConnector::spawn(config(directory.path(), &[]))
+        .await
+        .expect("spawn");
+    login(&connector).await;
+
+    let capabilities = connector.capabilities();
+    assert!(
+        capabilities.pin_chats && capabilities.pin_messages,
+        "the hello frame carries the fake's pin capabilities"
+    );
+
+    connector
+        .set_chat_pinned(FAKE_CHAT_GROUP, true)
+        .await
+        .expect("set_chat_pinned");
+    let page = connector.list_chats(None, 10).await.expect("list_chats");
+    let group = page
+        .items
+        .iter()
+        .find(|chat| chat.remote_chat_id == FAKE_CHAT_GROUP)
+        .expect("the group chat is listed");
+    assert!(group.is_pinned, "the pinned chat is reported pinned");
+    assert_eq!(
+        group.pin_order,
+        Some(0),
+        "a newly pinned chat sits at the top"
+    );
+
+    connector
+        .reorder_pinned_chats(&[FAKE_CHAT_DIRECT.to_string(), FAKE_CHAT_GROUP.to_string()])
+        .await
+        .expect("reorder_pinned_chats");
+    let page = connector.list_chats(None, 10).await.expect("list_chats");
+    let order_of = |id: &str| {
+        page.items
+            .iter()
+            .find(|chat| chat.remote_chat_id == id)
+            .map(|chat| (chat.is_pinned, chat.pin_order))
+            .expect("the chat is listed")
+    };
+    assert_eq!(order_of(FAKE_CHAT_DIRECT), (true, Some(0)));
+    assert_eq!(order_of(FAKE_CHAT_GROUP), (true, Some(1)));
+
+    let page = connector
+        .backfill(FAKE_CHAT_GROUP, None, 1)
+        .await
+        .expect("backfill");
+    let first = &page.items[0];
+    assert!(!first.pinned, "the seeded message starts unpinned");
+    connector
+        .set_message_pinned(FAKE_CHAT_GROUP, &first.remote_msg_id, true)
+        .await
+        .expect("set_message_pinned");
+    let page = connector
+        .backfill(FAKE_CHAT_GROUP, None, 1)
+        .await
+        .expect("backfill after the pin");
+    assert_eq!(page.items[0].remote_msg_id, first.remote_msg_id);
+    assert!(
+        page.items[0].pinned,
+        "a fresh backfill reports the message pinned"
+    );
 
     connector.stop().await.expect("stop");
 }

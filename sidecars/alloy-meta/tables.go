@@ -138,6 +138,7 @@ func (m *Messenger) messageFromRowLocked(row *table.LSInsertMessage, refs map[st
 		RemoteMsgID:        row.MessageId,
 		TxnID:              txn,
 		SenderRemoteID:     strconv.FormatInt(row.SenderId, 10),
+		Sender:             m.profileLocked(row.SenderId),
 		IsOwn:              row.SenderId != 0 && row.SenderId == m.ownID,
 		SentAt:             sentAt,
 		EditedAt:           nil,

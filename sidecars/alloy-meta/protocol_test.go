@@ -5,7 +5,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -13,6 +16,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"go.mau.fi/mautrix-meta/pkg/messagix/cookies"
+	"go.mau.fi/mautrix-meta/pkg/messagix/table"
 	"go.mau.fi/mautrix-meta/pkg/messagix/types"
 )
 
@@ -30,7 +34,7 @@ func encodeFrame(t *testing.T, frame any) string {
 // TestHelloFrame pins the byte-for-byte shape the Rust Frame::Hello deserializer accepts.
 func TestHelloFrame(t *testing.T) {
 	got := encodeFrame(t, NewHello())
-	want := `{"type":"hello","protocol_version":1,"network":"messenger","capabilities":{"edit":true,"edit_window_secs":900,"delete_for_everyone":true,"reactions":true,"max_reactions_per_user":1,"replies":true,"threads":false,"typing":true,"read_receipts":true,"delivered_receipts":true,"voice":true,"polls":false,"location":false,"max_upload_bytes":26214400,"formatted_text":false}}`
+	want := `{"type":"hello","protocol_version":1,"network":"messenger","capabilities":{"edit":true,"edit_window_secs":900,"delete_for_everyone":true,"reactions":true,"max_reactions_per_user":1,"replies":true,"threads":false,"typing":true,"read_receipts":true,"delivered_receipts":true,"voice":true,"polls":false,"location":false,"max_upload_bytes":26214400,"formatted_text":false,"pin_chats":true,"pin_messages":false}}`
 	if got != want {
 		t.Fatalf("hello frame mismatch\n got: %s\nwant: %s", got, want)
 	}
@@ -78,7 +82,7 @@ func TestEventMessageFrame(t *testing.T) {
 			Body:           &body,
 		}),
 	})
-	want := `{"type":"event","event":{"type":"message","message":{"remote_chat_id":"1234567","remote_msg_id":"mid.$abc","txn_id":null,"sender_remote_id":"42","is_own":false,"sent_at":1700000000000,"edited_at":null,"kind":"text","body":"hello","formatted":null,"reply_to_remote_msg_id":null,"media":null}}}`
+	want := `{"type":"event","event":{"type":"message","message":{"remote_chat_id":"1234567","remote_msg_id":"mid.$abc","txn_id":null,"sender_remote_id":"42","sender":null,"is_own":false,"sent_at":1700000000000,"edited_at":null,"kind":"text","body":"hello","formatted":null,"reply_to_remote_msg_id":null,"media":null,"pinned":false}}}`
 	if got != want {
 		t.Fatalf("message event mismatch\n got: %s\nwant: %s", got, want)
 	}
@@ -308,5 +312,273 @@ func TestSessionRejectsForeignPlatform(t *testing.T) {
 	))
 	if _, err := decodeSession(blob); err == nil {
 		t.Fatal("expected an error for a foreign platform")
+	}
+}
+
+// TestOneToOneChatUsesContactRow pins that a one-to-one chat, whose thread row has no name or
+// picture, takes both from the other person's contact row, and that a group does not.
+func TestOneToOneChatUsesContactRow(t *testing.T) {
+	m := newMessenger(zerolog.Nop(), newWriter(io.Discard), defaultSettings())
+	tbl := &table.LSTable{
+		LSDeleteThenInsertThread: []*table.LSDeleteThenInsertThread{
+			{ThreadKey: 42, ThreadType: table.ENCRYPTED_OVER_WA_ONE_TO_ONE},
+			{ThreadKey: 43, ThreadType: table.GROUP_THREAD},
+		},
+		LSVerifyContactRowExists: []*table.LSVerifyContactRowExists{
+			{ContactId: 42, Name: "Ada", ProfilePictureUrl: "https://cdn.example/ada.jpg"},
+			{ContactId: 43, Name: "Not the group", ProfilePictureUrl: "https://cdn.example/no.jpg"},
+		},
+	}
+	m.mu.Lock()
+	m.applyThreadTableLocked(tbl)
+	direct := m.chatForThreadLocked(m.threads[42])
+	group := m.chatForThreadLocked(m.threads[43])
+	m.mu.Unlock()
+
+	if direct.Title != "Ada" || direct.Avatar == nil || direct.Avatar.RemoteRef != "https://cdn.example/ada.jpg" {
+		t.Fatalf("direct chat ignored its contact row: %+v avatar=%+v", direct, direct.Avatar)
+	}
+	if group.Title != "43" || group.Avatar != nil {
+		t.Fatalf("group chat took a contact row: %+v", group)
+	}
+}
+
+// TestMessageCarriesSenderProfile pins that a group message names its sender from the contact
+// row, live and in a history page, and that a sender without a contact row stays a bare id.
+func TestMessageCarriesSenderProfile(t *testing.T) {
+	m := newMessenger(zerolog.Nop(), newWriter(io.Discard), defaultSettings())
+	tbl := &table.LSTable{
+		LSDeleteThenInsertThread: []*table.LSDeleteThenInsertThread{
+			{ThreadKey: 43, ThreadType: table.GROUP_THREAD},
+		},
+		LSVerifyContactRowExists: []*table.LSVerifyContactRowExists{
+			{ContactId: 7, Name: "Ada", ProfilePictureUrl: "https://cdn.example/ada.jpg"},
+		},
+		LSInsertMessage: []*table.LSInsertMessage{
+			{ThreadKey: 43, MessageId: "mid.1", SenderId: 7, Text: "hi", TimestampMs: 1},
+			{ThreadKey: 43, MessageId: "mid.2", SenderId: 8, Text: "yo", TimestampMs: 2},
+		},
+	}
+	m.mu.Lock()
+	m.applyThreadTableLocked(tbl)
+	events := m.messageEventsLocked(tbl)
+	m.mu.Unlock()
+
+	if len(events) != 2 {
+		t.Fatalf("expected two message events, got %d", len(events))
+	}
+	named := events[0].(MessageEvent).Message
+	if named.Sender == nil || named.Sender.RemoteUserID != named.SenderRemoteID ||
+		named.Sender.DisplayName != "Ada" || named.Sender.Avatar == nil ||
+		named.Sender.Avatar.RemoteRef != "https://cdn.example/ada.jpg" {
+		t.Fatalf("message lost its sender profile: %+v", named.Sender)
+	}
+	if bare := events[1].(MessageEvent).Message; bare.Sender != nil {
+		t.Fatalf("a sender without a contact row got a profile: %+v", bare.Sender)
+	}
+}
+
+// TestMembersFollowParticipantRows pins the member list a thread's participant rows produce:
+// admins carry the role, a removed participant is gone, and the wire shape matches RemoteMember.
+func TestMembersFollowParticipantRows(t *testing.T) {
+	m := newMessenger(zerolog.Nop(), newWriter(io.Discard), defaultSettings())
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.applyThreadTableLocked(&table.LSTable{
+		LSVerifyContactRowExists: []*table.LSVerifyContactRowExists{
+			{ContactId: 7, Name: "Ada"},
+		},
+		LSAddParticipantIdToGroupThread: []*table.LSAddParticipantIdToGroupThread{
+			{ThreadKey: 43, ContactId: 9},
+			{ThreadKey: 43, ContactId: 7, IsAdmin: true},
+			{ThreadKey: 43, ContactId: 8},
+			{ThreadKey: 44, ContactId: 5},
+		},
+	})
+	m.applyThreadTableLocked(&table.LSTable{
+		LSRemoveParticipantFromThread: []*table.LSRemoveParticipantFromThread{
+			{ThreadKey: 43, ParticipantId: 8},
+		},
+		LSUpdateThreadParticipantAdminStatus: []*table.LSUpdateThreadParticipantAdminStatus{
+			{ThreadKey: 43, ContactId: 9, IsAdmin: true},
+			{ThreadKey: 43, ContactId: 7, IsAdmin: false},
+		},
+	})
+
+	raw, err := json.Marshal(m.membersLocked(m.members[43]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `[{"user":{"remote_user_id":"7","display_name":"Ada","avatar":null},"role":null},` +
+		`{"user":{"remote_user_id":"9","display_name":"","avatar":null},"role":"admin"}]`
+	if string(raw) != want {
+		t.Fatalf("member list mismatch\n got: %s\nwant: %s", raw, want)
+	}
+
+	m.applyThreadTableLocked(&table.LSTable{
+		LSRemoveAllParticipantsForThread: []*table.LSRemoveAllParticipantsForThread{{ThreadKey: 43}},
+	})
+	if len(m.members[43]) != 0 || len(m.members[44]) != 1 {
+		t.Fatalf("clearing one thread touched the wrong members: %+v", m.members)
+	}
+}
+
+// TestListMembersNeedsASession pins that the method is dispatched and refuses a logged-out call.
+func TestListMembersNeedsASession(t *testing.T) {
+	m := newMessenger(zerolog.Nop(), newWriter(io.Discard), defaultSettings())
+	_, werr := m.handle("list_members", json.RawMessage(`{"remote_chat_id":"43"}`))
+	if werr == nil || werr.Type != "unauthorized" {
+		t.Fatalf("expected unauthorized, got %+v", werr)
+	}
+}
+
+// pinnedMessenger is a logged-in messenger with two plain threads and no network: enough for
+// the pin methods, which never touch messagix. Pins are written under dataDir.
+func pinnedMessenger(t *testing.T, dataDir string, out io.Writer) *Messenger {
+	t.Helper()
+	m := newMessenger(zerolog.Nop(), newWriter(out), defaultSettings())
+	m.dataDir = dataDir
+	m.cli = defaultSettings().newMessagixClient(zerolog.Nop(), &cookies.Cookies{Platform: types.MessengerLiteAndroid})
+	m.mu.Lock()
+	m.applyThreadTableLocked(&table.LSTable{
+		LSDeleteThenInsertThread: []*table.LSDeleteThenInsertThread{
+			{ThreadKey: 42, ThreadType: table.ONE_TO_ONE},
+			{ThreadKey: 43, ThreadType: table.GROUP_THREAD},
+		},
+	})
+	m.loadPinsLocked()
+	m.mu.Unlock()
+	return m
+}
+
+// pinOrders renders what list_chats would say about pins: chat id to (is_pinned, pin_order).
+func pinOrders(m *Messenger) map[string][2]int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make(map[string][2]int)
+	for _, t := range m.allThreadsLocked() {
+		chat := m.chatForThreadLocked(t)
+		order := -1
+		if chat.PinOrder != nil {
+			order = int(*chat.PinOrder)
+		}
+		pinned := 0
+		if chat.IsPinned {
+			pinned = 1
+		}
+		out[chat.RemoteChatID] = [2]int{pinned, order}
+	}
+	return out
+}
+
+// TestPinnedChatsOrder pins the sidecar-local pin list: a new pin goes to the top, a reorder
+// replaces the list, an unpin closes the gap, unknown chats are refused and every change is
+// announced with the frozen event shapes.
+func TestPinnedChatsOrder(t *testing.T) {
+	var events bytes.Buffer
+	m := pinnedMessenger(t, t.TempDir(), &events)
+
+	if _, werr := m.handle("set_chat_pinned", json.RawMessage(`{"remote_chat_id":"43","pinned":true}`)); werr != nil {
+		t.Fatalf("pin 43: %+v", werr)
+	}
+	if _, werr := m.handle("set_chat_pinned", json.RawMessage(`{"remote_chat_id":"42","pinned":true}`)); werr != nil {
+		t.Fatalf("pin 42: %+v", werr)
+	}
+	got := pinOrders(m)
+	if got["42"] != [2]int{1, 0} || got["43"] != [2]int{1, 1} {
+		t.Fatalf("a new pin did not go to the top: %v", got)
+	}
+
+	if _, werr := m.handle("reorder_pinned_chats", json.RawMessage(`{"remote_chat_ids":["43","42"]}`)); werr != nil {
+		t.Fatalf("reorder: %+v", werr)
+	}
+	got = pinOrders(m)
+	if got["43"] != [2]int{1, 0} || got["42"] != [2]int{1, 1} {
+		t.Fatalf("reorder did not replace the list: %v", got)
+	}
+
+	// Idempotent: pinning a pinned chat changes nothing and emits nothing.
+	before := events.Len()
+	if _, werr := m.handle("set_chat_pinned", json.RawMessage(`{"remote_chat_id":"43","pinned":true}`)); werr != nil {
+		t.Fatalf("re-pin 43: %+v", werr)
+	}
+	if events.Len() != before {
+		t.Fatalf("re-pinning emitted an event: %s", events.String()[before:])
+	}
+
+	if _, werr := m.handle("set_chat_pinned", json.RawMessage(`{"remote_chat_id":"43","pinned":false}`)); werr != nil {
+		t.Fatalf("unpin 43: %+v", werr)
+	}
+	got = pinOrders(m)
+	if got["43"] != [2]int{0, -1} || got["42"] != [2]int{1, 0} {
+		t.Fatalf("unpin left a gap: %v", got)
+	}
+
+	for _, params := range []string{
+		`{"remote_chat_id":"99","pinned":true}`,
+		`{"remote_chat_id":"not-a-chat","pinned":true}`,
+	} {
+		if _, werr := m.handle("set_chat_pinned", json.RawMessage(params)); werr == nil || werr.Type != "invalid_input" {
+			t.Fatalf("expected invalid_input for %s, got %+v", params, werr)
+		}
+	}
+	if _, werr := m.handle("reorder_pinned_chats", json.RawMessage(`{"remote_chat_ids":["42","99"]}`)); werr == nil || werr.Type != "invalid_input" {
+		t.Fatalf("expected invalid_input for an unknown chat, got %+v", werr)
+	}
+	if got = pinOrders(m); got["42"] != [2]int{1, 0} {
+		t.Fatalf("a refused reorder changed the list: %v", got)
+	}
+
+	want := `{"type":"event","event":{"type":"chat_pinned","remote_chat_id":"43","pinned":true}}` + "\n" +
+		`{"type":"event","event":{"type":"chat_pinned","remote_chat_id":"42","pinned":true}}` + "\n" +
+		`{"type":"event","event":{"type":"pinned_chats_reordered","remote_chat_ids":["43","42"]}}` + "\n" +
+		`{"type":"event","event":{"type":"chat_pinned","remote_chat_id":"43","pinned":false}}` + "\n"
+	if events.String() != want {
+		t.Fatalf("pin events mismatch\n got: %swant: %s", events.String(), want)
+	}
+}
+
+// TestPinsSurviveReload pins that the list is written to pins.json and read back by the next
+// messenger over the same data directory, and that logout removes it.
+func TestPinsSurviveReload(t *testing.T) {
+	dataDir := t.TempDir()
+	m := pinnedMessenger(t, dataDir, io.Discard)
+	if _, werr := m.handle("reorder_pinned_chats", json.RawMessage(`{"remote_chat_ids":["43","42"]}`)); werr != nil {
+		t.Fatalf("reorder: %+v", werr)
+	}
+	raw, err := os.ReadFile(filepath.Join(dataDir, pinsFile))
+	if err != nil {
+		t.Fatalf("pins.json was not written: %v", err)
+	}
+	if string(raw) != `["43","42"]` {
+		t.Fatalf("pins.json mismatch: %s", raw)
+	}
+
+	reloaded := pinnedMessenger(t, dataDir, io.Discard)
+	got := pinOrders(reloaded)
+	if got["43"] != [2]int{1, 0} || got["42"] != [2]int{1, 1} {
+		t.Fatalf("pins did not survive the reload: %v", got)
+	}
+
+	// The test client never connected; drop it so logout does not disconnect a bare socket.
+	reloaded.mu.Lock()
+	reloaded.cli = nil
+	reloaded.mu.Unlock()
+	reloaded.logout(context.Background())
+	if _, err := os.Stat(filepath.Join(dataDir, pinsFile)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("logout kept pins.json: %v", err)
+	}
+	if _, werr := reloaded.handle("set_chat_pinned", json.RawMessage(`{"remote_chat_id":"43","pinned":true}`)); werr == nil || werr.Type != "unauthorized" {
+		t.Fatalf("expected unauthorized after logout, got %+v", werr)
+	}
+}
+
+// TestSetMessagePinnedNotSupported pins that message pins are refused with the capability name
+// the host checks, so it falls back to a local pin.
+func TestSetMessagePinnedNotSupported(t *testing.T) {
+	m := pinnedMessenger(t, t.TempDir(), io.Discard)
+	_, werr := m.handle("set_message_pinned", json.RawMessage(`{"remote_chat_id":"43","remote_msg_id":"mid.1","pinned":true}`))
+	if werr == nil || werr.Type != "not_supported" || werr.Feature != "pin_messages" {
+		t.Fatalf("expected not_supported(pin_messages), got %+v", werr)
 	}
 }

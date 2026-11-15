@@ -74,19 +74,32 @@ impl GroupHandler for RoomsHandler {
             }
             EngineCommand::GetRoomMembers { room_id } => {
                 let chat = support::chat_record(ctx, &room_id).await?;
+                let live = refresh_members(ctx, &chat).await;
                 let members = ctx
                     .store
                     .list_participants(&chat.chat_id)
                     .await
                     .map_err(map_store)?
                     .into_iter()
+                    // The store also keeps people who have left; the network's answer, when
+                    // there is one, says who is a member now and in which role.
+                    .filter(|participant| {
+                        live.as_ref()
+                            .is_none_or(|live| live.contains_key(&participant.remote_user_id))
+                    })
                     .map(|participant| RoomMemberDto {
+                        role: match &live {
+                            Some(live) => live
+                                .get(&participant.remote_user_id)
+                                .cloned()
+                                .unwrap_or_default(),
+                            None => participant.role,
+                        },
                         user_id: UserId(participant.remote_user_id),
                         display_name: participant.display_name,
                         avatar: participant
                             .avatar_media_id
                             .map(|media_id| MediaSource { media_id }),
-                        role: participant.role,
                     })
                     .collect();
                 Ok(EngineResponse::RoomMembers { members })
@@ -145,16 +158,12 @@ impl GroupHandler for RoomsHandler {
             }
             EngineCommand::MarkRoomRead { room_id } => mark_room_read(ctx, &room_id).await,
             EngineCommand::SetRoomPinned { room_id, pinned } => {
-                update_flags(
-                    ctx,
-                    &room_id,
-                    ChatFlagsUpdate {
-                        is_pinned: Some(pinned),
-                        ..ChatFlagsUpdate::default()
-                    },
-                )
-                .await
+                set_room_pinned(ctx, &room_id, pinned).await
             }
+            EngineCommand::ReorderPinnedRooms {
+                account_id,
+                room_ids,
+            } => reorder_pinned_rooms(ctx, &account_id, room_ids).await,
             EngineCommand::SetRoomArchived { room_id, archived } => {
                 update_flags(
                     ctx,
@@ -249,6 +258,53 @@ impl GroupHandler for RoomsHandler {
             ))),
         }
     }
+}
+
+/// Asks the network who is in a group or channel and stores the answer, returning each member's
+/// role by remote id. `None` when there is nothing fresher than the store: a direct chat, an
+/// account that is not connected, or a network that will not list the members.
+async fn refresh_members(
+    ctx: &EngineContext,
+    chat: &ChatRecord,
+) -> Option<HashMap<String, Option<String>>> {
+    if chat.kind == StoreChatKind::Direct {
+        return None;
+    }
+    let runtime = ctx.accounts.get(&chat.account_id).await?;
+    let members = match runtime.connector.list_members(&chat.remote_chat_id).await {
+        Ok(members) => members,
+        Err(err) => {
+            tracing::warn!(chat = %chat.chat_id, error = %err, "member list unavailable");
+            return None;
+        }
+    };
+    let mut live = HashMap::with_capacity(members.len());
+    // ponytail: one store transaction per member; batch it if large groups make the panel slow.
+    for member in members {
+        let avatar = match &member.user.avatar {
+            Some(media) => crate::actor::store_media_ref(ctx, &chat.account_id, media)
+                .await
+                .ok(),
+            None => None,
+        };
+        if let Err(err) = ctx
+            .store
+            .upsert_participant(
+                &chat.chat_id,
+                &member.user.remote_user_id,
+                // An empty name is a member the network has not named yet; keep the stored one.
+                Some(member.user.display_name).filter(|name| !name.is_empty()),
+                avatar,
+                member.role.clone(),
+            )
+            .await
+        {
+            tracing::warn!(chat = %chat.chat_id, error = %err, "failed to store a member");
+            continue;
+        }
+        live.insert(member.user.remote_user_id, member.role);
+    }
+    Some(live)
 }
 
 async fn room_details(ctx: &EngineContext, room_id: RoomId) -> Result<RoomDetails, EngineError> {
@@ -387,6 +443,141 @@ async fn update_flags(
         .map_err(map_store)?;
     ctx.bus.chats();
     Ok(EngineResponse::RoomFlagsUpdated)
+}
+
+/// Pins or unpins a chat. The store changes first so the room list answers at once; when the
+/// account's network keeps pins, the connector is told too, and a refusal rolls the store back so
+/// this device never shows a pin the official apps do not.
+async fn set_room_pinned(
+    ctx: &EngineContext,
+    room_id: &RoomId,
+    pinned: bool,
+) -> Result<EngineResponse, EngineError> {
+    let chat = support::chat_record(ctx, room_id).await?;
+    if chat.is_pinned == pinned {
+        return Ok(EngineResponse::RoomFlagsUpdated);
+    }
+    // An unpin is rolled back by restoring the whole previous order: re-pinning through
+    // `update_chat_flags` would put the chat at the top, not where it was.
+    let before = if pinned {
+        None
+    } else {
+        Some(
+            ctx.store
+                .pinned_chats(&chat.account_id)
+                .await
+                .map_err(map_store)?,
+        )
+    };
+    ctx.store
+        .update_chat_flags(
+            &chat.chat_id,
+            ChatFlagsUpdate {
+                is_pinned: Some(pinned),
+                ..ChatFlagsUpdate::default()
+            },
+        )
+        .await
+        .map_err(map_store)?;
+    ctx.bus.chats();
+
+    // A disconnected account pins locally; the network's own list catches up on the next sync.
+    if let Some(runtime) = ctx.accounts.get(&chat.account_id).await
+        && runtime.capabilities.pin_chats
+        && let Err(err) = runtime
+            .connector
+            .set_chat_pinned(&chat.remote_chat_id, pinned)
+            .await
+    {
+        match before {
+            Some(before) => {
+                let order: Vec<String> = before.into_iter().map(|c| c.chat_id).collect();
+                ctx.store
+                    .set_pinned_chats(&chat.account_id, order)
+                    .await
+                    .map_err(map_store)?;
+                // An archived chat is outside the pinned list, so the order above cannot restore it.
+                if chat.is_archived {
+                    ctx.store
+                        .set_chat_pin_state(&chat.chat_id, chat.pin_order)
+                        .await
+                        .map_err(map_store)?;
+                }
+            }
+            None => {
+                ctx.store
+                    .update_chat_flags(
+                        &chat.chat_id,
+                        ChatFlagsUpdate {
+                            is_pinned: Some(!pinned),
+                            ..ChatFlagsUpdate::default()
+                        },
+                    )
+                    .await
+                    .map_err(map_store)?;
+            }
+        }
+        ctx.bus.chats();
+        return Err(crate::error::map_connector(err));
+    }
+    Ok(EngineResponse::RoomFlagsUpdated)
+}
+
+/// Replaces the order of one account's pinned chats. The list must name every pinned chat of
+/// the account exactly once: a stale list from the UI is refused instead of unpinning what it
+/// omits. Sent to the network when it keeps pins; a refusal there restores the previous order.
+async fn reorder_pinned_rooms(
+    ctx: &EngineContext,
+    account_id: &AccountId,
+    room_ids: Vec<RoomId>,
+) -> Result<EngineResponse, EngineError> {
+    support::account_record(ctx, account_id).await?;
+    let before = ctx
+        .store
+        .pinned_chats(&account_id.0)
+        .await
+        .map_err(map_store)?;
+    let wanted: Vec<String> = room_ids.into_iter().map(|room| room.0).collect();
+    {
+        let mut seen = std::collections::HashSet::with_capacity(wanted.len());
+        if wanted.len() != before.len()
+            || !wanted.iter().all(|id| seen.insert(id.as_str()))
+            || !before
+                .iter()
+                .all(|chat| seen.contains(chat.chat_id.as_str()))
+        {
+            return Err(EngineError::invalid_argument(
+                "the list must name every pinned chat of the account exactly once",
+            ));
+        }
+    }
+    let after = ctx
+        .store
+        .set_pinned_chats(&account_id.0, wanted.clone())
+        .await
+        .map_err(map_store)?;
+    ctx.bus.chats();
+
+    if let Some(runtime) = ctx.accounts.get(&account_id.0).await
+        && runtime.capabilities.pin_chats
+    {
+        let remote_ids: Vec<String> = after
+            .iter()
+            .map(|chat| chat.remote_chat_id.clone())
+            .collect();
+        if let Err(err) = runtime.connector.reorder_pinned_chats(&remote_ids).await {
+            let previous: Vec<String> = before.iter().map(|chat| chat.chat_id.clone()).collect();
+            ctx.store
+                .set_pinned_chats(&account_id.0, previous)
+                .await
+                .map_err(map_store)?;
+            ctx.bus.chats();
+            return Err(crate::error::map_connector(err));
+        }
+    }
+    Ok(EngineResponse::PinnedRoomsReordered {
+        room_ids: wanted.into_iter().map(RoomId).collect(),
+    })
 }
 
 // === Tag catalogue ===

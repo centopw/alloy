@@ -547,3 +547,175 @@ async fn vacuum_keeps_full_text_index_aligned() {
         "a hard-deleted message must not resurface through the index"
     );
 }
+
+/// One more chat for the same account, with its own activity time.
+async fn extra_chat(store: &Store, account_id: &str, remote: &str, activity: i64) -> String {
+    store
+        .upsert_chat(ChatUpsert {
+            account_id: account_id.to_owned(),
+            remote_chat_id: remote.to_owned(),
+            kind: ChatKind::Group,
+            title: Some(remote.to_owned()),
+            avatar_media_id: None,
+            last_message_id: None,
+            last_activity_at: Some(activity),
+        })
+        .await
+        .expect("upsert chat")
+}
+
+fn pin(flag: bool) -> ChatFlagsUpdate {
+    ChatFlagsUpdate {
+        is_pinned: Some(flag),
+        ..ChatFlagsUpdate::default()
+    }
+}
+
+#[tokio::test]
+async fn pinned_chats_keep_a_user_order_above_the_activity_order() {
+    let store = Store::open_in_memory(KEY).expect("open");
+    let (account_id, first) = account_and_chat(&store).await;
+    let second = extra_chat(&store, &account_id, "remote-chat-2", 3_000).await;
+    let third = extra_chat(&store, &account_id, "remote-chat-3", 2_000).await;
+
+    // Unpinned: newest activity first.
+    let ids = |chats: Vec<alloy_store::ChatRecord>| -> Vec<String> {
+        chats.into_iter().map(|chat| chat.chat_id).collect()
+    };
+    let listed = store.list_chats(None, false, 10).await.expect("list");
+    assert_eq!(ids(listed), [second.clone(), third.clone(), first.clone()]);
+
+    // Each new pin goes to the top; the earlier pins move down.
+    store
+        .update_chat_flags(&first, pin(true))
+        .await
+        .expect("pin");
+    store
+        .update_chat_flags(&third, pin(true))
+        .await
+        .expect("pin");
+    let listed = store.list_chats(None, false, 10).await.expect("list");
+    assert_eq!(
+        ids(listed.clone()),
+        [third.clone(), first.clone(), second.clone()]
+    );
+    assert_eq!(listed[0].pin_order, Some(0));
+    assert_eq!(listed[1].pin_order, Some(1));
+    assert_eq!(listed[2].pin_order, None);
+    // Pinning a pinned chat again changes nothing.
+    store
+        .update_chat_flags(&third, pin(true))
+        .await
+        .expect("pin");
+    assert_eq!(
+        ids(store.list_chats(None, false, 10).await.expect("list")),
+        [third.clone(), first.clone(), second.clone()]
+    );
+
+    // The user's own order wins over activity; the list must be complete.
+    let pinned = store
+        .set_pinned_chats(&account_id, vec![first.clone(), third.clone()])
+        .await
+        .expect("reorder");
+    assert_eq!(ids(pinned), [first.clone(), third.clone()]);
+    assert_eq!(
+        ids(store.pinned_chats(&account_id).await.expect("pinned")),
+        [first.clone(), third.clone()]
+    );
+    assert!(
+        store
+            .set_pinned_chats(&account_id, vec!["chat-does-not-exist".to_owned()])
+            .await
+            .is_err()
+    );
+    // ... and a refused list leaves the pins as they were.
+    assert_eq!(
+        ids(store.pinned_chats(&account_id).await.expect("pinned")),
+        [first.clone(), third.clone()]
+    );
+
+    // The network reported a position for one chat: only that chat moves.
+    store.set_pin_order(&third, 0).await.expect("set order");
+    store.set_pin_order(&first, 1).await.expect("set order");
+    assert_eq!(
+        ids(store.pinned_chats(&account_id).await.expect("pinned")),
+        [third.clone(), first.clone()]
+    );
+    assert!(store.set_pin_order(&second, 0).await.is_err());
+
+    // Unpinning closes the gap it leaves and the chat falls back into the activity order.
+    store
+        .update_chat_flags(&third, pin(false))
+        .await
+        .expect("unpin");
+    let listed = store.list_chats(None, false, 10).await.expect("list");
+    assert_eq!(
+        ids(listed.clone()),
+        [first.clone(), second.clone(), third.clone()]
+    );
+    assert_eq!(listed[0].pin_order, Some(0));
+    assert_eq!(listed[2].pin_order, None);
+    assert!(!listed[2].is_pinned);
+}
+
+#[tokio::test]
+async fn pinned_messages_are_listed_newest_first_without_deleted_ones() {
+    let store = Store::open_in_memory(KEY).expect("open");
+    let (_account_id, chat_id) = account_and_chat(&store).await;
+    let older = store
+        .upsert_message(text_message(&chat_id, 1_000))
+        .await
+        .expect("insert");
+    let newer = store
+        .upsert_message(text_message(&chat_id, 2_000))
+        .await
+        .expect("insert");
+    let other = store
+        .upsert_message(text_message(&chat_id, 3_000))
+        .await
+        .expect("insert");
+    assert!(!older.is_pinned);
+
+    let pinned = store
+        .set_message_pinned(&older.message_id, true)
+        .await
+        .expect("pin");
+    assert!(pinned.is_pinned);
+    store
+        .set_message_pinned(&newer.message_id, true)
+        .await
+        .expect("pin");
+    store
+        .set_message_pinned(&other.message_id, true)
+        .await
+        .expect("pin");
+    store
+        .mark_deleted(&other.message_id, 4_000)
+        .await
+        .expect("delete");
+
+    let listed = store.pinned_messages(&chat_id).await.expect("pinned");
+    let ids: Vec<&str> = listed.iter().map(|m| m.message_id.as_str()).collect();
+    assert_eq!(ids, [newer.message_id.as_str(), older.message_id.as_str()]);
+    assert!(
+        store
+            .get_message(&older.message_id)
+            .await
+            .expect("get")
+            .expect("exists")
+            .is_pinned
+    );
+
+    store
+        .set_message_pinned(&older.message_id, false)
+        .await
+        .expect("unpin");
+    let listed = store.pinned_messages(&chat_id).await.expect("pinned");
+    assert_eq!(listed.len(), 1);
+    assert!(
+        store
+            .set_message_pinned("msg-does-not-exist", true)
+            .await
+            .is_err()
+    );
+}

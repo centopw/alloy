@@ -9,6 +9,7 @@
   import { roomsStore } from '$lib/stores/rooms.svelte';
   import { prefs } from '$lib/stores/prefs.svelte';
   import TypingIndicator from './TypingIndicator.svelte';
+  import PinnedBar from './PinnedBar.svelte';
   import Icon from '$lib/icons/Icon.svelte';
   import { ArrowDown, AtSign } from '$lib/icons';
   import MessageRow from './MessageRow.svelte';
@@ -184,7 +185,8 @@
       // One Timeline serves every room: forget the previous room's rows so the next rows count as an opening.
       anchors = null;
       sticky = false;
-      void timelineStore.open(id);
+      // The pinned bar fetches after the subscription so its rows merge with the loaded timeline.
+      void timelineStore.open(id).then(() => timelineStore.loadPinned());
     });
     return () =>
       untrack(() => {
@@ -525,6 +527,7 @@
 </script>
 
 <section class="timeline" aria-label={t('chat-timeline-label', { title, kind: isDirect ? t('chat-kind-direct') : t('chat-kind-group') })}>
+  <PinnedBar {roomId} {kindLabel} />
   <!-- A layout and scroll-input wrapper only: the accessible structure lives on the `feed` inside. -->
   <div class="viewport" role="presentation" bind:this={viewportEl} bind:clientHeight={viewportHeight} onpointerdown={onViewportPointerDown} onwheel={onUserScroll} ontouchstart={onUserScroll} onfocusin={onViewportFocus} use:contextmenu={backgroundItems}>
     {#if timelineStore.loading && rows.length === 0}

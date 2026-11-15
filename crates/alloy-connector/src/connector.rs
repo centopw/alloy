@@ -16,7 +16,9 @@ use crate::capabilities::Capabilities;
 use crate::error::ConnectorError;
 use crate::events::ConnectorEvent;
 use crate::login::{LoginInput, LoginStep};
-use crate::types::{MediaRef, Network, RemoteChat, RemoteMessage, RemoteUser, SessionBlob};
+use crate::types::{
+    MediaRef, Network, RemoteChat, RemoteMember, RemoteMessage, RemoteUser, SessionBlob,
+};
 
 /// One page of a paged call.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -132,6 +134,21 @@ pub trait Connector: Send + Sync {
         limit: usize,
     ) -> Result<Page<RemoteChat>, ConnectorError>;
 
+    /// Lists the members of a group or channel as the network reports them now. A direct chat
+    /// has none. The network may cap the list (Telegram returns the most recent members of a
+    /// large group) or refuse it (a broadcast channel lists members to its admins only).
+    ///
+    /// The default is for connectors that cannot list members: `NotSupported("members")`.
+    async fn list_members(
+        &self,
+        remote_chat_id: &str,
+    ) -> Result<Vec<RemoteMember>, ConnectorError> {
+        let _ = remote_chat_id;
+        Err(ConnectorError::NotSupported {
+            feature: "members".to_string(),
+        })
+    }
+
     /// Pages history backwards, newest message first.
     ///
     /// `before` is exclusive: only messages strictly older than that remote message id are
@@ -200,6 +217,46 @@ pub trait Connector: Send + Sync {
 
     /// Sends or stops a typing indicator in the chat.
     async fn set_typing(&self, remote_chat_id: &str, typing: bool) -> Result<(), ConnectorError>;
+
+    /// Pins or unpins a chat on the network. A newly pinned chat goes to the top of the pinned
+    /// list. Idempotent. Fails with `NotSupported("pin_chats")` when
+    /// [`Capabilities::pin_chats`] is false; the default does exactly that.
+    async fn set_chat_pinned(
+        &self,
+        remote_chat_id: &str,
+        pinned: bool,
+    ) -> Result<(), ConnectorError> {
+        let _ = (remote_chat_id, pinned);
+        Err(ConnectorError::NotSupported {
+            feature: "pin_chats".to_string(),
+        })
+    }
+
+    /// Replaces the network's pinned list with `remote_chat_ids`, top to bottom. Every id must
+    /// be a chat this account can see; the network may refuse a list longer than its pin limit
+    /// with [`ConnectorError::InvalidInput`]. Fails with `NotSupported("pin_chats")` when
+    /// [`Capabilities::pin_chats`] is false; the default does exactly that.
+    async fn reorder_pinned_chats(&self, remote_chat_ids: &[String]) -> Result<(), ConnectorError> {
+        let _ = remote_chat_ids;
+        Err(ConnectorError::NotSupported {
+            feature: "pin_chats".to_string(),
+        })
+    }
+
+    /// Pins or unpins a message in its chat for every participant. Idempotent. Fails with
+    /// `NotSupported("pin_messages")` when [`Capabilities::pin_messages`] is false; the default
+    /// does exactly that.
+    async fn set_message_pinned(
+        &self,
+        remote_chat_id: &str,
+        remote_msg_id: &str,
+        pinned: bool,
+    ) -> Result<(), ConnectorError> {
+        let _ = (remote_chat_id, remote_msg_id, pinned);
+        Err(ConnectorError::NotSupported {
+            feature: "pin_messages".to_string(),
+        })
+    }
 
     /// Downloads media to `dest_path` (creating or truncating the file) and returns the number of
     /// bytes written. Filesystem failures, including a missing parent directory, are

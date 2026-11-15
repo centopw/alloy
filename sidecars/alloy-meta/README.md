@@ -26,8 +26,21 @@ is involved.
   one `{"type":"response","id":N,"result":…,"error":…}` with exactly one of the two set.
 - Events are `{"type":"event","event":{"type":"…"}}` and may be interleaved with responses.
 - Method names are the `Connector` trait methods in snake_case: `begin_login`, `submit_login`,
-  `restore`, `start`, `stop`, `list_chats`, `backfill`, `send`, `edit`, `delete`, `react`,
-  `unreact`, `mark_read`, `set_typing`, `fetch_media`, `logout`.
+  `restore`, `start`, `stop`, `list_chats`, `list_members`, `backfill`, `send`, `edit`, `delete`,
+  `react`, `unreact`, `mark_read`, `set_typing`, `set_chat_pinned`, `reorder_pinned_chats`,
+  `set_message_pinned`, `fetch_media`, `logout`.
+- Messenger pins live in the sidecar on this device: messagix exposes no pin API, so
+  `set_chat_pinned` (`{"remote_chat_id":"…","pinned":true|false}`) and `reorder_pinned_chats`
+  (`{"remote_chat_ids":["…"]}`, top first) keep an ordered list in `<dataDir>/pins.json`, emit
+  `chat_pinned` / `pinned_chats_reordered`, and `list_chats` reports `is_pinned` and `pin_order`
+  from it. The list never reaches the network or another device and is removed on `logout`.
+  `set_message_pinned` answers `not_supported` (`pin_messages`); the host pins messages locally.
+- `list_members` takes `{"remote_chat_id":"…"}` and returns `[{"user":{…},"role":"admin"|null}]`
+  from the participant rows Messenger already sent for the thread (the group info, for an
+  encrypted group). A one-to-one chat answers `[]`; a group nothing has listed yet answers
+  `not_supported`. An empty `display_name` means the person's contact row has not arrived.
+- A message carries `sender` (`{"remote_user_id","display_name","avatar"}` or `null`) when a
+  contact row has named its sender, so the host can name people it never listed as members.
 - Remote ids are opaque strings. Messenger threads use their numeric thread key; end-to-end
   encrypted chats use `e2ee:<jid>`, so the two id spaces never collide.
 

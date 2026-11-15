@@ -36,8 +36,6 @@ export interface Prefs {
   notifyPreview: boolean;
   notifyOnlyWhenUnfocused: boolean;
   roomListPreviews: boolean;
-  roomListSections: boolean;
-  roomListPeople: boolean;
   showTyping: boolean;
   sendTyping: boolean;
   /** Announces incoming messages through the conversation's polite live region (mute for chatty chats). */
@@ -71,8 +69,6 @@ export const DEFAULT_PREFS: Readonly<Prefs> = Object.freeze({
   notifyPreview: true,
   notifyOnlyWhenUnfocused: true,
   roomListPreviews: true,
-  roomListSections: true,
-  roomListPeople: true,
   showTyping: true,
   sendTyping: true,
   announceMessages: true,
@@ -219,12 +215,6 @@ export class PrefsStore {
   }
   get roomListPreviews(): boolean {
     return this.#values.roomListPreviews;
-  }
-  get roomListSections(): boolean {
-    return this.#values.roomListSections;
-  }
-  get roomListPeople(): boolean {
-    return this.#values.roomListPeople;
   }
   get showTyping(): boolean {
     return this.#values.showTyping;

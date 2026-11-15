@@ -3,7 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -11,6 +15,7 @@ import (
 	"go.mau.fi/mautrix-meta/pkg/messagix/methods"
 	"go.mau.fi/mautrix-meta/pkg/messagix/socket"
 	"go.mau.fi/mautrix-meta/pkg/messagix/table"
+	waTypes "go.mau.fi/whatsmeow/types"
 )
 
 // listChats returns chats newest-activity-first. The cursor is an opaque base64 value holding
@@ -153,6 +158,240 @@ func (m *Messenger) ensureThreads(ctx context.Context, want int) *WireError {
 	return nil
 }
 
+// pinsFile holds the ordered pinned-chat list in dataDir. messagix exposes no pin API, so
+// Messenger pins live on this device only and never reach the network or other devices.
+const pinsFile = "pins.json"
+
+func (m *Messenger) pinsPath() string {
+	return filepath.Join(m.dataDir, pinsFile)
+}
+
+// loadPinsLocked reads the pinned list persisted by an earlier run. A missing or unreadable
+// file leaves the list empty; the host then sees no pinned chats. mu must be held.
+func (m *Messenger) loadPinsLocked() {
+	m.pinned = nil
+	raw, err := os.ReadFile(m.pinsPath())
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			m.log.Warn().Err(err).Msg("Failed to read the pinned-chat list")
+		}
+		return
+	}
+	var ids []string
+	if err := json.Unmarshal(raw, &ids); err != nil {
+		m.log.Warn().Err(err).Msg("Ignoring a malformed pinned-chat list")
+		return
+	}
+	for _, id := range ids {
+		if _, _, _, err := parseChatID(id); err == nil && !slices.Contains(m.pinned, id) {
+			m.pinned = append(m.pinned, id)
+		}
+	}
+}
+
+// persistPinsLocked writes the pinned list so it survives a restart. mu must be held.
+func (m *Messenger) persistPinsLocked() *WireError {
+	ids := m.pinned
+	if ids == nil {
+		ids = []string{}
+	}
+	raw, err := json.Marshal(ids)
+	if err != nil {
+		return errProtocol("encode pinned-chat list: " + err.Error())
+	}
+	if err := os.MkdirAll(m.dataDir, 0o700); err != nil {
+		return errProtocol("create data directory: " + err.Error())
+	}
+	if err := os.WriteFile(m.pinsPath(), raw, 0o600); err != nil {
+		return errProtocol("write pinned-chat list: " + err.Error())
+	}
+	return nil
+}
+
+// pinOrderLocked reports whether a chat is pinned and its position, 0 at the top. mu must be held.
+func (m *Messenger) pinOrderLocked(chatID string) (bool, *uint32) {
+	index := slices.Index(m.pinned, chatID)
+	if index < 0 {
+		return false, nil
+	}
+	return true, new(uint32(index))
+}
+
+// threadForChatIDLocked finds the thread behind a host-facing chat id, plain or E2EE. mu must
+// be held.
+func (m *Messenger) threadForChatIDLocked(chatID string) *threadInfo {
+	threadKey, jid, isE2EE, err := parseChatID(chatID)
+	if err != nil {
+		return nil
+	}
+	if !isE2EE {
+		return m.threads[threadKey]
+	}
+	if t := m.e2eeThreads[chatID]; t != nil {
+		return t
+	}
+	if t := m.threads[int64(jid.UserInt())]; t != nil && t.chatID() == chatID {
+		return t
+	}
+	return nil
+}
+
+// setChatPinned pins a chat to the top of the local pinned list or removes it. Idempotent.
+func (m *Messenger) setChatPinned(params json.RawMessage) (any, *WireError) {
+	var p SetChatPinnedParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, errInvalidInput("set_chat_pinned params: " + err.Error())
+	}
+	if _, _, _, err := parseChatID(p.RemoteChatID); err != nil {
+		return nil, errInvalidInput(err.Error())
+	}
+	m.mu.Lock()
+	if m.cli == nil || m.loggedOut {
+		m.mu.Unlock()
+		return nil, errUnauthorized()
+	}
+	if m.threadForChatIDLocked(p.RemoteChatID) == nil {
+		m.mu.Unlock()
+		return nil, errInvalidInput(fmt.Sprintf("unknown chat %q", p.RemoteChatID))
+	}
+	index := slices.Index(m.pinned, p.RemoteChatID)
+	if p.Pinned == (index >= 0) {
+		m.mu.Unlock()
+		return nil, nil
+	}
+	if p.Pinned {
+		m.pinned = append([]string{p.RemoteChatID}, m.pinned...)
+	} else {
+		m.pinned = slices.Delete(slices.Clone(m.pinned), index, index+1)
+	}
+	werr := m.persistPinsLocked()
+	m.mu.Unlock()
+	if werr != nil {
+		return nil, werr
+	}
+	m.emit(NewChatPinnedEvent(p.RemoteChatID, p.Pinned))
+	return nil, nil
+}
+
+// reorderPinnedChats replaces the local pinned list, top first. Every id must name a known
+// chat; a chat left out is unpinned.
+func (m *Messenger) reorderPinnedChats(params json.RawMessage) (any, *WireError) {
+	var p ReorderPinnedChatsParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, errInvalidInput("reorder_pinned_chats params: " + err.Error())
+	}
+	ids := make([]string, 0, len(p.RemoteChatIDs))
+	for _, id := range p.RemoteChatIDs {
+		if _, _, _, err := parseChatID(id); err != nil {
+			return nil, errInvalidInput(err.Error())
+		}
+		if slices.Contains(ids, id) {
+			return nil, errInvalidInput(fmt.Sprintf("chat %q listed twice", id))
+		}
+		ids = append(ids, id)
+	}
+	m.mu.Lock()
+	if m.cli == nil || m.loggedOut {
+		m.mu.Unlock()
+		return nil, errUnauthorized()
+	}
+	for _, id := range ids {
+		if m.threadForChatIDLocked(id) == nil {
+			m.mu.Unlock()
+			return nil, errInvalidInput(fmt.Sprintf("unknown chat %q", id))
+		}
+	}
+	m.pinned = ids
+	werr := m.persistPinsLocked()
+	m.mu.Unlock()
+	if werr != nil {
+		return nil, werr
+	}
+	m.emit(NewPinnedChatsReorderedEvent(slices.Clone(ids)))
+	return nil, nil
+}
+
+// listMembers answers from what the network already sent: the participant rows of a thread, or
+// the group info of an encrypted group. A one-to-one chat has no members to list.
+func (m *Messenger) listMembers(ctx context.Context, params json.RawMessage) (any, *WireError) {
+	var p ListMembersParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, errInvalidInput("list_members params: " + err.Error())
+	}
+	threadKey, jid, isE2EE, err := parseChatID(p.RemoteChatID)
+	if err != nil {
+		return nil, errInvalidInput(err.Error())
+	}
+	m.mu.Lock()
+	if m.cli == nil || m.loggedOut {
+		m.mu.Unlock()
+		return nil, errUnauthorized()
+	}
+	thread := m.threads[threadKey]
+	if isE2EE {
+		threadKey = int64(jid.UserInt())
+		if thread = m.e2eeThreads[p.RemoteChatID]; thread == nil {
+			thread = m.threads[threadKey]
+		}
+	}
+	m.mu.Unlock()
+	if thread == nil {
+		return nil, errInvalidInput(fmt.Sprintf("unknown chat %q", p.RemoteChatID))
+	}
+	if thread.Type.IsOneToOne() {
+		return []RemoteMember{}, nil
+	}
+
+	admins := make(map[int64]bool)
+	if jid.Server == waTypes.GroupServer {
+		m.e2eeMu.Lock()
+		e2ee := m.e2ee
+		m.e2eeMu.Unlock()
+		if e2ee != nil {
+			info, err := e2ee.GetGroupInfo(ctx, jid)
+			if err != nil {
+				m.log.Warn().Err(err).Msg("Failed to fetch the encrypted group's members")
+			} else {
+				for _, participant := range info.Participants {
+					admins[int64(participant.JID.UserInt())] = participant.IsAdmin || participant.IsSuperAdmin
+				}
+			}
+		}
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(admins) == 0 {
+		admins = m.members[threadKey]
+	}
+	if len(admins) == 0 {
+		// Nothing the network sent lists this group; the host keeps what it has.
+		return nil, errNotSupported("members")
+	}
+	return m.membersLocked(admins), nil
+}
+
+// membersLocked renders a member set, ordered by id so the answer is stable. mu must be held.
+func (m *Messenger) membersLocked(admins map[int64]bool) []RemoteMember {
+	ids := make([]int64, 0, len(admins))
+	for id := range admins {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	members := make([]RemoteMember, 0, len(ids))
+	for _, id := range ids {
+		member := RemoteMember{User: RemoteUser{RemoteUserID: strconv.FormatInt(id, 10)}}
+		if profile := m.profileLocked(id); profile != nil {
+			member.User = *profile
+		}
+		if admins[id] {
+			member.Role = new("admin")
+		}
+		members = append(members, member)
+	}
+	return members
+}
+
 // backfill pages history backwards through the FetchMessagesTask. Messenger's history request
 // is asynchronous on the socket, so the response table is the only page this call can see.
 func (m *Messenger) backfill(ctx context.Context, params json.RawMessage) (any, *WireError) {
@@ -234,6 +473,8 @@ func (m *Messenger) backfill(ctx context.Context, params json.RawMessage) (any, 
 		items = append(items, msg)
 	}
 	m.mu.Lock()
+	// The page names its senders in its own contact rows.
+	m.applyContactsLocked(resp)
 	for _, row := range resp.LSInsertMessage {
 		appendRow(row)
 	}

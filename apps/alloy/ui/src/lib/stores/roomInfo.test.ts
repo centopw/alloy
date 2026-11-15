@@ -37,6 +37,8 @@ function details(name: string | null) {
       location: false,
       max_upload_bytes: null,
       formatted_text: false,
+      pin_chats: true,
+      pin_messages: true,
     },
   };
 }

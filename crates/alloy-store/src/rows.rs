@@ -50,6 +50,7 @@ pub(crate) fn chat(row: &Row<'_>) -> rusqlite::Result<ChatRecord> {
         unread_count: row.get("unread_count")?,
         mention_count: row.get("mention_count")?,
         is_pinned: row.get("is_pinned")?,
+        pin_order: row.get("pin_order")?,
         is_archived: row.get("is_archived")?,
         is_muted: row.get("is_muted")?,
         muted_until: row.get("muted_until")?,
@@ -79,6 +80,7 @@ pub(crate) fn message(row: &Row<'_>) -> rusqlite::Result<MessageRecord> {
         media_id: row.get("media_id")?,
         send_state: row.get("send_state")?,
         extra,
+        is_pinned: row.get("is_pinned")?,
     })
 }
 
