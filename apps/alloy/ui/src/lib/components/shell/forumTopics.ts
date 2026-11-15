@@ -32,14 +32,30 @@ export function groupForumTopics(rooms: readonly RoomSummary[]): ForumGroups {
     }
   }
   // Newest activity first, then name: the same order the rest of the list uses.
-  for (const topics of topicsByForum.values()) {
-    topics.sort(
-      (a, b) =>
-        (b.latest_event?.timestamp_millis ?? 0) - (a.latest_event?.timestamp_millis ?? 0) ||
-        (a.name ?? '').localeCompare(b.name ?? ''),
-    );
-  }
+  for (const topics of topicsByForum.values()) topics.sort(byActivityThenName);
   return { top, topicsByForum };
+}
+
+/** Newest activity first, then name: the order the room list and the topics pane share. */
+function byActivityThenName(a: RoomSummary, b: RoomSummary): number {
+  return (
+    (b.latest_event?.timestamp_millis ?? 0) - (a.latest_event?.timestamp_millis ?? 0) ||
+    (a.name ?? '').localeCompare(b.name ?? '')
+  );
+}
+
+/**
+ * Every topic a forum owns, newest activity first. `forumId` is the forum's own room id; a topic
+ * with no messages sorts after the ones that have some. Topics are conversations of their own, so
+ * this looks at the whole room list rather than at the filtered sidebar view.
+ */
+export function topicsOf(rooms: readonly RoomSummary[], forumId: string): RoomSummary[] {
+  return rooms.filter((r) => r.parent_id === forumId).sort(byActivityThenName);
+}
+
+/** How many topics a forum has; the header shows this instead of a member count. */
+export function forumTopicCount(rooms: readonly RoomSummary[], forumId: string): number {
+  return topicsOf(rooms, forumId).length;
 }
 
 /**

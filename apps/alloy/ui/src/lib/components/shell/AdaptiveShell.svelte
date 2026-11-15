@@ -2,6 +2,7 @@
   import { onMount, tick, untrack } from 'svelte';
   import Sidebar from './Sidebar.svelte';
   import ChatHeader from './ChatHeader.svelte';
+  import TopicsPane from './TopicsPane.svelte';
   import MobileTabBar from './MobileTabBar.svelte';
   import RoomInfoPanel from './RoomInfoPanel.svelte';
   import RoomSearchPanel from './RoomSearchPanel.svelte';
@@ -247,12 +248,13 @@
 
   function onKeydown(e: KeyboardEvent) {
     // Typing anywhere in a conversation starts a message; the keystroke follows focus into the field.
-    if (activeId && !paletteOpen && shouldFocusComposer(e)) focusComposer();
+    // A forum has no composer, so its topics pane keeps the keyboard.
+    if (activeId && !active?.is_forum && !paletteOpen && shouldFocusComposer(e)) focusComposer();
     const mod = e.metaKey || e.ctrlKey;
     if (mod && e.key.toLowerCase() === 'k') {
       e.preventDefault();
       paletteOpen = !paletteOpen;
-    } else if (mod && e.key.toLowerCase() === 'f' && activeId && caps.keyboardShortcuts) {
+    } else if (mod && e.key.toLowerCase() === 'f' && activeId && !active?.is_forum && caps.keyboardShortcuts) {
       e.preventDefault();
       ui.toggleRoomSearch();
     } else if (mod && e.key === ',') {
@@ -346,16 +348,22 @@
 
   <main class="chat" id="conversation" tabindex="-1">
     {#if active && activeId}
-      {#if timelineStore.selecting}
+      {#if timelineStore.selecting && !active.is_forum}
         <!-- Selection replaces the header; keep the view's h1 in the outline for the duration. -->
         <h1 class="visually-hidden">{roomTitle(active)}</h1>
         <SelectionBar />
       {:else}
-        <ChatHeader room={active} onback={backToList} />
+        <ChatHeader room={active} onback={backToList} onopenforum={pick} />
       {/if}
-      <Timeline roomId={activeId} title={roomTitle(active)} isDirect={active.is_direct} />
-      <UploadStrip roomId={activeId} />
-      <Composer roomId={activeId} />
+      {#if active.is_forum}
+        <!-- A forum holds no messages of its own: its topics are the conversations, so the pane
+             replaces the timeline, the attachment strip and the composer. -->
+        <TopicsPane forum={active} onselect={pick} />
+      {:else}
+        <Timeline roomId={activeId} title={roomTitle(active)} isDirect={active.is_direct} />
+        <UploadStrip roomId={activeId} />
+        <Composer roomId={activeId} />
+      {/if}
     {:else}
       <div class="drag-strip" data-tauri-drag-region aria-hidden="true"></div>
       <div class="empty">

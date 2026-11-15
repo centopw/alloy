@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RoomSummary } from '$lib/generated';
-import { forumTotals, groupForumTopics } from './forumTopics';
+import { forumTopicCount, forumTotals, groupForumTopics, topicsOf } from './forumTopics';
 
 function room(id: string, patch: Partial<RoomSummary> = {}): RoomSummary {
   return {
@@ -68,6 +68,49 @@ describe('groupForumTopics', () => {
     const rooms = [room('a', { parent_id: null }), room('b', { parent_id: undefined })];
     const { top } = groupForumTopics(rooms);
     expect(top.map((r) => r.id)).toEqual(['a', 'b']);
+  });
+});
+
+describe('topicsOf', () => {
+  it('returns only the topics of that forum, newest activity first', () => {
+    const rooms = [
+      room('dm'),
+      room('forum', { is_forum: true }),
+      room('old', { parent_id: 'forum', latest_event: at(100) }),
+      room('new', { parent_id: 'forum', latest_event: at(900) }),
+      room('other', { parent_id: 'elsewhere' }),
+    ];
+    expect(topicsOf(rooms, 'forum').map((r) => r.id)).toEqual(['new', 'old']);
+  });
+
+  it('keeps a topic that has no messages, after the active ones', () => {
+    const rooms = [
+      room('forum', { is_forum: true }),
+      room('quiet', { parent_id: 'forum' }),
+      room('busy', { parent_id: 'forum', latest_event: at(5) }),
+    ];
+    expect(topicsOf(rooms, 'forum').map((r) => r.id)).toEqual(['busy', 'quiet']);
+  });
+
+  it('is empty for a forum without topics', () => {
+    expect(topicsOf([room('forum', { is_forum: true })], 'forum')).toEqual([]);
+  });
+});
+
+describe('forumTopicCount', () => {
+  it('counts the topics of one forum only', () => {
+    const rooms = [
+      room('forum', { is_forum: true }),
+      room('t1', { parent_id: 'forum' }),
+      room('t2', { parent_id: 'forum' }),
+      room('t3', { parent_id: 'elsewhere' }),
+      room('dm'),
+    ];
+    expect(forumTopicCount(rooms, 'forum')).toBe(2);
+  });
+
+  it('is zero for a forum without topics', () => {
+    expect(forumTopicCount([room('forum', { is_forum: true })], 'forum')).toBe(0);
   });
 });
 

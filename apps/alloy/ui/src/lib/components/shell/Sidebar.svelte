@@ -338,13 +338,15 @@
     rovingId = roomId;
   }
 
-  /** Forum rows toggle their topics; Enter and Space activate, ArrowRight opens, ArrowLeft closes. */
+  /**
+   * A forum row opens the forum on Enter/Space, like any other row. The inline topic list is the
+   * secondary affordance: ArrowRight unfolds it and ArrowLeft folds it, so it needs no extra tab stop.
+   */
   function onForumKeydown(e: KeyboardEvent, forumId: string) {
     if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
     const open = roomsStore.expandedForums.has(forumId);
     if (e.key === 'ArrowRight' && !open) roomsStore.toggleForum(forumId);
     else if (e.key === 'ArrowLeft' && open) roomsStore.toggleForum(forumId);
-    else if (e.key === 'Enter' || e.key === ' ') roomsStore.toggleForum(forumId);
     else return;
     e.preventDefault();
   }
@@ -590,20 +592,24 @@
   {@const open = roomsStore.expandedForums.has(r.id)}
   {@const totals = forumTotals(r, topics, (x) => roomsStore.unreadOf(x))}
   {@const name = roomTitle(r)}
+  {@const active = r.id === roomsStore.activeRoomId}
   <div class="row-wrap forum">
+    <!-- A forum is a container of conversations: the row opens it, which shows every topic at
+         once. The chevron stays a separate, secondary control for the inline list. -->
     <button
       type="button"
       class="row forum-row"
-      class:expanded={open}
-      aria-expanded={open}
-      aria-label={open ? t('forum-topics-collapse', { name }) : t('forum-topics-expand', { name })}
+      class:active
       data-room-id={r.id}
+      aria-current={active ? 'true' : undefined}
       tabindex={viewport.isPhone ? undefined : r.id === rovingStopId ? 0 : -1}
-      onclick={() => roomsStore.toggleForum(r.id)}
+      onclick={() => openRoom(r.id)}
       onfocus={() => onRoomFocus(r.id)}
-      onkeydown={(e) => onForumKeydown(e, r.id)}
+      onkeydown={(e) => {
+        onForumKeydown(e, r.id);
+        if (!e.defaultPrevented) onRoomKeydown(e, r.id);
+      }}
     >
-      <span class="twisty" aria-hidden="true"><Icon icon={open ? ChevronDown : ChevronRight} size={16} /></span>
       <span class="pinned avatar">
         <Avatar userId={r.id} displayName={name} src={avatars[r.id] ?? null} size={36} shape="rounded" />
       </span>
@@ -618,6 +624,17 @@
           {/if}
         </span>
       </span>
+    </button>
+    <button
+      type="button"
+      class="twisty"
+      tabindex="-1"
+      aria-expanded={open}
+      aria-label={open ? t('forum-topics-collapse', { name }) : t('forum-topics-expand', { name })}
+      data-tooltip={open ? t('forum-topics-collapse', { name }) : t('forum-topics-expand', { name })}
+      onclick={() => roomsStore.toggleForum(r.id)}
+    >
+      <Icon icon={open ? ChevronDown : ChevronRight} size={16} />
     </button>
   </div>
 {/snippet}
@@ -1317,10 +1334,39 @@
   .row-wrap {
     position: relative;
   }
-  /* Forums are containers: the chevron opens their topic list, which nests under the forum row. */
-  .forum-row .twisty {
-    display: inline-flex;
+  /* Forums are containers: the row opens the forum's topic pane, while the chevron is its own
+     control — a click on it never opens the forum, it only unfolds the inline topic list. */
+  button.row.forum-row {
+    padding-left: calc(var(--alloy-spacing-scale-2) + 28px);
+  }
+  /* The rail marks the open forum at the very edge, clear of the chevron. */
+  button.row.forum-row.active::before {
+    left: 0;
+  }
+  .twisty {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    z-index: 1;
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--alloy-radii-sm);
+    background: transparent;
     color: var(--alloy-color-text-muted);
+    translate: 0 -50%;
+    cursor: pointer;
+  }
+  .twisty:hover {
+    background: var(--alloy-glass-control);
+    color: var(--alloy-color-text-primary);
+  }
+  .twisty:focus-visible {
+    outline: 2px solid var(--alloy-color-accent-primary);
+    outline-offset: 2px;
   }
   /* `.group ul` zeroes list padding, so the indent needs the same specificity to win. */
   .group ul.topics {
@@ -1371,7 +1417,9 @@
     .more:focus-visible {
       display: grid;
     }
-    .row-wrap:hover .end {
+    /* The hovered row hands its trailing marks over to the more button. A forum row has no such
+       button, so its summed unread badge stays visible. */
+    .row-wrap:hover:has(> .more) .end {
       visibility: hidden;
     }
   }
@@ -1527,6 +1575,15 @@
       min-height: 56px;
       box-sizing: border-box;
       padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x);
+    }
+    /* Touch: the chevron keeps a full 44px target of its own, so opening the inline list never
+       means hitting the row by mistake. */
+    .twisty {
+      width: 44px;
+      height: 44px;
+    }
+    button.row.forum-row {
+      padding-left: calc(var(--alloy-spacing-scale-2) + 44px);
     }
     .title {
       font-size: var(--alloy-typography-size-base);
