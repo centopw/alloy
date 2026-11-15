@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.1 (pre-release)
+
+### Added
+- **Pin chats and messages.** Pin a chat from its menu and it goes to the top of the list; drag a pinned chat, or use Alt+Arrow, to reorder the block. Pins made in the official Telegram app and Messenger's saved pins follow in, in the order the network gives them. A pinned bar above a conversation lists its pinned messages and jumps to them. Telegram pins messages on the network; Messenger's message pins stay on this device.
+- **A country dropdown for phone sign-in.** A number typed with a leading 0, spaces or its own `+` code is turned into international format, and the dropdown follows a code you type.
+- **Browser sign-in for Messenger reads one pasted request.** The cookie step lists the browser steps and takes every cookie it needs from a request copied as cURL.
+- **A network icon beside each chat** in the sidebar.
+
+### Changed
+- **Telegram shows a readable device.** Settings → Devices and the "new login" notice name the device and system and carry the app's own version instead of the crate's.
+- **The room list is no longer grouped into sections.** The "Group chats into sections" and "direct messages as a separate section" preferences are removed; pinned chats lead the list.
+
+### Fixed
+- **Cached images and avatars did not load.** The webview's asset scope and the save and download bridges named `media_cache` while the engine caches under `media`; the scope now matches, and `https://asset.localhost` is allowed for Windows and Android.
+- **A media download could be cut short or mistyped.** Files are written to a temporary name and renamed, so two requests for the same file cannot truncate one the webview is reading, and a file takes the network's own type rather than the one the caller asked for.
+- **Archived Telegram chats broke pin reordering.** Pinned dialogs in the archive are no longer pinned or numbered, so a reorder is not refused and a reorder from Telegram does not unpin them.
+
 ## 0.4.0 (pre-release)
 
 Alloy no longer talks to a homeserver: Telegram and Messenger are connected straight from the device. Both networks may restrict accounts that use unofficial clients, so read https://core.telegram.org/api/terms and https://github.com/mautrix/meta/issues/44 before you connect an account you cannot afford to lose.
