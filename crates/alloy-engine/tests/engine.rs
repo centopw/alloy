@@ -6,16 +6,17 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use alloy_connector::Connector;
 use alloy_connector::fake::{
     FAKE_CHAT_CHANNEL, FAKE_CHAT_DIRECT, FAKE_CHAT_FORUM, FAKE_CHAT_GROUP, FAKE_CODE, FAKE_USER_ID,
+    FakeConnector,
 };
+use alloy_connector::{Connector, ConnectorEvent};
 use alloy_engine::factory::FakeConnectorFactory;
 use alloy_engine::{AppEngine, Engine, EngineContext};
 use alloy_protocol::{
-    Account, AccountState, EngineCommand, EngineEvent, EngineResponse, EventSendState, LoginId,
-    LoginInputDto, LoginStepDto, Network, RoomId, RoomSummary, SubscriptionId, TimelineItemContent,
-    TimelineItemDto, VectorDiffDto,
+    Account, AccountState, EngineCommand, EngineEvent, EngineResponse, EventId, EventSendState,
+    LoginId, LoginInputDto, LoginStepDto, Network, RoomId, RoomSummary, SubscriptionId,
+    TimelineItemContent, TimelineItemDto, UserId, VectorDiffDto,
 };
 use alloy_storage::{InMemorySecretStore, SecretStore};
 use alloy_store::{SendState, Store};
@@ -1166,4 +1167,201 @@ async fn timeline_of_a_topic_replays_only_that_topic() {
             "the other topic's message '{message}' must not appear here"
         );
     }
+}
+
+/// The remote id of the seeded message with this body, read from the fake's history.
+async fn remote_message_id(fake: &FakeConnector, remote_chat_id: &str, body: &str) -> String {
+    let page = fake
+        .backfill(remote_chat_id, None, 50)
+        .await
+        .expect("history");
+    page.items
+        .iter()
+        .find(|message| message.body.as_deref() == Some(body))
+        .unwrap_or_else(|| panic!("the seeded message '{body}'"))
+        .remote_msg_id
+        .clone()
+}
+
+/// The local event id of the timeline item carrying this body.
+fn event_id_with_body(items: &[TimelineItemDto], body: &str) -> EventId {
+    items
+        .iter()
+        .find(|item| text_body(item) == Some(body))
+        .unwrap_or_else(|| panic!("the timeline item '{body}'"))
+        .event_id
+        .clone()
+        .expect("a stored message")
+}
+
+/// Subscribes to a room's timeline. Returns the subscription, which must stay alive for the test,
+/// the event stream from before the subscribe, and the items of the initial reset.
+async fn open_timeline(
+    harness: &Harness,
+    room: &RoomId,
+) -> (
+    SubscriptionId,
+    broadcast::Receiver<EngineEvent>,
+    Vec<TimelineItemDto>,
+) {
+    let mut events = harness.events();
+    let subscription = subscribe_timeline(&harness.engine, room).await;
+    let event = wait_for(&mut events, |event| {
+        matches!(
+            event,
+            EngineEvent::TimelineDiff { diff, .. }
+                if matches!(diff.as_ref(), VectorDiffDto::Reset { .. })
+        )
+    })
+    .await;
+    let EngineEvent::TimelineDiff { diff, .. } = event else {
+        panic!("unexpected event")
+    };
+    (subscription, events, timeline_values(&diff))
+}
+
+#[tokio::test]
+async fn forum_deletion_lands_on_the_topic_that_holds_the_message() {
+    let harness = Harness::new();
+    let account = login(&harness.engine).await;
+    let general = local_chat(&harness.engine, &account, FAKE_TOPIC_GENERAL).await;
+    let other = local_chat(&harness.engine, &account, FAKE_TOPIC_OTHER).await;
+    let fake = harness.factory.last().expect("the running connector");
+    let body = "Welcome to the forum.";
+    let remote = remote_message_id(&fake, FAKE_TOPIC_GENERAL, body).await;
+
+    let (_subscription, mut events, items) = open_timeline(&harness, &general).await;
+    let target = event_id_with_body(&items, body);
+
+    // Telegram names a forum's delete by the forum id alone.
+    fake.emit_event(ConnectorEvent::MessageDeleted {
+        remote_chat_id: FAKE_CHAT_FORUM.to_string(),
+        remote_msg_id: remote.clone(),
+    })
+    .await
+    .expect("emit the forum's delete");
+    wait_for(&mut events, |event| match event {
+        EngineEvent::TimelineDiff { diff, .. } => timeline_values(diff).iter().any(|item| {
+            item.event_id.as_ref() == Some(&target)
+                && matches!(item.content, TimelineItemContent::Deleted)
+        }),
+        _ => false,
+    })
+    .await;
+
+    let store = &harness.engine.context().store;
+    let deleted = store
+        .find_message_by_remote(&general.0, &remote)
+        .await
+        .expect("find message")
+        .expect("the message is stored in General");
+    assert!(deleted.deleted_at.is_some());
+
+    let other_messages = store
+        .page_messages(&other.0, None, 50)
+        .await
+        .expect("other topic");
+    assert!(
+        other_messages
+            .iter()
+            .all(|message| message.deleted_at.is_none()),
+        "the other topic is untouched"
+    );
+}
+
+#[tokio::test]
+async fn forum_pin_lands_on_the_topic_that_holds_the_message() {
+    let harness = Harness::new();
+    let account = login(&harness.engine).await;
+    let general = local_chat(&harness.engine, &account, FAKE_TOPIC_GENERAL).await;
+    let other = local_chat(&harness.engine, &account, FAKE_TOPIC_OTHER).await;
+    let forum = local_chat(&harness.engine, &account, FAKE_CHAT_FORUM).await;
+    let fake = harness.factory.last().expect("the running connector");
+    let body = "Keep each topic to its subject.";
+    let remote = remote_message_id(&fake, FAKE_TOPIC_GENERAL, body).await;
+
+    let (_subscription, mut events, items) = open_timeline(&harness, &general).await;
+    let target = event_id_with_body(&items, body);
+
+    fake.emit_event(ConnectorEvent::MessagePinned {
+        remote_chat_id: FAKE_CHAT_FORUM.to_string(),
+        remote_msg_id: remote,
+        pinned: true,
+    })
+    .await
+    .expect("emit the forum's pin");
+    wait_for(&mut events, |event| match event {
+        EngineEvent::TimelineDiff { diff, .. } => timeline_values(diff)
+            .iter()
+            .any(|item| item.event_id.as_ref() == Some(&target) && item.pinned),
+        _ => false,
+    })
+    .await;
+
+    let response = harness
+        .engine
+        .handle(EngineCommand::GetPinnedMessages {
+            room_id: general.clone(),
+        })
+        .await
+        .expect("list pinned in General");
+    let EngineResponse::PinnedMessages { items } = response else {
+        panic!("unexpected response: {response:?}")
+    };
+    assert_eq!(items.len(), 1);
+    assert_eq!(text_body(&items[0]), Some(body));
+
+    for room in [other, forum] {
+        let response = harness
+            .engine
+            .handle(EngineCommand::GetPinnedMessages { room_id: room })
+            .await
+            .expect("list pinned elsewhere");
+        let EngineResponse::PinnedMessages { items } = response else {
+            panic!("unexpected response: {response:?}")
+        };
+        assert!(
+            items.is_empty(),
+            "only the topic holding the message has a pin"
+        );
+    }
+}
+
+#[tokio::test]
+async fn forum_read_marker_lands_on_the_topic_that_holds_the_message() {
+    let harness = Harness::new();
+    let account = login(&harness.engine).await;
+    let general = local_chat(&harness.engine, &account, FAKE_TOPIC_GENERAL).await;
+    let other = local_chat(&harness.engine, &account, FAKE_TOPIC_OTHER).await;
+    let fake = harness.factory.last().expect("the running connector");
+    let body = "Keep each topic to its subject.";
+    let remote = remote_message_id(&fake, FAKE_TOPIC_GENERAL, body).await;
+
+    let (_subscription, mut events, items) = open_timeline(&harness, &general).await;
+    let target = event_id_with_body(&items, body);
+    let reader = UserId("fake-user-charles".to_string());
+
+    fake.emit_event(ConnectorEvent::ReadMarker {
+        remote_chat_id: FAKE_CHAT_FORUM.to_string(),
+        remote_user_id: reader.0.clone(),
+        up_to_remote_msg_id: remote,
+    })
+    .await
+    .expect("emit the forum's read marker");
+    wait_for(&mut events, |event| match event {
+        EngineEvent::TimelineDiff { diff, .. } => timeline_values(diff)
+            .iter()
+            .any(|item| item.event_id.as_ref() == Some(&target) && item.read_by.contains(&reader)),
+        _ => false,
+    })
+    .await;
+
+    let markers = harness
+        .engine
+        .context()
+        .store
+        .list_read_markers(&other.0)
+        .await
+        .expect("other topic markers");
+    assert!(markers.is_empty(), "the other topic has no read marker");
 }

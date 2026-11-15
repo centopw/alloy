@@ -855,3 +855,94 @@ async fn forum_topics_round_trip_list_newest_first_and_keep_their_parent() {
     let pinned_remotes: Vec<&str> = pinned.iter().map(|c| c.remote_chat_id.as_str()).collect();
     assert_eq!(pinned_remotes, ["ch123"]);
 }
+
+#[tokio::test]
+async fn a_topic_message_is_found_through_its_forum_only() {
+    let store = Store::open_in_memory(KEY).expect("open");
+    let (account_id, _) = account_and_chat(&store).await;
+
+    store
+        .upsert_chat(ChatUpsert {
+            account_id: account_id.clone(),
+            remote_chat_id: "ch123".to_owned(),
+            kind: ChatKind::Group,
+            title: Some("Forum".to_owned()),
+            avatar_media_id: None,
+            last_message_id: None,
+            last_activity_at: Some(1_000),
+            parent_remote_chat_id: None,
+            is_forum: true,
+        })
+        .await
+        .expect("upsert forum");
+    let general = store
+        .upsert_chat(topic(&account_id, "ch123/t1", "ch123", 2_000))
+        .await
+        .expect("upsert general");
+    let release = store
+        .upsert_chat(topic(&account_id, "ch123/t45", "ch123", 3_000))
+        .await
+        .expect("upsert release");
+
+    let mut in_general = text_message(&general, 2_000);
+    in_general.remote_msg_id = Some("msg-general".to_owned());
+    store
+        .upsert_message(in_general)
+        .await
+        .expect("general message");
+    let mut in_release = text_message(&release, 3_000);
+    in_release.remote_msg_id = Some("msg-release".to_owned());
+    store
+        .upsert_message(in_release)
+        .await
+        .expect("release message");
+
+    let (topic_record, message) = store
+        .find_topic_message(&account_id, "ch123", "msg-general")
+        .await
+        .expect("lookup")
+        .expect("the general topic holds it");
+    assert_eq!(topic_record.chat_id, general);
+    assert_eq!(topic_record.remote_chat_id, "ch123/t1");
+    assert_eq!(message.remote_msg_id.as_deref(), Some("msg-general"));
+
+    let (topic_record, _) = store
+        .find_topic_message(&account_id, "ch123", "msg-release")
+        .await
+        .expect("lookup")
+        .expect("the release topic holds it");
+    assert_eq!(topic_record.chat_id, release);
+
+    assert!(
+        store
+            .find_topic_message(&account_id, "ch123", "msg-unknown")
+            .await
+            .expect("lookup")
+            .is_none()
+    );
+
+    // A chat that is not a forum never yields topic messages, even one that names it as parent.
+    extra_chat(&store, &account_id, "remote-chat-plain", 4_000).await;
+    let orphan = store
+        .upsert_chat(topic(
+            &account_id,
+            "remote-chat-plain/t1",
+            "remote-chat-plain",
+            4_500,
+        ))
+        .await
+        .expect("upsert topic under plain chat");
+    let mut plain_message = text_message(&orphan, 4_500);
+    plain_message.remote_msg_id = Some("msg-plain".to_owned());
+    store
+        .upsert_message(plain_message)
+        .await
+        .expect("plain message");
+    assert!(
+        store
+            .find_topic_message(&account_id, "remote-chat-plain", "msg-plain")
+            .await
+            .expect("lookup")
+            .is_none()
+    );
+}

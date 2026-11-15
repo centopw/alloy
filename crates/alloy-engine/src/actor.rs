@@ -352,11 +352,7 @@ async fn apply_message_pinned(
     remote_msg_id: &str,
     pinned: bool,
 ) -> Result<(), EngineError> {
-    let Some(chat) = ctx
-        .store
-        .find_chat(account_id, remote_chat_id)
-        .await
-        .map_err(map_store)?
+    let Some(chat) = resolve_message_chat(ctx, account_id, remote_chat_id, remote_msg_id).await?
     else {
         return Ok(());
     };
@@ -543,11 +539,7 @@ async fn apply_edited(
     formatted: Option<String>,
     edited_at: i64,
 ) -> Result<(), EngineError> {
-    let Some(chat) = ctx
-        .store
-        .find_chat(account_id, remote_chat_id)
-        .await
-        .map_err(map_store)?
+    let Some(chat) = resolve_message_chat(ctx, account_id, remote_chat_id, remote_msg_id).await?
     else {
         return Ok(());
     };
@@ -574,11 +566,7 @@ async fn apply_deleted(
     remote_chat_id: &str,
     remote_msg_id: &str,
 ) -> Result<(), EngineError> {
-    let Some(chat) = ctx
-        .store
-        .find_chat(account_id, remote_chat_id)
-        .await
-        .map_err(map_store)?
+    let Some(chat) = resolve_message_chat(ctx, account_id, remote_chat_id, remote_msg_id).await?
     else {
         return Ok(());
     };
@@ -608,11 +596,7 @@ async fn apply_reaction(
     emoji: &str,
     added: bool,
 ) -> Result<(), EngineError> {
-    let Some(chat) = ctx
-        .store
-        .find_chat(account_id, remote_chat_id)
-        .await
-        .map_err(map_store)?
+    let Some(chat) = resolve_message_chat(ctx, account_id, remote_chat_id, remote_msg_id).await?
     else {
         return Ok(());
     };
@@ -646,11 +630,8 @@ async fn apply_read_marker(
     remote_user_id: &str,
     up_to_remote_msg_id: &str,
 ) -> Result<(), EngineError> {
-    let Some(chat) = ctx
-        .store
-        .find_chat(account_id, remote_chat_id)
-        .await
-        .map_err(map_store)?
+    let Some(chat) =
+        resolve_message_chat(ctx, account_id, remote_chat_id, up_to_remote_msg_id).await?
     else {
         return Ok(());
     };
@@ -697,6 +678,37 @@ async fn apply_typing(
         users: users.iter().cloned().map(UserId).collect(),
     });
     Ok(())
+}
+
+/// The chat an event naming `remote_chat_id` and `remote_msg_id` applies to.
+///
+/// A plain chat is its own answer. A forum holds no messages: Telegram names its deletes, pins and
+/// read markers by the forum id alone, so the topic that holds the message is the answer. `None`
+/// means no topic stores the message yet, and the event is a quiet no-op.
+async fn resolve_message_chat(
+    ctx: &EngineContext,
+    account_id: &str,
+    remote_chat_id: &str,
+    remote_msg_id: &str,
+) -> Result<Option<ChatRecord>, EngineError> {
+    let Some(chat) = ctx
+        .store
+        .find_chat(account_id, remote_chat_id)
+        .await
+        .map_err(map_store)?
+    else {
+        return Ok(None);
+    };
+    if !chat.is_forum {
+        return Ok(Some(chat));
+    }
+    let topic = ctx
+        .store
+        .find_topic_message(account_id, remote_chat_id, remote_msg_id)
+        .await
+        .map_err(map_store)?
+        .map(|(topic, _)| topic);
+    Ok(topic)
 }
 
 /// The chat a remote id belongs to, created as a placeholder when a message arrives first.

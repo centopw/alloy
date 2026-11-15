@@ -14,7 +14,7 @@ use alloy_connector::{
 };
 use async_trait::async_trait;
 use grammers_client::client::{Client, PasswordToken};
-use grammers_client::media::Attribute;
+use grammers_client::media::{Attribute, Uploaded};
 use grammers_client::message::{InputMessage, InputReactions};
 use grammers_client::peer::Role;
 use grammers_mtsender::{
@@ -810,50 +810,13 @@ impl TelegramConnector {
         mut input: InputMessage,
         attachment: &LocalAttachment,
     ) -> Result<InputMessage, ConnectorError> {
-        let path = Path::new(&attachment.path);
-        let mut file =
-            tokio::fs::File::open(path)
-                .await
-                .map_err(|error| ConnectorError::InvalidInput {
-                    message: format!("cannot read {}: {error}", attachment.path),
-                })?;
-        let size = file
-            .metadata()
-            .await
-            .map_err(|error| ConnectorError::InvalidInput {
-                message: format!("cannot read {}: {error}", attachment.path),
-            })?
-            .len();
-        let size = usize::try_from(size).map_err(|_| ConnectorError::InvalidInput {
-            message: format!("{} is too large to upload", attachment.path),
-        })?;
-        let name = attachment
-            .file_name
-            .clone()
-            .or_else(|| {
-                path.file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-            })
-            .unwrap_or_else(|| attachment.path.clone());
-        let uploaded = client
-            .upload_stream(&mut file, size, name.clone())
-            .await
-            .map_err(|error| ConnectorError::InvalidInput {
-                message: format!("cannot upload {}: {error}", attachment.path),
-            })?;
-
-        let mime = attachment
-            .mime
-            .clone()
-            .unwrap_or_else(|| mapping::mime_from_name(&name));
-        input = input.mime_type(&mime);
-        if mime.starts_with("image/") && mime != "image/gif" {
-            return Ok(input.photo(uploaded));
+        let upload = upload_attachment(client, attachment).await?;
+        input = input.mime_type(&upload.mime);
+        if mapping::is_photo_mime(&upload.mime) {
+            return Ok(input.photo(upload.uploaded));
         }
-        input = input.document(uploaded);
-        if mime == "audio/ogg"
-            && let Some(duration) = ogg_duration(path).await
-        {
+        input = input.document(upload.uploaded);
+        if let Some(duration) = upload.audio_duration {
             // Telegram only renders an audio track when the document carries its length.
             input = input.attribute(Attribute::Audio {
                 duration,
@@ -1277,70 +1240,97 @@ impl Connector for TelegramConnector {
             .map(|value| mapping::parse_msg_id(&value))
             .transpose()?;
 
-        let (id, sent_at) = match (topic, attachment.as_ref()) {
-            // A topic message with no attachment goes out as a raw send: grammers' input message
-            // cannot carry the topic's top message id, which is what files it under the topic.
-            (Some(topic_id), None) => {
-                let (text, entities) = match formatted {
-                    Some(html) => {
-                        let (plain, parsed) = grammers_client::parsers::parse_html_message(&html);
-                        if parsed.is_empty() {
-                            (body.unwrap_or_default(), None)
-                        } else {
-                            (plain, Some(parsed))
-                        }
+        let (id, sent_at) = match topic {
+            // Telegram files a message under a forum topic only when the request names the topic's
+            // top message. grammers' input message cannot carry that, so topic sends, with or
+            // without an attachment, are raw requests.
+            Some(topic_id) => {
+                let (text, entities) = topic_text(body, formatted);
+                let reply: tl::enums::InputReplyTo = tl::types::InputReplyToMessage {
+                    reply_to_msg_id: reply_to.unwrap_or(topic_id),
+                    top_msg_id: Some(topic_id),
+                    reply_to_peer_id: None,
+                    quote_text: None,
+                    quote_entities: None,
+                    quote_offset: None,
+                    monoforum_peer_id: None,
+                    todo_item_id: None,
+                    poll_option: None,
+                    quote_rich: None,
+                }
+                .into();
+                let updates = match attachment {
+                    None => {
+                        client
+                            .invoke(&tl::functions::messages::SendMessage {
+                                no_webpage: false,
+                                silent: false,
+                                background: false,
+                                clear_draft: false,
+                                peer: peer.into(),
+                                reply_to: Some(reply),
+                                message: text,
+                                random_id: next_random_id(),
+                                reply_markup: None,
+                                entities,
+                                schedule_date: None,
+                                schedule_repeat_period: None,
+                                send_as: None,
+                                noforwards: false,
+                                update_stickersets_order: false,
+                                invert_media: false,
+                                quick_reply_shortcut: None,
+                                effect: None,
+                                allow_paid_floodskip: false,
+                                allow_paid_stars: None,
+                                suggested_post: None,
+                                rich_message: None,
+                            })
+                            .await
                     }
-                    None => (body.unwrap_or_default(), None),
-                };
-                let updates = client
-                    .invoke(&tl::functions::messages::SendMessage {
-                        no_webpage: false,
-                        silent: false,
-                        background: false,
-                        clear_draft: false,
-                        peer: peer.into(),
-                        reply_to: Some(
-                            tl::types::InputReplyToMessage {
-                                reply_to_msg_id: reply_to.unwrap_or(topic_id),
-                                top_msg_id: Some(topic_id),
-                                reply_to_peer_id: None,
-                                quote_text: None,
-                                quote_entities: None,
-                                quote_offset: None,
-                                monoforum_peer_id: None,
-                                todo_item_id: None,
-                                poll_option: None,
-                                quote_rich: None,
-                            }
-                            .into(),
-                        ),
-                        message: text,
-                        random_id: next_random_id(),
-                        reply_markup: None,
-                        entities,
-                        schedule_date: None,
-                        schedule_repeat_period: None,
-                        send_as: None,
-                        noforwards: false,
-                        update_stickersets_order: false,
-                        invert_media: false,
-                        quick_reply_shortcut: None,
-                        effect: None,
-                        allow_paid_floodskip: false,
-                        allow_paid_stars: None,
-                        suggested_post: None,
-                        rich_message: None,
-                    })
-                    .await
-                    .map_err(error::map_invocation)?;
+                    Some(attachment) => {
+                        let upload = upload_attachment(&client, &attachment).await?;
+                        let media = mapping::input_media(
+                            upload.uploaded.raw,
+                            &upload.name,
+                            &upload.mime,
+                            upload.audio_duration,
+                        );
+                        client
+                            .invoke(&tl::functions::messages::SendMedia {
+                                silent: false,
+                                background: false,
+                                clear_draft: false,
+                                noforwards: false,
+                                update_stickersets_order: false,
+                                invert_media: false,
+                                allow_paid_floodskip: false,
+                                peer: peer.into(),
+                                reply_to: Some(reply),
+                                media,
+                                message: text,
+                                random_id: next_random_id(),
+                                reply_markup: None,
+                                entities,
+                                schedule_date: None,
+                                schedule_repeat_period: None,
+                                send_as: None,
+                                quick_reply_shortcut: None,
+                                effect: None,
+                                allow_paid_stars: None,
+                                suggested_post: None,
+                            })
+                            .await
+                    }
+                }
+                .map_err(error::map_invocation)?;
                 sent_from_updates(&updates)?
             }
-            _ => {
-                // Attachments and plain chats keep grammers' send. Its input message takes only a
-                // reply id, so an attachment sent into a topic is not filed under the topic yet.
+            None => {
+                // Plain chats keep grammers' send.
                 let mut input = InputMessage::new()
                     .text(body.unwrap_or_default())
-                    .reply_to(reply_to.or(topic));
+                    .reply_to(reply_to);
                 if let Some(html) = formatted {
                     let (_, entities) = grammers_client::parsers::parse_html_message(&html);
                     if !entities.is_empty() {
@@ -1913,6 +1903,87 @@ fn sent_from_updates(updates: &tl::enums::Updates) -> Result<(i32, i64), Connect
         _ => Err(ConnectorError::Protocol {
             message: "telegram accepted the topic message without returning its id".to_string(),
         }),
+    }
+}
+
+/// An attachment uploaded to Telegram, with what its message needs to present it.
+struct UploadedAttachment {
+    uploaded: Uploaded,
+    name: String,
+    mime: String,
+    /// Length of an Ogg file, which Telegram needs to render it as an audio track.
+    audio_duration: Option<Duration>,
+}
+
+/// Reads a local attachment and uploads it, deciding its mime type and audio length.
+async fn upload_attachment(
+    client: &Client,
+    attachment: &LocalAttachment,
+) -> Result<UploadedAttachment, ConnectorError> {
+    let path = Path::new(&attachment.path);
+    let mut file =
+        tokio::fs::File::open(path)
+            .await
+            .map_err(|error| ConnectorError::InvalidInput {
+                message: format!("cannot read {}: {error}", attachment.path),
+            })?;
+    let size = file
+        .metadata()
+        .await
+        .map_err(|error| ConnectorError::InvalidInput {
+            message: format!("cannot read {}: {error}", attachment.path),
+        })?
+        .len();
+    let size = usize::try_from(size).map_err(|_| ConnectorError::InvalidInput {
+        message: format!("{} is too large to upload", attachment.path),
+    })?;
+    let name = attachment
+        .file_name
+        .clone()
+        .or_else(|| {
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        })
+        .unwrap_or_else(|| attachment.path.clone());
+    let uploaded = client
+        .upload_stream(&mut file, size, name.clone())
+        .await
+        .map_err(|error| ConnectorError::InvalidInput {
+            message: format!("cannot upload {}: {error}", attachment.path),
+        })?;
+    let mime = attachment
+        .mime
+        .clone()
+        .unwrap_or_else(|| mapping::mime_from_name(&name));
+    let audio_duration = if mime == "audio/ogg" {
+        ogg_duration(path).await
+    } else {
+        None
+    };
+    Ok(UploadedAttachment {
+        uploaded,
+        name,
+        mime,
+        audio_duration,
+    })
+}
+
+/// The text and entities a topic message is sent with. Formatted HTML supplies its own plain text
+/// when it has entities, so their offsets line up with that text; otherwise the body is sent as is.
+fn topic_text(
+    body: Option<String>,
+    formatted: Option<String>,
+) -> (String, Option<Vec<tl::enums::MessageEntity>>) {
+    match formatted {
+        Some(html) => {
+            let (plain, parsed) = grammers_client::parsers::parse_html_message(&html);
+            if parsed.is_empty() {
+                (body.unwrap_or_default(), None)
+            } else {
+                (plain, Some(parsed))
+            }
+        }
+        None => (body.unwrap_or_default(), None),
     }
 }
 

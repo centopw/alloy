@@ -1117,6 +1117,67 @@ pub(crate) fn mime_from_name(name: &str) -> String {
     mime.to_string()
 }
 
+/// Whether an upload of this mime type is sent as a photo. GIFs stay documents so they keep
+/// animating, and every other image is sent as a photo, which Telegram compresses.
+pub(crate) fn is_photo_mime(mime: &str) -> bool {
+    mime.starts_with("image/") && mime != "image/gif"
+}
+
+/// The media of an uploaded file for a raw `messages.sendMedia`, mirroring what grammers' photo
+/// and document builders send: a photo for photo mimes, otherwise a document with its file name,
+/// plus an audio attribute carrying the length of an Ogg file.
+pub(crate) fn input_media(
+    file: tl::enums::InputFile,
+    name: &str,
+    mime: &str,
+    audio_duration: Option<Duration>,
+) -> tl::enums::InputMedia {
+    if is_photo_mime(mime) {
+        return tl::types::InputMediaUploadedPhoto {
+            spoiler: false,
+            live_photo: false,
+            file,
+            stickers: None,
+            ttl_seconds: None,
+            video: None,
+        }
+        .into();
+    }
+    let mut attributes: Vec<tl::enums::DocumentAttribute> = vec![
+        tl::types::DocumentAttributeFilename {
+            file_name: name.to_string(),
+        }
+        .into(),
+    ];
+    if let Some(duration) = audio_duration {
+        // Telegram only renders an audio track when the document carries its length.
+        attributes.push(
+            tl::types::DocumentAttributeAudio {
+                voice: false,
+                duration: i32::try_from(duration.as_secs()).unwrap_or(i32::MAX),
+                title: None,
+                performer: None,
+                waveform: None,
+            }
+            .into(),
+        );
+    }
+    tl::types::InputMediaUploadedDocument {
+        nosound_video: false,
+        force_file: false,
+        spoiler: false,
+        file,
+        thumb: None,
+        mime_type: mime.to_string(),
+        attributes,
+        stickers: None,
+        video_cover: None,
+        video_timestamp: None,
+        ttl_seconds: None,
+    }
+    .into()
+}
+
 /// Duration of an Ogg file, read from the granule position of its last page.
 ///
 /// Telegram’s audio attribute needs a whole number of seconds and an Ogg voice note does not
@@ -1818,6 +1879,57 @@ mod tests {
         assert!(matches!(
             parse_msg_id(""),
             Err(ConnectorError::InvalidInput { .. })
+        ));
+    }
+
+    #[test]
+    fn photo_mimes_are_sent_as_photos_except_gifs() {
+        assert!(is_photo_mime("image/jpeg"));
+        assert!(is_photo_mime("image/png"));
+        assert!(!is_photo_mime("image/gif"));
+        assert!(!is_photo_mime("application/pdf"));
+    }
+
+    #[test]
+    fn input_media_picks_photo_or_document_by_mime() {
+        let file = || {
+            tl::enums::InputFile::File(tl::types::InputFile {
+                id: 1,
+                parts: 1,
+                name: "a".to_string(),
+                md5_checksum: String::new(),
+            })
+        };
+        assert!(matches!(
+            input_media(file(), "a.jpg", "image/jpeg", None),
+            tl::enums::InputMedia::UploadedPhoto(_)
+        ));
+        let tl::enums::InputMedia::UploadedDocument(document) =
+            input_media(file(), "a.gif", "image/gif", None)
+        else {
+            panic!("a gif must be sent as a document");
+        };
+        assert_eq!(document.mime_type, "image/gif");
+        assert_eq!(document.attributes.len(), 1);
+    }
+
+    #[test]
+    fn ogg_voice_notes_carry_their_length_as_an_audio_attribute() {
+        let file = tl::enums::InputFile::File(tl::types::InputFile {
+            id: 1,
+            parts: 1,
+            name: "v.ogg".to_string(),
+            md5_checksum: String::new(),
+        });
+        let tl::enums::InputMedia::UploadedDocument(document) =
+            input_media(file, "v.ogg", "audio/ogg", Some(Duration::from_secs(7)))
+        else {
+            panic!("an ogg must be sent as a document");
+        };
+        assert_eq!(document.attributes.len(), 2);
+        assert!(matches!(
+            &document.attributes[1],
+            tl::enums::DocumentAttribute::Audio(audio) if audio.duration == 7 && !audio.voice
         ));
     }
 }

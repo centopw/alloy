@@ -6,7 +6,9 @@ use uuid::Uuid;
 use crate::Store;
 use crate::error::StoreError;
 use crate::events;
-use crate::model::{MessageRecord, NewMessage, ReactionRecord, RoomMediaQuery, SendState, now_ms};
+use crate::model::{
+    ChatRecord, MessageRecord, NewMessage, ReactionRecord, RoomMediaQuery, SendState, now_ms,
+};
 use crate::rows;
 
 impl Store {
@@ -286,6 +288,47 @@ impl Store {
                     rows::message,
                 )
                 .optional()?)
+        })
+        .await
+    }
+
+    /// The message carrying `remote_msg_id` in a topic of a forum, with the topic that holds it.
+    ///
+    /// Telegram names a forum's deletes, pins and read markers by the forum id alone, while the
+    /// message lives in one of the forum's topics. Channel message ids are unique per channel, so
+    /// at most one topic holds it. Returns `None` when `forum_remote_chat_id` has no topics or no
+    /// topic holds the message yet.
+    pub async fn find_topic_message(
+        &self,
+        account_id: &str,
+        forum_remote_chat_id: &str,
+        remote_msg_id: &str,
+    ) -> Result<Option<(ChatRecord, MessageRecord)>, StoreError> {
+        let account_id = account_id.to_owned();
+        let forum_remote_chat_id = forum_remote_chat_id.to_owned();
+        let remote_msg_id = remote_msg_id.to_owned();
+        self.with_conn(move |conn| {
+            let found = conn
+                .query_row(
+                    "SELECT m.* FROM messages m
+                     JOIN chats c ON c.chat_id = m.chat_id
+                     JOIN chats forum ON forum.account_id = c.account_id
+                       AND forum.remote_chat_id = c.parent_remote_chat_id
+                     WHERE c.account_id = ?1
+                       AND c.parent_remote_chat_id = ?2
+                       AND forum.is_forum = 1
+                       AND m.remote_msg_id = ?3",
+                    rusqlite::params![account_id, forum_remote_chat_id, remote_msg_id],
+                    rows::message,
+                )
+                .optional()?;
+            match found {
+                Some(message) => {
+                    let topic = rows::chat_by_id(conn, &message.chat_id)?;
+                    Ok(Some((topic, message)))
+                }
+                None => Ok(None),
+            }
         })
         .await
     }

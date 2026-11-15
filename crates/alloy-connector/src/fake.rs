@@ -148,6 +148,21 @@ impl FakeConnector {
         Ok(message)
     }
 
+    /// Sends an arbitrary event through the running event channel, as the network would deliver it.
+    ///
+    /// Tests use it to simulate events a real network sends in a shape the fake does not produce
+    /// itself, such as Telegram naming a forum's deletes and pins by the forum id alone. Fails when
+    /// the connector has not been started, since there is no channel to send through.
+    pub async fn emit_event(&self, event: ConnectorEvent) -> Result<(), ConnectorError> {
+        let events = self.inner.lock().await.events.clone();
+        match events {
+            Some(events) => emit(&events, event).await,
+            None => Err(ConnectorError::Protocol {
+                message: "connector is not started".to_string(),
+            }),
+        }
+    }
+
     /// Returns the read marker last stored by [`Connector::mark_read`] for a chat.
     ///
     /// The trait has no read side for local markers, so this accessor exists for tests that assert
