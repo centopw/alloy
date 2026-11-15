@@ -115,6 +115,12 @@ type Messenger struct {
 	e2ee        *whatsmeow.Client
 	deviceStore *sqlstore.Container
 	device      *store.Device
+	// e2eeRetry is the one pending reconnect, e2eeAttempts counts the failed attempts of the
+	// current outage and e2eeBusy says a connect attempt is in flight. All three are guarded by
+	// e2eeMu so a flapping socket keeps at most one retry alive.
+	e2eeRetry    *time.Timer
+	e2eeAttempts int
+	e2eeBusy     bool
 }
 
 func newMessenger(log zerolog.Logger, out *writer, cfg settings) *Messenger {
@@ -332,7 +338,7 @@ func (m *Messenger) start(ctx context.Context) *WireError {
 	cli.SetEventHandler(m.handleMessagixEvent)
 	if err := cli.Connect(runCtx); err != nil {
 		cli.SetEventHandler(nil)
-		m.emit(NewConnectionEvent(stateOffline(err.Error())))
+		m.emit(NewConnectionEvent(stateOffline(err.Error(), 1)))
 		return mapMetaError(err)
 	}
 
@@ -421,6 +427,7 @@ func (m *Messenger) stop() *WireError {
 	m.e2eeMu.Lock()
 	e2ee := m.e2ee
 	m.e2ee = nil
+	m.cancelE2EERetryLocked()
 	m.e2eeMu.Unlock()
 	if e2ee != nil {
 		e2ee.Disconnect()
@@ -494,7 +501,14 @@ func (m *Messenger) handleMessagixEvent(_ context.Context, raw any) {
 		m.mu.Lock()
 		m.online = false
 		m.mu.Unlock()
-		m.emit(NewConnectionEvent(stateOffline(reason)))
+		// messagix retries on its own and counts the attempt it just failed (1-based since
+		// v0.2610.0). Forwarding the count lets the host show real progress instead of "attempt 1"
+		// for every report of one outage.
+		attempt := uint32(0)
+		if evt.ConnectionAttempts > 0 {
+			attempt = uint32(evt.ConnectionAttempts)
+		}
+		m.emit(NewConnectionEvent(stateOffline(reason, attempt)))
 	case *messagix.PermanentErrorEvent:
 		m.mu.Lock()
 		m.online = false

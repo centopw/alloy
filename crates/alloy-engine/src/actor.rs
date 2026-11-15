@@ -218,31 +218,36 @@ async fn apply_connection(
     state: ConnectionState,
 ) -> Result<(), EngineError> {
     let account_id = AccountId(runtime.account_id.clone());
-    match state {
-        ConnectionState::Offline { reason } => {
-            ctx.sink.emit(EngineEvent::ConnectionStatus {
-                account_id,
-                status: ConnectionStatusDto::Reconnecting {
-                    attempt: 1,
-                    next_retry_millis: 0,
-                },
-            });
-            ctx.sink.emit(EngineEvent::ToastNotice {
-                message: reason,
-                level: "warning".to_string(),
-            });
-        }
-        ConnectionState::NeedsRelogin => {
-            ctx.sink.emit(EngineEvent::ConnectionStatus {
-                account_id,
-                status: ConnectionStatusDto::Terminated,
-            });
-            crate::accounts::mark_needs_relogin(ctx, &runtime.account_id).await;
-        }
-        state => ctx.sink.emit(EngineEvent::ConnectionStatus {
+    if matches!(state, ConnectionState::NeedsRelogin) {
+        runtime.mark_connection_live();
+        ctx.sink.emit(EngineEvent::ConnectionStatus {
             account_id,
-            status: convert::connection_status(state),
-        }),
+            status: ConnectionStatusDto::Terminated,
+        });
+        crate::accounts::mark_needs_relogin(ctx, &runtime.account_id).await;
+        return Ok(());
+    }
+    // A connector retries on its own and repeats the offline report for every failed attempt, so
+    // the warning marks the start of an outage: one blip is one notice, and a return to Online
+    // arms the next one.
+    let (notify, reason) = match &state {
+        ConnectionState::Offline { reason, .. } => {
+            (runtime.mark_connection_lost(), Some(reason.clone()))
+        }
+        _ => {
+            runtime.mark_connection_live();
+            (false, None)
+        }
+    };
+    ctx.sink.emit(EngineEvent::ConnectionStatus {
+        account_id,
+        status: convert::connection_status(state),
+    });
+    if let (true, Some(message)) = (notify, reason) {
+        ctx.sink.emit(EngineEvent::ToastNotice {
+            message,
+            level: "warning".to_string(),
+        });
     }
     Ok(())
 }

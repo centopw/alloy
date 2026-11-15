@@ -387,6 +387,38 @@ async fn crash_mid_session_fails_pending_and_resumes_after_respawn() {
 }
 
 #[tokio::test]
+async fn offline_frames_carry_the_connector_attempt() {
+    let directory = tempfile::tempdir().expect("temp dir");
+    let connector = SidecarConnector::spawn(config(
+        directory.path(),
+        &[("ALLOY_FAKE_SIDECAR_OFFLINE_ATTEMPT", "3")],
+    ))
+    .await
+    .expect("spawn");
+    login(&connector).await;
+
+    let (sender, mut events) = channel(32);
+    connector.start(sender).await.expect("start");
+
+    loop {
+        if let ConnectorEvent::Connection {
+            state: ConnectionState::Offline { reason, attempt },
+        } = next_event(&mut events).await
+        {
+            assert_eq!(
+                attempt,
+                Some(3),
+                "the attempt the sidecar counted survives the wire"
+            );
+            assert_eq!(reason, "simulated outage");
+            break;
+        }
+    }
+
+    connector.stop().await.expect("stop");
+}
+
+#[tokio::test]
 async fn stop_terminates_the_sidecar() {
     let directory = tempfile::tempdir().expect("temp dir");
     let pid_file = directory.path().join("sidecar.pid");

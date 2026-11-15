@@ -9,11 +9,6 @@ export function isLiveStatus(status: ConnectionStatus | undefined): boolean {
   return status === 'Connected' || status === 'Syncing' || status === 'Connecting';
 }
 
-/** True when the account's connector is waiting to retry after a failure. */
-export function isReconnecting(status: ConnectionStatus | undefined): boolean {
-  return typeof status === 'object' && status !== null && 'Reconnecting' in status;
-}
-
 /**
  * Whether the app can reach its networks.
  *

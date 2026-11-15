@@ -187,6 +187,15 @@ fn every_frame_variant_round_trips() {
             event: ConnectorEvent::Connection {
                 state: ConnectionState::Offline {
                     reason: "tls handshake failed".to_string(),
+                    attempt: None,
+                },
+            },
+        },
+        Frame::Event {
+            event: ConnectorEvent::Connection {
+                state: ConnectionState::Offline {
+                    reason: "connection lost".to_string(),
+                    attempt: Some(3),
                 },
             },
         },

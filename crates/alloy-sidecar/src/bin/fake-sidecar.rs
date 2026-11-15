@@ -11,6 +11,8 @@
 //! - `ALLOY_FAKE_SIDECAR_CRASH_AFTER=<n>` — exit without answering the `n + 1`th request, which
 //!   simulates a crash with a call in flight.
 //! - `ALLOY_FAKE_SIDECAR_PID_FILE=<path>` — write the process id there at startup.
+//! - `ALLOY_FAKE_SIDECAR_OFFLINE_ATTEMPT=<n>` — after `start`, emit an offline report carrying
+//!   attempt `n`, so the host's decoding of a counted retry can be tested.
 
 use std::env;
 use std::path::PathBuf;
@@ -18,8 +20,8 @@ use std::sync::Arc;
 
 use alloy_connector::fake::FakeConnector;
 use alloy_connector::{
-    Connector, ConnectorError, ConnectorEvent, Frame, LoginInput, MediaRef, OutgoingMessage,
-    PROTOCOL_VERSION, SessionBlob, decode_frame, encode_frame,
+    ConnectionState, Connector, ConnectorError, ConnectorEvent, Frame, LoginInput, MediaRef,
+    OutgoingMessage, PROTOCOL_VERSION, SessionBlob, decode_frame, encode_frame,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -32,6 +34,10 @@ use tokio::sync::{
 const BAD_VERSION_ENV: &str = "ALLOY_FAKE_SIDECAR_BAD_VERSION";
 const CRASH_AFTER_ENV: &str = "ALLOY_FAKE_SIDECAR_CRASH_AFTER";
 const PID_FILE_ENV: &str = "ALLOY_FAKE_SIDECAR_PID_FILE";
+const OFFLINE_ATTEMPT_ENV: &str = "ALLOY_FAKE_SIDECAR_OFFLINE_ATTEMPT";
+
+/// Reason the injected offline report carries; the test only pins the attempt.
+const INJECTED_OFFLINE_REASON: &str = "simulated outage";
 
 /// Events the fake connector produces while one request runs. The host drains its own receiver
 /// promptly; this only has to be large enough that a burst of `start` events cannot block.
@@ -61,6 +67,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         _ => PROTOCOL_VERSION,
     };
     let crash_after: Option<u64> = env::var(CRASH_AFTER_ENV)
+        .ok()
+        .and_then(|value| value.trim().parse().ok());
+    let offline_attempt: Option<u32> = env::var(OFFLINE_ATTEMPT_ENV)
         .ok()
         .and_then(|value| value.trim().parse().ok());
 
@@ -112,7 +121,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         let events = event_sender.clone();
         let writer = Arc::clone(&writer);
         tokio::spawn(async move {
-            let response = match dispatch(&connector, &method, params, &events).await {
+            let dispatched = dispatch(&connector, &method, params, &events, offline_attempt).await;
+            let response = match dispatched {
                 Ok(result) => Frame::Response {
                     id,
                     result: Some(result),
@@ -147,6 +157,7 @@ async fn dispatch(
     method: &str,
     params: Value,
     events: &Sender<ConnectorEvent>,
+    offline_attempt: Option<u32>,
 ) -> Result<Value, ConnectorError> {
     match method {
         "network" => encode_result(connector.network()),
@@ -162,6 +173,21 @@ async fn dispatch(
         }
         "start" => {
             connector.start(events.clone()).await?;
+            if let Some(attempt) = offline_attempt {
+                // Injected only when the test asks for it: it exercises the host's path for an
+                // offline report that names its retry attempt.
+                events
+                    .send(ConnectorEvent::Connection {
+                        state: ConnectionState::Offline {
+                            reason: INJECTED_OFFLINE_REASON.to_string(),
+                            attempt: Some(attempt),
+                        },
+                    })
+                    .await
+                    .map_err(|_| ConnectorError::Network {
+                        message: "the host stopped reading events".to_string(),
+                    })?;
+            }
             Ok(Value::Null)
         }
         "stop" => {

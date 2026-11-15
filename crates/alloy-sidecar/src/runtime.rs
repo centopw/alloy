@@ -288,7 +288,12 @@ impl Runtime {
         }
 
         self.deliver(ConnectorEvent::Connection {
-            state: ConnectionState::Offline { reason },
+            // The transport just closed; the relaunch below counts its own attempts and reports
+            // them, so this first report has none to name yet.
+            state: ConnectionState::Offline {
+                reason,
+                attempt: None,
+            },
         })
         .await;
 
@@ -315,6 +320,9 @@ impl Runtime {
                     self.deliver(ConnectorEvent::Connection {
                         state: ConnectionState::Offline {
                             reason: CRASHED_REPEATEDLY.to_string(),
+                            // How many relaunches were spent, which is the retry count the user
+                            // waited through; zero means nothing was retried.
+                            attempt: (attempt > 0).then_some(attempt),
                         },
                     })
                     .await;

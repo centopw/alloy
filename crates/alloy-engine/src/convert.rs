@@ -250,12 +250,27 @@ pub fn connection_status(state: ConnectionState) -> ConnectionStatus {
     match state {
         ConnectionState::Connecting => ConnectionStatus::Connecting,
         ConnectionState::Online => ConnectionStatus::Connected,
-        ConnectionState::Offline { .. } => ConnectionStatus::Reconnecting {
-            attempt: 1,
-            next_retry_millis: 0,
-        },
+        ConnectionState::Offline { attempt, .. } => {
+            let attempt = attempt.unwrap_or(1).max(1);
+            ConnectionStatus::Reconnecting {
+                attempt,
+                next_retry_millis: reconnect_delay_millis(attempt),
+            }
+        }
         ConnectionState::NeedsRelogin => ConnectionStatus::Terminated,
     }
+}
+
+/// Delay the connector will wait before the attempt after `attempt` (1-based).
+///
+/// The connector retries on its own; this only mirrors its schedule so the banner can say when
+/// the next attempt is due instead of claiming an instant retry. Messenger's loop (`messagix`
+/// `Client.Connect`) doubles before it sleeps and stops at `MaxConnectBackoff`, so the wait after
+/// failed attempt `n` is `min(2^n s, 5 min)` — already two seconds after the first failure.
+pub fn reconnect_delay_millis(attempt: u32) -> u64 {
+    const MAX_MILLIS: u64 = 300_000;
+    let doublings = attempt.clamp(1, 9);
+    (1_000u64 << doublings).min(MAX_MILLIS)
 }
 
 // === Login ===
@@ -351,5 +366,48 @@ pub fn login_input(input: LoginInputDto) -> alloy_connector::LoginInput {
             to: connector_login_alternative(to),
         },
         LoginInputDto::QrRefresh => alloy_connector::LoginInput::QrRefresh,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reconnect_delay_matches_the_messenger_loop() {
+        // messagix doubles before sleeping and stops at MaxConnectBackoff (5 min): the wait after
+        // failed attempt n is min(2^n s, 5 min), so the first retry already waits two seconds.
+        assert_eq!(reconnect_delay_millis(1), 2_000);
+        assert_eq!(reconnect_delay_millis(2), 4_000);
+        assert_eq!(reconnect_delay_millis(3), 8_000);
+        assert_eq!(reconnect_delay_millis(8), 256_000);
+        assert_eq!(reconnect_delay_millis(9), 300_000);
+        assert_eq!(reconnect_delay_millis(40), 300_000);
+        // An attempt count of zero cannot happen on the wire, but it must not shift the base.
+        assert_eq!(reconnect_delay_millis(0), 2_000);
+    }
+
+    #[test]
+    fn offline_without_a_count_reports_the_first_attempt() {
+        assert_eq!(
+            connection_status(ConnectionState::Offline {
+                reason: "network unreachable".to_string(),
+                attempt: Some(3),
+            }),
+            ConnectionStatus::Reconnecting {
+                attempt: 3,
+                next_retry_millis: 8_000,
+            }
+        );
+        assert_eq!(
+            connection_status(ConnectionState::Offline {
+                reason: "network unreachable".to_string(),
+                attempt: None,
+            }),
+            ConnectionStatus::Reconnecting {
+                attempt: 1,
+                next_retry_millis: 2_000,
+            }
+        );
     }
 }

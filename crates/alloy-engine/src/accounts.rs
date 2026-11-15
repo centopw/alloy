@@ -1,6 +1,7 @@
 //! Running accounts: one connector, one event actor and one outbox worker per connected account.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -32,10 +33,27 @@ pub struct AccountRuntime {
     pub connector: Arc<dyn Connector>,
     pub capabilities: Capabilities,
     wake: Arc<Notify>,
+    /// Whether the connector's last reported state was `Offline`; see
+    /// [`AccountRuntime::mark_connection_lost`].
+    offline: AtomicBool,
     tasks: Mutex<Vec<AbortHandle>>,
 }
 
 impl AccountRuntime {
+    /// Records that the connector reported itself offline and returns `true` when this report
+    /// starts an outage, i.e. nothing was offline since the connector last reported live.
+    ///
+    /// A connector retries on its own and repeats the offline report for every failed attempt, so
+    /// the caller must notify the user only for the first one.
+    pub fn mark_connection_lost(&self) -> bool {
+        !self.offline.swap(true, Ordering::SeqCst)
+    }
+
+    /// Records that the connector is live again, so the next outage notifies once more.
+    pub fn mark_connection_live(&self) {
+        self.offline.store(false, Ordering::SeqCst);
+    }
+
     /// Wakes the outbox worker; the permit survives until the worker waits again.
     pub fn notify_outbox(&self) {
         self.wake.notify_one();
@@ -206,6 +224,7 @@ pub async fn start_with_connector(
         capabilities: connector.capabilities(),
         connector: connector.clone(),
         wake: Arc::new(Notify::new()),
+        offline: AtomicBool::new(false),
         tasks: Mutex::new(Vec::new()),
     });
 

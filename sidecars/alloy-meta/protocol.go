@@ -150,10 +150,13 @@ func errInvalidInput(message string) *WireError {
 	return &WireError{Type: "invalid_input", Message: message}
 }
 
-// ConnectionState mirrors alloy_connector::ConnectionState.
+// ConnectionState mirrors alloy_connector::ConnectionState. Attempt is the 1-based count of failed
+// attempts in this connector's own retry loop; 0 means the state has no attempt to report and is
+// left off the wire so the host applies its own default.
 type ConnectionState struct {
-	Type   string  `json:"type"`
-	Reason *string `json:"reason,omitempty"`
+	Type    string  `json:"type"`
+	Reason  *string `json:"reason,omitempty"`
+	Attempt uint32  `json:"attempt,omitempty"`
 }
 
 func stateConnecting() ConnectionState { return ConnectionState{Type: "connecting"} }
@@ -162,8 +165,8 @@ func stateNeedsRelogin() ConnectionState {
 	return ConnectionState{Type: "needs_relogin"}
 }
 
-func stateOffline(reason string) ConnectionState {
-	return ConnectionState{Type: "offline", Reason: &reason}
+func stateOffline(reason string, attempt uint32) ConnectionState {
+	return ConnectionState{Type: "offline", Reason: &reason, Attempt: attempt}
 }
 
 // ConnectionEvent is ConnectorEvent::Connection.

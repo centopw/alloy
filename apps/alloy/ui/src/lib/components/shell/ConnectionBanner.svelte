@@ -1,6 +1,6 @@
 <script lang="ts">
   import Button from '../common/Button.svelte';
-  import { connectivity, isReconnecting } from '$lib/stores/connectivity.svelte';
+  import { connectivity } from '$lib/stores/connectivity.svelte';
   import { networkName, roomsStore } from '$lib/stores/rooms.svelte';
 
   import { t } from '$lib/i18n';
@@ -10,15 +10,27 @@
     connectivity.disconnectedAccounts.map((accountId) => {
       const account = roomsStore.accounts.find((a) => a.id === accountId) ?? null;
       const name = account?.display_name?.trim() || (account ? networkName(account.network) : null);
+      const who = name ?? t('chat-network-account');
       const status = connectivity.statusOf(accountId);
-      const text =
-        status === 'Disconnected'
-          ? t('chat-connection-disconnected', { account: name ?? t('chat-network-account') })
+      // The connector retries on its own and counts the failed attempts, so the banner reports the
+      // attempt it is on and when the next one is due instead of a bare "reconnecting".
+      const reconnecting =
+        typeof status === 'object' && status !== null && 'Reconnecting' in status
+          ? status.Reconnecting
+          : null;
+      const text = reconnecting
+        ? reconnecting.attempt > 1
+          ? t('chat-connection-reconnecting-attempt', {
+              account: who,
+              attempt: reconnecting.attempt,
+              seconds: Math.max(1, Math.round(reconnecting.next_retry_millis / 1000)),
+            })
+          : t('chat-connection-reconnecting', { account: who })
+        : status === 'Disconnected'
+          ? t('chat-connection-disconnected', { account: who })
           : status === 'Terminated'
-            ? t('chat-connection-terminated', { account: name ?? t('chat-network-account') })
-            : isReconnecting(status)
-              ? t('chat-connection-reconnecting', { account: name ?? t('chat-network-account') })
-              : t('chat-connection-connecting', { account: name ?? t('chat-network-account') });
+            ? t('chat-connection-terminated', { account: who })
+            : t('chat-connection-connecting', { account: who });
       return { accountId, text };
     })
   );

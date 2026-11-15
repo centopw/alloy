@@ -10,13 +10,13 @@ use alloy_connector::fake::{
     FAKE_CHAT_CHANNEL, FAKE_CHAT_DIRECT, FAKE_CHAT_FORUM, FAKE_CHAT_GROUP, FAKE_CODE, FAKE_USER_ID,
     FakeConnector,
 };
-use alloy_connector::{Connector, ConnectorEvent};
+use alloy_connector::{ConnectionState, Connector, ConnectorEvent};
 use alloy_engine::factory::FakeConnectorFactory;
 use alloy_engine::{AppEngine, Engine, EngineContext};
 use alloy_protocol::{
-    Account, AccountState, EngineCommand, EngineEvent, EngineResponse, EventId, EventSendState,
-    LoginId, LoginInputDto, LoginStepDto, Network, RoomId, RoomSummary, SubscriptionId,
-    TimelineItemContent, TimelineItemDto, UserId, VectorDiffDto,
+    Account, AccountState, ConnectionStatus, EngineCommand, EngineEvent, EngineResponse, EventId,
+    EventSendState, LoginId, LoginInputDto, LoginStepDto, Network, RoomId, RoomSummary,
+    SubscriptionId, TimelineItemContent, TimelineItemDto, UserId, VectorDiffDto,
 };
 use alloy_storage::{InMemorySecretStore, SecretStore};
 use alloy_store::{SendState, Store};
@@ -1364,4 +1364,122 @@ async fn forum_read_marker_lands_on_the_topic_that_holds_the_message() {
         .await
         .expect("other topic markers");
     assert!(markers.is_empty(), "the other topic has no read marker");
+}
+
+// === Connection state ===
+
+/// One offline report as the Messenger sidecar sends it: the reason plus the attempt count of the
+/// connector's own retry loop.
+fn offline(reason: &str, attempt: u32) -> ConnectorEvent {
+    ConnectorEvent::Connection {
+        state: ConnectionState::Offline {
+            reason: reason.to_string(),
+            attempt: Some(attempt),
+        },
+    }
+}
+
+/// Asserts that no warning arrives for a while; used to prove a repeated offline report is silent.
+async fn expect_no_toast(events: &mut broadcast::Receiver<EngineEvent>) {
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(300);
+    loop {
+        match tokio::time::timeout_at(deadline, events.recv()).await {
+            Ok(Ok(EngineEvent::ToastNotice { message, .. })) => {
+                panic!("a repeated offline report must not warn again, got: {message}")
+            }
+            Ok(Ok(_)) => continue,
+            Ok(Err(broadcast::error::RecvError::Lagged(_))) => continue,
+            Ok(Err(broadcast::error::RecvError::Closed)) => panic!("the event stream closed"),
+            Err(_) => return,
+        }
+    }
+}
+
+#[tokio::test]
+async fn one_outage_warns_once_and_reports_every_attempt() {
+    let harness = Harness::new();
+    login(&harness.engine).await;
+    let fake = harness.factory.last().expect("the running connector");
+    let mut events = harness.events();
+
+    fake.emit_event(offline("network unreachable", 1))
+        .await
+        .expect("report the first failed attempt");
+    wait_for(&mut events, |event| {
+        matches!(
+            event,
+            EngineEvent::ConnectionStatus {
+                status: ConnectionStatus::Reconnecting {
+                    attempt: 1,
+                    next_retry_millis: 2_000,
+                },
+                ..
+            }
+        )
+    })
+    .await;
+    let notice = wait_for(&mut events, |event| {
+        matches!(event, EngineEvent::ToastNotice { .. })
+    })
+    .await;
+    let EngineEvent::ToastNotice { message, level } = notice else {
+        panic!("the wait only returns a notice")
+    };
+    assert_eq!(message, "network unreachable");
+    assert_eq!(level, "warning");
+
+    // The connector retries on its own and reports each failed attempt; the second report is the
+    // same outage, so it updates the banner but must not warn again.
+    fake.emit_event(offline("network unreachable", 2))
+        .await
+        .expect("report the second failed attempt");
+    wait_for(&mut events, |event| {
+        matches!(
+            event,
+            EngineEvent::ConnectionStatus {
+                status: ConnectionStatus::Reconnecting {
+                    attempt: 2,
+                    next_retry_millis: 4_000,
+                },
+                ..
+            }
+        )
+    })
+    .await;
+    expect_no_toast(&mut events).await;
+
+    // Coming back online arms the next outage.
+    fake.emit_event(ConnectorEvent::Connection {
+        state: ConnectionState::Online,
+    })
+    .await
+    .expect("report the recovery");
+    wait_for(&mut events, |event| {
+        matches!(
+            event,
+            EngineEvent::ConnectionStatus {
+                status: ConnectionStatus::Connected,
+                ..
+            }
+        )
+    })
+    .await;
+
+    fake.emit_event(offline("network unreachable", 1))
+        .await
+        .expect("report the next outage");
+    wait_for(&mut events, |event| {
+        matches!(
+            event,
+            EngineEvent::ConnectionStatus {
+                status: ConnectionStatus::Reconnecting { attempt: 1, .. },
+                ..
+            }
+        )
+    })
+    .await;
+    wait_for(&mut events, |event| {
+        matches!(event, EngineEvent::ToastNotice { .. })
+    })
+    .await;
 }

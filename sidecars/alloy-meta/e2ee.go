@@ -177,6 +177,7 @@ func (m *Messenger) handleE2EEEvent(raw any) bool {
 	case *events.Connected:
 		m.log.Debug().Msg("E2EE socket connected")
 		m.e2eeMu.Lock()
+		m.e2eeAttempts = 0
 		client := m.e2ee
 		m.e2eeMu.Unlock()
 		if client != nil {
@@ -185,15 +186,141 @@ func (m *Messenger) handleE2EEEvent(raw any) bool {
 			}
 		}
 	case *events.Disconnected:
-		m.log.Warn().Msg("E2EE socket disconnected")
+		m.scheduleE2EEReconnect("socket closed")
 	case *events.LoggedOut:
 		m.log.Warn().Msg("E2EE session logged out; encrypted chats need a fresh login")
+		m.cancelE2EERetry()
 	case *events.ConnectFailure:
-		m.log.Warn().Str("reason", evt.Reason.String()).Msg("E2EE connection failed")
+		m.scheduleE2EEReconnect(evt.Reason.String())
 	default:
 		_ = evt
 	}
 	return true
+}
+
+// e2eeBackoffLimit caps the wait between E2EE reconnect attempts. A socket that stays down is
+// retried every minute, not in a tight loop.
+const e2eeBackoffLimit = 60 * time.Second
+
+// e2eeBackoff is the wait before the given 1-based reconnect attempt: one second, doubling, capped
+// at e2eeBackoffLimit.
+func e2eeBackoff(attempt int) time.Duration {
+	wait := time.Second
+	for i := 1; i < attempt && wait < e2eeBackoffLimit; i++ {
+		wait *= 2
+	}
+	if wait > e2eeBackoffLimit {
+		return e2eeBackoffLimit
+	}
+	return wait
+}
+
+// scheduleE2EEReconnect arms the next E2EE reconnect, replacing any pending one, so one outage
+// keeps exactly one timer and a socket that keeps failing backs off instead of spinning. It warns
+// once per outage and drops to debug for the repeats.
+func (m *Messenger) scheduleE2EEReconnect(reason string) {
+	ctx := m.backgroundCtx()
+	if ctx == nil || ctx.Err() != nil {
+		return
+	}
+	m.e2eeMu.Lock()
+	if m.e2ee == nil {
+		// Logged out or torn down: only a fresh login can bring the E2EE client back.
+		m.e2eeMu.Unlock()
+		return
+	}
+	m.e2eeAttempts++
+	attempt := m.e2eeAttempts
+	if m.e2eeRetry != nil {
+		m.e2eeRetry.Stop()
+	}
+	wait := e2eeBackoff(attempt)
+	var timer *time.Timer
+	timer = time.AfterFunc(wait, func() {
+		m.e2eeMu.Lock()
+		current := m.e2eeRetry == timer
+		if current {
+			m.e2eeRetry = nil
+		}
+		m.e2eeMu.Unlock()
+		if !current {
+			// Superseded by a newer schedule or cancelled by a logout.
+			return
+		}
+		m.reconnectE2EE(ctx, attempt)
+	})
+	m.e2eeRetry = timer
+	m.e2eeMu.Unlock()
+
+	event := m.log.Debug()
+	if attempt == 1 {
+		event = m.log.Warn()
+	}
+	event.Str("reason", reason).Int("attempt", attempt).Dur("retry_in", wait).
+		Msg("Reconnecting the E2EE socket")
+}
+
+// cancelE2EERetry drops the pending reconnect and resets the attempt count; called on logout and on
+// teardown, where the session needs a fresh login rather than another attempt.
+func (m *Messenger) cancelE2EERetry() {
+	m.e2eeMu.Lock()
+	defer m.e2eeMu.Unlock()
+	m.cancelE2EERetryLocked()
+}
+
+func (m *Messenger) cancelE2EERetryLocked() {
+	if m.e2eeRetry != nil {
+		m.e2eeRetry.Stop()
+		m.e2eeRetry = nil
+	}
+	m.e2eeAttempts = 0
+}
+
+// reconnectE2EE opens the E2EE socket again through the same call startE2EE uses. A failed attempt
+// schedules the next one; a socket that is already up counts as success.
+func (m *Messenger) reconnectE2EE(ctx context.Context, attempt int) {
+	if ctx.Err() != nil {
+		return
+	}
+	m.e2eeMu.Lock()
+	client := m.e2ee
+	if client == nil || m.e2eeBusy {
+		// Torn down or an attempt is already in flight; the pending timer covers the retry.
+		m.e2eeMu.Unlock()
+		return
+	}
+	m.e2eeBusy = true
+	m.e2eeMu.Unlock()
+
+	if client.IsConnected() {
+		// whatsmeow reconnected on its own while the timer ran.
+		m.e2eeMu.Lock()
+		m.e2eeBusy = false
+		m.e2eeAttempts = 0
+		m.e2eeMu.Unlock()
+		return
+	}
+
+	err := client.Connect()
+
+	m.e2eeMu.Lock()
+	m.e2eeBusy = false
+	m.e2eeMu.Unlock()
+
+	switch {
+	case err == nil && client.IsConnected():
+		return
+	case errors.Is(err, whatsmeow.ErrAlreadyConnected):
+		return
+	case err != nil:
+		m.log.Debug().Err(err).Int("attempt", attempt).Msg("E2EE reconnect attempt failed")
+		m.scheduleE2EEReconnect(err.Error())
+	default:
+		// Connect accepted the attempt but handed the reconnect to its own background loop, and the
+		// socket is not up yet: keep this connector's retry armed so encrypted chats come back even
+		// if that loop stops (it does nothing when the device has no saved WhatsApp id).
+		m.scheduleE2EEReconnect("socket still down")
+	}
 }
 
 // ensureE2EEChat makes sure the host knows the chat an encrypted event belongs to.

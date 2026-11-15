@@ -14,7 +14,9 @@
 //! relaunched with exponential backoff (1 s, 2 s, 4 s, ... capped at 60 s). At most
 //! [`SidecarConfig::max_restarts`] relaunches happen inside a rolling ten-minute window; once they
 //! are spent the connector reports `"sidecar crashed repeatedly"` and stays down until
-//! [`Connector::start`] is called again.
+//! [`Connector::start`] is called again. Offline reports carry the failed attempt the emitter
+//! counted, whether that is the child's own retry loop or this host's relaunches, so the engine can
+//! show real progress; a report with no count arrives as `attempt: None`.
 //!
 //! After a restart the host replays the session it was given (through [`Connector::restore`], a
 //! completed login, or [`ConnectorEvent::SessionUpdated`]) and re-sends `start`, so a live account

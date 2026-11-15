@@ -100,6 +100,32 @@ func TestEventTypingFrame(t *testing.T) {
 	}
 }
 
+// TestEventConnectionOfflineFrame pins the offline state the Rust ConnectionState deserializer
+// reads, including the 1-based attempt count the engine derives its retry delay from.
+func TestEventConnectionOfflineFrame(t *testing.T) {
+	got := encodeFrame(t, EventFrame{
+		Type:  "event",
+		Event: NewConnectionEvent(stateOffline("network unreachable", 3)),
+	})
+	want := `{"type":"event","event":{"type":"connection","state":{"type":"offline","reason":"network unreachable","attempt":3}}}`
+	if got != want {
+		t.Fatalf("offline connection event mismatch\n got: %s\nwant: %s", got, want)
+	}
+}
+
+// TestEventConnectionOfflineWithoutAttempt keeps the report valid for connectors that do not count
+// attempts: the host then assumes the first one.
+func TestEventConnectionOfflineWithoutAttempt(t *testing.T) {
+	got := encodeFrame(t, EventFrame{
+		Type:  "event",
+		Event: NewConnectionEvent(stateOffline("socket closed", 0)),
+	})
+	want := `{"type":"event","event":{"type":"connection","state":{"type":"offline","reason":"socket closed"}}}`
+	if got != want {
+		t.Fatalf("uncounted offline connection event mismatch\n got: %s\nwant: %s", got, want)
+	}
+}
+
 // TestDoneLoginStep pins the terminal login step the host persists.
 func TestDoneLoginStep(t *testing.T) {
 	got := encodeFrame(t, doneStep("100012345", "Ada", "AAAA"))

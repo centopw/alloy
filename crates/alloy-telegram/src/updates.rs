@@ -70,7 +70,12 @@ pub(crate) async fn run(shared: Arc<Shared>, mut stream: UpdateStream) {
                 recovering = true;
                 shared
                     .emit(ConnectorEvent::Connection {
-                        state: ConnectionState::Offline { reason },
+                        state: ConnectionState::Offline {
+                            reason,
+                            // The update stream retries with its own backoff but does not count
+                            // attempts; the host reports this as the first one.
+                            attempt: None,
+                        },
                     })
                     .await;
                 sleep(backoff).await;

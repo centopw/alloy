@@ -16,7 +16,15 @@ pub enum ConnectionState {
     /// Updates are flowing.
     Online,
     /// Live updates stopped; the connector is retrying on its own. `reason` is shown to the user.
-    Offline { reason: String },
+    ///
+    /// `attempt` is the 1-based count of failed attempts in the connector's own retry loop, so a
+    /// host can report real progress instead of a constant "retrying". It is `None` when the
+    /// connector does not count its attempts; hosts then assume the first one.
+    Offline {
+        reason: String,
+        #[serde(default)]
+        attempt: Option<u32>,
+    },
     /// The stored session is dead. No automatic retry happens; the host must run login again.
     NeedsRelogin,
 }
