@@ -160,17 +160,6 @@ class RoomsStore {
    */
   unreadChatCount = $derived(unreadChats(this.rooms, (r) => this.isUnread(r)));
 
-  /** Forum room ids whose topics the sidebar shows. Survives list updates; not persisted. */
-  expandedForums = $state<Set<string>>(new Set());
-
-  /** Shows or hides a forum's topics in the sidebar. */
-  toggleForum(forumId: string) {
-    const next = new Set(this.expandedForums);
-    if (next.has(forumId)) next.delete(forumId);
-    else next.add(forumId);
-    this.expandedForums = next;
-  }
-
   /** Whether the room shows as unread: new messages, or marked unread by hand. */
   isUnread(r: RoomSummary): boolean {
     return this.unreadOf(r) > 0 || !!r.marked_unread;
@@ -286,9 +275,6 @@ class RoomsStore {
   select(roomId: string | null) {
     this.activeRoomId = roomId;
     this.lastActive = this.rooms.find((r) => r.id === roomId) ?? null;
-    // A topic opened from elsewhere (search, palette) reveals its forum in the list.
-    const forum = this.lastActive?.parent_id;
-    if (forum && !this.expandedForums.has(forum)) this.toggleForum(forum);
     // Opening a chat that was marked unread by hand reads it.
     if (roomId && this.lastActive?.marked_unread) void this.setMarkedUnread(roomId, false);
   }

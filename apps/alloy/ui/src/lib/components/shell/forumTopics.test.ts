@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RoomSummary } from '$lib/generated';
-import { forumTopicCount, forumTotals, groupForumTopics, topicsOf } from './forumTopics';
+import { forumTopicCount, forumTotals, topicsOf } from './forumTopics';
 
 function room(id: string, patch: Partial<RoomSummary> = {}): RoomSummary {
   return {
@@ -26,51 +26,6 @@ function room(id: string, patch: Partial<RoomSummary> = {}): RoomSummary {
 
 const at = (millis: number) => ({ timestamp_millis: millis }) as RoomSummary['latest_event'];
 
-describe('groupForumTopics', () => {
-  it('keeps rooms without a parent at top level in their order', () => {
-    const rooms = [room('dm'), room('forum', { is_forum: true }), room('group')];
-    const { top, topicsByForum } = groupForumTopics(rooms);
-    expect(top.map((r) => r.id)).toEqual(['dm', 'forum', 'group']);
-    expect(topicsByForum.size).toBe(0);
-  });
-
-  it('nests topics under their forum and never lists them at top level', () => {
-    const rooms = [
-      room('forum', { is_forum: true }),
-      room('t1', { parent_id: 'forum' }),
-      room('t2', { parent_id: 'forum' }),
-    ];
-    const { top, topicsByForum } = groupForumTopics(rooms);
-    expect(top.map((r) => r.id)).toEqual(['forum']);
-    expect(topicsByForum.get('forum')?.map((r) => r.id).sort()).toEqual(['t1', 't2']);
-  });
-
-  it('sorts topics by newest activity, then by name', () => {
-    const rooms = [
-      room('forum', { is_forum: true }),
-      room('b', { parent_id: 'forum', latest_event: at(100) }),
-      room('a', { parent_id: 'forum', latest_event: at(100) }),
-      room('new', { parent_id: 'forum', latest_event: at(500) }),
-      room('none', { parent_id: 'forum' }),
-    ];
-    const { topicsByForum } = groupForumTopics(rooms);
-    expect(topicsByForum.get('forum')?.map((r) => r.id)).toEqual(['new', 'a', 'b', 'none']);
-  });
-
-  it('promotes a topic whose forum is not listed to top level', () => {
-    const rooms = [room('orphan', { parent_id: 'missing-forum' }), room('dm')];
-    const { top, topicsByForum } = groupForumTopics(rooms);
-    expect(top.map((r) => r.id)).toEqual(['orphan', 'dm']);
-    expect(topicsByForum.size).toBe(0);
-  });
-
-  it('treats a null or undefined parent as no parent', () => {
-    const rooms = [room('a', { parent_id: null }), room('b', { parent_id: undefined })];
-    const { top } = groupForumTopics(rooms);
-    expect(top.map((r) => r.id)).toEqual(['a', 'b']);
-  });
-});
-
 describe('topicsOf', () => {
   it('returns only the topics of that forum, newest activity first', () => {
     const rooms = [
@@ -81,6 +36,16 @@ describe('topicsOf', () => {
       room('other', { parent_id: 'elsewhere' }),
     ];
     expect(topicsOf(rooms, 'forum').map((r) => r.id)).toEqual(['new', 'old']);
+  });
+
+  it('breaks a tie in activity by name, so the forum opens the same topic every time', () => {
+    const rooms = [
+      room('forum', { is_forum: true }),
+      room('b', { parent_id: 'forum', latest_event: at(100) }),
+      room('a', { parent_id: 'forum', latest_event: at(100) }),
+      room('none', { parent_id: 'forum' }),
+    ];
+    expect(topicsOf(rooms, 'forum').map((r) => r.id)).toEqual(['a', 'b', 'none']);
   });
 
   it('keeps a topic that has no messages, after the active ones', () => {

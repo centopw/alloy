@@ -18,10 +18,8 @@
   interface Props {
     room: RoomSummary;
     onback?: () => void;
-    /** Opens a forum's topic list: the breadcrumb back from a topic to all its siblings. */
-    onopenforum?: (roomId: string) => void;
   }
-  let { room, onback, onopenforum }: Props = $props();
+  let { room, onback }: Props = $props();
 
   const roomId = $derived(room.id);
   const title = $derived(roomTitle(room));
@@ -112,17 +110,8 @@
         {/if}
       </button>
       {#if subtitle}
-        {#if forum}
-          <!-- The breadcrumb back from a topic to all of its siblings: one click opens the forum. -->
-          <button
-            type="button"
-            class="sub forum-link"
-            aria-label={t('chat-header-show-forum-topics', { name: subtitle })}
-            onclick={() => onopenforum?.(forum.id)}
-          >{subtitle}</button>
-        {:else}
-          <span class="sub">{subtitle}</span>
-        {/if}
+        <!-- A topic reads topic over forum; a forum shows its topic count instead. -->
+        <span class="sub">{subtitle}</span>
       {/if}
     </div>
   </h1>
@@ -240,7 +229,7 @@
     font-weight: var(--alloy-typography-weight-semibold);
     line-height: 15px;
   }
-  /* The second line: the topic's forum (a button back to all topics) or a forum's topic count. */
+  /* The second line: the topic's forum, or a forum's topic count. */
   .sub {
     flex: 1 1 auto;
     min-width: 0;
@@ -262,23 +251,6 @@
     border-radius: var(--alloy-radii-full);
     background: color-mix(in srgb, var(--alloy-color-text-muted) 70%, transparent);
     vertical-align: middle;
-  }
-  .forum-link {
-    padding: 0;
-    border: 0;
-    border-radius: var(--alloy-radii-sm);
-    background: transparent;
-    color: inherit;
-    font-family: inherit;
-    cursor: pointer;
-  }
-  .forum-link:hover {
-    color: var(--alloy-color-text-primary);
-    text-decoration: underline;
-  }
-  .forum-link:focus-visible {
-    outline: 2px solid var(--alloy-color-accent-primary);
-    outline-offset: 2px;
   }
   .actions {
     display: flex;
@@ -341,7 +313,7 @@
       gap: var(--alloy-spacing-scale-3);
     }
     /* Two lines where there is a second one: the title, then the subtitle under its text. The
-       subtitle stays a separate control, so it wraps instead of living inside the info button. */
+       subtitle sits beside the info button, so it wraps instead of living inside it. */
     .identity {
       flex-wrap: wrap;
       row-gap: 0;

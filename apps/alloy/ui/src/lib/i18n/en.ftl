@@ -78,7 +78,6 @@ chat-header-room-info-2 = Room info
 chat-header-room-info-button = Room info
 chat-header-room-picture-options = Room picture options
 chat-header-search-in-room = Search in room
-chat-header-show-forum-topics = Show topics of { $name }
 chat-header-show-members = Show members
 command-palette-close-quick-switcher = Close quick switcher
 command-palette-esc = esc
@@ -179,8 +178,6 @@ forum-topic-count = { $count ->
     [one] { $count } topic
    *[other] { $count } topics
   }
-forum-topics-collapse = Hide topics of { $name }
-forum-topics-expand = Show topics of { $name }
 forward-dialog-forward-message = Forward message
 forward-dialog-forward-messages = Forward { $count } messages
 forward-dialog-no-matching-rooms = No matching rooms.
@@ -575,10 +572,8 @@ timeline-preview-sticker = Sticker
 timeline-preview-unreadable-message = Unreadable message
 timeline-preview-voice-message = Voice message
 timeline-scroll-to-top-load-older = Scroll to top (load older)
-topics-pane-empty = No topics yet
-topics-pane-heading = Topics in { $name }
-topics-pane-no-messages = No messages yet
-topics-pane-section-label = Topics
+topics-rail-empty = No topics yet
+topics-rail-label = Topics of { $name }
 update-notice-almost-done = Almost done
 update-notice-download = Download
 update-notice-downloading-update = Downloading update

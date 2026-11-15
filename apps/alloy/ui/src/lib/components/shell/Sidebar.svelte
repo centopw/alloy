@@ -6,7 +6,7 @@
   import TagEditDialog from '../tags/TagEditDialog.svelte';
   import Icon from '$lib/icons/Icon.svelte';
   import NetworkIcon from '$lib/icons/NetworkIcon.svelte';
-  import { Archive, ArchiveRestore, ArrowUpDown, Bell, BellOff, CheckCheck, ChevronDown, ChevronRight, ChevronUp, Copy, Ellipsis, Info, Mail, Palette, Pencil, Pin, PinOff, RefreshCw, Search, Settings, StickyNote, Tag, Trash2 } from '$lib/icons';
+  import { Archive, ArchiveRestore, ArrowUpDown, Bell, BellOff, CheckCheck, ChevronDown, ChevronUp, Copy, Ellipsis, Info, Mail, Palette, Pencil, Pin, PinOff, RefreshCw, Search, Settings, StickyNote, Tag, Trash2 } from '$lib/icons';
   import { contextmenu } from '$lib/platform/contextmenu';
   import { pullToRefresh } from '$lib/platform/pullToRefresh';
   import { shortcutLabel } from '$lib/platform/shortcuts';
@@ -33,7 +33,7 @@
   import { muteRoom, unmuteRoom } from '$lib/stores/muteTimer.svelte';
   import { resolveAvatar } from '$lib/stores/avatars.svelte';
   import { globalSearch, isSearchable } from '$lib/stores/globalSearch.svelte';
-  import { forumTotals, groupForumTopics } from './forumTopics';
+  import { forumTotals, topicsOf } from './forumTopics';
   import { muteEndLabel } from '$lib/content/mute';
 
   import { t } from '$lib/i18n';
@@ -44,6 +44,18 @@
   let { onselect, onsettings }: Props = $props();
 
   type RoomItem = (typeof roomsStore.rooms)[number];
+
+  /** What a forum row overrides on the shared chat row: its counted unread, preview and target. */
+  interface RoomRowOptions {
+    /** Unread count to show; a forum shows the sum for itself and its topics. */
+    unread?: number;
+    /** Whether the row reads as the open chat; a forum counts as open while a topic of it is. */
+    active?: boolean;
+    /** Preview line to show instead of the room's own last activity. */
+    preview?: string | null;
+    /** Room the row opens; a forum opens its most recently active topic. */
+    openId?: string;
+  }
 
   /** Resolved chat avatars by room id; null while a lookup runs. */
   let avatars = $state<Record<string, string | null>>({});
@@ -290,10 +302,14 @@
   const multipleAccounts = $derived(roomsStore.accounts.length > 1);
 
   const joined = $derived(roomsStore.visible);
-  // Topics live under their forum, so the top-level lists see only rooms that have no parent here.
-  const forumGroups = $derived(groupForumTopics(joined));
-  const topLevel = $derived(forumGroups.top);
-  const topicsByForum = $derived(forumGroups.topicsByForum);
+  // One row per forum: topics live beside the open conversation, not inline in the list. A topic
+  // whose forum the filter dropped (search, chip) keeps its own row so it never disappears.
+  const topLevel = $derived.by(() => {
+    const listed = new Set(joined.map((r) => r.id));
+    return joined.filter((r) => !r.parent_id || !listed.has(r.parent_id));
+  });
+  // The forum row stays highlighted while one of its topics is open.
+  const activeForumId = $derived(roomsStore.active?.parent_id ?? null);
   // Pinned chats sit above everything else; the Archive view lists them in place.
   const pinned = $derived(roomsStore.filter === 'archive' ? [] : topLevel.filter((r) => r.pinned));
   const unpinned = $derived(roomsStore.filter === 'archive' ? topLevel : topLevel.filter((r) => !r.pinned));
@@ -312,44 +328,22 @@
   // ids are the `button.row` ids in visual order, so the model matches the markup in every grouping
   // mode (flat, tags). Phones keep every row a normal button (touch-first UI).
   let rovingId = $state<string | null>(null);
-  function roomButtonIds(list: readonly RoomItem[]): string[] {
-    return list.map((r) => r.id);
-  }
-  /** Whether a topic matches the search box; the room list filter already applied to the rest. */
-  function topicMatches(t: RoomItem): boolean {
-    return roomTitle(t).toLowerCase().includes(roomsStore.query.trim().toLowerCase());
-  }
-
-  /** Topics a forum row reveals in the list: its topics when expanded, or the matching ones while searching. */
-  function topicsRevealedBy(r: RoomItem): RoomItem[] {
-    const topics = topicsByForum.get(r.id) ?? [];
-    if (searching) return topics.filter((t) => topicMatches(t));
-    return roomsStore.expandedForums.has(r.id) ? topics : [];
-  }
-
-  // Roving ids follow the rows as drawn: each forum, then its revealed topics, in every grouping mode.
   const rovingIds = $derived.by(() => {
     const visibleRows = prefs.roomSort === 'tag' ? groupRoomsByTag(flat, tagDefs).flatMap((g) => g.rooms) : flat;
-    return roomButtonIds(visibleRows.flatMap((r) => [r, ...topicsRevealedBy(r)]));
+    return visibleRows.map((r) => r.id);
   });
-  const rovingStopId = $derived(rovingTabStop(rovingIds, rovingId, roomsStore.activeRoomId));
+  // The row that owns the Tab stop when nothing was focused yet: the open chat's own row, or the
+  // forum row when the open chat is one of its topics.
+  const rovingActiveId = $derived(
+    roomsStore.activeRoomId !== null && rovingIds.includes(roomsStore.activeRoomId)
+      ? roomsStore.activeRoomId
+      : activeForumId,
+  );
+  const rovingStopId = $derived(rovingTabStop(rovingIds, rovingId, rovingActiveId));
 
   /** Remembers the row the user last focused, so Tab returns there instead of the top of the list. */
   function onRoomFocus(roomId: string) {
     rovingId = roomId;
-  }
-
-  /**
-   * A forum row opens the forum on Enter/Space, like any other row. The inline topic list is the
-   * secondary affordance: ArrowRight unfolds it and ArrowLeft folds it, so it needs no extra tab stop.
-   */
-  function onForumKeydown(e: KeyboardEvent, forumId: string) {
-    if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
-    const open = roomsStore.expandedForums.has(forumId);
-    if (e.key === 'ArrowRight' && !open) roomsStore.toggleForum(forumId);
-    else if (e.key === 'ArrowLeft' && open) roomsStore.toggleForum(forumId);
-    else return;
-    e.preventDefault();
   }
 
   /**
@@ -485,9 +479,9 @@
   );
 </script>
 
-{#snippet roomRow(r: RoomItem)}
-  {@const unread = roomsStore.unreadOf(r)}
-  {@const active = r.id === roomsStore.activeRoomId}
+{#snippet roomRow(r: RoomItem, opts: RoomRowOptions)}
+  {@const unread = opts.unread ?? roomsStore.unreadOf(r)}
+  {@const active = opts.active ?? r.id === roomsStore.activeRoomId}
   {@const muted = isRoomMuted(r)}
   {@const markedUnread = !!r.marked_unread && unread === 0}
   {@const draft = active ? null : roomsStore.draftOf(r)}
@@ -500,7 +494,6 @@
   {@const dropAfter = dropTarget?.roomId === r.id && dropTarget.after}
   <div
     class="row-wrap"
-    class:topic={r.parent_id != null}
     class:dragging={dragging?.roomId === r.id}
     class:drop-before={dropBefore}
     class:drop-after={dropAfter}
@@ -517,7 +510,7 @@
       tabindex={viewport.isPhone ? undefined : r.id === rovingStopId ? 0 : -1}
       draggable={reorderable ? 'true' : undefined}
       use:contextmenu={() => roomItems(r)}
-      onclick={() => openRoom(r.id)}
+      onclick={() => openRoom(opts.openId ?? r.id)}
       onfocus={() => onRoomFocus(r.id)}
       onkeydown={(e) => onRoomKeydown(e, r.id)}
       ondragstart={reorderable ? (e) => onRowDragStart(e, r) : undefined}
@@ -536,6 +529,8 @@
         <span class="title">{roomTitle(r)}</span>
         {#if draft}
           <span class="preview"><span class="draft">{t('sidebar-draft')}</span> {draft}</span>
+        {:else if opts.preview !== undefined}
+          {#if opts.preview}<span class="preview">{opts.preview}</span>{/if}
         {:else if prefs.roomListPreviews && r.latest_event}
           <span class="preview">{r.latest_event.body}</span>
         {/if}
@@ -588,91 +583,38 @@
   </div>
 {/snippet}
 
+<!-- A forum is a container of conversations. Like Telegram, opening it lands in its most recently
+     active topic and the rail beside the messages switches from there; a forum with no topics
+     opens itself. Archived topics are chats of their own, so they stay out of the badge and the
+     click. -->
 {#snippet forumRow(r: RoomItem)}
-  {@const topics = topicsByForum.get(r.id) ?? []}
-  {@const open = roomsStore.expandedForums.has(r.id)}
+  {@const topics = topicsOf(roomsStore.rooms, r.id).filter((t) => !t.archived)}
   {@const totals = forumTotals(r, topics, (x) => roomsStore.unreadOf(x))}
-  {@const name = roomTitle(r)}
-  {@const active = r.id === roomsStore.activeRoomId}
-  <div class="row-wrap forum">
-    <!-- A forum is a container of conversations: the row opens it, which shows every topic at
-         once. The chevron stays a separate, secondary control for the inline list. -->
-    <button
-      type="button"
-      class="row forum-row"
-      class:active
-      data-room-id={r.id}
-      aria-current={active ? 'true' : undefined}
-      tabindex={viewport.isPhone ? undefined : r.id === rovingStopId ? 0 : -1}
-      onclick={() => openRoom(r.id)}
-      onfocus={() => onRoomFocus(r.id)}
-      onkeydown={(e) => {
-        onForumKeydown(e, r.id);
-        if (!e.defaultPrevented) onRoomKeydown(e, r.id);
-      }}
-    >
-      <span class="pinned avatar">
-        <Avatar userId={r.id} displayName={name} src={avatars[r.id] ?? null} size={36} shape="rounded" />
-      </span>
-      <span class="text">
-        <span class="title">{name}</span>
-        <span class="preview">{t('forum-topic-count', { count: topics.length })}</span>
-      </span>
-      <span class="end">
-        <span class="marks">
-          {#if totals.notifications > 0}
-            <span class="pinned"><Badge count={totals.notifications} /></span>
-          {/if}
-        </span>
-      </span>
-    </button>
-    <button
-      type="button"
-      class="twisty"
-      tabindex="-1"
-      aria-expanded={open}
-      aria-label={open ? t('forum-topics-collapse', { name }) : t('forum-topics-expand', { name })}
-      data-tooltip={open ? t('forum-topics-collapse', { name }) : t('forum-topics-expand', { name })}
-      onclick={() => roomsStore.toggleForum(r.id)}
-    >
-      <Icon icon={open ? ChevronDown : ChevronRight} size={16} />
-    </button>
-  </div>
+  {@const lastActivity = prefs.roomListPreviews ? r.latest_event?.body ?? null : null}
+  {@const count = topics.length > 0 ? t('forum-topic-count', { count: topics.length }) : null}
+  {@render roomRow(r, {
+    unread: totals.notifications,
+    active: r.id === roomsStore.activeRoomId || r.id === activeForumId,
+    preview: [lastActivity, count].filter(Boolean).join(' · ') || null,
+    openId: topics[0]?.id ?? r.id,
+  })}
 {/snippet}
-
-{#snippet forumList(list: RoomItem[])}
-  <ul>
-    {#each list as r (r.id)}
-      <li>
-        {#if topicsByForum.has(r.id)}
-          {@render forumRow(r)}
-        {:else}
-          {@render listRow(r)}
-        {/if}
-        {#if topicsByForum.has(r.id) && topicsRevealedBy(r).length > 0}
-          <ul class="topics">
-            {#each topicsRevealedBy(r) as topic (topic.id)}
-              <li>{@render roomRow(topic)}</li>
-            {/each}
-          </ul>
-        {/if}
-      </li>
-    {/each}
-  </ul>
-{/snippet}
-
 
 {#snippet listRow(r: RoomItem)}
-  <RoomSwipe
-    id={r.id}
-    enabled={viewport.isPhone}
-    archived={r.archived}
-    muted={isRoomMuted(r)}
-    onarchive={() => void roomsStore.setArchived(r.id, !r.archived)}
-    onmute={() => void (isRoomMuted(r) ? unmuteRoom(r.id) : muteRoom(r.id, null))}
-  >
-    {@render roomRow(r)}
-  </RoomSwipe>
+  {#if r.is_forum}
+    {@render forumRow(r)}
+  {:else}
+    <RoomSwipe
+      id={r.id}
+      enabled={viewport.isPhone}
+      archived={r.archived}
+      muted={isRoomMuted(r)}
+      onarchive={() => void roomsStore.setArchived(r.id, !r.archived)}
+      onmute={() => void (isRoomMuted(r) ? unmuteRoom(r.id) : muteRoom(r.id, null))}
+    >
+      {@render roomRow(r, {})}
+    </RoomSwipe>
+  {/if}
 {/snippet}
 
 {#snippet roomList(list: RoomItem[])}
@@ -691,7 +633,11 @@
       </section>
     {/each}
   {:else}
-    {@render forumList(list)}
+    <ul>
+      {#each list as r (r.id)}
+        <li>{@render listRow(r)}</li>
+      {/each}
+    </ul>
   {/if}
 {/snippet}
 
@@ -1340,46 +1286,6 @@
   .row-wrap {
     position: relative;
   }
-  /* Forums are containers: the row opens the forum's topic pane, while the chevron is its own
-     control — a click on it never opens the forum, it only unfolds the inline topic list. */
-  button.row.forum-row {
-    padding-left: calc(var(--alloy-spacing-scale-2) + 28px);
-  }
-  /* The rail marks the open forum at the very edge, clear of the chevron. */
-  button.row.forum-row.active::before {
-    left: 0;
-  }
-  .twisty {
-    position: absolute;
-    top: 50%;
-    left: 0;
-    z-index: 1;
-    display: grid;
-    place-items: center;
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    border: 0;
-    border-radius: var(--alloy-radii-sm);
-    background: transparent;
-    color: var(--alloy-color-text-muted);
-    translate: 0 -50%;
-    cursor: pointer;
-  }
-  .twisty:hover {
-    background: var(--alloy-glass-control);
-    color: var(--alloy-color-text-primary);
-  }
-  .twisty:focus-visible {
-    outline: 2px solid var(--alloy-color-accent-primary);
-    outline-offset: 2px;
-  }
-  /* `.group ul` zeroes list padding, so the indent needs the same specificity to win. */
-  .group ul.topics {
-    list-style: none;
-    margin: 0;
-    padding: 0 0 0 var(--alloy-spacing-scale-5);
-  }
   /* Rearranging pinned chats: the dragged row fades, and an accent rule marks the slot the drop would take. */
   .row-wrap.dragging {
     opacity: 0.45;
@@ -1423,8 +1329,7 @@
     .more:focus-visible {
       display: grid;
     }
-    /* The hovered row hands its trailing marks over to the more button. A forum row has no such
-       button, so its summed unread badge stays visible. */
+    /* The hovered row hands its trailing marks over to the more button. */
     .row-wrap:hover:has(> .more) .end {
       visibility: hidden;
     }
@@ -1581,15 +1486,6 @@
       min-height: 56px;
       box-sizing: border-box;
       padding: var(--alloy-spacing-scale-2) var(--alloy-layout-row-pad-x);
-    }
-    /* Touch: the chevron keeps a full 44px target of its own, so opening the inline list never
-       means hitting the row by mistake. */
-    .twisty {
-      width: 44px;
-      height: 44px;
-    }
-    button.row.forum-row {
-      padding-left: calc(var(--alloy-spacing-scale-2) + 44px);
     }
     .title {
       font-size: var(--alloy-typography-size-base);

@@ -2,7 +2,7 @@
   import { onMount, tick, untrack } from 'svelte';
   import Sidebar from './Sidebar.svelte';
   import ChatHeader from './ChatHeader.svelte';
-  import TopicsPane from './TopicsPane.svelte';
+  import TopicsRail from './TopicsRail.svelte';
   import MobileTabBar from './MobileTabBar.svelte';
   import RoomInfoPanel from './RoomInfoPanel.svelte';
   import RoomSearchPanel from './RoomSearchPanel.svelte';
@@ -43,6 +43,7 @@
   import { shortcutLabel } from '$lib/platform/shortcuts';
   import { focusChatEntry, focusRoomList, focusRoomRow, focusSkipTarget } from '$lib/platform/shellFocus';
   import { applyWindowTitle } from '$lib/platform/windowTitle';
+  import { topicsOf } from './forumTopics';
 
   import { t } from '$lib/i18n';
   let paletteOpen = $state(false);
@@ -68,6 +69,21 @@
 
   const active = $derived(roomsStore.active);
   const activeId = $derived(roomsStore.active?.id ?? null);
+
+  // A forum is a container without messages of its own: the conversation belongs to one of its
+  // topics, and the rail beside it lists the siblings. `forumId` is the forum the rail lists,
+  // whether the forum itself or one of its topics is selected.
+  const forumId = $derived(
+    active ? (active.is_forum ? active.id : (active.parent_id ?? null)) : null
+  );
+  const railForum = $derived(
+    forumId ? (roomsStore.rooms.find((r) => r.id === forumId) ?? null) : null
+  );
+  // Topics of the rail's forum, newest activity first; the redirect below and the forum's empty
+  // state read the same list the rail renders.
+  const railTopics = $derived(forumId ? topicsOf(roomsStore.rooms, forumId) : []);
+  // Only a conversation accepts typed input: a forum itself has no composer, a topic does.
+  const composerOpen = $derived(activeId !== null && !(active?.is_forum ?? false));
 
   // Room search and room info share the side slot. Opening one closes the other in the ui store.
   const infoPanel = $derived<'room-search' | 'room-info' | 'none'>(
@@ -184,6 +200,15 @@
   // Timed mutes end on their own; this restores the chat's notifications.
   $effect(() => startMuteTimer());
 
+  // A forum is never the open conversation: anything that selects the container itself (a stale
+  // link, a notification payload, the room list row) lands in its most recently active topic.
+  // Once a topic is selected this effect stops, so the redirect cannot loop.
+  $effect(() => {
+    if (!active?.is_forum) return;
+    const newest = railTopics[0];
+    if (newest) pick(newest.id);
+  });
+
   // Room info and room search belong to the room they were opened for.
   $effect(() => {
     void activeId;
@@ -250,13 +275,14 @@
 
   function onKeydown(e: KeyboardEvent) {
     // Typing anywhere in a conversation starts a message; the keystroke follows focus into the field.
-    // A forum has no composer, so its topics pane keeps the keyboard.
-    if (activeId && !active?.is_forum && !paletteOpen && shouldFocusComposer(e)) focusComposer();
+    // A forum itself has no composer and no messages to search, so it keeps the keyboard; a topic
+    // inside one is a conversation and accepts both.
+    if (composerOpen && !paletteOpen && shouldFocusComposer(e)) focusComposer();
     const mod = e.metaKey || e.ctrlKey;
     if (mod && e.key.toLowerCase() === 'k') {
       e.preventDefault();
       paletteOpen = !paletteOpen;
-    } else if (mod && e.key.toLowerCase() === 'f' && activeId && !active?.is_forum && caps.keyboardShortcuts) {
+    } else if (mod && e.key.toLowerCase() === 'f' && composerOpen && caps.keyboardShortcuts) {
       e.preventDefault();
       ui.toggleRoomSearch();
     } else if (mod && e.key === ',') {
@@ -348,24 +374,43 @@
     </div>
   {/if}
 
-  <main class="chat" id="conversation" tabindex="-1">
+  <main
+    class="chat"
+    class:with-conversation={active !== null && activeId !== null}
+    id="conversation"
+    tabindex="-1"
+  >
     {#if active && activeId}
-      {#if timelineStore.selecting && !active.is_forum}
-        <!-- Selection replaces the header; keep the view's h1 in the outline for the duration. -->
-        <h1 class="visually-hidden">{roomTitle(active)}</h1>
-        <SelectionBar />
-      {:else}
-        <ChatHeader room={active} onback={backToList} onopenforum={pick} />
+      {#if railForum && railTopics.length > 0}
+        <!-- The forum's topics stay beside the messages: switching is one click, without leaving
+             the conversation. On a phone the same rail is a chip strip above the header. -->
+        <TopicsRail forum={railForum} onpick={pick} />
       {/if}
-      {#if active.is_forum}
-        <!-- A forum holds no messages of its own: its topics are the conversations, so the pane
-             replaces the timeline, the attachment strip and the composer. -->
-        <TopicsPane forum={active} onselect={pick} />
-      {:else}
-        <Timeline roomId={activeId} title={roomTitle(active)} isDirect={active.is_direct} />
-        <UploadStrip roomId={activeId} />
-        <Composer roomId={activeId} />
-      {/if}
+      <div class="conversation">
+        {#if timelineStore.selecting && !active.is_forum}
+          <!-- Selection replaces the header; keep the view's h1 in the outline for the duration. -->
+          <h1 class="visually-hidden">{roomTitle(active)}</h1>
+          <SelectionBar />
+        {:else}
+          <!-- The header names the conversation, and on a phone it is also the way back to the
+               room list, so a forum keeps it even when it has no topic to open. -->
+          <ChatHeader room={active} onback={backToList} />
+        {/if}
+        {#if active.is_forum}
+          <!-- A forum holds no messages of its own and no composer: with no topic there is nothing
+               to read, so the pane only says why it is empty. While the newest topic is being
+               selected the pane stays blank instead of claiming the forum is empty. -->
+          {#if railTopics.length === 0}
+            <div class="forum-empty">
+              <p>{t('topics-rail-empty')}</p>
+            </div>
+          {/if}
+        {:else}
+          <Timeline roomId={activeId} title={roomTitle(active)} isDirect={active.is_direct} />
+          <UploadStrip roomId={activeId} />
+          <Composer roomId={activeId} />
+        {/if}
+      </div>
     {:else}
       <div class="drag-strip" data-tauri-drag-region aria-hidden="true"></div>
       <div class="empty">
@@ -576,14 +621,39 @@
     min-height: 0;
     overflow: hidden;
     --alloy-layout-gutter: 12px;
+    /* Top padding of the forum rail; only a chat at the window edge under an overlay title bar
+       has to clear the traffic lights, and that scope raises it below. */
+    --chat-rail-lead: var(--alloy-spacing-scale-2);
     background: var(--alloy-chat-surface);
     -webkit-backdrop-filter: var(--alloy-chat-filter);
     backdrop-filter: var(--alloy-chat-filter);
+  }
+  /* An open conversation puts the forum rail at the left edge; the messages keep the rest of the
+     pane and scroll on their own, so the rail never moves with the timeline. */
+  .chat.with-conversation {
+    flex-direction: row;
+  }
+  .conversation {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
   }
   /* Collapsed list: the conversation starts at the window's left edge, under the traffic lights. */
   .shell[data-layout='wide'][data-sidebar='collapsed'] .chat,
   .shell[data-layout='medium'][data-sidebar='collapsed'] .chat {
     --chat-header-lead: var(--alloy-titlebar-lights-inset);
+  }
+  /* The forum rail starts at that same edge, so its first topic clears the lights row. */
+  :root[data-titlebar='overlay']:not([data-fullscreen='true'])
+    .shell[data-layout='wide'][data-sidebar='collapsed']
+    .chat,
+  :root[data-titlebar='overlay']:not([data-fullscreen='true'])
+    .shell[data-layout='medium'][data-sidebar='collapsed']
+    .chat {
+    --chat-rail-lead: calc(var(--alloy-titlebar-lights-inset) / 4 + 14px);
   }
   /* macOS overlay title bar: the empty pane has no header, so this strip keeps the window draggable
      and the lights over empty space. Other platforms keep their native title bar. */
@@ -652,6 +722,21 @@
     font-size: var(--alloy-typography-size-base);
     line-height: var(--alloy-typography-line-height-normal);
   }
+  /* A forum with no topics yet: the header names it, the pane says why it is empty. */
+  .forum-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: auto;
+    padding: var(--alloy-spacing-scale-6) var(--alloy-layout-gutter);
+    text-align: center;
+  }
+  .forum-empty p {
+    margin: 0;
+    max-width: 34ch;
+    font-size: var(--alloy-typography-size-sm);
+    color: var(--alloy-color-text-muted);
+  }
   .jump {
     display: inline-flex;
     align-items: center;
@@ -718,6 +803,8 @@
   /* Phones get the roomier phone gutter back; the desktop 12px is for a narrow chat column. */
   .shell[data-layout='narrow'] .chat {
     --alloy-layout-gutter: var(--alloy-spacing-scale-4);
+    /* The topic rail becomes a horizontal strip above the header on a phone. */
+    flex-direction: column;
   }
   .shell[data-layout='narrow'] .list-body {
     display: grid;

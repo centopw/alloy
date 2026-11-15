@@ -170,29 +170,29 @@ describe('stores against the mock engine', () => {
   });
 });
 
-describe('unread chat count', () => {
-  /** Only the fields the counting rule reads; the rest is filler a room summary always carries. */
-  const chat = (id: string, patch: Partial<RoomSummary> = {}): RoomSummary =>
-    ({
-      id,
-      account_id: 'acc',
-      network: 'telegram',
-      name: id,
-      avatar: null,
-      kind: 'group',
-      is_direct: false,
-      unread_notifications: { highlight_count: 0, notification_count: 0 },
-      latest_event: null,
-      pinned: false,
-      pin_order: null,
-      archived: false,
-      muted_until: null,
-      marked_unread: false,
-      tags: [],
-      draft: null,
-      ...patch,
-    }) as RoomSummary;
+/** Only the fields the counting rule reads; the rest is filler a room summary always carries. */
+const chat = (id: string, patch: Partial<RoomSummary> = {}): RoomSummary =>
+  ({
+    id,
+    account_id: 'acc',
+    network: 'telegram',
+    name: id,
+    avatar: null,
+    kind: 'group',
+    is_direct: false,
+    unread_notifications: { highlight_count: 0, notification_count: 0 },
+    latest_event: null,
+    pinned: false,
+    pin_order: null,
+    archived: false,
+    muted_until: null,
+    marked_unread: false,
+    tags: [],
+    draft: null,
+    ...patch,
+  }) as RoomSummary;
 
+describe('unread chat count', () => {
   beforeEach(() => {
     roomsStore.rooms = [];
   });
@@ -258,6 +258,24 @@ describe('unread chat count', () => {
     // The forum row still shows the sum of its topics (`forumTotals`); only the chat count folds.
     expect(roomsStore.rooms.reduce((n, r) => n + roomsStore.unreadOf(r), 0)).toBe(5);
     expect(roomsStore.unreadChatCount).toBe(1);
+  });
+});
+
+describe('active room', () => {
+  beforeEach(() => {
+    roomsStore.rooms = [];
+    roomsStore.select(null);
+  });
+
+  it('keeps the open topic known after the list drops it, so its forum row stays lit', () => {
+    roomsStore.rooms = [chat('forum', { is_forum: true }), chat('t1', { parent_id: 'forum' })];
+    roomsStore.select('t1');
+    expect(roomsStore.active?.id).toBe('t1');
+    // The sidebar highlights a forum through `parent_id`; a filter or a refresh that drops the
+    // topic from the list must not take its parent with it.
+    roomsStore.rooms = [chat('forum', { is_forum: true })];
+    expect(roomsStore.active?.id).toBe('t1');
+    expect(roomsStore.active?.parent_id).toBe('forum');
   });
 });
 
