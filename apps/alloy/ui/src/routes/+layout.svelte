@@ -12,6 +12,7 @@
   import ContextMenu from "$lib/components/common/ContextMenu.svelte";
   import TooltipLayer from "$lib/components/common/TooltipLayer.svelte";
   import { installNativeMenuGuard } from "$lib/platform/nativeMenu";
+  import { installTitlebar } from "$lib/platform/titlebar";
 
   let { children } = $props();
 
@@ -20,7 +21,14 @@
     document.documentElement.dataset.insets = 'native';
   }
 
-  onMount(() => installNativeMenuGuard(document));
+  onMount(() => {
+    const stopMenuGuard = installNativeMenuGuard(document);
+    const stopTitlebar = installTitlebar(document);
+    return () => {
+      stopMenuGuard();
+      stopTitlebar();
+    };
+  });
 </script>
 
 {@render children()}

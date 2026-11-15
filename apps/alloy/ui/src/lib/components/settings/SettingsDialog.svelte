@@ -260,7 +260,10 @@ import Permissions from './sections/Permissions.svelte';
     inset: 0;
     z-index: 60;
     display: flex;
-    padding: var(--alloy-spacing-scale-4);
+    /* Under an overlay title bar the traffic lights float over the window's top-left corner, so the
+       panel starts below them instead of being drawn behind them. */
+    padding: max(var(--alloy-spacing-scale-4), calc(var(--alloy-titlebar-lights-inset) / 4 + 14px))
+      var(--alloy-spacing-scale-4) var(--alloy-spacing-scale-4);
     background: color-mix(in srgb, var(--alloy-color-surface-canvas) 55%, transparent);
     -webkit-backdrop-filter: blur(10px) saturate(140%);
     backdrop-filter: blur(10px) saturate(140%);

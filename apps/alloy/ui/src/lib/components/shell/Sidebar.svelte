@@ -678,16 +678,16 @@
 {/snippet}
 
 <section class="sidebar" aria-label={t('sidebar-rooms')}>
-  <header class="head" use:contextmenu={paneItems}>
+  <header class="head" data-tauri-drag-region use:contextmenu={paneItems}>
     <!-- On phones the room list is a screen of its own, so its title is that view's h1; the chat's
          h1 is `display: none` while the list shows. On desktop the conversation owns the h1. -->
     {#if viewport.isPhone}
       <h1 class="scope">{t('sidebar-chats')}</h1>
     {:else}
-      <h2 class="scope">{t('sidebar-chats')}</h2>
+      <h2 class="scope" data-tauri-drag-region>{t('sidebar-chats')}</h2>
     {/if}
     {#if unreadRoomsCount > 0}
-      <span class="scope-meta">{unreadRoomsCount} {t('sidebar-unread')}</span>
+      <span class="scope-meta" data-tauri-drag-region>{unreadRoomsCount} {t('sidebar-unread')}</span>
     {/if}
     <div class="actions">
       <button
@@ -853,6 +853,7 @@
     flex-direction: column;
     min-width: 0;
     min-height: 0;
+    container-type: inline-size;
     height: 100%;
     background: transparent;
     color: var(--alloy-color-text-secondary);
@@ -865,6 +866,24 @@
     height: var(--alloy-layout-header-height);
     padding: 0 var(--alloy-spacing-scale-2);
     border-bottom: 1px solid var(--alloy-chat-rim);
+  }
+  /* Desktop: the head starts after the macOS traffic lights (see layout.css); a no-op elsewhere. */
+  @media (min-width: 900px) {
+    .head {
+      padding-left: max(var(--alloy-spacing-scale-2), var(--alloy-titlebar-lights-inset));
+    }
+  }
+  /* Under the traffic lights the head keeps 84px on the left; below 255px the "Chats" word yields to the
+     unread chip and refresh button. It stays in the accessibility tree; only its paint goes. */
+  @container (max-width: 255px) {
+    :root[data-titlebar='overlay']:not([data-fullscreen='true']) .scope {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      white-space: nowrap;
+    }
   }
   .actions {
     display: flex;

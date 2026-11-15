@@ -357,6 +357,7 @@
       <UploadStrip roomId={activeId} />
       <Composer roomId={activeId} />
     {:else}
+      <div class="drag-strip" data-tauri-drag-region aria-hidden="true"></div>
       <div class="empty">
         <h1 class="eyebrow">{t('brand-name')}</h1>
         <h2>{t('adaptive-shell-no-conversation-open')}</h2>
@@ -509,6 +510,12 @@
   .shell[data-layout='medium'][data-sidebar='collapsed'] .nav {
     display: none;
   }
+  /* The hidden list leaves its grid track empty (it is `display: none`), so the conversation has to
+     name its column; auto-placement would put it in the 0px track. */
+  .shell[data-layout='wide'][data-sidebar='collapsed'] .chat,
+  .shell[data-layout='medium'][data-sidebar='collapsed'] .chat {
+    grid-column: 2;
+  }
   /* Handles straddle the hairline; the wrapper gives them a hit area without a gutter between panes. */
   .split {
     position: absolute;
@@ -562,6 +569,21 @@
     background: var(--alloy-chat-surface);
     -webkit-backdrop-filter: var(--alloy-chat-filter);
     backdrop-filter: var(--alloy-chat-filter);
+  }
+  /* Collapsed list: the conversation starts at the window's left edge, under the traffic lights. */
+  .shell[data-layout='wide'][data-sidebar='collapsed'] .chat,
+  .shell[data-layout='medium'][data-sidebar='collapsed'] .chat {
+    --chat-header-lead: var(--alloy-titlebar-lights-inset);
+  }
+  /* macOS overlay title bar: the empty pane has no header, so this strip keeps the window draggable
+     and the lights over empty space. Other platforms keep their native title bar. */
+  .drag-strip {
+    display: none;
+    flex: none;
+    height: var(--alloy-layout-header-height);
+  }
+  :root[data-titlebar='overlay'] .drag-strip {
+    display: block;
   }
 
   .side {

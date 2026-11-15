@@ -19,6 +19,8 @@
   --alloy-layout-rail-width: 56px;
   --alloy-layout-control-height: 36px;
   --alloy-layout-control-height-sm: 28px;
+  /* macOS overlay title bar only (see the rule below); zero everywhere else. */
+  --alloy-titlebar-lights-inset: 0px;
 }
 
 /* Phones: controls become touch targets. Fields and buttons share this height so they match in a row. */
@@ -26,4 +28,11 @@
   :root {
     --alloy-layout-control-height: 44px;
   }
+}
+
+/* macOS overlay title bar: the traffic lights sit over the top-left 84px of the window (three 12px
+   lights, two 8px gaps, 18px left offset, 6px air). Chrome that starts at the window's left edge pads
+   by this value so no control sits under them. Zero in fullscreen, where macOS hides the lights. */
+:root[data-titlebar='overlay']:not([data-fullscreen='true']) {
+  --alloy-titlebar-lights-inset: 84px;
 }

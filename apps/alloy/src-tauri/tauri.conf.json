@@ -16,7 +16,10 @@
         "height": 800,
         "minWidth": 680,
         "minHeight": 600,
-        "useHttpsScheme": true
+        "useHttpsScheme": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": { "x": 18, "y": 20 }
       }
     ],
     "security": {

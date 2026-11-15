@@ -87,12 +87,12 @@
   <Avatar userId={roomId} displayName={title} src={avatarSrc} size="sm" shape="rounded" />
 {/snippet}
 
-<header class="head" use:contextmenu={headerMenu}>
+<header class="head" data-tauri-drag-region use:contextmenu={headerMenu}>
   <button type="button" class="icon back" aria-label={t('chat-header-back-to-rooms')} onclick={() => onback?.()} use:contextmenu={() => [{ id: 'back', label: t('chat-header-back-to-rooms'), icon: ChevronLeft, onselect: () => onback?.() }]}>
     <Icon icon={ChevronLeft} size={20} />
   </button>
-  <h1 class="heading" tabindex="-1" data-chat-entry>
-    <div class="identity">
+  <h1 class="heading" tabindex="-1" data-chat-entry data-tauri-drag-region>
+    <div class="identity" data-tauri-drag-region>
       <button type="button" class="info-btn" aria-label={t('chat-header-room-info', { room: title })} data-tooltip={t('chat-header-room-info-2')} onclick={() => ui.toggleRoomInfo()}>
         <span class="avatar-slot">{@render avatarEl()}</span>
         {#if phone}
@@ -158,7 +158,7 @@
     flex-shrink: 0;
     min-width: 0;
     height: var(--alloy-layout-header-height);
-    padding: 0 var(--alloy-layout-gutter);
+    padding: 0 var(--alloy-layout-gutter) 0 max(var(--alloy-layout-gutter), var(--chat-header-lead, 0px));
     border-bottom: 1px solid var(--alloy-chat-rim);
     background: transparent;
   }
