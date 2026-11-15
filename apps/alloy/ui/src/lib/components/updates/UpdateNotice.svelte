@@ -10,6 +10,32 @@
 
   import { t } from '$lib/i18n';
   const visible = $derived(updatesStore.pending !== null || updatesStore.busy);
+  /**
+   * A narrow chat list cannot hold the title, the second line and a labelled action at once; the
+   * title is what used to be cut mid-word. Under this width the bar drops both and becomes the
+   * action itself, so one click still does the thing the bar is about.
+   */
+  const NARROW_PX = 300;
+  let narrow = $state(false);
+  let noticeEl = $state<HTMLDivElement | null>(null);
+
+  $effect(() => {
+    const el = noticeEl;
+    if (!el) return;
+    const measure = () => {
+      narrow = el.clientWidth > 0 && el.clientWidth < NARROW_PX;
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  });
+
+  /** The bar's own click: on a narrow list it applies the update, otherwise it opens what's new. */
+  function activate() {
+    if (narrow) void updatesStore.primary();
+    else updatesStore.openChangelog();
+  }
   const percent = $derived(
     updatesStore.progress === null ? null : Math.round(updatesStore.progress * 100),
   );
@@ -60,8 +86,8 @@
 </script>
 
 {#if visible}
-  <div class="notice" class:failed={updatesStore.phase === 'error'} use:contextmenu={menuItems}>
-    <button type="button" class="body" onclick={() => updatesStore.openChangelog()}>
+  <div class="notice" class:failed={updatesStore.phase === 'error'} bind:this={noticeEl} use:contextmenu={menuItems}>
+    <button type="button" class="body" onclick={activate}>
       <span class="dot" aria-hidden="true"></span>
       <span class="text">
         <span class="title">{copy.title}</span>
@@ -108,7 +134,9 @@
     flex-shrink: 0;
     align-items: center;
     gap: var(--alloy-spacing-scale-1);
-    margin: var(--alloy-layout-row-inset) var(--alloy-layout-row-inset) 0;
+    /* Inset on all four sides: the old bottom margin of zero left the bar glued to the window edge,
+       where a rounded window corner cut it in half. */
+    margin: var(--alloy-layout-row-inset);
     padding: 0 var(--alloy-spacing-scale-1) 0 0;
     overflow: hidden;
     border-radius: var(--alloy-radii-lg);
@@ -121,8 +149,10 @@
     align-items: center;
     gap: var(--alloy-spacing-scale-2);
     min-width: 0;
-    min-height: 44px;
-    padding: var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-1) var(--alloy-layout-row-pad-x);
+    /* One compact line: the bar sits under the chat list and every pixel it keeps is a row the
+       user cannot see. The touch target grows back to 44px on a phone, below. */
+    min-height: 36px;
+    padding: 0 var(--alloy-spacing-scale-1) 0 var(--alloy-layout-row-pad-x);
     border: 0;
     background: transparent;
     color: inherit;
@@ -170,7 +200,7 @@
   .action,
   .dismiss {
     flex: none;
-    min-height: 44px;
+    min-height: 36px;
     border: 0;
     border-radius: var(--alloy-radii-md);
     background: transparent;
@@ -189,8 +219,37 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 44px;
+    min-width: 36px;
     color: var(--alloy-color-text-muted);
+  }
+
+  /* A narrow chat list cannot hold the title, the second line and a labelled action at once; the
+     title was what got cut mid-word ("Update a…"). Both yield, and the component makes the bar
+     itself apply the update. */
+  @container (max-width: 300px) {
+    .detail,
+    .action {
+      display: none;
+    }
+  }
+
+  /* Phone: the bar is a full-width row again, so it keeps the 44px touch target and both lines. */
+  @media (max-width: 899px) {
+    .body {
+      min-height: 44px;
+      padding: var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-1)
+        var(--alloy-layout-row-pad-x);
+    }
+    .action,
+    .dismiss {
+      min-height: 44px;
+    }
+    .dismiss {
+      min-width: 44px;
+    }
+    .detail {
+      display: block;
+    }
   }
 
   .action:hover,

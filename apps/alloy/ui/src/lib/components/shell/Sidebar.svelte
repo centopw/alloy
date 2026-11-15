@@ -1097,6 +1097,11 @@
     flex: 1;
     min-height: 0;
     overflow-y: auto;
+    /* `overflow-y: auto` alone leaves the horizontal axis scrollable, and one row wider than the
+       list (a long muted title, a wide tag) then paints a scrollbar along the bottom of the list
+       that eats a row's worth of height. The rows truncate their own text, so no row is ever
+       meant to scroll sideways. */
+    overflow-x: hidden;
     padding: 0 var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-2);
   }
   .group h3,
