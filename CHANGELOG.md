@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.4 (pre-release)
+
+### Changed
+- **A Telegram forum opens as a list of its topics.** Reaching a conversation inside a forum took two clicks through a folded tree and showed one topic at a time. Clicking the forum now shows every topic at once in the conversation pane, with its last message, time and unread count; one more click enters the topic. The chat header names the topic over the forum and takes you back to the list. The sidebar's chevron still folds the same topics inline for anyone who prefers that.
+
+### Fixed
+- **Messenger's reconnect looked like constant retrying.** Messenger retries on its own and reports each failed attempt; Alloy raised a warning for every one of them and always claimed it was on attempt one with no wait. One dropped connection now warns once, and the banner reports the attempt it is on and when the next one is due, matching Messenger's own backoff (two seconds, doubling to five minutes).
+- **Encrypted Messenger chats stopped syncing after a disconnect.** The encrypted socket only wrote a log line and never reconnected, so those chats stayed silent until the app restarted. It now retries on its own with a bounded backoff and stops only when the session is logged out.
+- **Pictures sent together sat off to one side of their bubble.** A run of sent pictures drew a 400px bubble around a narrower grid, pushing the pictures to one edge and the timestamp to the other. The grid now takes the bubble's width, like a single picture does.
+
 ## 0.4.3 (pre-release)
 
 ### Changed
