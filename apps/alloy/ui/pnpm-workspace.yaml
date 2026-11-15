@@ -2,5 +2,3 @@ packages:
   - '.'
 minimumReleaseAgeExclude:
   - '@lucide/svelte@1.58.0'
-patchedDependencies:
-  qrcode: patches/qrcode.patch

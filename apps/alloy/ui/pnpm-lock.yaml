@@ -5,7 +5,9 @@ settings:
   excludeLinksFromLockfile: false
 
 patchedDependencies:
-  qrcode: d00d7f1adf70732b927b08b233c431abd7a86712c23e263464f63ac41daa22bb
+  qrcode:
+    hash: meekj6n4gca5vbvhsqwbgwi37y
+    path: patches/qrcode.patch
 
 importers:
 
@@ -43,7 +45,7 @@ importers:
         version: 18.0.0(emojibase@18.0.0)
       qrcode:
         specifier: ^1.5.4
-        version: 1.5.4(patch_hash=d00d7f1adf70732b927b08b233c431abd7a86712c23e263464f63ac41daa22bb)
+        version: 1.5.4(patch_hash=meekj6n4gca5vbvhsqwbgwi37y)
       tailwind-merge:
         specifier: ^3.7.0
         version: 3.7.0
@@ -2159,7 +2161,7 @@ snapshots:
       - utf-8-validate
       - yauzl
 
-  qrcode@1.5.4(patch_hash=d00d7f1adf70732b927b08b233c431abd7a86712c23e263464f63ac41daa22bb):
+  qrcode@1.5.4(patch_hash=meekj6n4gca5vbvhsqwbgwi37y):
     dependencies:
       dijkstrajs: 1.0.3
       pngjs: 5.0.0
