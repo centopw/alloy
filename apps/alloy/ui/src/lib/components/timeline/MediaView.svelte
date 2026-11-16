@@ -3,7 +3,7 @@
   import type { MediaSource } from '$lib/generated';
   import { formatBytes } from '$lib/content/format';
   import { localFileUrl } from '$lib/platform/files';
-  import { openExternal } from '$lib/platform/links';
+  import MediaLightbox from './MediaLightbox.svelte';
   import { prefs } from '$lib/stores/prefs.svelte';
   import Icon from '$lib/icons/Icon.svelte';
   import { Download, Play } from '$lib/icons';
@@ -38,6 +38,8 @@
   }: Props = $props();
 
   let thumbSrc = $state<string | null>(null);
+  /** Set while the picture is open at full size; the lightbox reads it. */
+  let lightboxSrc = $state<string | null>(null);
   let fileSrc = $state<string | null>(null);
   let failed = $state(false);
   let loadingFile = $state(false);
@@ -114,7 +116,9 @@
   async function openFullSize() {
     if (visual) {
       try {
-        await openExternal(await fetchPath('file', mimeType));
+        // The picture opens in the app, not in whatever the operating system associates with the
+        // file: handing a path to the opener showed nothing on builds that refuse local paths.
+        lightboxSrc = await fetchPath('file', mimeType);
       } catch {
         failed = true;
       }
@@ -181,6 +185,16 @@
     {/if}
   </div>
 {/if}
+
+{#if lightboxSrc}
+  <MediaLightbox
+    src={lightboxSrc}
+    alt={caption}
+    onclose={() => (lightboxSrc = null)}
+    ondownload={ondownload ? () => ondownload?.() : null}
+  />
+{/if}
+
 <style>
   .frame {
     position: relative;
