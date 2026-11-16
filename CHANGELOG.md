@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.9 (pre-release)
+
+### Added
+- **Sign-in now handles Facebook's checkpoints and code prompts.** When Meta wants the sign-in confirmed on its own site, or a two-factor code, the flow no longer dead-ends on "account locked": the step names what is being asked, offers Open Facebook, keeps a code field for a two-factor challenge, and keeps the attempt open so the answer is accepted, with the browser-cookie route one click away.
+- **Reconnect an account from the connection banner.** A connector that has given up now comes back with a button instead of waiting for a restart of the app; the banner also says that messages sent while offline will go out when the connection returns, and shows when a retry is running.
+- **Pictures open at full size in the app.** Clicking one used to hand a file path to the operating system, which did nothing on some builds. A picture now opens in a lightbox with its download action, closes on Escape or a backdrop click, and gives keyboard focus back to the message.
+
+### Changed
+- **A forum's topics are ordered by the conversation that moved last.** The rail used to sort on the newest message stored on this device, so a forum whose history had not been fetched looked like a list of its first topics. Topics now carry the network's own "last message" time, so the topic that moved last is at the top even before it is opened, and the forum's row in the chat list previews that topic's message instead of only its topic count.
+- **The keychain no longer asks for your password on every launch.** Desktop builds kept the database key in the OS keychain, and macOS ties a keychain item to the exact binary that created it, so every local build and every release prompted again. Secrets now live in an owner-only file (0600) inside the app's private data folder; the OS keychain stays available with `ALLOY_SECRET_BACKEND=keychain`, keys an older build sealed there are copied over once on first start, and the startup write-probe is gone. A keychain read now happens at most once per process (ADR 0019).
+
+### Fixed
+- **Pictures and files inside a forum topic never loaded.** Their media reference named the topic, and every download resolved that id with the strict peer parser, which rejects a topic suffix: every image in a topic showed "Couldn't load this image". References now name the forum, and the download path also strips the suffix so stored rows work too.
+- **The update bar hid its own action.** At the list's usual width it dropped the button that restarts the app, leaving "Update ready" with nothing to press; it now shows the action itself ("Restart to apply").
+- **The settings gear could be pushed out of view.** Once the traffic lights took their inset, the chat list header could no longer fit the unread chip beside its actions, and the chip won. The chip now yields first, so refresh and settings stay reachable at every width.
+
 ## 0.4.8 (pre-release)
 
 ### Changed
