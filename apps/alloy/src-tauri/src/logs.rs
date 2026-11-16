@@ -9,6 +9,16 @@
 //!
 //! Redaction is applied before a line enters the buffer, so a secret never sits in memory: see
 //! [`redact_line`] for the full list of categories.
+//!
+//! The two layers are filtered differently. The stdout layer keeps everything the configured
+//! [`EnvFilter`] allows: a terminal is for the developer and wants full detail. The capture layer
+//! applies the same filter and then drops third-party chatter, because transport internals are not
+//! a diagnostic for the user: an event whose target is not one of this workspace's own crates
+//! reaches the buffer only at WARN and above, while first-party targets (`alloy_*`, which includes
+//! `alloy_sidecar`'s own warnings) keep their configured level. The escape hatch is `RUST_LOG`
+//! itself: when a directive names a third-party target, as in
+//! `RUST_LOG=info,grammers_mtsender=debug`, that crate is captured at the level its directive
+//! allows. A bare level such as `RUST_LOG=debug` widens the terminal only, never the Debug panel.
 
 use std::collections::VecDeque;
 use std::fmt::Write as _;
@@ -20,7 +30,9 @@ use serde::Serialize;
 use tauri::AppHandle;
 use tauri_plugin_dialog::DialogExt;
 use tracing::field::{Field, Visit};
-use tracing::{Event, Subscriber};
+use tracing::{Event, Level, Metadata, Subscriber};
+use tracing_subscriber::EnvFilter;
+use tracing_subscriber::filter::{FilterExt, filter_fn};
 use tracing_subscriber::layer::{Context, Layer, SubscriberExt};
 
 /// Newest lines kept in memory.
@@ -33,6 +45,16 @@ const MAX_TEXT_BYTES: usize = 256 * 1024;
 const DEFAULT_FILE_NAME: &str = "alloy-debug.log";
 /// What a redacted value turns into. ASCII only: no emoji, no locale-dependent text.
 const MARK: &str = "<redacted>";
+/// What the base filter falls back to when [`EnvFilter::DEFAULT_ENV`] is unset or unreadable.
+const DEFAULT_FILTER: &str = "info";
+/// Lowest level at which a third-party event is captured.
+const THIRD_PARTY_CAPTURE_LEVEL: Level = Level::WARN;
+/// Prefix of this workspace's crates, whose events keep the configured level in the buffer.
+const WORKSPACE_PREFIX: &str = "alloy_";
+/// This crate's own target root, so the app's events count as first-party even if renamed.
+const APP_TARGET: &str = env!("CARGO_CRATE_NAME");
+/// `RUST_LOG` words that set a level instead of naming a target.
+const LEVEL_NAMES: [&str; 6] = ["trace", "debug", "info", "warn", "error", "off"];
 
 /// The one process-wide log buffer. A failed subscriber install still reaches the same lines.
 static BUFFER: LazyLock<LogBuffer> = LazyLock::new(LogBuffer::new);
@@ -43,16 +65,71 @@ fn global() -> &'static LogBuffer {
 
 /// Installs the global tracing subscriber. Safe to call twice: the first install wins.
 pub fn init() {
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+    let spec = std::env::var(EnvFilter::DEFAULT_ENV).unwrap_or_else(|_| DEFAULT_FILTER.to_owned());
+    let level_filter = EnvFilter::try_new(&spec).unwrap_or_else(|_| EnvFilter::new(DEFAULT_FILTER));
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_ansi(std::io::stdout().is_terminal())
-        .with_target(false);
+        .with_target(false)
+        .with_filter(level_filter.clone());
+    let capture_gate =
+        filter_fn(move |meta: &Metadata<'_>| capture_enabled(&spec, meta.target(), *meta.level()));
     let subscriber = tracing_subscriber::registry()
-        .with(filter)
         .with(fmt_layer)
-        .with(CaptureLayer);
+        .with(CaptureLayer.with_filter(level_filter.and(capture_gate)));
     let _ = tracing::subscriber::set_global_default(subscriber);
+}
+
+/// Whether one event may enter the capture buffer, on top of what [`EnvFilter`] already allows.
+///
+/// First-party targets keep the configured level; anything else needs
+/// [`THIRD_PARTY_CAPTURE_LEVEL`] or above unless `spec` names that target itself.
+fn capture_enabled(spec: &str, target: &str, level: Level) -> bool {
+    // `tracing::Level` orders by verbosity, not severity: ERROR < WARN < INFO < DEBUG < TRACE.
+    // So "WARN and above" is `<=`, never `>=`.
+    is_first_party(target) || level <= THIRD_PARTY_CAPTURE_LEVEL || names_target(spec, target)
+}
+
+/// True when `target` belongs to this workspace, so its configured level applies unchanged.
+fn is_first_party(target: &str) -> bool {
+    if target.starts_with(WORKSPACE_PREFIX) {
+        return true;
+    }
+    match target.strip_prefix(APP_TARGET) {
+        Some(rest) => rest.is_empty() || rest.starts_with("::"),
+        None => false,
+    }
+}
+
+/// True when a directive in `spec` names `target` or one of its module ancestors.
+fn names_target(spec: &str, target: &str) -> bool {
+    spec.split(',').filter_map(directive_target).any(|named| {
+        target == named
+            || target
+                .strip_prefix(named)
+                .is_some_and(|rest| rest.starts_with("::"))
+    })
+}
+
+/// The target a `RUST_LOG` directive names, if it names one.
+///
+/// `foo=debug`, `foo[span]=trace` and a bare `foo` all name `foo`; a bare `info` or `off` sets a
+/// level instead, and a span-only directive such as `[span]=debug` names no target at all, so
+/// neither can be mistaken for the escape hatch.
+fn directive_target(directive: &str) -> Option<&str> {
+    let directive = directive.trim();
+    let name = match directive.rsplit_once('=') {
+        Some((name, _level)) => name,
+        None => directive,
+    };
+    let name = name.split('[').next().unwrap_or(name).trim();
+    if name.is_empty()
+        || LEVEL_NAMES
+            .iter()
+            .any(|level| name.eq_ignore_ascii_case(level))
+    {
+        return None;
+    }
+    Some(name)
 }
 
 /// What the settings page reads: redacted lines, oldest first.
@@ -619,6 +696,80 @@ mod tests {
     use super::*;
 
     const API_HASH: &str = "0123456789abcdef0123456789abcdef";
+
+    #[test]
+    fn capture_drops_third_party_info_and_keeps_warn() {
+        assert!(!capture_enabled(
+            DEFAULT_FILTER,
+            "grammers_mtsender::net::tcp",
+            Level::INFO
+        ));
+        assert!(capture_enabled(
+            DEFAULT_FILTER,
+            "grammers_mtsender::sender",
+            Level::WARN
+        ));
+        assert!(capture_enabled(
+            DEFAULT_FILTER,
+            "alloy_engine::timeline",
+            Level::INFO
+        ));
+        // The other side of the boundary: severity at or below WARN passes, verbosity never does.
+        assert!(capture_enabled(
+            DEFAULT_FILTER,
+            "grammers_mtsender::net::tcp",
+            Level::ERROR
+        ));
+        assert!(!capture_enabled(
+            DEFAULT_FILTER,
+            "grammers_mtsender::net::tcp",
+            Level::DEBUG
+        ));
+        // The sidecar's own warnings are the useful ones; they must survive the cut.
+        assert!(capture_enabled(
+            DEFAULT_FILTER,
+            "alloy_sidecar::stderr",
+            Level::WARN
+        ));
+    }
+
+    #[test]
+    fn naming_a_third_party_crate_in_rust_log_is_the_escape_hatch() {
+        assert!(capture_enabled(
+            "info,grammers_mtsender=debug",
+            "grammers_mtsender::net::tcp",
+            Level::INFO
+        ));
+        // A bare level widens the terminal only.
+        assert!(!capture_enabled(
+            "debug",
+            "grammers_mtsender::net::tcp",
+            Level::INFO
+        ));
+        // Directives match on module boundaries, never on a shared prefix.
+        assert!(!capture_enabled(
+            "info,grammers=debug",
+            "grammers_mtsender::sender",
+            Level::INFO
+        ));
+        assert!(!capture_enabled(
+            "info,grammers_mtsender_other=debug",
+            "grammers_mtsender::sender",
+            Level::INFO
+        ));
+        // A span-only directive names no target.
+        assert!(!capture_enabled(
+            "info,[conn]=debug",
+            "grammers_mtsender::sender",
+            Level::INFO
+        ));
+        // A bare target directive (`RUST_LOG=info,grammers_mtsender`) also names the crate.
+        assert!(capture_enabled(
+            "info,grammers_mtsender",
+            "grammers_mtsender::sender",
+            Level::INFO
+        ));
+    }
 
     #[test]
     fn redacts_the_telegram_api_hash() {
