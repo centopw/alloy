@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { flushSync, mount } from 'svelte';
+import { flushSync, mount, tick } from 'svelte';
 import LoginStep from './LoginStep.svelte';
 import type { LoginInputDto, LoginStepDto } from '$lib/generated/index.js';
 
@@ -111,7 +111,54 @@ describe('LoginStep browser sign-in', () => {
     expect(document.querySelector('[role="alert"]')?.textContent).toContain('c_user, xs');
     expect(onsubmit).not.toHaveBeenCalled();
   });
+
+  it('fills the cookies from the clipboard in one click', async () => {
+    stubClipboard(() =>
+      Promise.resolve("curl 'https://www.messenger.com/' -H 'cookie: datr=D1; c_user=42; xs=X%3A1'")
+    );
+    const { submit } = render();
+    expect(submit.disabled).toBe(true);
+
+    click('Paste from clipboard');
+    await tick();
+    flushSync();
+
+    expect(submit.disabled).toBe(false);
+    expect(document.body.textContent).toContain('Found the cookies Alloy needs.');
+    expect(document.body.textContent).not.toContain('would not hand over');
+  });
+
+  it('says so when the browser refuses the clipboard or holds nothing usable', async () => {
+    stubClipboard(() => Promise.reject(new Error('denied')));
+    const { submit } = render();
+
+    click('Paste from clipboard');
+    await tick();
+    flushSync();
+
+    expect(document.body.textContent).toContain('would not hand over the clipboard');
+    expect(submit.disabled).toBe(true);
+
+    stubClipboard(() => Promise.resolve('   '));
+    click('Paste from clipboard');
+    await tick();
+    flushSync();
+    expect(submit.disabled).toBe(true);
+  });
 });
+
+/** Stands in for the OS clipboard; jsdom has no `navigator.clipboard`. */
+function stubClipboard(readText: () => Promise<string>) {
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { readText } });
+}
+
+function click(label: string) {
+  const button = [...document.querySelectorAll('button')].find(
+    (b) => b.textContent?.trim() === label
+  );
+  expect(button, label).toBeTruthy();
+  button!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+}
 
 describe('LoginStep phone number', () => {
   it('submits international format however the number was typed, and follows a typed country', () => {

@@ -146,10 +146,38 @@
 
   function readCookiePaste(e: Event & { currentTarget: HTMLTextAreaElement }) {
     if (step.type !== 'cookies') return;
-    const found = cookiesFromPaste(e.currentTarget.value);
+    absorbPaste(e.currentTarget.value);
+  }
+
+  /** Fills the required cookies from any text that carries them; shared by typing and the clipboard. */
+  function absorbPaste(text: string) {
+    if (step.type !== 'cookies') return;
+    const found = cookiesFromPaste(text);
     for (const field of step.fields) {
       if (found[field.name]) cookieValues[field.name] = found[field.name];
     }
+  }
+
+  // Reading the clipboard needs a gesture and the platform's permission; when either refuses, the
+  // box below still takes the same text, so a refusal is a hint rather than an error.
+  let clipboardBlocked = $state(false);
+
+  async function pasteFromClipboard() {
+    if (step.type !== 'cookies' || busy) return;
+    clipboardBlocked = false;
+    let text = '';
+    try {
+      text = (await navigator.clipboard?.readText?.()) ?? '';
+    } catch {
+      clipboardBlocked = true;
+      return;
+    }
+    if (text.trim().length === 0) {
+      clipboardBlocked = true;
+      return;
+    }
+    cookiePaste = text;
+    absorbPaste(text);
   }
 
   // The cookie step is Messenger's (see LoginStep::Cookies in alloy-connector); its session
@@ -476,6 +504,14 @@
           autofocus
         />
       </label>
+      <div class="paste-actions">
+        <button type="button" class="link" disabled={busy} onclick={() => void pasteFromClipboard()}>
+          {t('onboarding-cookies-clipboard')}
+        </button>
+      </div>
+      {#if clipboardBlocked}
+        <p class="hint" role="status">{t('onboarding-cookies-clipboard-blocked')}</p>
+      {/if}
       {#if cookiePaste.trim().length > 0}
         {#if missingCookies.length === 0}
           <p class="hint" role="status">{t('onboarding-cookies-paste-found')}</p>
@@ -733,6 +769,10 @@
     display: flex;
     flex-direction: column;
     gap: var(--alloy-spacing-scale-2);
+    margin-top: var(--alloy-spacing-scale-2);
+  }
+  .paste-actions {
+    display: flex;
     margin-top: var(--alloy-spacing-scale-2);
   }
   .link {
