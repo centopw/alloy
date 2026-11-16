@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.11 (pre-release)
+
+### Added
+- **A sign-in that needs a passkey or a Google account now says so instead of failing.** Meta finishes some sign-ins only with a method an app cannot drive: the door closed as "invalid input" with the network's own English in the log, and no way forward. Facebook's refusal is now recognised by its error code and shown as a step that names the method it demands, opens the security settings where a password or an authenticator can be added, and keeps the browser-cookie route one tap away. The attempt stays open rather than ending.
+- **The browser sign-in reads the clipboard in one click.** That step asks you to sign in to Messenger in your own browser and copy a request from the Network tab; you then had to paste it by hand. "Paste from clipboard" now does that, fills the cookies it recognises, and names the ones still missing when the copy is incomplete. A platform that refuses the clipboard says so and leaves the box as the way through.
+
+### Changed
+- **Settings → Debug no longer fills with the network libraries' own chatter.** "Connecting", a stale salt being re-sent — those are not diagnostics a user can act on, and they crowded out the lines that are. The capture now keeps only warnings and errors from third-party libraries, while Alloy's own logs keep their configured level; naming a crate in `RUST_LOG` brings the rest back, and the terminal view is unchanged.
+
 ## 0.4.10 (pre-release)
 
 ### Fixed
