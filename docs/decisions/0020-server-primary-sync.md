@@ -101,6 +101,18 @@ setup:
 - **No phrase**: recovery requires enrolling from a device that still exists. The server keeps
   ciphertext it can never open again; it is offered for deletion and the UI says so plainly.
 
+### Hosting
+
+| Mode | Server holds | Fits |
+|---|---|---|
+| `off` (default) | nothing | any build |
+| `prefs` | encrypted config/tag/group blobs, `head` CAS | Cloudflare Workers + KV or D1, Vercel + KV, a $0 tier, or Docker |
+| `full` | the above plus opt-in message/media mirror | self-hosted Docker, or R2 + Durable Objects; not Vercel/Workers — serverless has no process for incremental push and free-tier KV is the wrong store for a growing archive |
+
+The wire contract is one small HTTP API (blob `GET`/`PUT` under a `head` CAS, roster `GET`, escrow
+`GET`/`PUT`), so a self-hosted deployment is a container the user runs, and the hosted options are
+the same contract behind a managed KV.
+
 ### Threat model, as acceptance criteria
 
 | # | Invariant | Verified by |
@@ -114,21 +126,69 @@ setup:
 | 7 | Only audited primitives | `chacha20poly1305` and `sha2` already in `alloy-store`; add `x25519-dalek`, `ed25519-dalek`, `hkdf`, `argon2`, `zeroize`; no hand-rolled crypto |
 | 8 | Keys at rest obey ADR 0019 | master key in `secrets.json` (0600) or keychain; zeroized on drop |
 | 9 | Metadata does not leak | TLS 1.3 only, no plaintext headers beyond auth, padded body sizes, server access logging off by default |
+| 10 | AEAD is bound to identity and order | AAD = `(layer, logical_id, seq, epoch)`, so a replay, a swap, or a relabel fails to decrypt |
+| 11 | Client trusts no server metadata for correctness | head is monotonic per device; a fork is detected on the next read and on enrolment |
+| 12 | The sync endpoint is pinned | enrolment payload carries the endpoint's SPKI hash; a changed pin blocks sync and warns |
+| 13 | Untrusted server input is bounded | max blob size, padding size classes only, max chain length, no decompression on a server-supplied field |
+| 14 | Revocation rotates keys | removing a device bumps the epoch and re-seals the config layers; the server drops its token |
 
 Invariants 1–6 are tests against an in-repo fake server, not claims. A test that only exercises the
 honest server is not evidence.
 
-### Hosting
+## Adversary: root on the server
 
-| Mode | Server holds | Fits |
-|---|---|---|
-| `off` (default) | nothing | any build |
-| `prefs` | encrypted config/tag/group blobs, `head` CAS | Cloudflare Workers + KV or D1, Vercel + KV, a $0 tier, or Docker |
-| `full` | the above plus opt-in message/media mirror | self-hosted Docker, or R2 + Durable Objects; not Vercel/Workers — serverless has no process for incremental push and free-tier KV is the wrong store for a growing archive |
+Assume the operator can read the disk, rewrite the code, serve arbitrary responses, drop or replay
+anything, and log every request. Cheap VPS hosting makes this the *expected* case, not the exotic
+one.
 
-The wire contract is one small HTTP API (blob `GET`/`PUT` under a `head` CAS, roster `GET`, escrow
-`GET`/`PUT`), so a self-hosted deployment is a container the user runs, and the hosted options are
-the same contract behind a managed KV.
+| Attack with server root | Result |
+|---|---|
+| Read the database | ciphertext, padded sizes, `HMAC` blob ids, head hashes. No plaintext, no key, no plaintext identifier |
+| Serve a rewritten or forked history | signature failure on the batch, or a head the client has already passed: refuse, warn, keep local state |
+| Replay an old blob into a new slot | decryption fails (invariant 10) |
+| Impersonate the server to a client | pinned SPKI mismatch; and even a successful MITM learns ciphertext |
+| Serve garbage of unbounded size | rejected by size/chain bounds before any decrypt (invariant 13) |
+| Read the relay used for cross-network enrolment | the envelope is sealed to the new device's ephemeral key; the relay sees opaque bytes and a pairing id |
+| MITM the enrolment rendezvous | both devices display a SAS derived from both ephemeral keys; a mismatch shows different digits and the user stops |
+| Enrol its own device into the account | impossible — enrolment needs a QR shown by an existing device and a SAS confirmation there. The server is never in that path |
+| Deny service, delete everything | availability loss only; each configured device still runs on local state (invariant 6) |
+
+Residual risk that cannot be engineered away: **a compromised server learns traffic metadata**
+(when, how much, which device, roughly which layer by size class). Padding reduces it; it does not
+remove it.
+
+## Adversary: the client device in the wrong hands
+
+Separate the two cases, because only one of them is defensible.
+
+**A stolen, locked device** (attacker has the hardware, not the user's session). Controls: the master
+key and the SQLCipher key live behind the platform's own lock — hardware-backed wrapping on Android
+(Keystore) and, where available, the OS keychain on desktop; an optional passphrase wraps the master
+key so a disk image alone does not yield it. This is the case the design is expected to survive.
+
+**A stolen or compromised device with the attacker running as the user** — shell access, or any
+malware in the user's session. Honest answer: **this is total compromise of that device.** A
+same-UID process can read `secrets.json` (0600 is not a defence against its owner), the SQLCipher
+database while unlocked, and the connector session material. No client-side crypto fixes that. What
+the design does instead is bound the damage:
+
+| Control | Effect |
+|---|---|
+| Signed device roster | the stolen device is one named entry, and the user can see it, with last-seen and last-sync |
+| Revocation bumps the epoch | after revocation the stolen device cannot decrypt *new* config, even though it keeps the old master key |
+| Re-seal on rotation | config layers are re-sealed under the new epoch on the remaining devices; the old ciphertext on the server is deleted, not just orphaned |
+| Remote wipe flag | on next contact the device erases local state — best effort, worthless against an attacker who stays offline, so it is advertised as best effort |
+| Enrolment requires a live existing device | a stolen device can enrol its own client only while it is unlocked and in the user's hands; rotation after revoke is the remedy |
+| Rotation is visible and cheap | "revoke this device" in Settings rotates the config-key epoch in the background; the user is told history mirroring is not retroactively protected |
+
+The uncomfortable consequence, stated in the UI rather than the fine print: **a device that ran with
+the master key keeps everything it already saw.** Rotation protects the future, never the past. This
+is also why the recovery phrase and the master key must not be treated as replayable credentials for
+long-lived secrets.
+
+Follow-up this ADR does not cover: hardening local secret storage itself (Android Keystore wrapping,
+issue #74, and a desktop passphrase gate) is a prerequisite for the "stolen locked device" row above
+on platforms without hardware-backed storage. It should be its own ADR.
 
 ## Alternatives considered
 
@@ -167,7 +227,11 @@ the same contract behind a managed KV.
 | Slice | Deliverable | Proof |
 |---|---|---|
 | A | `alloy-storage` config bundle export/import + QR / 8-char pairing over LAN, no server | two machines exchange settings, theme, tags, groups; no network egress besides the LAN pair |
-| B | `crates/alloy-sync`: key hierarchy, blob codec, head chain; fake server in-repo | invariants 1, 2, 4, 5 as tests against the hostile fake |
+| B | `crates/alloy-sync`: key hierarchy, blob codec with AAD binding, head chain, endpoint pinning; fake server in-repo | invariants 1, 2, 4, 5, 10, 11, 12 as tests against the hostile fake |
 | C | `prefs` server (Workers-compatible contract) + client sync loop | fresh device enrols and pulls config; server stopped → app unchanged |
-| D | Recovery phrase + escrow | recover on a clean device from the phrase alone |
-| E | Opt-in message/media mirror (`full`) | gated on B's hostile-server suite; documented as self-host/R2 only |
+| D | Device roster, revocation, and epoch rotation with re-seal | revoke a device, assert it cannot decrypt the next config blob; remaining devices converge |
+| E | Recovery phrase + escrow | recover on a clean device from the phrase alone |
+| F | Opt-in message/media mirror (`full`) | gated on B's hostile-server suite; documented as self-host/R2 only |
+
+Slice F is the only one that enlarges the blast radius of a stolen device, which is why it comes
+after D rather than with B.
