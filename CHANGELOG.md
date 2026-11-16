@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.8 (pre-release)
+
+### Changed
+- **Timestamps sit on the message's last line, like Telegram.** A short message used to give a whole line to its time; now the time shares the last line when it fits, and the bubble grows by its width to keep it there. It drops to its own line when the text fills the line, when the message ends in a block, or when reaction chips own the bottom edge — in which case it sits below the chips. The placement is measured from the rendered text, so it holds for rich text, emoji and every language.
+- **A chat can have its own background.** Set a picture for every conversation in Settings → Appearance and override it for a single contact or group from the chat's menu, the way Messenger works. The file is copied into Alloy's own folder, so it survives the original moving. The conversation draws it behind the messages with a scrim that keeps muted text above 4.5:1 even over a fully white or black photograph, and bubbles stay opaque.
+
+### Fixed
+- **Message actions appeared without a hover.** The reply/edit/delete bar and the quick-reaction bar revealed on any focus inside a message, so after clicking a reaction they stayed on screen for every message you had touched. They now reveal on pointer hover or visible keyboard focus only, and the quick bar moves below the message when there is no room above it.
+
+### Added
+- **Settings → Debug: copy the logs to report a problem.** The app kept no log of its own, so a report could not say what happened. It now keeps the recent log in memory and offers Copy, Clear and Save from Settings → Debug. Everything sensitive is redacted before a line is stored: cookies and authorization headers, bearer tokens, session material, credentials, message text after body/text/title keys, long hex secrets, email addresses, phone numbers and home-folder paths.
+
 ## 0.4.7 (pre-release)
 
 ### Changed
