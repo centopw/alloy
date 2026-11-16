@@ -1,7 +1,7 @@
 ---
 id: adr-0021-tiered-local-secret-storage
 type: architecture-design
-status: proposed
+status: accepted
 title: "ADR 0021: Tiered local secret storage, UX first"
 parent: alloy-architecture
 depends-on:
@@ -12,7 +12,7 @@ tags: [adr, security, storage, keychain, android, ux]
 
 # 0021: Tiered local secret storage, UX first
 
-- Status: proposed (2026-11-16)
+- Status: accepted (2026-11-16)
 - Issue: #74 (`security`, open) — this ADR is the design half of it
 - Date: 2026-11-16
 - Extends: ADR 0019 (owner-only file on desktop, keychain opt-in)
