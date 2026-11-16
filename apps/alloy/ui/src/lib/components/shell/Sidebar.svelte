@@ -839,8 +839,15 @@
       padding-left: max(var(--alloy-spacing-scale-2), var(--alloy-titlebar-lights-inset));
     }
   }
-  /* Under the traffic lights the head keeps 84px on the left; below 255px the "Chats" word yields to the
-     unread chip and refresh button. It stays in the accessibility tree; only its paint goes. */
+  /* Under the traffic lights the head keeps 84px on the left; a narrow list then cannot hold the
+     title, the unread chip and two actions, and the actions are what must never be clipped (the
+     settings gear is one of them). The chip yields first, then the word: both stay in the
+     accessibility tree, only their paint goes. */
+  @container (max-width: 300px) {
+    .scope-meta {
+      display: none;
+    }
+  }
   @container (max-width: 255px) {
     :root[data-titlebar='overlay']:not([data-fullscreen='true']) .scope {
       position: absolute;

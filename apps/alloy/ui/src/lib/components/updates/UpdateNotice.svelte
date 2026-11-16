@@ -65,6 +65,19 @@
     }
   });
 
+  /**
+   * The bar's label when the list is too narrow to show the title and an action side by side. It
+   * has to say what the click does: "Restart to apply" when the update is downloaded, otherwise the
+   * action word itself. Everything comes from the bundles, so it follows the locale.
+   */
+  const narrowLabel = $derived(
+    copy.action === null
+      ? copy.title
+      : updatesStore.phase === 'ready'
+        ? t('update-notice-restart-to-apply')
+        : copy.action,
+  );
+
   function menuItems(): MenuItem[] {
     const items: MenuItem[] = [
       { id: 'whats-new', label: t('help-about-whats-new'), onselect: () => updatesStore.openChangelog() },
@@ -87,11 +100,24 @@
 
 {#if visible}
   <div class="notice" class:failed={updatesStore.phase === 'error'} bind:this={noticeEl} use:contextmenu={menuItems}>
-    <button type="button" class="body" onclick={activate}>
+    <button
+      type="button"
+      class="body"
+      class:narrow
+      aria-label={narrow && copy.action ? `${copy.title}. ${copy.action}` : undefined}
+      onclick={activate}
+    >
       <span class="dot" aria-hidden="true"></span>
       <span class="text">
-        <span class="title">{copy.title}</span>
-        <span class="detail">{copy.detail}</span>
+        {#if narrow && copy.action}
+          <!-- A narrow list cannot hold "what" and "do" side by side, and hiding the action left a
+               bar that said "Update ready" with nothing to press. The action's own label carries
+               both: "Restart to apply update" says what and what to do. -->
+          <span class="title action-title">{narrowLabel}</span>
+        {:else}
+          <span class="title">{copy.title}</span>
+          <span class="detail">{copy.detail}</span>
+        {/if}
       </span>
     </button>
     {#if copy.action}
