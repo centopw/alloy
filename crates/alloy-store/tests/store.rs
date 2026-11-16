@@ -254,6 +254,58 @@ async fn remote_echo_reconciles_the_queued_message_by_txn_id() {
 }
 
 #[tokio::test]
+async fn send_ack_folds_in_an_echo_that_arrived_first() {
+    let store = Store::open_in_memory(KEY).expect("open");
+    let (_account_id, chat_id) = account_and_chat(&store).await;
+
+    // The user's queued copy of a message this device is sending.
+    let mut local = text_message(&chat_id, 1_000);
+    local.txn_id = Some("txn-1".to_owned());
+    local.sender_remote_id = "me".to_owned();
+    local.is_own = true;
+    local.body = Some("outgoing".to_owned());
+    local.send_state = Some(SendState::Queued);
+    let queued = store.upsert_message(local).await.expect("queued message");
+
+    // The network echoes it before the send ack is applied; the echo carries no txn id, so it is
+    // stored as its own row under the remote id.
+    let mut echo = text_message(&chat_id, 1_050);
+    echo.remote_msg_id = Some("remote-1".to_owned());
+    echo.sender_remote_id = "me".to_owned();
+    echo.is_own = true;
+    echo.body = Some("outgoing".to_owned());
+    echo.send_state = Some(SendState::Sent);
+    let echoed = store.upsert_message(echo).await.expect("echo");
+
+    // The ack then tries to attach the same remote id to the queued row: it must fold the echo
+    // into the queued row instead of failing the uniqueness constraint and marking it failed.
+    store
+        .set_send_state(
+            &queued.message_id,
+            SendState::Sent,
+            Some("remote-1".to_owned()),
+            Some(1_050),
+        )
+        .await
+        .expect("send ack");
+
+    let page = store.page_messages(&chat_id, None, 50).await.expect("page");
+    assert_eq!(page.len(), 1, "echo must not survive beside the queued row");
+    assert_eq!(page[0].message_id, queued.message_id);
+    assert_eq!(page[0].remote_msg_id.as_deref(), Some("remote-1"));
+    assert_eq!(page[0].send_state, Some(SendState::Sent));
+    assert_eq!(page[0].sent_at, 1_050);
+    assert!(
+        store
+            .get_message(&echoed.message_id)
+            .await
+            .expect("lookup")
+            .is_none(),
+        "the folded-in echo row is gone"
+    );
+}
+
+#[tokio::test]
 async fn keyset_pagination_orders_newest_first_without_gaps() {
     let store = Store::open_in_memory(KEY).expect("open");
     let (_account_id, chat_id) = account_and_chat(&store).await;

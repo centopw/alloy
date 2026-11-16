@@ -416,6 +416,17 @@ pub enum LoginStepDto {
         /// The network's own instructions, e.g. where it sent the notification.
         message: String,
     },
+    /// Ask the user to pick one of the network's own choices: which MFA method to use, which
+    /// phone number or email should receive the code, which of several accounts to sign in as.
+    Choice {
+        /// The network's own question, when it asks one; otherwise the host's own copy.
+        message: String,
+        /// The network's input this answer belongs to, e.g. `"mfatype"`.
+        field: String,
+        /// The network's options for that input, in its own wording; the answer is one of them
+        /// verbatim.
+        options: Vec<String>,
+    },
     /// Login finished; the account is stored and the connector starts.
     Done { account: Account },
     /// The attempt failed. Terminal for this attempt.
@@ -451,6 +462,8 @@ pub enum LoginInputDto {
     Switch { to: LoginAlternativeDto },
     /// Answer to [`LoginStepDto::Wait`]: the user has done what the network asked.
     Continue,
+    /// Answer to [`LoginStepDto::Choice`]: `value` is one of the step's options, verbatim.
+    Choice { field: String, value: String },
     /// Ask for a fresh [`LoginStepDto::Qr`] payload (the previous one expired, or the user chose QR
     /// login).
     QrRefresh,
@@ -485,6 +498,11 @@ impl fmt::Debug for LoginInputDto {
                 .finish(),
             Self::Switch { to } => f.debug_struct("Switch").field("to", to).finish(),
             Self::Continue => f.write_str("Continue"),
+            Self::Choice { field, value } => f
+                .debug_struct("Choice")
+                .field("field", field)
+                .field("value", value)
+                .finish(),
             Self::QrRefresh => f.write_str("QrRefresh"),
         }
     }

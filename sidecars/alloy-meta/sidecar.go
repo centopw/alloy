@@ -294,12 +294,16 @@ func (m *Messenger) start(ctx context.Context) *WireError {
 		m.mu.Unlock()
 		return errUnauthorized()
 	}
-	if m.started {
-		// Replacing the previous sender is allowed; just keep going.
-		if m.cancel != nil {
-			m.cancel()
-		}
+	replacing := m.started
+	m.mu.Unlock()
+	if replacing {
+		// A second connect replaces the previous session. Take the whole old one down first: its
+		// messagix socket and its E2EE client both stay live otherwise, and two E2EE clients on the
+		// same device identity race each other's Signal ratchets, so every message they share
+		// fails to decrypt with a MAC mismatch.
+		m.stop()
 	}
+	m.mu.Lock()
 	runCtx, cancel := context.WithCancel(context.Background())
 	m.ctx = runCtx
 	m.cancel = cancel
@@ -428,9 +432,17 @@ func (m *Messenger) stop() *WireError {
 	e2ee := m.e2ee
 	m.e2ee = nil
 	m.cancelE2EERetryLocked()
+	container := m.deviceStore
+	m.deviceStore = nil
+	m.device = nil
 	m.e2eeMu.Unlock()
 	if e2ee != nil {
+		// Disconnect first: the client owns the store's prepared statements, and a second
+		// connection opened on the same file while this one lives would keep two Signal states.
 		e2ee.Disconnect()
+	}
+	if container != nil {
+		_ = container.Close()
 	}
 	return nil
 }
@@ -444,21 +456,16 @@ func (m *Messenger) logout(ctx context.Context) {
 			m.log.Warn().Err(err).Msg("E2EE remote logout failed; wiping local credentials anyway")
 		}
 	}
-	_ = m.stop()
+	// The device row is deleted while its store is still open; stop() closes that store.
 	m.e2eeMu.Lock()
 	device := m.device
-	container := m.deviceStore
-	m.device = nil
-	m.deviceStore = nil
 	m.e2eeMu.Unlock()
 	if device != nil {
 		if err := device.Delete(ctx); err != nil {
 			m.log.Warn().Err(err).Msg("Failed to delete WhatsApp device from the store")
 		}
 	}
-	if container != nil {
-		_ = container.Close()
-	}
+	_ = m.stop()
 	m.mu.Lock()
 	user := m.remoteUser
 	m.cookies = nil

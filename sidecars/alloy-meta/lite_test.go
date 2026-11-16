@@ -77,7 +77,14 @@ func TestClassifyLiteStep(t *testing.T) {
 		{
 			name:     "two-factor method picker",
 			step:     liteStep{ID: "fi.mau.meta.messengerlite.mfa_type", Fields: []liteInputField{{ID: "mfatype", Type: "select", Options: []string{"SMS", "Authenticator"}}}},
-			wantKind: liteUnsupported,
+			wantKind: liteChoice,
+			wantFld:  "mfatype",
+		},
+		{
+			name:     "generic select",
+			step:     liteStep{ID: "fi.mau.meta.messengerlite.contact_point", Fields: []liteInputField{{ID: "contact_point", Type: "select", Options: []string{"+8490…", "me@example.com"}}}},
+			wantKind: liteChoice,
+			wantFld:  "contact_point",
 		},
 		{
 			name:     "google oauth",
@@ -238,16 +245,48 @@ func TestLiteFailureApprovalDenied(t *testing.T) {
 	}
 }
 
-// TestLiteFlowUnsupportedStep fails rather than rendering a step the contract cannot express.
-func TestLiteFlowUnsupportedStep(t *testing.T) {
+// TestLiteFlowChoiceStep renders the network's options instead of ending the attempt: the MFA
+// picker is where a username/password login lands when Meta asks how to confirm it.
+func TestLiteFlowChoiceStep(t *testing.T) {
 	picker := liteStep{
-		ID:     "fi.mau.meta.messengerlite.mfa_type",
-		Fields: []liteInputField{{ID: "mfatype", Type: "select", Options: []string{"SMS"}}},
+		ID:           "fi.mau.meta.messengerlite.mfa_type",
+		Instructions: "Choose how to finish signing in",
+		Fields:       []liteInputField{{ID: "mfatype", Type: "select", Options: []string{"SMS", "Authenticator"}}},
 	}
 	flow, _ := scriptedFlow(litePoll{Step: &picker})
 	out := flow.run(context.Background(), map[string]string{})
-	if out.Failure == nil || out.Failure.Type != "not_supported" {
-		t.Fatalf("select step = %+v, want not_supported", out)
+	if out.Failure != nil {
+		t.Fatalf("select step failed: %+v", out.Failure)
+	}
+	if out.Step.Type != "choice" || out.Step.Field != "mfatype" || len(out.Step.Options) != 2 {
+		t.Fatalf("select step = %+v, want a choice with two options", out.Step)
+	}
+	if out.Step.Message != "Choose how to finish signing in" {
+		t.Fatalf("the network's prompt was lost: %q", out.Step.Message)
+	}
+	if flow.choiceField != "mfatype" || len(flow.expect) != 1 || flow.expect[0] != "mfatype" {
+		t.Fatalf("flow did not record the field to answer: %+v", flow)
+	}
+}
+
+// TestLiteChoiceAnswerReachesTheNetwork pins that the picked option is written to the field the
+// step named, so the Bloks flow receives exactly the value it offered.
+func TestLiteChoiceAnswerReachesTheNetwork(t *testing.T) {
+	picker := liteStep{
+		ID:     "fi.mau.meta.messengerlite.mfa_type",
+		Fields: []liteInputField{{ID: "mfatype", Type: "select", Options: []string{"SMS", "Authenticator"}}},
+	}
+	next := liteStep{ID: "fi.mau.meta.messengerlite.sms", Fields: []liteInputField{{ID: "sms_code", Type: "2fa_code"}}}
+	flow, sent := scriptedFlow(litePoll{Step: &picker}, litePoll{Step: &next})
+	if out := flow.run(context.Background(), map[string]string{}); out.Step.Type != "choice" {
+		t.Fatalf("first turn = %+v, want the choice step", out)
+	}
+	if out := flow.run(context.Background(), map[string]string{"mfatype": "Authenticator"}); out.Step.Type != "code" {
+		t.Fatalf("answer turn = %+v, want the code step", out)
+	}
+	last := (*sent)[len(*sent)-1]
+	if last["mfatype"] != "Authenticator" {
+		t.Fatalf("answer went to the wrong field: %+v", last)
 	}
 }
 

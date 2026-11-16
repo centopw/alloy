@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.14 (pre-release)
+
+### Fixed
+- **Username/password sign-in no longer dead-ends at "this network does not offer that sign-in method".** After the password, Meta often asks how the login should be confirmed (a text message, an authenticator app, a password again). That question was treated as a sign-in method Alloy does not implement and ended the attempt. It is now its own step: the network's options are listed as buttons in its own wording, and the choice is submitted back under the field the network asked about. The same step covers which phone number or email should receive a code, and which account to sign in as.
+- **Messages that arrive while the app is connecting decrypt again.** A reconnect could leave the previous encrypted (WhatsApp-style) client running next to the new one, both holding the same device identity; the two then broke each other's ratchets, and every message either side received ended in "mismatching MAC in signal message" or "no valid sessions". Replacing a session now tears down the old client and its encrypted store first, and only one bring-up runs at a time. The Signal library's own warnings also went to stdout, where they corrupted protocol frames; they now go to stderr with the rest of the diagnostics.
+- **A message the network accepted is no longer marked failed while a duplicate copy sits beside it.** When the network echoed a just-sent message before the send acknowledgement was processed, the echo was stored as its own row, and attaching the same network id to the queued row hit the `(chat_id, remote_msg_id)` uniqueness and parked the row as "failed permanently". The acknowledgement now folds the earlier echo into the queued row: one message, the id it really has on the network, and the state "sent".
+
 ## 0.4.13 (pre-release)
 
 ### Fixed

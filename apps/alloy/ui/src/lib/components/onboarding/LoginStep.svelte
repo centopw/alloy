@@ -426,6 +426,24 @@
         {t('onboarding-alternative-cookies')}
       </button>
     </div>
+  {:else if step.type === 'choice'}
+    <h3>{t('onboarding-choice-title')}</h3>
+    <p class="hint">{step.message || t('onboarding-choice-fallback')}</p>
+    <div class="choices">
+      {#each step.options as option (option)}
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={busy}
+          onclick={() => onsubmit({ type: 'choice', field: step.field, value: option })}
+        >
+          {option}
+        </Button>
+      {/each}
+    </div>
+    <div class="actions">
+      <Button variant="ghost" type="button" onclick={oncancel}>{t('common-cancel')}</Button>
+    </div>
   {:else if step.type === 'code'}
     <h3>{t('onboarding-code-title')}</h3>
     <p class="hint">{codeHint(step.via)}</p>
@@ -732,6 +750,19 @@
     margin-top: var(--alloy-spacing-scale-2);
   }
   .actions :global(.alloy-button) {
+    width: 100%;
+    min-height: var(--alloy-layout-control-height);
+    touch-action: manipulation;
+  }
+  /* The network's options are listed in its own order, so this stack is not reversed like .actions. */
+  .choices {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--alloy-spacing-scale-2);
+    margin-top: var(--alloy-spacing-scale-2);
+  }
+  .choices :global(.alloy-button) {
     width: 100%;
     min-height: var(--alloy-layout-control-height);
     touch-action: manipulation;

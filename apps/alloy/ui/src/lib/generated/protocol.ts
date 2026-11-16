@@ -704,6 +704,8 @@ export type LoginInputDto =
 { type: "switch"; to: LoginAlternativeDto } | 
 /**  Answer to [`LoginStepDto::Wait`]: the user has done what the network asked. */
 { type: "continue" } | 
+/**  Answer to [`LoginStepDto::Choice`]: `value` is one of the step's options, verbatim. */
+{ type: "choice"; field: string; value: string } | 
 /**
  *  Ask for a fresh [`LoginStepDto::Qr`] payload (the previous one expired, or the user chose QR
  *  login).
@@ -763,6 +765,20 @@ message: string } |
 { type: "wait"; 
 /**  The network's own instructions, e.g. where it sent the notification. */
 message: string } | 
+/**
+ *  Ask the user to pick one of the network's own choices: which MFA method to use, which
+ *  phone number or email should receive the code, which of several accounts to sign in as.
+ */
+{ type: "choice"; 
+/**  The network's own question, when it asks one; otherwise the host's own copy. */
+message: string; 
+/**  The network's input this answer belongs to, e.g. `"mfatype"`. */
+field: string; 
+/**
+ *  The network's options for that input, in its own wording; the answer is one of them
+ *  verbatim.
+ */
+options: string[] } | 
 /**  Login finished; the account is stored and the connector starts. */
 { type: "done"; account: Account } | 
 /**  The attempt failed. Terminal for this attempt. */

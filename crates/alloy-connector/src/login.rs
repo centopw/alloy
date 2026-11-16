@@ -139,6 +139,19 @@ pub enum LoginStep {
         /// The network's own instructions, e.g. where it sent the notification.
         message: String,
     },
+    /// The network offers several answers and the user must pick one: which MFA method to finish
+    /// with, which phone number or email should receive the code, which account to sign in as.
+    ///
+    /// The options are the network's own wording; the host answers with [`LoginInput::Choice`]
+    /// and the connector maps the pick back to the network's value.
+    Choice {
+        /// The network's own question, when it asks one.
+        message: String,
+        /// The network's input this answer belongs to, e.g. `"mfatype"`.
+        field: String,
+        /// The network's options for that input, in its own wording.
+        options: Vec<String>,
+    },
     /// Login finished. The session blob must be persisted before the connector is started.
     Done {
         remote_user_id: String,
@@ -176,6 +189,8 @@ pub enum LoginInput {
     Switch { to: LoginAlternative },
     /// Answer to [`LoginStep::Wait`]: the user says they have done what the network asked.
     Continue,
+    /// Answer to [`LoginStep::Choice`]: `value` is one of the step's options, verbatim.
+    Choice { field: String, value: String },
     /// Ask for a fresh [`LoginStep::Qr`] payload (previous one expired, or the user chose QR login).
     QrRefresh,
 }
@@ -217,6 +232,11 @@ impl fmt::Debug for LoginInput {
                 .finish(),
             Self::Switch { to } => f.debug_struct("Switch").field("to", to).finish(),
             Self::Continue => f.write_str("Continue"),
+            Self::Choice { field, value } => f
+                .debug_struct("Choice")
+                .field("field", field)
+                .field("value", value)
+                .finish(),
             Self::QrRefresh => f.write_str("QrRefresh"),
         }
     }

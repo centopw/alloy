@@ -474,6 +474,8 @@ type LoginStep struct {
 	Message       string        `json:"message,omitempty"`
 	UsernameLabel string        `json:"username_label,omitempty"`
 	Alternatives  []string      `json:"alternatives,omitempty"`
+	Field         string        `json:"field,omitempty"`
+	Options       []string      `json:"options,omitempty"`
 	RemoteUserID  string        `json:"remote_user_id,omitempty"`
 	DisplayName   string        `json:"display_name,omitempty"`
 	Session       string        `json:"session,omitempty"`
@@ -530,6 +532,13 @@ func waitStep(message string) LoginStep {
 	return LoginStep{Type: "wait", Message: message}
 }
 
+// choiceStep asks the user to pick one of the network's own options (which MFA method to finish
+// with, which contact point should receive the code). The answer names the field and the option
+// verbatim, so the Bloks flow gets exactly the value it offered.
+func choiceStep(message, field string, options []string) LoginStep {
+	return LoginStep{Type: "choice", Message: message, Field: field, Options: options}
+}
+
 // LoginInput mirrors alloy_connector::LoginInput.
 type LoginInput struct {
 	Type     string            `json:"type"`
@@ -538,6 +547,8 @@ type LoginInput struct {
 	Password string            `json:"password,omitempty"`
 	Username string            `json:"username,omitempty"`
 	To       string            `json:"to,omitempty"`
+	Field    string            `json:"field,omitempty"`
+	Value    string            `json:"value,omitempty"`
 	Values   map[string]string `json:"values,omitempty"`
 }
 

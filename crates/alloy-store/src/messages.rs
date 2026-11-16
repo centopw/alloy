@@ -362,14 +362,98 @@ impl Store {
         let message_id = message_id.to_owned();
         self.with_conn(move |conn| {
             let tx = conn.transaction()?;
-            let updated = tx.execute(
-                "UPDATE messages SET
-                     send_state = ?2,
-                     remote_msg_id = COALESCE(?3, remote_msg_id),
-                     sent_at = COALESCE(?4, sent_at)
-                 WHERE message_id = ?1",
-                rusqlite::params![&message_id, state, remote_msg_id, sent_at],
-            )?;
+            // The network can echo a sent message before the send ack is applied, storing the same
+            // message under its remote id. Attaching that id to the queued row would then break the
+            // `(chat_id, remote_msg_id)` uniqueness and mark a delivered message failed. Fold the
+            // echoed row into the queued one instead: the queued row keeps the identity the UI and
+            // queued replies already refer to, and takes over the network's id and any detail only
+            // the echo carried.
+            let mut merged = false;
+            if let Some(remote) = remote_msg_id.as_deref() {
+                let echoed = tx
+                    .query_row(
+                        "SELECT message_id FROM messages
+                          WHERE chat_id = (SELECT chat_id FROM messages WHERE message_id = ?1)
+                            AND remote_msg_id = ?2
+                            AND message_id <> ?1",
+                        rusqlite::params![&message_id, remote],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional()?;
+                if let Some(echoed) = echoed {
+                    // The echoed row's own details are read first and the row dropped, because the
+                    // remote id must be free before the queued row can take it.
+                    let (echoed_sent_at, echoed_body, echoed_formatted, echoed_media): (
+                        Option<i64>,
+                        Option<String>,
+                        Option<String>,
+                        Option<String>,
+                    ) = tx.query_row(
+                        "SELECT sent_at, body, formatted, media_id FROM messages WHERE message_id = ?1",
+                        rusqlite::params![&echoed],
+                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                    )?;
+                    let chat_id: String = tx.query_row(
+                        "SELECT chat_id FROM messages WHERE message_id = ?1",
+                        rusqlite::params![&message_id],
+                        |row| row.get(0),
+                    )?;
+                    tx.execute(
+                        "DELETE FROM messages WHERE message_id = ?1",
+                        rusqlite::params![&echoed],
+                    )?;
+                    tx.execute(
+                        "UPDATE messages SET
+                             send_state = ?2,
+                             remote_msg_id = ?3,
+                             sent_at = COALESCE(?4, sent_at, ?5),
+                             body = COALESCE(NULLIF(body, ''), ?6),
+                             formatted = COALESCE(formatted, ?7),
+                             media_id = COALESCE(media_id, ?8)
+                         WHERE message_id = ?1",
+                        rusqlite::params![
+                            &message_id,
+                            state,
+                            remote,
+                            sent_at,
+                            echoed_sent_at,
+                            echoed_body,
+                            echoed_formatted,
+                            echoed_media
+                        ],
+                    )?;
+                    let account_id = rows::account_for_chat(&tx, &chat_id)?;
+                    let removed = serde_json::json!({
+                        "message_id": &echoed,
+                        "chat_id": &chat_id,
+                    });
+                    events::append(
+                        &tx,
+                        &account_id,
+                        Some(chat_id.as_str()),
+                        "message.removed",
+                        removed,
+                        now_ms(),
+                    )?;
+                    merged = true;
+                }
+            }
+            let updated = if merged {
+                // The remote id (and any detail merged from the echo) is already applied above.
+                tx.execute(
+                    "UPDATE messages SET send_state = ?2 WHERE message_id = ?1",
+                    rusqlite::params![&message_id, state],
+                )?
+            } else {
+                tx.execute(
+                    "UPDATE messages SET
+                         send_state = ?2,
+                         remote_msg_id = COALESCE(?3, remote_msg_id),
+                         sent_at = COALESCE(?4, sent_at)
+                     WHERE message_id = ?1",
+                    rusqlite::params![&message_id, state, remote_msg_id, sent_at],
+                )?
+            };
             if updated == 0 {
                 return Err(StoreError::NotFound("message"));
             }

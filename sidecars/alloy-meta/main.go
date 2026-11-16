@@ -62,6 +62,8 @@ func main() {
 		Str("platform", cfg.platformName()).
 		Str("proxy", cfg.describeProxy()).
 		Msg("Messenger sidecar starting")
+	// stdout carries protocol frames only; libsignal's default logger writes to stdout.
+	installSignalLogger(logger)
 	out := newWriter(os.Stdout)
 	messenger := newMessenger(logger, out, cfg)
 

@@ -78,6 +78,9 @@ const (
 	liteWait
 	// liteBlocked is a captcha: only a human on Meta's own site can clear it.
 	liteBlocked
+	// liteChoice asks the user to pick one of the network's own options: which MFA method to finish
+	// with, which phone number or email should receive the code, which account to sign in as.
+	liteChoice
 )
 
 // liteFlow drives the Bloks state machine across submit_login calls. poll is the only part that
@@ -93,6 +96,8 @@ type liteFlow struct {
 	// awaitingCode records that the last returned step asked for a one-time code, which is what
 	// makes a challenge answerable with a code on this device.
 	awaitingCode bool
+	// choiceField is the input a choice step asked about; the next choice answer is written to it.
+	choiceField string
 	// awaitingApproval records that the last returned step is the network waiting for something
 	// only the user can do elsewhere; waitingMessage is what that step told them.
 	awaitingApproval bool
@@ -175,6 +180,14 @@ func (l *liteLogin) answerCode(ctx context.Context, code string) liteOutcome {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.flow.run(ctx, map[string]string{l.flow.codeField(): code})
+}
+
+// answerChoice submits the option the user picked for a choice step. The field and value come from
+// the step, so the flow receives exactly the pair the network offered.
+func (l *liteLogin) answerChoice(ctx context.Context, field, value string) liteOutcome {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.flow.run(ctx, map[string]string{field: value})
 }
 
 // afadPollWindow bounds one "continue" answer while the network waits for the user to approve the
@@ -262,6 +275,16 @@ func (f *liteFlow) mapStep(step liteStep) liteOutcome {
 		f.awaitingApproval = true
 		f.waitingMessage = waitInstructions(step.Instructions)
 		return liteOutcome{Step: waitStep(f.waitingMessage)}
+	case liteChoice:
+		if repeat {
+			failure := failureInvalidInput(field, step.Instructions)
+			return liteOutcome{Failure: &failure}
+		}
+		f.expect = []string{field}
+		f.choiceField = field
+		f.lastKey = key
+		options := choiceOptions(step, field)
+		return liteOutcome{Step: choiceStep(strings.TrimSpace(step.Instructions), field, options)}
 	case liteBlocked:
 		// A captcha is a checkpoint: only Meta's own site can render it, so the host points the user
 		// there and the attempt stays open for another answer.
@@ -292,6 +315,8 @@ func kindName(kind liteKind) string {
 		return "wait"
 	case liteBlocked:
 		return "blocked"
+	case liteChoice:
+		return "choice"
 	default:
 		return ""
 	}
@@ -313,6 +338,19 @@ func waitInstructions(text string) string {
 	return waitApprovalFallback
 }
 
+// choiceOptions returns the network's options for the input a choice step is asking about.
+func choiceOptions(step liteStep, field string) []string {
+	for _, f := range step.Fields {
+		if f.ID == field {
+			return f.Options
+		}
+	}
+	if len(step.Fields) == 1 {
+		return step.Fields[0].Options
+	}
+	return nil
+}
+
 // classifyLiteStep decides what the connector asks for from the field IDs and types the Bloks state
 // machine put in the step. The field ID decides first and the component type second, so a renamed
 // label does not change the flow.
@@ -327,7 +365,14 @@ func classifyLiteStep(step liteStep) (kind liteKind, field, via string) {
 			return liteCode, f.ID, codeChannel(step, f.ID)
 		case "captcha_code", "recaptcha_token":
 			return liteBlocked, "", ""
-		case "oauth_token", "mfatype", "contact_point", "account", "dialog_action", "confirmation_action":
+		case "mfatype", "contact_point", "account", "dialog_action":
+			// The network is offering its own options; the host renders them and answers with the
+			// one the user picked.
+			if len(f.Options) > 0 {
+				return liteChoice, f.ID, ""
+			}
+			return liteUnsupported, "", ""
+		case "oauth_token", "confirmation_action":
 			return liteUnsupported, "", ""
 		}
 	}
@@ -342,6 +387,9 @@ func classifyLiteStep(step liteStep) (kind liteKind, field, via string) {
 		case "captcha_code":
 			return liteBlocked, "", ""
 		case "select":
+			if len(f.Options) > 0 {
+				return liteChoice, f.ID, ""
+			}
 			return liteUnsupported, "", ""
 		}
 	}

@@ -363,6 +363,15 @@ pub fn pending_login_step(step: alloy_connector::LoginStep) -> Option<LoginStepD
             message,
         }),
         alloy_connector::LoginStep::Wait { message } => Some(LoginStepDto::Wait { message }),
+        alloy_connector::LoginStep::Choice {
+            message,
+            field,
+            options,
+        } => Some(LoginStepDto::Choice {
+            message,
+            field,
+            options,
+        }),
         alloy_connector::LoginStep::Done { .. } | alloy_connector::LoginStep::Failed { .. } => None,
     }
 }
@@ -393,6 +402,9 @@ pub fn login_input(input: LoginInputDto) -> alloy_connector::LoginInput {
         },
         LoginInputDto::QrRefresh => alloy_connector::LoginInput::QrRefresh,
         LoginInputDto::Continue => alloy_connector::LoginInput::Continue,
+        LoginInputDto::Choice { field, value } => {
+            alloy_connector::LoginInput::Choice { field, value }
+        }
     }
 }
 

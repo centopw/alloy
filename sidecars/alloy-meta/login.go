@@ -57,6 +57,8 @@ func (m *Messenger) submitLogin(ctx context.Context, params json.RawMessage) (an
 		return m.submitLiteCode(ctx, p.Input.Code, fail)
 	case "continue":
 		return m.submitLiteContinue(ctx, fail)
+	case "choice":
+		return m.submitLiteChoice(ctx, p.Input, fail)
 	case "switch":
 		if p.Input.To != "cookies" {
 			return fail(failureNotSupported())
@@ -109,6 +111,18 @@ func (m *Messenger) submitLiteCode(ctx context.Context, code string, fail loginF
 // give, so nothing is submitted and the answer is whatever that poll saw (often the same step).
 func (m *Messenger) submitLiteContinue(ctx context.Context, fail loginFail) (any, *WireError) {
 	out := m.liteForAttempt().answerContinue(ctx)
+	return m.settleLite(ctx, out, "", fail)
+}
+
+// submitLiteChoice answers a step that offered the network's own options: the field and the option
+// come back verbatim from that step, so the Bloks flow gets exactly what it offered.
+func (m *Messenger) submitLiteChoice(ctx context.Context, input LoginInput, fail loginFail) (any, *WireError) {
+	field := strings.TrimSpace(input.Field)
+	value := strings.TrimSpace(input.Value)
+	if field == "" || value == "" {
+		return fail(failureInvalidInput("choice", "pick one of the sign-in options the network offered"))
+	}
+	out := m.liteForAttempt().answerChoice(ctx, field, value)
 	return m.settleLite(ctx, out, "", fail)
 }
 

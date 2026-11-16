@@ -103,10 +103,27 @@ func (m *Messenger) e2eeStoreDir() string {
 func (m *Messenger) startE2EE(ctx context.Context) error {
 	m.e2eeMu.Lock()
 	already := m.e2ee != nil
+	busy := m.e2eeBusy
+	if !already && !busy {
+		if m.deviceStore != nil {
+			// A previous session's store outlived its client; opening a second connection on the
+			// same file would keep two Signal states for one device identity.
+			stale := m.deviceStore
+			m.deviceStore = nil
+			m.device = nil
+			_ = stale.Close()
+		}
+		m.e2eeBusy = true
+	}
 	m.e2eeMu.Unlock()
-	if already {
+	if already || busy {
 		return nil
 	}
+	defer func() {
+		m.e2eeMu.Lock()
+		m.e2eeBusy = false
+		m.e2eeMu.Unlock()
+	}()
 	m.mu.Lock()
 	user := m.remoteUser
 	ownID := m.ownID
