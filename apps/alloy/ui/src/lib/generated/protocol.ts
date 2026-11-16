@@ -784,9 +784,25 @@ export type EngineResponse = { type: "AccountsList"; payload: {
 } } | { type: "DevicesList"; payload: {
 	devices: DeviceDto[],
 } } | 
-/**  The roster change landed; `epoch` is the new local key epoch. */
+/**
+ *  The roster change landed; `epoch` is the new local key epoch.
+ * 
+ *  The epoch is the security boundary: a revoked device keeps the old master key and can no
+ *  longer open anything sealed under the new one. The remaining fields say how much of the
+ *  server work followed, so the UI never claims a clean sweep it did not get.
+ */
 { type: "DeviceRevoked"; payload: {
 	epoch: number,
+	/**  Every enabled layer was re-published under the new epoch. */
+	re_sealed?: boolean | null,
+	/**  Previous-epoch blobs the server confirmed deleted (already-absent ones included). */
+	blobs_deleted?: number | null,
+	/**  Previous-epoch blobs the server still holds; the revocation is valid regardless. */
+	blobs_remaining?: number | null,
+	/**  The master key rotated, so a recovery phrase created earlier no longer opens new data. */
+	recovery_stale?: boolean | null,
+	/**  Why the server half was incomplete, when it was. */
+	error?: string | null,
 } } | 
 /**
  *  The endpoint answered and the configuration was stored; `pin` is the endpoint identity now

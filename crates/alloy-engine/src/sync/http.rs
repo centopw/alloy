@@ -300,6 +300,23 @@ impl Endpoint {
             status => Err(map_status(status)),
         }
     }
+
+    /// `DELETE /v1/blob/{id}`; `false` when the server no longer holds it (already gone).
+    ///
+    /// Revocation is the only caller: an id this device never published is not enumerable, so a
+    /// 404 means a previous sweep already removed it, never that the wrong id was sent.
+    pub async fn delete_blob(&self, id: &str) -> Result<bool, EngineError> {
+        let response = self
+            .request(reqwest::Method::DELETE, &format!("/v1/blob/{id}"))?
+            .send()
+            .await
+            .map_err(|error| self.transport_error(error))?;
+        match response.status() {
+            StatusCode::NO_CONTENT | StatusCode::OK => Ok(true),
+            StatusCode::NOT_FOUND => Ok(false),
+            status => Err(map_status(status)),
+        }
+    }
 }
 
 fn header(

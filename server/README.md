@@ -67,6 +67,12 @@ token.
 | `PUT /v1/head`, `/v1/escrow`, `/v1/roster` | Compare-and-swap write, `204` on success. |
 | `GET /v1/blob/{id}` | `200` with the bytes and an `ETag`; `404` if absent. |
 | `PUT /v1/blob/{id}` | Overwrite-allowed write, `204` on success. |
+| `DELETE /v1/blob/{id}` | `204` when it existed and was removed; `404` when it is already absent, so a retried delete is not an error. The client names every id it deletes; there is no enumeration endpoint. |
+
+Deleting a blob does **not** refund the token's quota: the bytes were already accounted when they
+arrived, and refunding would let a client rewrite and delete in a loop for free. A delete is the
+only way ciphertext leaves the server (revocation, ADR 0020 invariant 14), so it is a real
+deletion of the stored bytes, not a tombstone the store may protect from overwrite.
 
 CAS preconditions on the three singleton resources:
 

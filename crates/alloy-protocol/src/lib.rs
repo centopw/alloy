@@ -1579,8 +1579,27 @@ pub enum EngineResponse {
         devices: Vec<DeviceDto>,
     },
     /// The roster change landed; `epoch` is the new local key epoch.
+    ///
+    /// The epoch is the security boundary: a revoked device keeps the old master key and can no
+    /// longer open anything sealed under the new one. The remaining fields say how much of the
+    /// server work followed, so the UI never claims a clean sweep it did not get.
     DeviceRevoked {
         epoch: u32,
+        /// Every enabled layer was re-published under the new epoch.
+        #[specta(optional)]
+        re_sealed: Option<bool>,
+        /// Previous-epoch blobs the server confirmed deleted (already-absent ones included).
+        #[specta(type = Option<Number>, optional)]
+        blobs_deleted: Option<u32>,
+        /// Previous-epoch blobs the server still holds; the revocation is valid regardless.
+        #[specta(type = Option<Number>, optional)]
+        blobs_remaining: Option<u32>,
+        /// The master key rotated, so a recovery phrase created earlier no longer opens new data.
+        #[specta(optional)]
+        recovery_stale: Option<bool>,
+        /// Why the server half was incomplete, when it was.
+        #[specta(optional)]
+        error: Option<String>,
     },
     /// The endpoint answered and the configuration was stored; `pin` is the endpoint identity now
     /// enforced, absent for a loopback `http` endpoint.

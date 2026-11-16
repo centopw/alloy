@@ -633,7 +633,7 @@ async fn the_roster_names_this_device_and_revocation_advances_the_epoch() {
         .await
         .expect("revoke")
     {
-        EngineResponse::DeviceRevoked { epoch } => epoch,
+        EngineResponse::DeviceRevoked { epoch, .. } => epoch,
         other => panic!("unexpected response: {other:?}"),
     };
     assert_eq!(epoch, 1);
@@ -792,7 +792,7 @@ async fn pairing_enrols_both_devices_in_each_roster() {
         .await
         .expect("revoke the enrolled peer")
     {
-        EngineResponse::DeviceRevoked { epoch } => epoch,
+        EngineResponse::DeviceRevoked { epoch, .. } => epoch,
         other => panic!("unexpected response: {other:?}"),
     };
     assert_eq!(epoch, 1);

@@ -15,7 +15,8 @@ use alloy_engine::{AppEngine, Engine, EngineContext, EngineError};
 use alloy_protocol::{EngineCommand, EngineResponse, SyncMode, SyncState, SyncStatusReport};
 use alloy_storage::{InMemorySecretStore, SecretStore};
 use alloy_store::{AccountState, ChatFlagsUpdate, ChatKind, ChatUpsert, Network, NewAccount};
-use alloy_sync::SignedBatch;
+use alloy_sync::{BlobAddr, BlobError, BlobKeyRing, Layer, MasterKey, SignedBatch, open};
+use base64::Engine as _;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -323,6 +324,67 @@ server.listen(port, '127.0.0.1', () => console.log(`listening ${server.address()
     }
 }
 
+/// A loopback proxy that refuses every `DELETE` with `500` and forwards everything else. A server
+/// can lose the delete endpoint; the client must keep the rotation and say what is left.
+struct DeleteRefusingProxy {
+    child: Child,
+    port: u16,
+    _dir: TempDir,
+}
+
+impl Drop for DeleteRefusingProxy {
+    fn drop(&mut self) {
+        let _ = self.child.start_kill();
+    }
+}
+
+async fn start_delete_refusing_proxy(target_port: u16) -> DeleteRefusingProxy {
+    let dir = TempDir::new().expect("proxy dir");
+    let script = dir.path().join("no-delete.mjs");
+    std::fs::write(
+        &script,
+        r#"
+import http from 'node:http';
+const port = Number(process.env.PROXY_PORT);
+const target = Number(process.env.TARGET_PORT);
+const server = http.createServer((req, res) => {
+  const chunks = [];
+  req.on('data', (chunk) => chunks.push(chunk));
+  req.on('end', () => {
+    if (req.method === 'DELETE') {
+      res.writeHead(500);
+      res.end();
+      return;
+    }
+    const upstream = http.request(
+      { host: '127.0.0.1', port: target, path: req.url, method: req.method, headers: req.headers },
+      (answer) => {
+        res.writeHead(answer.statusCode, answer.headers);
+        answer.pipe(res);
+      },
+    );
+    upstream.end(Buffer.concat(chunks));
+  });
+});
+server.listen(port, '127.0.0.1', () => console.log(`listening ${server.address().port}`));
+"#,
+    )
+    .expect("write the delete-refusing proxy");
+    let (child, port) = spawn_node_script(
+        &script,
+        &[
+            ("TARGET_PORT", target_port.to_string()),
+            ("PROXY_PORT", "0".to_string()),
+        ],
+    )
+    .await;
+    DeleteRefusingProxy {
+        child,
+        port,
+        _dir: dir,
+    }
+}
+
 /// A real TLS listener with a self-signed certificate, forwarding to the plain-HTTP server.
 struct TlsProxy {
     child: Child,
@@ -479,6 +541,120 @@ fn head_seq(bytes: &[u8]) -> u64 {
         .expect("the server head is a signed batch")
         .header
         .seq
+}
+
+fn head_epoch(bytes: &[u8]) -> u32 {
+    SignedBatch::from_bytes(bytes)
+        .expect("the server head is a signed batch")
+        .header
+        .epoch
+}
+
+// === Revocation helpers ===
+
+struct Revoked {
+    epoch: u32,
+    re_sealed: Option<bool>,
+    blobs_deleted: Option<u32>,
+    blobs_remaining: Option<u32>,
+    recovery_stale: Option<bool>,
+    error: Option<String>,
+}
+
+async fn revoke(engine: &AppEngine, device_id: &str) -> Revoked {
+    match engine
+        .handle(EngineCommand::RevokeDevice {
+            device_id: device_id.to_string(),
+        })
+        .await
+        .expect("revoke")
+    {
+        EngineResponse::DeviceRevoked {
+            epoch,
+            re_sealed,
+            blobs_deleted,
+            blobs_remaining,
+            recovery_stale,
+            error,
+        } => Revoked {
+            epoch,
+            re_sealed,
+            blobs_deleted,
+            blobs_remaining,
+            recovery_stale,
+            error,
+        },
+        other => panic!("unexpected response: {other:?}"),
+    }
+}
+
+fn read_json_file(path: &Path) -> Value {
+    serde_json::from_slice(&std::fs::read(path).expect("read json file")).expect("parse json file")
+}
+
+/// The ids this device published under `epoch`, as `(id, layer key, seq)`.
+fn indexed_blobs(dir: &Path, epoch: u32) -> Vec<(String, String, u64)> {
+    let index = read_json_file(&dir.join("sync-blobs.json"));
+    index["epochs"][epoch.to_string()]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|blob| {
+            (
+                blob["id"].as_str().expect("indexed id").to_string(),
+                blob["layer"].as_str().expect("indexed layer").to_string(),
+                blob["seq"].as_u64().expect("indexed seq"),
+            )
+        })
+        .collect()
+}
+
+/// Adds a peer entry to `settings.json`, as an earlier enrolment would have.
+fn add_roster_entry(dir: &Path, device_id: &str) {
+    let mut settings = read_settings(dir);
+    settings["sync"]["devices"]
+        .as_array_mut()
+        .expect("roster array")
+        .push(json!({
+            "device_id": device_id,
+            "label": "Enrolled peer",
+            "enrolled_ms": 1_700_000_000_000i64,
+            "epoch": 0,
+        }));
+    write_settings(dir, &settings);
+}
+
+async fn blob_status(base: &str, id: &str) -> reqwest::StatusCode {
+    reqwest::Client::new()
+        .get(format!("{base}/v1/blob/{id}"))
+        .bearer_auth(TOKEN)
+        .send()
+        .await
+        .expect("get blob")
+        .status()
+}
+
+async fn blob_bytes(base: &str, id: &str) -> Vec<u8> {
+    let response = reqwest::Client::new()
+        .get(format!("{base}/v1/blob/{id}"))
+        .bearer_auth(TOKEN)
+        .send()
+        .await
+        .expect("get blob");
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    response.bytes().await.expect("blob body").to_vec()
+}
+
+async fn stored_master(secrets: &Arc<dyn SecretStore>) -> MasterKey {
+    let text = secrets
+        .get_secret("alloy.sync.master_key.v1")
+        .await
+        .expect("this device has a master key");
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(text.trim())
+        .expect("the master key is base64");
+    MasterKey::from_bytes(bytes.try_into().expect("the master key is 32 bytes"))
 }
 
 // === Recovery helpers ===
@@ -1321,4 +1497,248 @@ async fn the_escrow_upload_survives_a_competing_cas() {
     recover(&fresh, &words, &server.base(), TOKEN)
         .await
         .expect("the retried escrow is the one the phrase opens");
+}
+
+#[tokio::test]
+async fn revocation_rotates_the_key_and_deletes_the_old_ciphertext() {
+    if !node_available().await {
+        eprintln!("skipping: node is not on PATH, so the real sync server cannot be spawned");
+        return;
+    }
+    let server = start_server().await;
+    let first_dir = TempDir::new().expect("first data dir");
+    let second_dir = TempDir::new().expect("second data dir");
+    let first_vault = vault();
+    let second_vault = vault();
+    let first = open_engine(first_dir.path(), first_vault.clone()).await;
+    let second = open_engine(second_dir.path(), second_vault.clone()).await;
+    seed_chat(&first, Some("work")).await;
+    seed_chat(&second, None).await;
+    write_settings(first_dir.path(), &json!({"density": "compact"}));
+
+    configure(&first, &server.base(), TOKEN, false)
+        .await
+        .expect("the first device publishes seq 1");
+    let (_, revoked_id) = roster_ids(&second).await;
+    let revoked_id = revoked_id.expect("the second device names itself");
+    copy_master(&first_vault, &second_vault).await;
+    configure(&second, &server.base(), TOKEN, false)
+        .await
+        .expect("the second device pulls seq 1");
+    add_roster_entry(first_dir.path(), &revoked_id);
+
+    // Every id the first device published under the old epoch is readable before the revoke.
+    let old = indexed_blobs(first_dir.path(), 0);
+    assert_eq!(old.len(), 5, "one id per enabled layer");
+    for (id, _, _) in &old {
+        assert_eq!(
+            blob_status(&server.base(), id).await,
+            reqwest::StatusCode::OK
+        );
+    }
+
+    let revoked = revoke(&first, &revoked_id).await;
+    assert_eq!(revoked.epoch, 1);
+    assert_eq!(revoked.re_sealed, Some(true));
+    assert_eq!(revoked.blobs_deleted, Some(old.len() as u32));
+    assert_eq!(revoked.blobs_remaining, Some(0));
+    assert_eq!(revoked.recovery_stale, Some(true));
+    assert!(revoked.error.is_none(), "{:?}", revoked.error);
+
+    // A real 404: the old ciphertext is gone from the real server, not merely orphaned.
+    for (id, _, _) in &old {
+        let status = blob_status(&server.base(), id).await;
+        eprintln!("revoked epoch's blob {id} -> {status}");
+        assert_eq!(
+            status,
+            reqwest::StatusCode::NOT_FOUND,
+            "revoked blob {id} is still served"
+        );
+    }
+
+    let new = indexed_blobs(first_dir.path(), 1);
+    assert_eq!(new.len(), 5, "every enabled layer was re-sealed");
+    for (id, _, _) in &new {
+        assert_eq!(
+            blob_status(&server.base(), id).await,
+            reqwest::StatusCode::OK
+        );
+    }
+
+    // The revoked device holds the old master key. It cannot name the new epoch's key at all,
+    // and guessing the epoch gives a key that fails authentication.
+    let settings = new
+        .iter()
+        .find(|(_, layer, _)| layer == "settings")
+        .expect("the settings layer was re-sealed");
+    let blob = blob_bytes(&server.base(), &settings.0).await;
+    let addr = BlobAddr::new(Layer::Config, "settings", settings.2, 1);
+    let old_master = stored_master(&second_vault).await;
+    let error = open(&BlobKeyRing::new(&old_master, [0u32]), &addr, &blob)
+        .expect_err("the old key set does not contain the new epoch");
+    assert_eq!(error, BlobError::UnknownEpoch { epoch: 1 });
+    let error = open(&BlobKeyRing::new(&old_master, [0u32, 1]), &addr, &blob)
+        .expect_err("the old master cannot derive the rotated key");
+    assert_eq!(error, BlobError::AuthenticationFailed);
+
+    // Following the head fails the same way: nothing sealed after the revoke opens.
+    let error = sync(&second)
+        .await
+        .expect_err("the revoked device cannot read the new epoch");
+    assert_eq!(error.code, "sync_blocked");
+    assert_eq!(error.reason.as_deref(), Some("content"));
+
+    let (ids, current) = roster_ids(&first).await;
+    assert!(!ids.contains(&revoked_id), "the revoked entry is gone");
+    assert!(current.is_some(), "this device stays in its own roster");
+}
+
+#[tokio::test]
+async fn a_remaining_device_converges_on_the_re_sealed_layers() {
+    if !node_available().await {
+        eprintln!("skipping: node is not on PATH, so the real sync server cannot be spawned");
+        return;
+    }
+    let server = start_server().await;
+    let first_dir = TempDir::new().expect("first data dir");
+    let revoked_dir = TempDir::new().expect("revoked data dir");
+    let remaining_dir = TempDir::new().expect("remaining data dir");
+    let first_vault = vault();
+    let revoked_vault = vault();
+    let remaining_vault = vault();
+    let first = open_engine(first_dir.path(), first_vault.clone()).await;
+    let revoked = open_engine(revoked_dir.path(), revoked_vault.clone()).await;
+    let remaining = open_engine(remaining_dir.path(), remaining_vault.clone()).await;
+    seed_chat(&first, Some("work")).await;
+    seed_chat(&revoked, None).await;
+    let remaining_chat = seed_chat(&remaining, None).await;
+    write_settings(first_dir.path(), &json!({"density": "compact"}));
+
+    configure(&first, &server.base(), TOKEN, false)
+        .await
+        .expect("the first device publishes seq 1");
+    let (_, revoked_id) = roster_ids(&revoked).await;
+    let revoked_id = revoked_id.expect("the revoked device names itself");
+    // Both peers start with the pre-rotation master, as enrolment would have left them.
+    copy_master(&first_vault, &revoked_vault).await;
+    copy_master(&first_vault, &remaining_vault).await;
+    configure(&revoked, &server.base(), TOKEN, false)
+        .await
+        .expect("the revoked device pulls seq 1");
+    configure(&remaining, &server.base(), TOKEN, false)
+        .await
+        .expect("the remaining device pulls seq 1");
+    add_roster_entry(first_dir.path(), &revoked_id);
+
+    let outcome = revoke(&first, &revoked_id).await;
+    assert_eq!(outcome.epoch, 1);
+    assert_eq!(outcome.re_sealed, Some(true));
+
+    // With the pre-rotation key the remaining device cannot open the re-sealed head.
+    let error = sync(&remaining)
+        .await
+        .expect_err("the old key does not open the new epoch");
+    assert_eq!(error.code, "sync_blocked");
+    assert_eq!(error.reason.as_deref(), Some("content"));
+
+    // A surviving device that obtained the rotated key reads the re-sealed layers and follows
+    // the head at the new epoch from then on.
+    copy_master(&first_vault, &remaining_vault).await;
+    merge_settings(first_dir.path(), &json!({"accent": "green"}));
+    sync(&first).await.expect("the surviving device publishes");
+    sync(&remaining)
+        .await
+        .expect("the remaining device converges");
+    assert_eq!(
+        read_settings(remaining_dir.path())["accent"],
+        json!("green")
+    );
+    assert_eq!(
+        chat_tags(&remaining, &remaining_chat).await,
+        vec!["work".to_string()]
+    );
+    eprintln!(
+        "remaining device converged at epoch {}: accent={} tags={:?}",
+        read_settings(remaining_dir.path())["sync"]["epoch"],
+        read_settings(remaining_dir.path())["accent"],
+        chat_tags(&remaining, &remaining_chat).await
+    );
+    assert_eq!(
+        read_settings(remaining_dir.path())["sync"]["epoch"],
+        json!(1)
+    );
+
+    sync(&remaining)
+        .await
+        .expect("the remaining device publishes");
+    let (head, _) = read_head(&server.base()).await;
+    assert_eq!(head_epoch(&head), 1, "publishing follows the adopted epoch");
+}
+
+#[tokio::test]
+async fn a_server_that_refuses_delete_keeps_the_revocation_and_reports_leftovers() {
+    if !node_available().await {
+        eprintln!("skipping: node is not on PATH, so the real sync server cannot be spawned");
+        return;
+    }
+    let server = start_server().await;
+    let proxy = start_delete_refusing_proxy(server.port).await;
+    let url = format!("http://127.0.0.1:{}", proxy.port);
+    let first_dir = TempDir::new().expect("first data dir");
+    let revoked_dir = TempDir::new().expect("revoked data dir");
+    let first_vault = vault();
+    let revoked_vault = vault();
+    let first = open_engine(first_dir.path(), first_vault.clone()).await;
+    let revoked = open_engine(revoked_dir.path(), revoked_vault.clone()).await;
+    seed_chat(&first, Some("work")).await;
+    seed_chat(&revoked, None).await;
+    write_settings(first_dir.path(), &json!({"density": "compact"}));
+
+    configure(&first, &url, TOKEN, false)
+        .await
+        .expect("the first device publishes through the proxy");
+    let (_, revoked_id) = roster_ids(&revoked).await;
+    let revoked_id = revoked_id.expect("the revoked device names itself");
+    copy_master(&first_vault, &revoked_vault).await;
+    configure(&revoked, &server.base(), TOKEN, false)
+        .await
+        .expect("the revoked device pulls");
+    add_roster_entry(first_dir.path(), &revoked_id);
+
+    let old = indexed_blobs(first_dir.path(), 0);
+    assert_eq!(old.len(), 5);
+
+    let outcome = revoke(&first, &revoked_id).await;
+    assert_eq!(outcome.epoch, 1, "the revocation stands");
+    assert_eq!(outcome.re_sealed, Some(true), "the new epoch is published");
+    assert_eq!(outcome.blobs_deleted, Some(0));
+    assert_eq!(outcome.blobs_remaining, Some(old.len() as u32));
+    let error = outcome
+        .error
+        .expect("an incomplete sweep is reported, not hidden");
+    assert!(
+        error.contains("left on the server"),
+        "the report names the leftovers: {error}"
+    );
+
+    // The delete really failed: the old ciphertext is still there, which is exactly what the
+    // response said.
+    for (id, _, _) in &old {
+        assert_eq!(
+            blob_status(&server.base(), id).await,
+            reqwest::StatusCode::OK,
+            "the refused delete must leave the blob in place"
+        );
+    }
+    let (head, _) = read_head(&server.base()).await;
+    assert_eq!(head_epoch(&head), 1);
+    let (ids, _) = roster_ids(&first).await;
+    assert!(!ids.contains(&revoked_id));
+
+    // The epoch, not the deletion, is the boundary.
+    let error = sync(&revoked)
+        .await
+        .expect_err("the revoked device cannot read the new epoch");
+    assert_eq!(error.code, "sync_blocked");
+    assert_eq!(error.reason.as_deref(), Some("content"));
 }

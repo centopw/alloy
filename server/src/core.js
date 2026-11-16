@@ -171,6 +171,22 @@ export async function createApp({
   }
 
   /**
+   * `DELETE /v1/blob/{id}`. The bytes are already accounted to the token's quota; deleting never
+   * refunds it, so a client cannot free quota by rewriting and deleting in a loop.
+   * @param {string} id
+   * @returns {Promise<Response>}
+   */
+  async function deleteBlob(id) {
+    return serialize(async () => {
+      const key = `blob/${id}`;
+      // The server cannot tell an already-deleted id from one that never existed: both are 404.
+      if ((await store.get(key)) === null) return new Response(null, { status: 404 });
+      await store.delete(key);
+      return new Response(null, { status: 204 });
+    });
+  }
+
+  /**
    * @param {Request} request
    * @param {string} key
    * @param {{ digest: Uint8Array, quota: number }} token
@@ -235,7 +251,8 @@ export async function createApp({
       if (!BLOB_ID_SHAPE.test(id)) throw new HttpError(400);
       if (method === 'GET') return readResource(`blob/${id}`);
       if (method === 'PUT') return writeBlob(request, id, token);
-      throw new HttpError(405, { allow: 'GET, PUT' });
+      if (method === 'DELETE') return deleteBlob(id);
+      throw new HttpError(405, { allow: 'GET, PUT, DELETE' });
     }
 
     throw new HttpError(404);

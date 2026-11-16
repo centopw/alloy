@@ -284,7 +284,17 @@ impl GroupHandler for SyncHandler {
             }
             EngineCommand::RevokeDevice { device_id } => {
                 let epoch = revoke_device(ctx, &device_id).await?;
-                Ok(EngineResponse::DeviceRevoked { epoch })
+                // The roster and the epoch already moved; everything below is best effort and is
+                // reported rather than turned into a failed command (invariant 14).
+                let outcome = crate::sync::reseal_after_revoke(ctx, epoch).await;
+                Ok(EngineResponse::DeviceRevoked {
+                    epoch,
+                    re_sealed: Some(outcome.re_sealed),
+                    blobs_deleted: Some(outcome.blobs_deleted),
+                    blobs_remaining: Some(outcome.blobs_remaining),
+                    recovery_stale: Some(outcome.recovery_stale),
+                    error: outcome.error,
+                })
             }
             EngineCommand::ConfigureSync {
                 url,
@@ -1452,6 +1462,28 @@ pub(crate) fn enroll_recovered_device(
             enrolled_ms: now_ms(),
             epoch,
         });
+        sync["devices"] = serde_json::to_value(&devices).map_err(|err| {
+            EngineError::internal_error(format!("cannot encode the device roster: {err}"))
+        })?;
+        settings["sync"] = sync;
+        SettingsHandler::write_settings_file(ctx, settings)
+    })
+}
+
+/// Moves this device onto an epoch a verified batch established. A no-op when it is already
+/// there or ahead. The roster entries follow, exactly as a local revocation moves them.
+pub(crate) fn adopt_epoch(ctx: &EngineContext, epoch: u32) -> Result<(), EngineError> {
+    SettingsHandler::with_settings_lock(ctx, || {
+        let mut settings = settings_object(ctx)?;
+        let mut sync = sync_section(&settings);
+        if sync_epoch(&sync) >= epoch {
+            return Ok(());
+        }
+        let mut devices = roster(&settings)?;
+        for device in &mut devices {
+            device.epoch = epoch;
+        }
+        sync["epoch"] = json!(epoch);
         sync["devices"] = serde_json::to_value(&devices).map_err(|err| {
             EngineError::internal_error(format!("cannot encode the device roster: {err}"))
         })?;

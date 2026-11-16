@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 
 import { createApp } from '../src/core.js';
@@ -183,6 +184,71 @@ test('content type must be application/octet-stream', async () => {
   });
   assert.equal(response.status, 415);
   assert.deepEqual(store.keys(), []);
+});
+
+test('delete removes a blob, needs auth, and a second delete is 404', async () => {
+  const { app, store } = await makeApp();
+  const id = blobId();
+  const payload = new TextEncoder().encode('ciphertext');
+
+  assert.equal((await call(app, `/v1/blob/${id}`, { method: 'DELETE' })).status, 401);
+  assert.equal((await call(app, `/v1/blob/${id}`, { method: 'DELETE', token: 'wrong' })).status, 401);
+  // Never written: 404, and nothing is invented.
+  assert.equal((await call(app, `/v1/blob/${id}`, { method: 'DELETE', token: TOKEN })).status, 404);
+
+  await call(app, `/v1/blob/${id}`, { method: 'PUT', token: TOKEN, body: payload });
+  assert.deepEqual(await store.listPrefix('blob/'), [`blob/${id}`]);
+
+  assert.equal((await call(app, `/v1/blob/${id}`, { method: 'DELETE', token: TOKEN })).status, 204);
+  assert.equal((await call(app, `/v1/blob/${id}`, { token: TOKEN })).status, 404);
+  assert.deepEqual(await store.listPrefix('blob/'), []);
+  // Idempotent in effect, a 404 in answer: the second delete finds nothing to remove.
+  assert.equal((await call(app, `/v1/blob/${id}`, { method: 'DELETE', token: TOKEN })).status, 404);
+});
+
+test('delete rejects malformed ids and never touches a key outside blob/', async () => {
+  const { app, store } = await makeApp();
+  const head = await call(app, '/v1/head', {
+    method: 'PUT',
+    token: TOKEN,
+    body: bytes('head'),
+    headers: { 'if-none-match': '*' },
+  });
+  assert.equal(head.status, 204);
+  const kept = store.keys();
+
+  const ids = [
+    '..',
+    '.',
+    '%2e%2e',
+    '%2e%2e%2f%2e%2e%2fhead',
+    'a/b',
+    'A'.repeat(42),
+    'A'.repeat(44),
+    'A'.repeat(40) + '!',
+  ];
+  for (const id of ids) {
+    const response = await call(app, `/v1/blob/${id}`, { method: 'DELETE', token: TOKEN });
+    assert.ok([400, 404].includes(response.status), `id ${id} must be rejected, got ${response.status}`);
+  }
+  assert.equal((await call(app, '/v1/blob/', { method: 'DELETE', token: TOKEN })).status, 400);
+  assert.deepEqual(store.keys(), kept, 'no key outside the blob prefix was deleted');
+  assert.equal((await call(app, '/v1/head', { token: TOKEN })).status, 200);
+});
+
+test('delete does not refund the token quota', async () => {
+  const { app, store } = await makeApp({ quota: 100 });
+  const digest = createHash('sha256').update(TOKEN).digest('hex');
+  const usage = `usage/${digest}`;
+  const id = blobId();
+
+  assert.equal(
+    (await call(app, `/v1/blob/${id}`, { method: 'PUT', token: TOKEN, body: new Uint8Array(10) })).status,
+    204,
+  );
+  assert.equal(new TextDecoder().decode(await store.get(usage)), '10');
+  assert.equal((await call(app, `/v1/blob/${id}`, { method: 'DELETE', token: TOKEN })).status, 204);
+  assert.equal(new TextDecoder().decode(await store.get(usage)), '10', 'deleting is not a refund');
 });
 
 test('concurrent PUT of the same head has exactly one winner', async () => {

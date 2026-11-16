@@ -19,6 +19,7 @@ mod http;
 mod tls;
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use alloy_protocol::{EngineError, SyncMode, SyncState, SyncStatusReport};
 use alloy_storage::SecretStore;
@@ -33,15 +34,16 @@ use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use hmac::{Hmac, Mac};
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::context::EngineContext;
 use crate::handlers::settings::SettingsHandler;
 use crate::handlers::sync::{
-    build_bundle, device_key, enroll_recovered_device, has_master_key, import_bundle_value,
-    list_devices, master_key, settings_object, store_master_key, sync_epoch, sync_layer_statuses,
-    sync_section, unwrap_escrow,
+    adopt_epoch, build_bundle, device_key, enroll_recovered_device, has_master_key,
+    import_bundle_value, list_devices, master_key, settings_object, store_master_key, sync_epoch,
+    sync_layer_statuses, sync_section, unwrap_escrow,
 };
 use crate::support::now_ms;
 
@@ -52,6 +54,13 @@ const TOKEN_SECRET: &str = "alloy.sync.server_token.v1";
 
 /// Verified heads, persisted between runs so a replay is detectable across restarts.
 const HEAD_STORE_FILE: &str = "sync-heads.json";
+
+/// Blobs this device published, per epoch, persisted next to the head store. Revocation is the
+/// only consumer: the server offers no enumeration, so the client must know every id it wrote.
+const BLOB_INDEX_FILE: &str = "sync-blobs.json";
+
+/// Index file version. A file this build does not understand is refused, never guessed at.
+const BLOB_INDEX_VERSION: u32 = 1;
 
 /// Domain separator for the batch content root.
 const ROOT_DOMAIN: &[u8] = b"alloy-sync-v1/root/1";
@@ -158,6 +167,131 @@ impl ServerState {
                 .map(str::to_string),
         }
     }
+}
+
+/// One blob this device published: enough to name it for deletion, nothing that names content.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct IndexedBlob {
+    id: String,
+    /// The layer key (`settings`, `tags`, …), for a human reading the file.
+    layer: String,
+    seq: u64,
+}
+
+/// The on-disk shape, versioned so a future change is refused rather than misread.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BlobIndexFile {
+    version: u32,
+    #[serde(default)]
+    epochs: BTreeMap<u32, Vec<IndexedBlob>>,
+}
+
+/// Every blob this device published, grouped by the epoch it was sealed under.
+///
+/// The server cannot enumerate what it stores, so this local index is the only list of ids a
+/// revocation may delete. It is written after each successful `PUT`: a crash between the upload
+/// and the write would leave ciphertext the client could never name again.
+struct BlobIndex {
+    path: PathBuf,
+    epochs: BTreeMap<u32, Vec<IndexedBlob>>,
+}
+
+impl BlobIndex {
+    fn open(path: PathBuf) -> Result<Self, EngineError> {
+        let epochs = match std::fs::read(&path) {
+            Ok(bytes) => {
+                let file: BlobIndexFile = serde_json::from_slice(&bytes).map_err(|error| {
+                    EngineError::internal_error(format!(
+                        "the sync blob index {} is corrupt: {error}",
+                        path.display()
+                    ))
+                })?;
+                if file.version != BLOB_INDEX_VERSION {
+                    return Err(EngineError::internal_error(format!(
+                        "the sync blob index has version {}, not {BLOB_INDEX_VERSION}",
+                        file.version
+                    )));
+                }
+                file.epochs
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
+            Err(error) => {
+                return Err(EngineError::internal_error(format!(
+                    "cannot read the sync blob index {}: {error}",
+                    path.display()
+                )));
+            }
+        };
+        Ok(Self { path, epochs })
+    }
+
+    /// Records one blob as published under `epoch` and persists the index atomically.
+    fn record(
+        &mut self,
+        epoch: u32,
+        layer: &'static str,
+        seq: u64,
+        id: &str,
+    ) -> Result<(), EngineError> {
+        let entries = self.epochs.entry(epoch).or_default();
+        entries.retain(|blob| blob.id != id);
+        entries.push(IndexedBlob {
+            id: id.to_string(),
+            layer: layer.to_string(),
+            seq,
+        });
+        self.persist()
+    }
+
+    /// Epochs older than `epoch`, ascending. Their blobs are the ones a rotation invalidates.
+    fn older_epochs(&self, epoch: u32) -> Vec<u32> {
+        self.epochs
+            .keys()
+            .copied()
+            .filter(|old| *old < epoch)
+            .collect()
+    }
+
+    fn blobs(&self, epoch: u32) -> Vec<IndexedBlob> {
+        self.epochs.get(&epoch).cloned().unwrap_or_default()
+    }
+
+    /// Drops one id, so a later sweep does not retry what the server already removed.
+    fn forget(&mut self, epoch: u32, id: &str) {
+        if let Some(entries) = self.epochs.get_mut(&epoch) {
+            entries.retain(|blob| blob.id != id);
+            if entries.is_empty() {
+                self.epochs.remove(&epoch);
+            }
+        }
+    }
+
+    fn persist(&self) -> Result<(), EngineError> {
+        let file = BlobIndexFile {
+            version: BLOB_INDEX_VERSION,
+            epochs: self.epochs.clone(),
+        };
+        let bytes = serde_json::to_vec_pretty(&file).map_err(|error| {
+            EngineError::internal_error(format!("cannot encode the sync blob index: {error}"))
+        })?;
+        let temp = self.path.with_extension("json.tmp");
+        std::fs::write(&temp, bytes).map_err(|error| {
+            EngineError::internal_error(format!(
+                "cannot write the sync blob index {}: {error}",
+                temp.display()
+            ))
+        })?;
+        std::fs::rename(&temp, &self.path).map_err(|error| {
+            EngineError::internal_error(format!(
+                "cannot replace the sync blob index {}: {error}",
+                self.path.display()
+            ))
+        })
+    }
+}
+
+fn blob_index_path(ctx: &EngineContext) -> PathBuf {
+    ctx.data_dir.join(BLOB_INDEX_FILE)
 }
 
 /// `ConfigureSync`: validate the endpoint, probe it, pin it on first success, then sync once.
@@ -344,6 +478,8 @@ pub async fn recover(
     let mut signer: Option<(String, u32)> = None;
     if let Some((bytes, _etag)) = endpoint.get_head().await? {
         let (_, batch) = observe_head(&mut store, &bytes)?;
+        // A recovered device starts at epoch 0; the head names the epoch the account is on.
+        adopt_epoch(ctx, batch.header.epoch)?;
         pull_layers(ctx, &endpoint, &master, &batch).await?;
         signer = Some((batch.header.device_id.clone(), batch.header.epoch));
     }
@@ -457,6 +593,190 @@ pub async fn sync_now(ctx: &EngineContext) -> Result<(u64, u64, String, u32), En
     }
 }
 
+/// What a revocation managed to do on the server. The roster change and the epoch bump are the
+/// security boundary and stand on their own; this says how much of the ciphertext followed.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct RevokeOutcome {
+    /// The layers were re-published under the new epoch; the revoked device cannot open them.
+    pub re_sealed: bool,
+    /// Blobs from an older epoch the server confirmed gone (including already-absent ones).
+    pub blobs_deleted: u32,
+    /// Blobs from an older epoch the server still holds.
+    pub blobs_remaining: u32,
+    /// The master key rotated, so an existing recovery phrase no longer opens new data.
+    pub recovery_stale: bool,
+    /// Why the sweep was incomplete. The revocation itself is valid regardless.
+    pub error: Option<String>,
+}
+
+/// Re-seals the account after a device was revoked (ADR 0020 invariant 14).
+///
+/// Order is the whole design: rotate the master key, publish every enabled layer under the new
+/// epoch, and only then delete the older epoch's blobs. A failure before the publish deletes
+/// nothing, because losing data is worse than leaving ciphertext that is already unreadable to
+/// the revoked device. A failed delete leaves the rotation valid and is reported, never hidden.
+pub(crate) async fn reseal_after_revoke(ctx: &EngineContext, epoch: u32) -> RevokeOutcome {
+    let mut outcome = RevokeOutcome::default();
+
+    // The new epoch key must not be derivable from the key the revoked device still holds, so the
+    // root itself rotates. The old master is not kept: this device already holds its own data.
+    let had_master = match has_master_key(ctx).await {
+        Ok(had) => had,
+        Err(error) => {
+            outcome.error = Some(format!(
+                "the master key state could not be read: {}",
+                error.message
+            ));
+            return outcome;
+        }
+    };
+    let master = MasterKey::generate();
+    if let Err(error) = store_master_key(ctx, &master).await {
+        outcome.error = Some(format!(
+            "the master key could not be rotated: {}",
+            error.message
+        ));
+        return outcome;
+    }
+    outcome.recovery_stale = had_master;
+
+    let settings = match SettingsHandler::get_settings_file(ctx) {
+        Ok(settings) => settings,
+        Err(error) => {
+            outcome.error = Some(format!(
+                "the sync settings could not be read: {}",
+                error.message
+            ));
+            return outcome;
+        }
+    };
+    let server = ServerState::from_settings(&settings);
+    let Some(url) = server
+        .url
+        .clone()
+        .filter(|_| server.mode == SyncMode::Prefs)
+    else {
+        outcome.error = Some(
+            "sync is off, so only the master key rotated: no layers were re-sealed and no server \
+             blobs were deleted"
+                .to_string(),
+        );
+        return outcome;
+    };
+
+    let endpoint = match configured_endpoint(&server, &url, ctx).await {
+        Ok(endpoint) => endpoint,
+        Err(error) => {
+            outcome.error = Some(format!(
+                "the sync endpoint is not usable: {}",
+                error.message
+            ));
+            return outcome;
+        }
+    };
+    let bundle = match build_bundle(ctx, true, true).await {
+        Ok(bundle) => bundle,
+        Err(error) => {
+            outcome.error = Some(format!("the layers could not be read: {}", error.message));
+            return outcome;
+        }
+    };
+    let local_root = match content_root(&bundle) {
+        Ok(root) => root,
+        Err(error) => {
+            outcome.error = Some(format!("the layers could not be sealed: {}", error.message));
+            return outcome;
+        }
+    };
+    let signing = match device_key(ctx).await {
+        Ok(key) => key,
+        Err(error) => {
+            outcome.error = Some(format!("the device key is not usable: {}", error.message));
+            return outcome;
+        }
+    };
+    let device_id = hex(signing.verifying_key().as_bytes());
+    let mut store = match FileHeadStore::open(ctx.data_dir.join(HEAD_STORE_FILE)) {
+        Ok(store) => store,
+        Err(error) => {
+            outcome.error = Some(format!("the head store is not usable: {error}"));
+            return outcome;
+        }
+    };
+    let mut index = match BlobIndex::open(blob_index_path(ctx)) {
+        Ok(index) => index,
+        Err(error) => {
+            outcome.error = Some(format!(
+                "the published blob index is not usable, so nothing was deleted: {}",
+                error.message
+            ));
+            return outcome;
+        }
+    };
+
+    // Re-publish first. Every enabled layer goes out under the rotated key; only a head that
+    // names our new epoch proves the server holds what the revoked device cannot open.
+    if let Err(error) = publish(
+        &endpoint, &mut store, &mut index, &master, &signing, &device_id, epoch, &bundle,
+        local_root,
+    )
+    .await
+    {
+        outcome.error = Some(format!(
+            "the layers were not re-published, so no old blobs were deleted: {}",
+            error.message
+        ));
+        return outcome;
+    }
+    outcome.re_sealed = true;
+
+    // The new epoch is live; now the old ciphertext leaves. Leftovers are retried by the next
+    // revocation, because the index keeps every id the server did not confirm gone.
+    let mut first_error: Option<String> = None;
+    for old in index.older_epochs(epoch) {
+        for blob in index.blobs(old) {
+            match endpoint.delete_blob(&blob.id).await {
+                Ok(_deleted) => {
+                    outcome.blobs_deleted = outcome.blobs_deleted.saturating_add(1);
+                    index.forget(old, &blob.id);
+                }
+                Err(error) => {
+                    outcome.blobs_remaining = outcome.blobs_remaining.saturating_add(1);
+                    first_error.get_or_insert(error.message);
+                }
+            }
+        }
+    }
+    if let Err(error) = index.persist() {
+        first_error.get_or_insert(error.message);
+    }
+    if let Some(message) = first_error {
+        outcome.error = Some(format!(
+            "the revocation stands, but {} previous-epoch blob(s) were left on the server: {message}",
+            outcome.blobs_remaining
+        ));
+    }
+    outcome
+}
+
+/// Builds the endpoint exactly as a sync run would, without deciding whether sync is on.
+async fn configured_endpoint(
+    server: &ServerState,
+    url: &str,
+    ctx: &EngineContext,
+) -> Result<Endpoint, EngineError> {
+    let target = parse_target(url)?;
+    if target.secure && server.pin.is_none() {
+        return Err(EngineError::unavailable(
+            "the sync endpoint has no stored pin; configure it again",
+        ));
+    }
+    let token = read_token(ctx)
+        .await?
+        .ok_or_else(|| EngineError::unavailable("no sync token is stored for this endpoint"))?;
+    Endpoint::new(&target, token, server.pin.filter(|_| target.secure))
+}
+
 /// One pass: verify and pull the server head, then publish our layers on top of it.
 async fn run_once(ctx: &EngineContext) -> Result<(u64, u64, String, u32), EngineError> {
     let settings = SettingsHandler::get_settings_file(ctx)?;
@@ -470,22 +790,11 @@ async fn run_once(ctx: &EngineContext) -> Result<(u64, u64, String, u32), Engine
         .url
         .clone()
         .ok_or_else(|| EngineError::unavailable("no sync endpoint is configured"))?;
-    let target = parse_target(&url)?;
-    if target.secure && server.pin.is_none() {
-        // Never run an https endpoint unpinned after configuration: a lost pin is a reconfigure,
-        // not a silent trust-on-first-use.
-        return Err(EngineError::unavailable(
-            "the sync endpoint has no stored pin; configure it again",
-        ));
-    }
-    let token = read_token(ctx)
-        .await?
-        .ok_or_else(|| EngineError::unavailable("no sync token is stored for this endpoint"))?;
-    let endpoint = Endpoint::new(&target, token, server.pin.filter(|_| target.secure))?;
+    let endpoint = configured_endpoint(&server, &url, ctx).await?;
 
     let settings = SettingsHandler::get_settings_file(ctx)?;
     let sync = sync_section(&settings);
-    let epoch = sync_epoch(&sync);
+    let mut epoch = sync_epoch(&sync);
     let master = master_key(ctx).await?;
     let signing = device_key(ctx).await?;
     let device_id = hex(signing.verifying_key().as_bytes());
@@ -510,6 +819,12 @@ async fn run_once(ctx: &EngineContext) -> Result<(u64, u64, String, u32), Engine
             downloaded += bytes.len() as u64;
             let before = store.current().map(|record| record.head);
             let (_, batch) = observe_head(&mut store, &bytes)?;
+            // A rotation is visible only in the signed batch. Without adopting it, a surviving
+            // device would keep sealing under the old epoch after it got the new key.
+            if batch.header.epoch > epoch {
+                adopt_epoch(ctx, batch.header.epoch)?;
+                epoch = batch.header.epoch;
+            }
             remote_root = Some(batch.header.root_hash);
             let changed = store.current().map(|record| record.head) != before;
             if changed {
@@ -522,9 +837,11 @@ async fn run_once(ctx: &EngineContext) -> Result<(u64, u64, String, u32), Engine
     // sides converge, and publishing a pre-import bundle would overwrite the winner's content.
     let bundle = build_bundle(ctx, true, true).await?;
     let local_root = content_root(&bundle)?;
+    let mut index = BlobIndex::open(blob_index_path(ctx))?;
     if remote_root != Some(local_root) {
         let (sent, _) = publish(
-            &endpoint, &mut store, &master, &signing, &device_id, epoch, &bundle, local_root,
+            &endpoint, &mut store, &mut index, &master, &signing, &device_id, epoch, &bundle,
+            local_root,
         )
         .await?;
         uploaded += sent;
@@ -578,6 +895,7 @@ fn observe_head(
 async fn publish(
     endpoint: &Endpoint,
     store: &mut FileHeadStore,
+    index: &mut BlobIndex,
     master: &MasterKey,
     signing: &SigningKey,
     device_id: &str,
@@ -597,7 +915,10 @@ async fn publish(
             }
             Some((bytes, etag)) => {
                 let (head, batch) = observe_head(store, &bytes)?;
-                if batch.header.root_hash == local_root {
+                // Identical content at the same epoch is already published. The epoch matters:
+                // after a rotation the same layers must go out again under the new key even
+                // though their content root did not change.
+                if batch.header.root_hash == local_root && batch.header.epoch == epoch {
                     return Ok((uploaded, head));
                 }
                 (
@@ -609,9 +930,12 @@ async fn publish(
         };
 
         let (blobs, root) = prepare_layers(master, epoch, seq, bundle)?;
-        for (id, blob) in blobs {
-            uploaded += blob.len() as u64;
-            endpoint.put_blob(&id, blob).await?;
+        for blob in blobs {
+            uploaded += blob.bytes.len() as u64;
+            endpoint.put_blob(&blob.id, blob.bytes).await?;
+            // Persist after the upload, not before: an id the server never accepted must not be
+            // in the list a later revocation tries to delete.
+            index.record(epoch, blob.layer, seq, &blob.id)?;
         }
 
         let header = BatchHeader {
@@ -647,8 +971,15 @@ async fn publish(
     ))
 }
 
-/// Seals every layer for slot `(seq, epoch)`, returning `(blob id, blob)` and the content root.
-type PreparedLayers = (Vec<(String, Vec<u8>)>, [u8; 32]);
+/// One sealed layer ready to upload, with the layer name the index records beside its id.
+struct PreparedBlob {
+    id: String,
+    layer: &'static str,
+    bytes: Vec<u8>,
+}
+
+/// Seals every layer for slot `(seq, epoch)`, returning them and the content root.
+type PreparedLayers = (Vec<PreparedBlob>, [u8; 32]);
 
 fn prepare_layers(
     master: &MasterKey,
@@ -671,7 +1002,11 @@ fn prepare_layers(
                 layer.id()
             )),
         })?;
-        blobs.push((blob_id(master, &addr), bytes));
+        blobs.push(PreparedBlob {
+            id: blob_id(master, &addr),
+            layer: layer.id(),
+            bytes,
+        });
     }
     Ok((blobs, content_root(bundle)?))
 }
@@ -724,6 +1059,11 @@ fn blob_id(master: &MasterKey, addr: &BlobAddr) -> String {
 }
 
 /// Fetches and imports the layers a verified batch names.
+///
+/// Every enabled layer must be present and open: a batch is published only after all five blobs
+/// are uploaded, so a missing one means the server lost data or the head names an epoch this
+/// device cannot derive ids for. Importing the remainder would look like a converged sync while
+/// silently dropping configuration, so it blocks instead.
 async fn pull_layers(
     ctx: &EngineContext,
     endpoint: &Endpoint,
@@ -741,9 +1081,10 @@ async fn pull_layers(
             batch.header.epoch,
         );
         let id = blob_id(master, &addr);
-        let Some(bytes) = endpoint.get_blob(&id).await? else {
-            continue;
-        };
+        let bytes = endpoint
+            .get_blob(&id)
+            .await?
+            .ok_or_else(|| EngineError::sync_blocked("content"))?;
         downloaded += bytes.len() as u64;
         let plaintext =
             open(&ring, &addr, &bytes).map_err(|_| EngineError::sync_blocked("content"))?;
