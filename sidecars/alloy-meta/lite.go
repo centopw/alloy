@@ -84,6 +84,9 @@ type liteFlow struct {
 	// lastKey identifies the last returned step, so the same step coming back is reported as a
 	// rejection instead of being rendered again.
 	lastKey string
+	// awaitingCode records that the last returned step asked for a one-time code, which is what
+	// makes a challenge answerable with a code on this device.
+	awaitingCode bool
 }
 
 // liteLogin owns the messagix client that runs the flow and the flow state itself. The mutex
@@ -168,8 +171,7 @@ func (l *liteLogin) answerCode(ctx context.Context, code string) liteOutcome {
 func (f *liteFlow) run(ctx context.Context, input map[string]string) liteOutcome {
 	polled, err := f.poll(ctx, input)
 	if err != nil {
-		failure := liteFailure(err)
-		return liteOutcome{Failure: &failure}
+		return f.outcome(err)
 	}
 	if polled.Cookies != nil {
 		return liteOutcome{Cookies: polled.Cookies}
@@ -189,6 +191,9 @@ func (f *liteFlow) mapStep(step liteStep) liteOutcome {
 	kind, field, via := classifyLiteStep(step)
 	key := step.ID + "|" + kindName(kind)
 	repeat := key != "" && key == f.lastKey
+	// A challenge can only be answered with a code while the flow is waiting for one; every other
+	// turn loses that ability.
+	f.awaitingCode = kind == liteCode
 
 	switch kind {
 	case liteCredentials:
@@ -216,8 +221,9 @@ func (f *liteFlow) mapStep(step liteStep) liteOutcome {
 		f.lastKey = key
 		return liteOutcome{Step: codeStep(via)}
 	case liteBlocked:
-		failure := failureAccountLocked(liteCaptchaMessage)
-		return liteOutcome{Failure: &failure}
+		// A captcha is a checkpoint: only Meta's own site can render it, so the host points the user
+		// there and the attempt stays open for another answer.
+		return liteOutcome{Step: challengeStep(challengeCheckpoint, liteCaptchaMessage)}
 	default:
 		failure := failureNotSupported()
 		return liteOutcome{Failure: &failure}
@@ -314,18 +320,53 @@ func codeChannel(step liteStep, field string) string {
 	return "app"
 }
 
-// liteFailure classifies an error from the Bloks flow into the failures the contract distinguishes.
-// A checkpoint, challenge, consent prompt or suspension means only Meta's own site can unblock the
-// account; a 429 is a rate limit; a rejection of the submitted pair is an invalid input.
-func liteFailure(err error) LoginFailure {
+// The text the host shows for each challenge. The connector cannot clear any of them, so the copy
+// says where the user has to go.
+const (
+	challengeCheckpointMessage = "Facebook needs to confirm this sign-in on its own site or app: approve it on facebook.com or in the Facebook app, then try again"
+	challengeTwoFactorMessage  = "Facebook wants a two-factor code before it will let this device in; enter it below, or approve the sign-in on facebook.com or in the Facebook app, then try again"
+	challengeConsentMessage    = "Facebook wants the account holder to accept its consent screens; accept them on facebook.com or in the Facebook app, then try again"
+	accountSuspendedMessage    = "Facebook has suspended this account; resolve it on facebook.com or in the Facebook app"
+)
+
+// challengeFor reports whether err is one of Meta's own challenges, and which. Only a flow that is
+// waiting for a code can turn ErrChallengeRequired into a two-factor challenge: otherwise there is no
+// code field to answer with, so it stays the checkpoint form.
+func challengeFor(err error, awaitingCode bool) (kind, message string, ok bool) {
 	var checkpoint bloks.CheckpointError
 	switch {
 	case errors.As(err, &checkpoint),
-		errors.Is(err, httpclient.ErrCheckpointRequired),
-		errors.Is(err, httpclient.ErrChallengeRequired),
-		errors.Is(err, httpclient.ErrConsentRequired),
-		errors.Is(err, httpclient.ErrAccountSuspended):
-		return failureAccountLocked("Facebook requires you to confirm this login on its own site or app")
+		errors.Is(err, httpclient.ErrCheckpointRequired):
+		return challengeCheckpoint, challengeCheckpointMessage, true
+	case errors.Is(err, httpclient.ErrChallengeRequired):
+		if awaitingCode {
+			return challengeTwoFactor, challengeTwoFactorMessage, true
+		}
+		return challengeCheckpoint, challengeCheckpointMessage, true
+	case errors.Is(err, httpclient.ErrConsentRequired):
+		return challengeConsent, challengeConsentMessage, true
+	}
+	return "", "", false
+}
+
+// outcome classifies an error from a turn of the flow into what the protocol can carry. A challenge
+// becomes a step so the attempt stays open — the user can answer a code, switch to cookies, or retry
+// once Meta's site has been visited; everything else ends the attempt with the matching failure.
+func (f *liteFlow) outcome(err error) liteOutcome {
+	if kind, message, ok := challengeFor(err, f.awaitingCode); ok {
+		return liteOutcome{Step: challengeStep(kind, message)}
+	}
+	failure := liteFailure(err)
+	return liteOutcome{Failure: &failure}
+}
+
+// liteFailure classifies an error from the Bloks flow into the failures the contract distinguishes:
+// a suspension is an account lock, a 429 a rate limit, a rejection of the submitted pair an invalid
+// input. Challenges are not failures; [`outcome`] turns them into steps before this runs.
+func liteFailure(err error) LoginFailure {
+	switch {
+	case errors.Is(err, httpclient.ErrAccountSuspended):
+		return failureAccountLocked(accountSuspendedMessage)
 	case errors.Is(err, httpclient.ErrRateLimited):
 		return failureRateLimited(30_000)
 	case errors.Is(err, context.DeadlineExceeded):

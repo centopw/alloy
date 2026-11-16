@@ -6,6 +6,7 @@
   import { cookiesFromPaste } from '$lib/content/curlCookies';
   import { COUNTRIES, defaultCountry, parsePhone } from '$lib/content/phone';
   import type {
+    ChallengeKind,
     CookieFieldDto,
     LoginAlternativeDto,
     LoginFailureDto,
@@ -31,8 +32,17 @@
     onback: () => void;
   }
 
-  let { step, networkName, busy, error, onsubmit, onswitch, oncancel, onretry, onback }: Props =
-    $props();
+  let {
+    step,
+    networkName,
+    busy,
+    error,
+    onsubmit,
+    onswitch,
+    oncancel,
+    onretry,
+    onback,
+  }: Props = $props();
 
   let phone = $state('');
   let code = $state('');
@@ -210,6 +220,48 @@
       default:
         return null;
     }
+  }
+
+  // A challenge can only be cleared on Meta's own site, so the step names the one the connector
+  // reported and points there instead of asking for another local answer.
+  function challengeTitle(kind: ChallengeKind): string {
+    switch (kind) {
+      case 'checkpoint':
+        return t('onboarding-challenge-checkpoint-title');
+      case 'two_factor':
+        return t('onboarding-challenge-two-factor-title');
+      case 'consent':
+        return t('onboarding-challenge-consent-title');
+    }
+  }
+
+  function challengeBody(kind: ChallengeKind): string {
+    switch (kind) {
+      case 'checkpoint':
+        return t('onboarding-challenge-checkpoint-body');
+      case 'two_factor':
+        return t('onboarding-challenge-two-factor-body');
+      case 'consent':
+        return t('onboarding-challenge-consent-body');
+    }
+  }
+
+  /** The page the challenge has to be cleared on. */
+  const CHALLENGE_SITE_URL = 'https://www.facebook.com/';
+
+  function openChallengeSite() {
+    void openExternal(CHALLENGE_SITE_URL);
+  }
+
+  /**
+   * Answers the code a two-factor challenge asks for with the same `code` input a code step uses.
+   * The attempt is still open, so the connector takes the answer and continues.
+   */
+  function submitChallengeCode(e: SubmitEvent) {
+    e.preventDefault();
+    const answer = code.trim();
+    if (busy || answer.length === 0) return;
+    onsubmit({ type: 'code', code: answer });
   }
 
   // QR rendering: the payload is an opaque string; only the image crosses into the DOM.
@@ -494,6 +546,49 @@
   {:else if step.type === 'done'}
     <h3>{t('onboarding-done-title')}</h3>
     <p class="hint" role="status">{t('onboarding-done-hint', { network: networkName })}</p>
+  {:else if step.type === 'challenge'}
+    <h3>{challengeTitle(step.kind)}</h3>
+    <p class="error" role="alert">{challengeBody(step.kind)}</p>
+    {#if step.message.trim().length > 0}
+      <p class="hint">{step.message}</p>
+    {/if}
+    {#if step.kind === 'two_factor'}
+      <form onsubmit={submitChallengeCode}>
+        <label>
+          <span>{t('onboarding-code-label')}</span>
+          <TextField
+            type="text"
+            bind:value={code}
+            inputmode="numeric"
+            autocomplete="one-time-code"
+            pattern="[0-9]*"
+            autofocus
+            required
+          />
+        </label>
+        <div class="actions">
+          <Button type="submit" disabled={busy || code.trim().length === 0}>
+            {busy ? t('onboarding-working') : t('onboarding-challenge-verify')}
+          </Button>
+        </div>
+      </form>
+    {/if}
+    <div class="actions">
+      <Button variant="ghost" type="button" onclick={onback}>
+        {t('onboarding-use-another-network')}
+      </Button>
+      <Button variant="ghost" type="button" disabled={busy} onclick={onretry}>
+        {t('common-retry')}
+      </Button>
+      <Button type="button" onclick={openChallengeSite}>
+        {t('onboarding-challenge-open-facebook')}
+      </Button>
+    </div>
+    <div class="alternatives">
+      <button type="button" class="link" disabled={busy} onclick={() => chooseAlternative('cookies')}>
+        {t('onboarding-alternative-cookies')}
+      </button>
+    </div>
   {:else if step.type === 'failed'}
     <h3>{t('onboarding-failed-title')}</h3>
     <p class="error" role="alert">{failureText(step.reason)}</p>

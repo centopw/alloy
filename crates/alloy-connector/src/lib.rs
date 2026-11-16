@@ -38,7 +38,9 @@ pub use capabilities::Capabilities;
 pub use connector::{Connector, LocalAttachment, OutgoingMessage, Page, SendAck};
 pub use error::ConnectorError;
 pub use events::{ConnectionState, ConnectorEvent};
-pub use login::{CodeChannel, CookieField, LoginAlternative, LoginFailure, LoginInput, LoginStep};
+pub use login::{
+    ChallengeKind, CodeChannel, CookieField, LoginAlternative, LoginFailure, LoginInput, LoginStep,
+};
 pub use rpc::{Frame, PROTOCOL_VERSION, decode_frame, encode_frame};
 pub use types::{
     ChatKind, MediaRef, MessageKind, Network, RemoteChat, RemoteMember, RemoteMessage, RemoteUser,

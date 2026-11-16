@@ -7,8 +7,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use alloy_connector::fake::{
-    FAKE_CHAT_CHANNEL, FAKE_CHAT_DIRECT, FAKE_CHAT_FORUM, FAKE_CHAT_GROUP, FAKE_CODE, FAKE_USER_ID,
-    FakeConnector,
+    FAKE_CHALLENGE_CODE, FAKE_CHAT_CHANNEL, FAKE_CHAT_DIRECT, FAKE_CHAT_FORUM, FAKE_CHAT_GROUP,
+    FAKE_CODE, FAKE_USER_ID, FakeConnector,
 };
 use alloy_connector::{ConnectionState, Connector, ConnectorEvent};
 use alloy_engine::factory::FakeConnectorFactory;
@@ -291,6 +291,87 @@ async fn login_state_machine_creates_an_account() {
     match changed {
         EngineEvent::AccountsChanged { accounts } => assert_eq!(accounts[0].id, account.id),
         other => panic!("unexpected event: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn login_challenge_keeps_the_attempt_open() {
+    let harness = Harness::new();
+    let (login_id, step) = begin_login(&harness.engine).await;
+    assert_eq!(step, LoginStepDto::PhoneNumber);
+    let step = submit_login(
+        &harness.engine,
+        &login_id,
+        LoginInputDto::PhoneNumber {
+            phone: "+15550100".to_string(),
+        },
+    )
+    .await;
+    assert!(matches!(step, LoginStepDto::Code { .. }));
+
+    // The network interrupts the sign-in with a checkpoint: the UI gets the kind and the network's
+    // own words, so it can name the problem and point at the network's site instead of dead-ending.
+    let step = submit_login(
+        &harness.engine,
+        &login_id,
+        LoginInputDto::Code {
+            code: FAKE_CHALLENGE_CODE.to_string(),
+        },
+    )
+    .await;
+    match step {
+        LoginStepDto::Challenge { kind, message } => {
+            assert_eq!(kind, alloy_protocol::ChallengeKind::Checkpoint);
+            assert!(
+                message.contains("own site"),
+                "the network's own explanation must survive: {message}"
+            );
+        }
+        other => panic!("a checkpoint must arrive as a step: {other:?}"),
+    }
+    assert!(list_accounts(&harness.engine).await.is_empty());
+
+    // The challenge is not terminal: the same attempt answers again and still finishes, which is
+    // what lets the UI leave its code field and "Try again" working while the user clears it.
+    let step = submit_login(
+        &harness.engine,
+        &login_id,
+        LoginInputDto::Code {
+            code: FAKE_CODE.to_string(),
+        },
+    )
+    .await;
+    match step {
+        LoginStepDto::Done { account } => assert_eq!(account.network, Network::Fake),
+        other => panic!("the attempt must stay answerable after a challenge: {other:?}"),
+    }
+    assert_eq!(list_accounts(&harness.engine).await.len(), 1);
+
+    // Every kind crosses the connector/protocol boundary one-for-one.
+    for (connector, protocol) in [
+        (
+            alloy_connector::ChallengeKind::Checkpoint,
+            alloy_protocol::ChallengeKind::Checkpoint,
+        ),
+        (
+            alloy_connector::ChallengeKind::TwoFactor,
+            alloy_protocol::ChallengeKind::TwoFactor,
+        ),
+        (
+            alloy_connector::ChallengeKind::Consent,
+            alloy_protocol::ChallengeKind::Consent,
+        ),
+    ] {
+        assert_eq!(
+            alloy_engine::convert::pending_login_step(alloy_connector::LoginStep::Challenge {
+                kind: connector,
+                message: "clear it on Meta's site".to_string(),
+            }),
+            Some(alloy_protocol::LoginStepDto::Challenge {
+                kind: protocol,
+                message: "clear it on Meta's site".to_string(),
+            })
+        );
     }
 }
 

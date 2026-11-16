@@ -283,10 +283,12 @@ class SessionStore {
     this.loginError = null;
   }
 
-  /** Starts the attempt over on the same network after a `Failed` step. */
+  /** Starts the attempt over on the same network after a `Failed` step or a challenge. */
   async retryLogin() {
     const network = this.login?.network;
-    this.dismissLogin();
+    // A challenge step leaves the attempt open, so it is cancelled first; a `Failed` step already
+    // ended it and there is nothing to cancel.
+    if (this.login) await this.cancelLogin();
     if (network) await this.beginLogin(network);
   }
 

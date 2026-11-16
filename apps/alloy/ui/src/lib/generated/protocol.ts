@@ -96,6 +96,20 @@ export type CapabilitiesDto = {
 	topics?: boolean,
 };
 
+/**
+ *  Which of the network's own challenges is holding the sign-in.
+ * 
+ *  The network clears a challenge on its own site or app, so the UI names it and points the user
+ *  there while keeping the attempt open (see [`LoginStepDto::Challenge`]).
+ */
+export type ChallengeKind = 
+/**  The network wants this sign-in confirmed on its own site or app. */
+"checkpoint" | 
+/**  The network wants a two-factor code the challenge step asks for. */
+"two_factor" | 
+/**  The network wants a consent screen accepted first. */
+"consent";
+
 /**  Kind of a chat, in network-neutral terms. */
 export type ChatKind = "direct" | "group" | "channel";
 
@@ -152,6 +166,16 @@ export type EngineCommand =
 } } | 
 /**  Removes the account and its local data after revoking the session on the network. */
 { action: "Logout"; params: {
+	account_id: AccountId,
+} } | 
+/**
+ *  Restarts one account's connector.
+ * 
+ *  A connector retries transient failures on its own, but one that has given up — a sidecar
+ *  out of restarts, a socket that never came back — only comes back when it is started again.
+ *  The account's chats and history stay in place; only the network session is rebuilt.
+ */
+{ action: "ReconnectAccount"; params: {
 	account_id: AccountId,
 } } | 
 /**
@@ -461,6 +485,8 @@ export type EngineResponse = { type: "AccountsList"; payload: {
 { type: "Networks"; payload: {
 	networks: NetworkInfoDto[],
 } } | 
+/**  The account's connector was restarted. */
+{ type: "AccountReconnected" } | 
 /**  The application pair is sealed; the hash is never returned. */
 { type: "TelegramAppSet"; payload: {
 	configured: boolean,
@@ -711,6 +737,14 @@ username_label: string;
  *  and answers with [`LoginInputDto::Switch`].
  */
 alternatives: LoginAlternativeDto[] } | 
+/**
+ *  The network wants this sign-in cleared on its own site or app. Not terminal: the attempt
+ *  stays open, so the user can clear it there and answer with a code (when `kind` is
+ *  [`ChallengeKind::TwoFactor`]), switch methods, or cancel.
+ */
+{ type: "challenge"; kind: ChallengeKind; 
+/**  The network's own explanation, shown next to the UI's copy. */
+message: string } | 
 /**  Login finished; the account is stored and the connector starts. */
 { type: "done"; account: Account } | 
 /**  The attempt failed. Terminal for this attempt. */
@@ -926,6 +960,14 @@ export type RoomSummary = {
 	is_direct: boolean,
 	unread_notifications: NotificationCount,
 	latest_event: TimelineItemPreview | null,
+	/**
+	 *  When the chat last saw activity, in milliseconds since the epoch, as the network reports it.
+	 * 
+	 *  `latest_event` only exists once `latest_event`'s message is stored on this device; a forum
+	 *  topic that has never been opened has its network timestamp but no history here, and the rail
+	 *  still has to place it where it belongs. Sorting uses this, falling back to the preview.
+	 */
+	last_activity_millis?: number | null,
 	pinned: boolean,
 	/**
 	 *  Position among the account's pinned chats, `0` at the top; `None` when not pinned. The

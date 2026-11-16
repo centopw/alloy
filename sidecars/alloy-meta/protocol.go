@@ -421,12 +421,22 @@ type CookieField struct {
 }
 
 // LoginFailure mirrors alloy_connector::LoginFailure.
+//
+// Field is set only for "invalid_input", RetryAfterMs only for "rate_limited".
 type LoginFailure struct {
 	Type         string  `json:"type"`
 	Field        *string `json:"field,omitempty"`
 	Message      string  `json:"message,omitempty"`
 	RetryAfterMs *uint64 `json:"retry_after_ms,omitempty"`
 }
+
+// The challenge kinds the shared contract distinguishes. A challenge is cleared on Meta's own site
+// or app; the kind only decides which explanation and which affordances the UI leads with.
+const (
+	challengeCheckpoint = "checkpoint"
+	challengeTwoFactor  = "two_factor"
+	challengeConsent    = "consent"
+)
 
 func failureInvalidInput(field, message string) LoginFailure {
 	return LoginFailure{Type: "invalid_input", Field: &field, Message: message}
@@ -456,6 +466,8 @@ type LoginStep struct {
 	Fields        []CookieField `json:"fields,omitempty"`
 	HelpURL       *string       `json:"help_url,omitempty"`
 	Via           string        `json:"via,omitempty"`
+	Kind          string        `json:"kind,omitempty"`
+	Message       string        `json:"message,omitempty"`
 	UsernameLabel string        `json:"username_label,omitempty"`
 	Alternatives  []string      `json:"alternatives,omitempty"`
 	RemoteUserID  string        `json:"remote_user_id,omitempty"`
@@ -499,6 +511,12 @@ func doneStep(remoteUserID, displayName, session string) LoginStep {
 
 func failedStep(reason LoginFailure) LoginStep {
 	return LoginStep{Type: "failed", Reason: &reason}
+}
+
+// challengeStep asks the user to clear the network's own challenge. It is an ordinary step, not a
+// failure: the attempt stays open, so a code answer, a method switch or a retry all still work.
+func challengeStep(kind, message string) LoginStep {
+	return LoginStep{Type: "challenge", Kind: kind, Message: message}
 }
 
 // LoginInput mirrors alloy_connector::LoginInput.

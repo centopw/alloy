@@ -138,6 +138,9 @@ composer-text-formatting = Định dạng văn bản
 composer-your-text-becomes-the-caption = Văn bản đã nhập sẽ thành chú thích
 confirm-dialog-working = Đang xử lý...
 connection-banner-retry-now = Thử lại ngay
+connection-banner-reconnect = Kết nối lại
+connection-banner-messages-wait = Tin bạn gửi sẽ được đưa đi khi kết nối trở lại.
+connection-banner-trying = Đang thử…
 context-menu-actions = Hành động
 context-menu-message-actions = Hành động tin nhắn
 context-menu-no-matches = Không có kết quả phù hợp
@@ -747,6 +750,14 @@ onboarding-failure-not-supported = Mạng này không hỗ trợ cách đăng nh
 onboarding-failure-rate-limited = Quá nhiều lần thử. Hãy đợi { $seconds } giây rồi thử lại.
 onboarding-failure-network = Không thể kết nối đến mạng.
 onboarding-failure-account-locked = Mạng đã khóa tài khoản này. Hãy hoàn tất bước xác minh trên trang web hoặc ứng dụng của chính { $network }, sau đó quay lại thử lại.
+onboarding-challenge-checkpoint-title = Xác nhận lần đăng nhập này trên Facebook
+onboarding-challenge-checkpoint-body = Facebook cần chấp thuận lần đăng nhập này trước khi thiết bị này hoàn tất được.
+onboarding-challenge-two-factor-title = Nhập mã Facebook đã gửi cho bạn
+onboarding-challenge-two-factor-body = Facebook yêu cầu mã xác minh trước khi cho thiết bị này đăng nhập.
+onboarding-challenge-consent-title = Chấp nhận điều khoản của Facebook để tiếp tục
+onboarding-challenge-consent-body = Facebook muốn bạn chấp nhận điều khoản trước khi thiết bị này đăng nhập.
+onboarding-challenge-verify = Xác nhận mã
+onboarding-challenge-open-facebook = Mở Facebook
 onboarding-use-another-network = Chọn mạng khác
 
 # chat (v2)

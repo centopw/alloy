@@ -37,6 +37,23 @@ pub enum CodeChannel {
     Other,
 }
 
+/// Which of the network's own challenges is holding the sign-in.
+///
+/// A challenge is cleared on the network's own site or app: the connector cannot do it, so it says
+/// which one it is and the host guides the user there. The attempt stays open meanwhile (see
+/// [`LoginStep::Challenge`]), because the network may accept the answer once the user has cleared it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChallengeKind {
+    /// Meta wants this sign-in confirmed on facebook.com or in the Facebook app before the device
+    /// may continue.
+    Checkpoint,
+    /// Meta wants a two-factor code; entering it on the challenge step continues the flow.
+    TwoFactor,
+    /// Meta wants the account holder to accept a consent screen (new terms, data policy) first.
+    Consent,
+}
+
 /// Why a login attempt ended. A `Failed` step ends the attempt; the host restarts with
 /// [`crate::Connector::begin_login`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -56,8 +73,8 @@ pub enum LoginFailure {
     RateLimited { retry_after_ms: u64 },
     /// Transport failure while logging in.
     Network { message: String },
-    /// The network blocked the account itself (Messenger checkpoint, account restriction). The user
-    /// has to resolve it on the network's own site or app; no local retry helps.
+    /// The network blocked the account itself (suspension, restriction). The user has to resolve it
+    /// on the network's own site or app; no local retry helps.
     AccountLocked { message: String },
 }
 
@@ -97,6 +114,16 @@ pub enum LoginStep {
         /// is the only way in; the UI offers a link per entry and answers with
         /// [`LoginInput::Switch`].
         alternatives: Vec<LoginAlternative>,
+    },
+    /// The network wants this sign-in cleared on its own site or app before this device continues.
+    ///
+    /// The attempt stays open, so the user clears it there and answers with a code (when `kind` is
+    /// [`ChallengeKind::TwoFactor`]), switches to another method, or cancels. Nothing local ends the
+    /// attempt: the network's own site is where the challenge lives.
+    Challenge {
+        kind: ChallengeKind,
+        /// The network's own explanation, shown next to the host's copy.
+        message: String,
     },
     /// Login finished. The session blob must be persisted before the connector is started.
     Done {

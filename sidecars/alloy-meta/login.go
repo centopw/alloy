@@ -140,7 +140,7 @@ func (m *Messenger) finishLiteLogin(ctx context.Context, c *cookies.Cookies, fai
 	cli.MessengerLite.SetNativeSession(native)
 	user, initial, err := cli.LoadMessagesPage(ctx)
 	if err != nil {
-		return fail(loginFailure(err, "password"))
+		return settleCookieError(err, "password", fail)
 	}
 	if cookieUser := c.GetUserID(); cookieUser != 0 && cookieUser != user.GetFBID() {
 		return fail(failureInvalidInput("password", "the session belongs to a different account than the login"))
@@ -177,7 +177,7 @@ func (m *Messenger) submitCookies(ctx context.Context, values map[string]string,
 	cli := m.settings.newMessagixClient(m.logger(), c)
 	user, initial, err := cli.LoadMessagesPage(ctx)
 	if err != nil {
-		return fail(loginFailure(err, "cookies"))
+		return settleCookieError(err, "cookies", fail)
 	}
 	if cookieUser := c.GetUserID(); cookieUser != 0 && cookieUser != user.GetFBID() {
 		return fail(failureInvalidInput("cookies", "the cookies belong to a different account than c_user"))
@@ -212,16 +212,13 @@ func (m *Messenger) endLogin() {
 	m.mu.Unlock()
 }
 
-// loginFailure classifies a login error into the four cases the contract distinguishes:
-// rejected input, a locked account, a rate limit, and everything transport-level. field names the
-// input the user should correct.
+// loginFailure classifies a login error into the cases the contract distinguishes: rejected input,
+// a locked account, a rate limit, and everything transport-level. field names the input the user
+// should correct. Challenges never reach it: [`settleCookieError`] returns them as steps.
 func loginFailure(err error, field string) LoginFailure {
 	switch {
-	case errors.Is(err, httpclient.ErrCheckpointRequired),
-		errors.Is(err, httpclient.ErrChallengeRequired),
-		errors.Is(err, httpclient.ErrConsentRequired),
-		errors.Is(err, httpclient.ErrAccountSuspended):
-		return failureAccountLocked("Facebook requires you to confirm this login on its own site or app")
+	case errors.Is(err, httpclient.ErrAccountSuspended):
+		return failureAccountLocked(accountSuspendedMessage)
 	case errors.Is(err, httpclient.ErrRateLimited):
 		return failureRateLimited(30_000)
 	case errors.Is(err, httpclient.ErrTokenInvalidated),
@@ -238,4 +235,17 @@ func loginFailure(err error, field string) LoginFailure {
 		return failureNetwork(message)
 	}
 	return failureInvalidInput(field, message)
+}
+
+// settleCookieError maps an error from the cookie path onto the protocol. A challenge becomes a step
+// and the attempt stays open, so the user can clear it on Meta's own site and submit the cookies (or
+// a code) again; everything else ends the attempt.
+//
+// The cookie path never drives the Bloks state machine, so there is no code field waiting here: a
+// challenge is always the checkpoint form.
+func settleCookieError(err error, field string, fail loginFail) (any, *WireError) {
+	if kind, message, ok := challengeFor(err, false); ok {
+		return challengeStep(kind, message), nil
+	}
+	return fail(loginFailure(err, field))
 }

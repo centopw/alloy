@@ -311,6 +311,21 @@ pub enum CodeChannel {
     Other,
 }
 
+/// Which of the network's own challenges is holding the sign-in.
+///
+/// The network clears a challenge on its own site or app, so the UI names it and points the user
+/// there while keeping the attempt open (see [`LoginStepDto::Challenge`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum ChallengeKind {
+    /// The network wants this sign-in confirmed on its own site or app.
+    Checkpoint,
+    /// The network wants a two-factor code the challenge step asks for.
+    TwoFactor,
+    /// The network wants a consent screen accepted first.
+    Consent,
+}
+
 /// Why a login attempt ended. A `Failed` step is terminal for that attempt; the UI restarts with
 /// `BeginLogin`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -379,6 +394,14 @@ pub enum LoginStepDto {
         /// Other sign-in methods this account may use instead; the UI offers one link per entry
         /// and answers with [`LoginInputDto::Switch`].
         alternatives: Vec<LoginAlternativeDto>,
+    },
+    /// The network wants this sign-in cleared on its own site or app. Not terminal: the attempt
+    /// stays open, so the user can clear it there and answer with a code (when `kind` is
+    /// [`ChallengeKind::TwoFactor`]), switch methods, or cancel.
+    Challenge {
+        kind: ChallengeKind,
+        /// The network's own explanation, shown next to the UI's copy.
+        message: String,
     },
     /// Login finished; the account is stored and the connector starts.
     Done { account: Account },
@@ -501,6 +524,14 @@ pub struct RoomSummary {
     pub is_direct: bool,
     pub unread_notifications: NotificationCount,
     pub latest_event: Option<TimelineItemPreview>,
+    /// When the chat last saw activity, in milliseconds since the epoch, as the network reports it.
+    ///
+    /// `latest_event` only exists once `latest_event`'s message is stored on this device; a forum
+    /// topic that has never been opened has its network timestamp but no history here, and the rail
+    /// still has to place it where it belongs. Sorting uses this, falling back to the preview.
+    #[serde(default)]
+    #[specta(type = Option<Number>)]
+    pub last_activity_millis: Option<u64>,
     pub pinned: bool,
     /// Position among the account's pinned chats, `0` at the top; `None` when not pinned. The
     /// room list is already delivered in this order; the UI uses it to render drag handles and
@@ -839,6 +870,14 @@ pub enum EngineCommand {
     Logout {
         account_id: AccountId,
     },
+    /// Restarts one account's connector.
+    ///
+    /// A connector retries transient failures on its own, but one that has given up — a sidecar
+    /// out of restarts, a socket that never came back — only comes back when it is started again.
+    /// The account's chats and history stay in place; only the network session is rebuilt.
+    ReconnectAccount {
+        account_id: AccountId,
+    },
     /// Stores the Telegram application pair, sealed in the OS keyring, so a login can start.
     ///
     /// `api_id` must be positive and `api_hash` a 32-character hex string. The hash is never
@@ -1122,6 +1161,8 @@ pub enum EngineResponse {
     Networks {
         networks: Vec<NetworkInfoDto>,
     },
+    /// The account's connector was restarted.
+    AccountReconnected,
     /// The application pair is sealed; the hash is never returned.
     TelegramAppSet {
         configured: bool,
@@ -1429,6 +1470,7 @@ pub fn register_types() -> Types {
         .register::<Account>()
         .register::<CookieFieldDto>()
         .register::<CodeChannel>()
+        .register::<ChallengeKind>()
         .register::<LoginFailureDto>()
         .register::<LoginStepDto>()
         .register::<LoginInputDto>()
@@ -1550,6 +1592,7 @@ mod tests {
                 highlight_count: 1,
                 notification_count: 2,
             },
+            last_activity_millis: Some(1_700_000_000_000),
             latest_event: Some(TimelineItemPreview {
                 sender: UserId("u-1".into()),
                 timestamp_millis: 1_700_000_000_000,

@@ -158,6 +158,10 @@ itself: it shows the step it is given and submits the user's answer.
 - `submit_login(LoginInput) -> LoginStep` — consumes the answer and returns the next step. Wrong,
   expired or out-of-order input is a `Failed` step.
 - `Failed` is **terminal** for that attempt: the host restarts with `begin_login()`.
+- `Challenge { kind, message }` is a **step**, not a failure: the network wants the sign-in cleared
+  on its own site or app (`kind` is `checkpoint`, `two_factor` or `consent`). The attempt stays open,
+  so the user can clear it there and answer with a code (when the kind is `two_factor`), switch
+  methods, or cancel — the UI names the challenge and points at the network's site meanwhile.
 - `LoginFailure` distinguishes rejected input (with the offending `field`), expired steps, rate
   limits, transport failures, an unsupported login method, and a network-locked account.
 - `Done { remote_user_id, display_name, session }` — the host persists `session` before calling

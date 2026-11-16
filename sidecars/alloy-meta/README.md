@@ -90,15 +90,18 @@ Steps the flow can ask for after the credentials:
 | password re-entry | `password` |
 | 2FA, SMS, WhatsApp, backup or email code | `code` with `via` = `app`, `sms`, `other` or `email` |
 | approve-the-login-on-another-device | `code` with `via` = `app` (whatever code is sent is unused) |
-| captcha | `failed` with `account_locked` |
+| captcha | `challenge` with `kind: checkpoint` |
 
 Every answer goes back with `submit_login` (`{"type":"code","code":"…"}`,
 `{"type":"password","password":"…"}`) and the loop ends with a `done` step. A step that comes back
 after it was answered means the network rejected the answer: the connector reports `invalid_input`
 on field `code` or `password` with the network's own reason instead of prompting again.
-Rate limits produce `rate_limited`, checkpoints and suspicious-activity blocks produce
-`account_locked`, and a two-factor method picker or Meta's Google sign-in (which the connector
-cannot render) ends with `not_supported`.
+Rate limits produce `rate_limited`. A checkpoint, a consent screen or a challenge the flow cannot
+answer with a code produces a `challenge` step with `kind` = `checkpoint`, `consent` or
+`two_factor`: the host names it and points the user at `facebook.com`, and the attempt stays open,
+so a code answer, the cookie fallback or a retry all still work. Only a suspension is
+`account_locked`; a two-factor method picker or Meta's Google sign-in (which the connector cannot
+render) ends with `not_supported`.
 
 Cookie import stays available as the fallback: `submit_login` with
 `{"type":"switch","to":"cookies"}` returns the `cookies` step asking for `datr`, `c_user`, `xs`
@@ -125,8 +128,9 @@ risk of the messagix approach, documented upstream:
 <https://github.com/mautrix/meta/issues/44>. Logging in with a password is no riskier than
 importing cookies — both produce the same kind of session — but the network may answer either
 with a checkpoint, and only the user can clear that on Facebook's own site or in the official
-app. The sidecar never creates accounts and never bypasses a checkpoint; it reports
-`account_locked` and stops.
+app. The sidecar never creates accounts and never bypasses a checkpoint; it reports `challenge`
+with `kind: checkpoint` (or `two_factor`/`consent`) and stops. Only a suspended account is
+reported as `account_locked`.
 
 ## Licence
 

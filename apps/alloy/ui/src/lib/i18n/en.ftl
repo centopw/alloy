@@ -141,6 +141,9 @@ composer-text-formatting = Text formatting
 composer-your-text-becomes-the-caption = Your text becomes the caption
 confirm-dialog-working = Working...
 connection-banner-retry-now = Retry now
+connection-banner-reconnect = Reconnect
+connection-banner-messages-wait = Messages you send will go out when the connection returns.
+connection-banner-trying = Trying…
 context-menu-actions = Actions
 context-menu-message-actions = Message actions
 context-menu-no-matches = No matches
@@ -756,6 +759,14 @@ onboarding-failure-not-supported = This network does not offer that sign-in meth
 onboarding-failure-rate-limited = Too many attempts. Wait { $seconds } seconds, then try again.
 onboarding-failure-network = The network could not be reached.
 onboarding-failure-account-locked = The network locked this account. Finish its check on { $network }'s own site or app first, then come back and try again.
+onboarding-challenge-checkpoint-title = Confirm this sign-in on Facebook
+onboarding-challenge-checkpoint-body = Facebook needs to approve this sign-in before this device can finish.
+onboarding-challenge-two-factor-title = Enter the code Facebook sent you
+onboarding-challenge-two-factor-body = Facebook wants a verification code before it lets this device in.
+onboarding-challenge-consent-title = Accept Facebook's terms to continue
+onboarding-challenge-consent-body = Facebook wants you to accept its terms before this device can sign in.
+onboarding-challenge-verify = Verify code
+onboarding-challenge-open-facebook = Open Facebook
 onboarding-use-another-network = Choose another network
 
 # chat (v2)

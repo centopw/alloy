@@ -14,9 +14,11 @@
 //! `begin_login` returns [`LoginStep::PhoneNumber`]. Any non-empty number is accepted and answered
 //! with [`LoginStep::Code`] (`via: app`, five characters). The only accepted code is [`FAKE_CODE`].
 //! A wrong code returns [`LoginStep::Failed`] with
-//! [`LoginFailure::InvalidInput`](crate::LoginFailure::InvalidInput) naming the `code` field; a
-//! failed step is terminal, so the host restarts with `begin_login`. QR, password, cookie and
-//! credential inputs are not modelled: they return a `Failed` step with
+//! [`LoginFailure::InvalidInput`](crate::LoginFailure::InvalidInput) naming the `code` field;
+//! [`FAKE_CHALLENGE_CODE`] returns a [`LoginStep::Challenge`] the way a network checkpoint does,
+//! leaving the attempt open so the next code can finish the sign-in. A failed step is terminal, so
+//! the host restarts with `begin_login`. QR, password, cookie and credential inputs are not
+//! modelled: they return a `Failed` step with
 //! [`LoginFailure::NotSupported`](crate::LoginFailure::NotSupported).
 //!
 //! # Session blobs
@@ -38,7 +40,7 @@ use crate::capabilities::Capabilities;
 use crate::connector::{Connector, OutgoingMessage, Page, SendAck};
 use crate::error::ConnectorError;
 use crate::events::{ConnectionState, ConnectorEvent};
-use crate::login::{CodeChannel, LoginFailure, LoginInput, LoginStep};
+use crate::login::{ChallengeKind, CodeChannel, LoginFailure, LoginInput, LoginStep};
 use crate::types::{
     ChatKind, MediaRef, MessageKind, Network, RemoteChat, RemoteMember, RemoteMessage, RemoteUser,
     SessionBlob,
@@ -46,6 +48,9 @@ use crate::types::{
 
 /// The only login code the fake accepts.
 pub const FAKE_CODE: &str = "12345";
+/// A login code the fake answers with a checkpoint instead of a session: only the network's own site
+/// can clear it, so the attempt ends with [`crate::LoginFailure::Challenge`].
+pub const FAKE_CHALLENGE_CODE: &str = "77777";
 /// Remote user id of the account the fake logs in as.
 pub const FAKE_USER_ID: &str = "fake-self";
 /// Display name of the account the fake logs in as.
@@ -234,6 +239,15 @@ impl Connector for FakeConnector {
                 }
             }
             (LoginState::AwaitingCode, LoginInput::Code { code }) => {
+                if code.trim() == FAKE_CHALLENGE_CODE {
+                    // The network interrupts the flow with a checkpoint. It is a step, not a
+                    // failure: the attempt stays where it was, so answering again can still finish.
+                    inner.login = LoginState::AwaitingCode;
+                    return LoginStep::Challenge {
+                        kind: ChallengeKind::Checkpoint,
+                        message: "confirm this sign-in on the network's own site".to_string(),
+                    };
+                }
                 if code.trim() != FAKE_CODE {
                     return failed(Some("code"), "incorrect code");
                 }

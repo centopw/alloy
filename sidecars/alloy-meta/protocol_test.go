@@ -16,6 +16,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"go.mau.fi/mautrix-meta/pkg/messagix/cookies"
+	"go.mau.fi/mautrix-meta/pkg/messagix/httpclient"
 	"go.mau.fi/mautrix-meta/pkg/messagix/table"
 	"go.mau.fi/mautrix-meta/pkg/messagix/types"
 )
@@ -134,6 +135,128 @@ func TestEventConnectionOfflineWithoutAttempt(t *testing.T) {
 	want = `{"type":"event","event":{"type":"connection","state":{"type":"offline","reason":"socket closed","next_retry_millis":2000}}}`
 	if got != want {
 		t.Fatalf("delay without an attempt mismatch\n got: %s\nwant: %s", got, want)
+	}
+}
+
+// TestChallengeStepKinds pins the challenge step the host renders as a guide: the step carries the
+// kind and the network's own message, and it is a step rather than a failure so the attempt stays
+// open for another answer.
+func TestChallengeStepKinds(t *testing.T) {
+	cases := []struct {
+		kind    string
+		message string
+		want    string
+	}{
+		{
+			kind:    challengeCheckpoint,
+			message: challengeCheckpointMessage,
+			want:    `{"type":"challenge","kind":"checkpoint","message":"` + challengeCheckpointMessage + `"}`,
+		},
+		{
+			kind:    challengeTwoFactor,
+			message: challengeTwoFactorMessage,
+			want:    `{"type":"challenge","kind":"two_factor","message":"` + challengeTwoFactorMessage + `"}`,
+		},
+		{
+			kind:    challengeConsent,
+			message: challengeConsentMessage,
+			want:    `{"type":"challenge","kind":"consent","message":"` + challengeConsentMessage + `"}`,
+		},
+	}
+	for _, c := range cases {
+		got := encodeFrame(t, challengeStep(c.kind, c.message))
+		if got != c.want {
+			t.Fatalf("%s challenge frame mismatch\n got: %s\nwant: %s", c.kind, got, c.want)
+		}
+	}
+}
+
+// TestOnlyChallengesCarryAKind keeps every other step decoding into the shape the contract already
+// had: no stray "kind" key.
+func TestOnlyChallengesCarryAKind(t *testing.T) {
+	for name, step := range map[string]LoginStep{
+		"code":       codeStep("sms"),
+		"failed":     failedStep(failureAccountLocked(accountSuspendedMessage)),
+		"failedIn":   failedStep(failureInvalidInput("code", "incorrect code")),
+		"credential": credentialsStep(),
+	} {
+		got := encodeFrame(t, step)
+		if strings.Contains(got, `"kind"`) {
+			t.Fatalf("%s step carried a challenge kind: %s", name, got)
+		}
+	}
+}
+
+// TestChallengeKindClassification covers which error becomes which kind, so the wire value and the
+// copy cannot drift apart.
+func TestChallengeKindClassification(t *testing.T) {
+	if kind, message, ok := challengeFor(httpclient.ErrConsentRequired, false); !ok || kind != challengeConsent || message != challengeConsentMessage {
+		t.Fatalf("consent error classified as %q/%v", kind, ok)
+	}
+	if kind, _, ok := challengeFor(httpclient.ErrCheckpointRequired, true); !ok || kind != challengeCheckpoint {
+		t.Fatalf("checkpoint error classified as %q/%v", kind, ok)
+	}
+	// Only a flow waiting for a code can offer the code field the two-factor kind promises.
+	if kind, _, ok := challengeFor(httpclient.ErrChallengeRequired, true); !ok || kind != challengeTwoFactor {
+		t.Fatalf("challenge while awaiting a code classified as %q/%v", kind, ok)
+	}
+	if kind, _, ok := challengeFor(httpclient.ErrChallengeRequired, false); !ok || kind != challengeCheckpoint {
+		t.Fatalf("challenge without a code step classified as %q/%v", kind, ok)
+	}
+	if _, _, ok := challengeFor(errors.New("some other failure"), true); ok {
+		t.Fatal("an ordinary error must not be a challenge")
+	}
+	if got := liteFailure(httpclient.ErrAccountSuspended); got.Type != "account_locked" {
+		t.Fatalf("suspension classified as %+v", got)
+	}
+}
+
+// TestChallengeWhileAwaitingCodeIsTwoFactor covers the only case that can be a two-factor
+// challenge: the flow has a live code step. Without one the challenge is a checkpoint.
+func TestChallengeWhileAwaitingCodeIsTwoFactor(t *testing.T) {
+	code := liteStep{
+		ID:     "fi.mau.meta.messengerlite.totp",
+		Fields: []liteInputField{{ID: "totp_code", Type: "2fa_code"}},
+	}
+	flow := &liteFlow{poll: func(_ context.Context, _ map[string]string) (litePoll, error) {
+		return litePoll{Step: &code}, nil
+	}}
+	out := flow.run(context.Background(), map[string]string{})
+	if out.Failure != nil || out.Step.Type != "code" || out.Step.Via != "app" {
+		t.Fatalf("totp step = %+v, want a code step over the app", out)
+	}
+	if flow.codeField() != "totp_code" {
+		t.Fatalf("code answers go to %q, want totp_code", flow.codeField())
+	}
+
+	flow.poll = func(_ context.Context, _ map[string]string) (litePoll, error) {
+		return litePoll{}, httpclient.ErrChallengeRequired
+	}
+	out = flow.run(context.Background(), map[string]string{"totp_code": "123456"})
+	if out.Failure != nil || out.Step.Type != "challenge" || out.Step.Kind != challengeTwoFactor {
+		t.Fatalf("challenge while awaiting a code = %+v, want the two_factor challenge step", out)
+	}
+
+	plain := &liteFlow{poll: func(_ context.Context, _ map[string]string) (litePoll, error) {
+		return litePoll{}, httpclient.ErrChallengeRequired
+	}}
+	out = plain.run(context.Background(), map[string]string{})
+	if out.Failure != nil || out.Step.Type != "challenge" || out.Step.Kind != challengeCheckpoint {
+		t.Fatalf("challenge without a code step = %+v, want the checkpoint challenge step", out)
+	}
+}
+
+// TestCaptchaStaysAnswerable keeps the captcha a step instead of an account lock: the user can clear
+// it on Meta's site and the same attempt continues.
+func TestCaptchaStaysAnswerable(t *testing.T) {
+	captcha := liteStep{
+		ID:     "fi.mau.meta.messengerlite.captcha",
+		Fields: []liteInputField{{ID: "captcha_code", Type: "captcha_code"}},
+	}
+	flow, _ := scriptedFlow(litePoll{Step: &captcha})
+	out := flow.run(context.Background(), map[string]string{})
+	if out.Failure != nil || out.Step.Type != "challenge" || out.Step.Kind != challengeCheckpoint {
+		t.Fatalf("captcha = %+v, want the checkpoint challenge step", out)
 	}
 }
 

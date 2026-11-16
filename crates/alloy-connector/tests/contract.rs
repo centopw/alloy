@@ -9,10 +9,10 @@ use alloy_connector::fake::{
     FAKE_TOPIC_GENERAL, FAKE_TOPIC_RELEASE_NOTES, FAKE_USER_ID, FakeConnector, MAX_PINNED_CHATS,
 };
 use alloy_connector::{
-    ChatKind, CodeChannel, ConnectionState, Connector, ConnectorError, ConnectorEvent, Frame,
-    LoginAlternative, LoginFailure, LoginInput, LoginStep, MediaRef, MessageKind, Network,
-    OutgoingMessage, PROTOCOL_VERSION, RemoteChat, RemoteMessage, RemoteUser, SessionBlob,
-    decode_frame, encode_frame,
+    ChallengeKind, ChatKind, CodeChannel, ConnectionState, Connector, ConnectorError,
+    ConnectorEvent, Frame, LoginAlternative, LoginFailure, LoginInput, LoginStep, MediaRef,
+    MessageKind, Network, OutgoingMessage, PROTOCOL_VERSION, RemoteChat, RemoteMessage, RemoteUser,
+    SessionBlob, decode_frame, encode_frame,
 };
 use tokio::sync::mpsc::Receiver;
 
@@ -370,6 +370,43 @@ fn login_alternatives_round_trip() {
         serde_json::json!({"type": "switch", "to": "cookies"})
     );
     assert_eq!(serde_json::from_value::<LoginInput>(value).unwrap(), input);
+}
+
+#[test]
+fn challenge_step_frame_decodes() {
+    // The sidecar writes a challenge as its own step: the kind is what the UI leads with, the
+    // message is the network's own explanation, and the step keeps the attempt open.
+    for (wire_kind, kind) in [
+        ("checkpoint", ChallengeKind::Checkpoint),
+        ("two_factor", ChallengeKind::TwoFactor),
+        ("consent", ChallengeKind::Consent),
+    ] {
+        let frame =
+            format!(r#"{{"type":"challenge","kind":"{wire_kind}","message":"confirm it"}}"#);
+        let step: LoginStep = serde_json::from_str(&frame).expect("challenge frame decodes");
+        assert_eq!(
+            step,
+            LoginStep::Challenge {
+                kind,
+                message: "confirm it".to_string(),
+            }
+        );
+        // A challenge is answered, not terminal: the id stays valid until the user cancels.
+        assert!(!step.is_terminal());
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&frame).unwrap(),
+            serde_json::to_value(&step).unwrap()
+        );
+    }
+
+    // A challenge with no kind, or an unknown one, is a contract violation rather than a silent
+    // fallback to a locked account.
+    for frame in [
+        r#"{"type":"challenge","message":"confirm it"}"#,
+        r#"{"type":"challenge","kind":"captcha","message":"confirm it"}"#,
+    ] {
+        assert!(serde_json::from_str::<LoginStep>(frame).is_err());
+    }
 }
 
 #[test]

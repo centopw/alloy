@@ -6,13 +6,17 @@
 
 use alloy_connector::capabilities::Capabilities as ConnectorCapabilities;
 use alloy_connector::events::ConnectionState;
-use alloy_connector::login::{CodeChannel as ConnectorCodeChannel, CookieField, LoginFailure};
+use alloy_connector::login::{
+    ChallengeKind as ConnectorChallengeKind, CodeChannel as ConnectorCodeChannel, CookieField,
+    LoginFailure,
+};
 use alloy_connector::types::{ChatKind as ConnectorChatKind, MessageKind as ConnectorMessageKind};
 use alloy_protocol::{
-    AccountState as ProtocolAccountState, CapabilitiesDto, ChatKind as ProtocolChatKind,
-    CodeChannel as ProtocolCodeChannel, ConnectionStatus, CookieFieldDto, LoginAlternativeDto,
-    LoginFailureDto, LoginInputDto, LoginStepDto, Network as ProtocolNetwork, NetworkInfoDto,
-    NetworkSettingDto, NetworkSettingKind, NetworkSetupDto, NetworkSetupFieldDto, NetworkSetupKind,
+    AccountState as ProtocolAccountState, CapabilitiesDto, ChallengeKind as ProtocolChallengeKind,
+    ChatKind as ProtocolChatKind, CodeChannel as ProtocolCodeChannel, ConnectionStatus,
+    CookieFieldDto, LoginAlternativeDto, LoginFailureDto, LoginInputDto, LoginStepDto,
+    Network as ProtocolNetwork, NetworkInfoDto, NetworkSettingDto, NetworkSettingKind,
+    NetworkSetupDto, NetworkSetupFieldDto, NetworkSetupKind,
     TelegramAppSource as ProtocolTelegramAppSource,
 };
 use alloy_store::{
@@ -315,6 +319,14 @@ pub fn login_failure(reason: LoginFailure) -> LoginFailureDto {
     }
 }
 
+fn challenge_kind(kind: ConnectorChallengeKind) -> ProtocolChallengeKind {
+    match kind {
+        ConnectorChallengeKind::Checkpoint => ProtocolChallengeKind::Checkpoint,
+        ConnectorChallengeKind::TwoFactor => ProtocolChallengeKind::TwoFactor,
+        ConnectorChallengeKind::Consent => ProtocolChallengeKind::Consent,
+    }
+}
+
 /// Converts a login step that still needs user input.
 ///
 /// [`alloy_connector::LoginStep::Done`] is not a question for the UI, so it returns `None` and the
@@ -344,6 +356,10 @@ pub fn pending_login_step(step: alloy_connector::LoginStep) -> Option<LoginStepD
         } => Some(LoginStepDto::Credentials {
             username_label,
             alternatives: alternatives.into_iter().map(login_alternative).collect(),
+        }),
+        alloy_connector::LoginStep::Challenge { kind, message } => Some(LoginStepDto::Challenge {
+            kind: challenge_kind(kind),
+            message,
         }),
         alloy_connector::LoginStep::Done { .. } | alloy_connector::LoginStep::Failed { .. } => None,
     }
