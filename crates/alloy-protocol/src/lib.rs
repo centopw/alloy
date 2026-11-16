@@ -1160,13 +1160,27 @@ pub enum EngineCommand {
         pairing_id: String,
         accept: bool,
     },
-    /// Creates a 24-word recovery phrase and keeps only a verifier of the escrow blob it wraps
-    /// the master key into. The words exist only in the response and are never stored.
+    /// Creates a 24-word recovery phrase and keeps the wrapped escrow blob it produces. The words
+    /// exist only in the response and are never stored; a configured sync server receives the
+    /// blob, never the phrase.
     CreateRecoveryPhrase,
     /// Checks that `words` is the recovery phrase this device holds. A wrong word fails with
     /// `recovery_rejected` and no hint of which word it was.
     VerifyRecoveryPhrase {
         words: Vec<String>,
+    },
+    /// Rebuilds a fresh device from the phrase alone: opens the server's escrow blob with the
+    /// phrase, adopts the master key it holds, and pulls every enabled layer.
+    ///
+    /// Pinning follows `ConfigureSync`: an `https` endpoint is pinned on first success and a
+    /// later certificate change fails with `pin_mismatch` unless `accept_new_pin` is true. Plain
+    /// `http` is accepted only for a loopback host. A phrase that does not open the escrow fails
+    /// with `recovery_rejected` and writes nothing.
+    RecoverFromPhrase {
+        words: Vec<String>,
+        url: String,
+        token: String,
+        accept_new_pin: bool,
     },
     /// Lists the local device roster. `current` marks this device.
     ListDevices,
@@ -1587,11 +1601,17 @@ pub enum EngineResponse {
         head_hex: String,
         epoch: u32,
     },
-    /// The words exist only here: they are never stored, and the engine keeps a verifier.
+    /// The words exist only here: they are never stored, and the engine keeps the wrapped blob.
     RecoveryPhraseCreated {
         words: Vec<String>,
     },
     RecoveryVerified,
+    /// What the phrase rebuilt: the layer timestamps now on this device and the roster, which
+    /// names the recovering device and the one whose signed head it followed.
+    Recovered {
+        layers: Vec<SyncLayerStatus>,
+        devices: Vec<DeviceDto>,
+    },
 }
 
 // === Errors ===

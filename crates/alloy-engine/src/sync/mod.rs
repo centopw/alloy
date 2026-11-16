@@ -12,7 +12,8 @@
 //!   only.
 //!
 //! Pulled layers go through the existing bundle import (`handlers::sync`), so the server path
-//! merges with the same timestamp rules as a LAN pairing.
+//! merges with the same timestamp rules as a LAN pairing. The recovery escrow is published
+//! beside the head, and [`recover`] turns a phrase into the master key that opens the head.
 
 mod http;
 mod tls;
@@ -38,8 +39,9 @@ use sha2::{Digest, Sha256};
 use crate::context::EngineContext;
 use crate::handlers::settings::SettingsHandler;
 use crate::handlers::sync::{
-    build_bundle, device_key, import_bundle_value, list_devices, master_key, settings_object,
-    sync_epoch, sync_layer_statuses, sync_section,
+    build_bundle, device_key, enroll_recovered_device, has_master_key, import_bundle_value,
+    list_devices, master_key, settings_object, store_master_key, sync_epoch, sync_layer_statuses,
+    sync_section, unwrap_escrow,
 };
 use crate::support::now_ms;
 
@@ -246,6 +248,140 @@ pub async fn configure(
     sync_now(ctx).await?;
     let status = status(ctx).await?;
     Ok((pin.map(Pin::to_hex), status))
+}
+
+/// `CreateRecoveryPhrase` publishes the wrapper here, under the same compare-and-swap as the
+/// head. Nothing to do while sync is off; a configured server is the only place a fresh device
+/// can find the escrow.
+pub(crate) async fn publish_escrow(ctx: &EngineContext, blob: &[u8]) -> Result<(), EngineError> {
+    let settings = SettingsHandler::get_settings_file(ctx)?;
+    let server = ServerState::from_settings(&settings);
+    if server.mode != SyncMode::Prefs {
+        return Ok(());
+    }
+    let Some(url) = server.url.clone() else {
+        return Ok(());
+    };
+    let target = parse_target(&url)?;
+    if target.secure && server.pin.is_none() {
+        return Err(EngineError::unavailable(
+            "the sync endpoint has no stored pin; configure it again",
+        ));
+    }
+    let token = read_token(ctx)
+        .await?
+        .ok_or_else(|| EngineError::unavailable("no sync token is stored for this endpoint"))?;
+    let endpoint = Endpoint::new(&target, token, server.pin.filter(|_| target.secure))?;
+
+    // One re-read on a loss: the loser of the CAS adopts the winner's body and tries again. A
+    // second loss is reported rather than looped, because another device is actively writing.
+    for attempt in 0..2 {
+        let precondition = match endpoint.get_escrow().await? {
+            Some((bytes, _etag)) if bytes == blob => return Ok(()),
+            Some((_bytes, etag)) => Precondition::Match(etag),
+            None => Precondition::CreateOnly,
+        };
+        match endpoint.put_escrow(blob, precondition).await? {
+            WriteOutcome::Written => return Ok(()),
+            WriteOutcome::Conflict { .. } if attempt == 0 => continue,
+            WriteOutcome::Conflict { .. } => break,
+        }
+    }
+    Err(EngineError::network_error(
+        "another device kept writing the sync escrow; try again",
+    ))
+}
+
+/// `RecoverFromPhrase`: a device with no master key adopts the one in the server's escrow and
+/// pulls the head its phrase-protected key can open.
+///
+/// Nothing is written until the phrase has opened the escrow: a wrong phrase leaves no master
+/// key, no token, no settings and no head cursor behind. The KDF parameters arrive with the blob
+/// and are validated before they are used.
+pub async fn recover(
+    ctx: &EngineContext,
+    words: &[String],
+    url: String,
+    token: String,
+    accept_new_pin: bool,
+) -> Result<SyncStatusReport, EngineError> {
+    if has_master_key(ctx).await? {
+        return Err(EngineError::invalid_argument(
+            "this device already has a sync master key; recovery targets a fresh device",
+        ));
+    }
+    let target = parse_target(&url)?;
+    let settings = SettingsHandler::get_settings_file(ctx)?;
+    let stored = ServerState::from_settings(&settings);
+    let token = if token.trim().is_empty() {
+        read_token(ctx).await?.ok_or_else(|| {
+            EngineError::invalid_argument("no sync token is stored; provide one to recover")
+        })?
+    } else {
+        token
+    };
+
+    // Same pin rule as `ConfigureSync`: a stored pin is enforced before the token is sent; a
+    // first connection captures the leaf, and `accept_new_pin` is the only way past a stored one.
+    let enforce = if target.secure && !accept_new_pin {
+        stored.pin
+    } else {
+        None
+    };
+    let endpoint = Endpoint::new(&target, token.clone(), enforce)?;
+
+    let Some((escrow, _etag)) = endpoint.get_escrow().await? else {
+        return Err(EngineError::unavailable(
+            "the sync server holds no recovery escrow; create a phrase on a device that has one",
+        ));
+    };
+    // Everything above is a read. The phrase is checked here, before the first write.
+    let master = unwrap_escrow(words, &escrow)?;
+
+    let store_path = ctx.data_dir.join(HEAD_STORE_FILE);
+    let mut store = FileHeadStore::open(&store_path)
+        .map_err(|error| EngineError::sync_blocked(reason_for_store(&error)))?;
+    let mut signer: Option<(String, u32)> = None;
+    if let Some((bytes, _etag)) = endpoint.get_head().await? {
+        let (_, batch) = observe_head(&mut store, &bytes)?;
+        pull_layers(ctx, &endpoint, &master, &batch).await?;
+        signer = Some((batch.header.device_id.clone(), batch.header.epoch));
+    }
+
+    store_master_key(ctx, &master).await?;
+    store_token(ctx, &token).await?;
+    let pin = if target.secure {
+        let observed = endpoint.observed_pin().ok_or_else(|| {
+            EngineError::internal_error("the sync endpoint presented no certificate")
+        })?;
+        if let Some(expected) = enforce
+            && expected != observed
+        {
+            return Err(EngineError::pin_mismatch(
+                &expected.to_hex(),
+                &observed.to_hex(),
+            ));
+        }
+        Some(observed)
+    } else {
+        None
+    };
+    let pin_hex = pin.map(Pin::to_hex);
+    update_server(ctx, |server| {
+        server["mode"] = json!(SyncMode::Prefs);
+        server["url"] = json!(url);
+        server["pin"] = match &pin_hex {
+            Some(pin) => json!(pin),
+            None => Value::Null,
+        };
+        server["state"] = json!("done");
+        server["last_sync_ms"] = json!(now_ms());
+        server["last_error"] = Value::Null;
+    })?;
+    if let Some((device_id, epoch)) = signer {
+        enroll_recovered_device(ctx, &device_id, epoch)?;
+    }
+    status(ctx).await
 }
 
 /// `SyncStatus`: what is configured and when each layer last changed. Never the token.

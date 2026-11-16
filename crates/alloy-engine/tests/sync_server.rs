@@ -481,6 +481,229 @@ fn head_seq(bytes: &[u8]) -> u64 {
         .seq
 }
 
+// === Recovery helpers ===
+
+async fn create_phrase(engine: &AppEngine) -> Vec<String> {
+    match engine
+        .handle(EngineCommand::CreateRecoveryPhrase)
+        .await
+        .expect("create the recovery phrase")
+    {
+        EngineResponse::RecoveryPhraseCreated { words } => words,
+        other => panic!("unexpected response: {other:?}"),
+    }
+}
+
+async fn recover(
+    engine: &AppEngine,
+    words: &[String],
+    url: &str,
+    token: &str,
+) -> Result<
+    (
+        Vec<alloy_protocol::SyncLayerStatus>,
+        Vec<alloy_protocol::DeviceDto>,
+    ),
+    EngineError,
+> {
+    match engine
+        .handle(EngineCommand::RecoverFromPhrase {
+            words: words.to_vec(),
+            url: url.to_string(),
+            token: token.to_string(),
+            accept_new_pin: false,
+        })
+        .await?
+    {
+        EngineResponse::Recovered { layers, devices } => Ok((layers, devices)),
+        other => panic!("unexpected response: {other:?}"),
+    }
+}
+
+/// The device ids in this device's roster, and the one marked current.
+async fn roster_ids(engine: &AppEngine) -> (Vec<String>, Option<String>) {
+    match engine
+        .handle(EngineCommand::ListDevices)
+        .await
+        .expect("list devices")
+    {
+        EngineResponse::DevicesList { devices } => {
+            let current = devices
+                .iter()
+                .find(|device| device.current)
+                .map(|device| device.device_id.clone());
+            (
+                devices.into_iter().map(|device| device.device_id).collect(),
+                current,
+            )
+        }
+        other => panic!("unexpected response: {other:?}"),
+    }
+}
+
+/// Every file under `dir` with its size, sorted: a before/after comparison proves that a failed
+/// recovery wrote not one byte.
+fn dir_snapshot(dir: &Path) -> Vec<(String, u64)> {
+    let mut out = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(path) = stack.pop() {
+        for entry in std::fs::read_dir(&path).expect("read the data dir") {
+            let entry = entry.expect("dir entry");
+            let meta = entry.metadata().expect("entry metadata");
+            let relative = entry
+                .path()
+                .strip_prefix(dir)
+                .expect("entry is under the data dir")
+                .display()
+                .to_string();
+            if meta.is_dir() {
+                stack.push(entry.path());
+            } else {
+                out.push((relative, meta.len()));
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+async fn read_escrow(base: &str) -> Option<(Vec<u8>, String)> {
+    let response = reqwest::Client::new()
+        .get(format!("{base}/v1/escrow"))
+        .bearer_auth(TOKEN)
+        .send()
+        .await
+        .expect("get escrow");
+    match response.status() {
+        reqwest::StatusCode::OK => {
+            let etag = response
+                .headers()
+                .get(reqwest::header::ETAG)
+                .and_then(|value| value.to_str().ok())
+                .expect("escrow etag")
+                .to_string();
+            Some((response.bytes().await.expect("escrow body").to_vec(), etag))
+        }
+        reqwest::StatusCode::NOT_FOUND => None,
+        other => panic!("unexpected escrow status {other}"),
+    }
+}
+
+async fn write_escrow_create(base: &str, bytes: &[u8]) {
+    let response = reqwest::Client::new()
+        .put(format!("{base}/v1/escrow"))
+        .bearer_auth(TOKEN)
+        .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+        .header(reqwest::header::IF_NONE_MATCH, "*")
+        .body(bytes.to_vec())
+        .send()
+        .await
+        .expect("put escrow");
+    assert_eq!(response.status(), reqwest::StatusCode::NO_CONTENT);
+}
+
+/// A loopback proxy that, on the first `PUT /v1/escrow`, lands a competing CAS write upstream
+/// before forwarding the client's write. The client must lose that one, re-read and win the next.
+struct EscrowRaceProxy {
+    child: Child,
+    port: u16,
+    marker: PathBuf,
+    _dir: TempDir,
+}
+
+impl Drop for EscrowRaceProxy {
+    fn drop(&mut self) {
+        let _ = self.child.start_kill();
+    }
+}
+
+impl EscrowRaceProxy {
+    fn raced(&self) -> bool {
+        self.marker.exists()
+    }
+}
+
+async fn start_escrow_race_proxy(target_port: u16) -> EscrowRaceProxy {
+    let dir = TempDir::new().expect("proxy dir");
+    let marker = dir.path().join("raced.log");
+    let script = dir.path().join("escrow-race.mjs");
+    std::fs::write(
+        &script,
+        r#"
+import http from 'node:http';
+import fs from 'node:fs';
+const port = Number(process.env.PROXY_PORT);
+const target = Number(process.env.TARGET_PORT);
+const marker = process.env.RACE_FILE;
+const token = process.env.TOKEN;
+let raced = false;
+
+function upstream(method, path, headers, body) {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      { host: '127.0.0.1', port: target, path, method, headers },
+      (res) => {
+        const chunks = [];
+        res.on('data', (chunk) => chunks.push(chunk));
+        res.on('end', () =>
+          resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) }),
+        );
+      },
+    );
+    req.on('error', reject);
+    req.end(body);
+  });
+}
+
+const server = http.createServer((req, res) => {
+  const chunks = [];
+  req.on('data', (chunk) => chunks.push(chunk));
+  req.on('end', async () => {
+    const body = Buffer.concat(chunks);
+    if (req.method === 'PUT' && req.url === '/v1/escrow' && !raced) {
+      raced = true;
+      const auth = {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/octet-stream',
+      };
+      const current = await upstream('GET', '/v1/escrow', auth);
+      if (current.status === 200) {
+        await upstream(
+          'PUT',
+          '/v1/escrow',
+          { ...auth, 'if-match': current.headers.etag },
+          Buffer.from('competitor-escrow'),
+        );
+        fs.appendFileSync(marker, 'raced\n');
+      }
+    }
+    const answer = await upstream(req.method, req.url, req.headers, body);
+    res.writeHead(answer.status, answer.headers);
+    res.end(answer.body);
+  });
+});
+server.listen(port, '127.0.0.1', () => console.log(`listening ${server.address().port}`));
+"#,
+    )
+    .expect("write the escrow race proxy");
+    let (child, port) = spawn_node_script(
+        &script,
+        &[
+            ("TARGET_PORT", target_port.to_string()),
+            ("PROXY_PORT", "0".to_string()),
+            ("RACE_FILE", marker.display().to_string()),
+            ("TOKEN", TOKEN.to_string()),
+        ],
+    )
+    .await;
+    EscrowRaceProxy {
+        child,
+        port,
+        marker,
+        _dir: dir,
+    }
+}
+
 // === Tests ===
 
 #[tokio::test]
@@ -845,4 +1068,257 @@ async fn the_token_never_lands_in_settings() {
     );
     let status = status(&engine).await;
     assert!(status.token_configured);
+}
+
+#[tokio::test]
+async fn the_phrase_alone_rebuilds_settings_tags_and_the_roster() {
+    if !node_available().await {
+        eprintln!("skipping: node is not on PATH, so the real sync server cannot be spawned");
+        return;
+    }
+    let server = start_server().await;
+    let first_dir = TempDir::new().expect("first data dir");
+    let first_vault = vault();
+    let first = open_engine(first_dir.path(), first_vault.clone()).await;
+    seed_chat(&first, Some("work")).await;
+    write_settings(
+        first_dir.path(),
+        &json!({"density": "compact", "accent": "blue", "window": {"width": 900}}),
+    );
+    configure(&first, &server.base(), TOKEN, false)
+        .await
+        .expect("the first device pins and syncs");
+    let first_master = first_vault
+        .get_secret("alloy.sync.master_key.v1")
+        .await
+        .expect("the first device has a master key");
+    let words = create_phrase(&first).await;
+
+    // The escrow is on the server, and it is ciphertext: the phrase and the master key are not
+    // in it.
+    let (escrow, _etag) = read_escrow(&server.base())
+        .await
+        .expect("creating a phrase publishes the escrow");
+    let wire = String::from_utf8_lossy(&escrow);
+    assert!(!wire.contains(&words.join(" ")), "the phrase never travels");
+    assert!(
+        !wire.contains(&first_master),
+        "the master key never travels"
+    );
+    let parsed: Value = serde_json::from_slice(&escrow).expect("the escrow is a JSON blob");
+    assert_eq!(parsed["kdf"], json!("argon2id"));
+    assert_eq!(parsed["version"], json!(1));
+    assert!(
+        !parsed["ciphertext_b64"]
+            .as_str()
+            .unwrap_or_default()
+            .is_empty()
+    );
+
+    // A completely fresh data directory with the phrase, the URL and the token: nothing else.
+    let second_dir = TempDir::new().expect("second data dir");
+    let second_vault = vault();
+    let second = open_engine(second_dir.path(), second_vault.clone()).await;
+    let second_chat = seed_chat(&second, None).await;
+    let (layers, devices) = recover(&second, &words, &server.base(), TOKEN)
+        .await
+        .expect("the phrase alone recovers the device");
+
+    let settings = read_settings(second_dir.path());
+    assert_eq!(settings["density"], json!("compact"));
+    assert_eq!(settings["accent"], json!("blue"));
+    assert_eq!(
+        settings["window"],
+        Value::Null,
+        "device-local settings never cross the server"
+    );
+    assert_eq!(
+        chat_tags(&second, &second_chat).await,
+        vec!["work".to_string()]
+    );
+    assert_eq!(
+        second_vault
+            .get_secret("alloy.sync.master_key.v1")
+            .await
+            .expect("the recovered master key is stored"),
+        first_master,
+        "recovery adopts exactly the master key the escrow wrapped"
+    );
+    assert!(
+        layers
+            .iter()
+            .any(|layer| layer.key == "settings" && layer.enabled),
+        "the recovered layers are reported as enabled"
+    );
+    assert!(
+        layers
+            .iter()
+            .any(|layer| layer.key == "messages" && !layer.enabled)
+    );
+
+    let (first_ids, first_current) = roster_ids(&first).await;
+    let (second_ids, second_current) = roster_ids(&second).await;
+    assert_eq!(
+        first_ids.len(),
+        1,
+        "the first device is alone in its roster"
+    );
+    assert_eq!(
+        second_ids.len(),
+        2,
+        "the recovered roster names both devices"
+    );
+    assert!(
+        second_ids.contains(&first_current.clone().expect("the first device is current")),
+        "the roster names the device whose signed head was followed"
+    );
+    assert!(
+        second_ids.contains(&second_current.clone().expect("one entry is current")),
+        "the roster names the recovering device"
+    );
+    assert_eq!(
+        devices.len(),
+        2,
+        "the response reports the recovered roster"
+    );
+
+    // Recovery leaves a working configuration: a later sync is a no-op, not an error.
+    let (uploaded, _, _, _) = sync(&second).await.expect("the recovered device syncs");
+    assert_eq!(uploaded, 0, "nothing changed, so nothing is uploaded");
+}
+
+#[tokio::test]
+async fn a_wrong_phrase_writes_nothing_on_a_fresh_device() {
+    if !node_available().await {
+        eprintln!("skipping: node is not on PATH, so the real sync server cannot be spawned");
+        return;
+    }
+    let server = start_server().await;
+    let first_dir = TempDir::new().expect("first data dir");
+    let first = open_engine(first_dir.path(), vault()).await;
+    seed_chat(&first, Some("work")).await;
+    configure(&first, &server.base(), TOKEN, false)
+        .await
+        .expect("configure");
+    let words = create_phrase(&first).await;
+
+    let mut wrong = words.clone();
+    let replacement = if wrong[7] == "abandon" {
+        "ability"
+    } else {
+        "abandon"
+    };
+    wrong[7] = replacement.to_string();
+
+    let fresh_dir = TempDir::new().expect("fresh data dir");
+    let fresh_vault = vault();
+    let fresh = open_engine(fresh_dir.path(), fresh_vault.clone()).await;
+    let before = dir_snapshot(fresh_dir.path());
+
+    let error = recover(&fresh, &wrong, &server.base(), TOKEN)
+        .await
+        .expect_err("a wrong phrase must not recover");
+    assert_eq!(error.code, "recovery_rejected");
+    assert!(
+        !error.message.contains(replacement),
+        "the message names no word: {}",
+        error.message
+    );
+    assert!(
+        !error.message.contains(&words[7]),
+        "the message names no word: {}",
+        error.message
+    );
+
+    assert_eq!(
+        dir_snapshot(fresh_dir.path()),
+        before,
+        "a wrong phrase writes nothing, not even a settings file or a head cursor"
+    );
+    assert!(!fresh_dir.path().join("settings.json").exists());
+    assert!(!fresh_dir.path().join("sync-heads.json").exists());
+    assert!(
+        fresh_vault
+            .get_secret("alloy.sync.master_key.v1")
+            .await
+            .is_err(),
+        "a wrong phrase must not create a master key"
+    );
+    assert!(
+        fresh_vault
+            .get_secret("alloy.sync.server_token.v1")
+            .await
+            .is_err(),
+        "a wrong phrase must not store the token"
+    );
+}
+
+#[tokio::test]
+async fn a_second_fresh_device_recovers_with_the_same_phrase() {
+    if !node_available().await {
+        eprintln!("skipping: node is not on PATH, so the real sync server cannot be spawned");
+        return;
+    }
+    let server = start_server().await;
+    let first_dir = TempDir::new().expect("first data dir");
+    let first = open_engine(first_dir.path(), vault()).await;
+    seed_chat(&first, Some("work")).await;
+    write_settings(first_dir.path(), &json!({"density": "compact"}));
+    configure(&first, &server.base(), TOKEN, false)
+        .await
+        .expect("configure");
+    let words = create_phrase(&first).await;
+
+    for round in 0..2 {
+        let dir = TempDir::new().expect("fresh data dir");
+        let engine = open_engine(dir.path(), vault()).await;
+        seed_chat(&engine, None).await;
+        let (_, devices) = recover(&engine, &words, &server.base(), TOKEN)
+            .await
+            .unwrap_or_else(|error| panic!("recovery {round} failed: {error:?}"));
+        assert_eq!(read_settings(dir.path())["density"], json!("compact"));
+        assert_eq!(devices.len(), 2, "recovery {round} names both devices");
+    }
+}
+
+#[tokio::test]
+async fn the_escrow_upload_survives_a_competing_cas() {
+    if !node_available().await {
+        eprintln!("skipping: node is not on PATH, so the real sync server cannot be spawned");
+        return;
+    }
+    let server = start_server().await;
+    let proxy = start_escrow_race_proxy(server.port).await;
+    let url = format!("http://127.0.0.1:{}", proxy.port);
+    // An existing (foreign) escrow makes the first engine write a matching CAS, not a create.
+    write_escrow_create(&server.base(), b"seed-escrow").await;
+
+    let dir = TempDir::new().expect("data dir");
+    let engine = open_engine(dir.path(), vault()).await;
+    seed_chat(&engine, Some("work")).await;
+    configure(&engine, &url, TOKEN, false)
+        .await
+        .expect("configure through the proxy");
+    let words = create_phrase(&engine).await;
+
+    assert!(
+        proxy.raced(),
+        "the proxy must have landed a competing write"
+    );
+    let (escrow, _) = read_escrow(&server.base())
+        .await
+        .expect("the retried write published the escrow");
+    assert_ne!(
+        escrow, b"competitor-escrow",
+        "the loser of the first CAS re-read and retried instead of giving up"
+    );
+    let parsed: Value = serde_json::from_slice(&escrow).expect("the escrow is a JSON blob");
+    assert_eq!(parsed["kdf"], json!("argon2id"));
+
+    // The published blob is the one this device can open with the phrase it just returned.
+    let fresh_dir = TempDir::new().expect("fresh data dir");
+    let fresh = open_engine(fresh_dir.path(), vault()).await;
+    recover(&fresh, &words, &server.base(), TOKEN)
+        .await
+        .expect("the retried escrow is the one the phrase opens");
 }

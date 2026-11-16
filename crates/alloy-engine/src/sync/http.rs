@@ -19,7 +19,7 @@ use super::tls::EndpointVerifier;
 /// Body type every write must declare; the server answers `415` otherwise.
 const OCTET_STREAM: &str = "application/octet-stream";
 
-/// What a `PUT /v1/head` asked for.
+/// What a compare-and-swap `PUT` asked for.
 #[derive(Debug, Clone)]
 pub enum Precondition {
     /// `If-None-Match: *`: only while the resource does not exist.
@@ -32,7 +32,7 @@ pub enum Precondition {
 #[derive(Debug, Clone)]
 pub enum WriteOutcome {
     Written,
-    /// A competing writer won (`409` or `412`); `bytes`/`etag` are the current head when the
+    /// A competing writer won (`409` or `412`); `bytes`/`etag` are the current body when the
     /// server returned it.
     Conflict {
         bytes: Option<Vec<u8>>,
@@ -183,8 +183,36 @@ impl Endpoint {
 
     /// `GET /v1/head`: `None` when the server has never stored one.
     pub async fn get_head(&self) -> Result<Option<(Vec<u8>, String)>, EngineError> {
+        self.get_resource("/v1/head").await
+    }
+
+    /// `PUT /v1/head` under `precondition`.
+    pub async fn put_head(
+        &self,
+        bytes: &[u8],
+        precondition: Precondition,
+    ) -> Result<WriteOutcome, EngineError> {
+        self.put_resource("/v1/head", bytes, precondition).await
+    }
+
+    /// `GET /v1/escrow`: the recovery blob, `None` when no phrase was ever created.
+    pub async fn get_escrow(&self) -> Result<Option<(Vec<u8>, String)>, EngineError> {
+        self.get_resource("/v1/escrow").await
+    }
+
+    /// `PUT /v1/escrow` under the same compare-and-swap as the head.
+    pub async fn put_escrow(
+        &self,
+        bytes: &[u8],
+        precondition: Precondition,
+    ) -> Result<WriteOutcome, EngineError> {
+        self.put_resource("/v1/escrow", bytes, precondition).await
+    }
+
+    /// `GET` of a compare-and-swap resource: `(body, ETag)`, or `None` when it does not exist.
+    async fn get_resource(&self, path: &str) -> Result<Option<(Vec<u8>, String)>, EngineError> {
         let response = self
-            .request(reqwest::Method::GET, "/v1/head")?
+            .request(reqwest::Method::GET, path)?
             .send()
             .await
             .map_err(|error| self.transport_error(error))?;
@@ -202,14 +230,15 @@ impl Endpoint {
         }
     }
 
-    /// `PUT /v1/head` under `precondition`.
-    pub async fn put_head(
+    /// `PUT` of a compare-and-swap resource under `precondition`.
+    async fn put_resource(
         &self,
+        path: &str,
         bytes: &[u8],
         precondition: Precondition,
     ) -> Result<WriteOutcome, EngineError> {
         let mut request = self
-            .request(reqwest::Method::PUT, "/v1/head")?
+            .request(reqwest::Method::PUT, path)?
             .header(CONTENT_TYPE, OCTET_STREAM);
         request = match &precondition {
             Precondition::CreateOnly => request.header(IF_NONE_MATCH, "*"),

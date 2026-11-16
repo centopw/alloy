@@ -99,6 +99,7 @@ impl CommandGroup {
             | EngineCommand::ConfirmPairing { .. }
             | EngineCommand::CreateRecoveryPhrase
             | EngineCommand::VerifyRecoveryPhrase { .. }
+            | EngineCommand::RecoverFromPhrase { .. }
             | EngineCommand::ListDevices
             | EngineCommand::RevokeDevice { .. }
             | EngineCommand::ConfigureSync { .. }

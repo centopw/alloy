@@ -12,7 +12,7 @@
 //! - the master key and this device's Ed25519 key are in the platform secret store, created on
 //!   first use and never in `settings.json`;
 //! - the device roster, its version and the local key epoch are in `settings.json` under `sync`;
-//! - the recovery verifier (never the phrase and never a key) sits beside the roster.
+//! - the recovery verifier and the wrapped escrow blob (never the phrase) sit beside the roster.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::Write;
@@ -106,8 +106,8 @@ struct DeviceEntry {
     epoch: u32,
 }
 
-/// The recovery verifier. It names the KDF inputs so a later verification can rebuild the escrow
-/// blob byte for byte; the blob itself is not kept, and neither is the phrase.
+/// The recovery verifier plus the wrapped blob it describes. It names the KDF inputs so a later
+/// verification can rebuild the escrow byte for byte; the phrase itself is never kept.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RecoveryRecord {
@@ -118,13 +118,29 @@ struct RecoveryRecord {
     salt_b64: String,
     nonce_b64: String,
     verifier_hex: String,
+    /// The exact bytes published to a sync server. A record written before the escrow was
+    /// published lacks it, and verification only needs the parameters above.
+    #[serde(default)]
+    escrow_b64: String,
 }
 
-/// The escrow blob a later slice uploads. Serialised as canonical JSON and never stored here.
-#[derive(Debug, Serialize)]
-struct EscrowBlob<'a> {
+/// The KDF every escrow blob declares.
+const ESCROW_KDF: &str = "argon2id";
+
+/// Bounds on the Argon2id parameters a server-supplied blob may ask for. The server is untrusted,
+/// so a hostile blob cannot make the client allocate or busy-run beyond these.
+const RECOVERY_M_COST_MIN: u32 = 8 * 1024;
+const RECOVERY_M_COST_MAX: u32 = 256 * 1024;
+const RECOVERY_T_COST_MAX: u32 = 16;
+const RECOVERY_P_COST_MAX: u32 = 8;
+
+/// The escrow blob: the wrapped master key and the parameters needed to open it. Serialised as
+/// canonical JSON; the same bytes are published to the sync server.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EscrowBlob {
     version: u32,
-    kdf: &'a str,
+    kdf: String,
     m_cost: u32,
     t_cost: u32,
     p_cost: u32,
@@ -249,6 +265,18 @@ impl GroupHandler for SyncHandler {
             EngineCommand::VerifyRecoveryPhrase { words } => {
                 verify_recovery_phrase(ctx, &words).await?;
                 Ok(EngineResponse::RecoveryVerified)
+            }
+            EngineCommand::RecoverFromPhrase {
+                words,
+                url,
+                token,
+                accept_new_pin,
+            } => {
+                let report = crate::sync::recover(ctx, &words, url, token, accept_new_pin).await?;
+                Ok(EngineResponse::Recovered {
+                    layers: report.layers,
+                    devices: report.devices,
+                })
             }
             EngineCommand::ListDevices => {
                 let devices = list_devices(ctx).await?;
@@ -1403,6 +1431,35 @@ pub(crate) async fn list_devices(ctx: &EngineContext) -> Result<Vec<DeviceDto>, 
         .collect())
 }
 
+/// Records the device whose signed head a recovery followed. The id comes from the batch that
+/// this device verified, not from a server assertion, so the entry is evidence of the chain.
+pub(crate) fn enroll_recovered_device(
+    ctx: &EngineContext,
+    device_id: &str,
+    epoch: u32,
+) -> Result<(), EngineError> {
+    let short = device_id.get(..8).unwrap_or(device_id);
+    SettingsHandler::with_settings_lock(ctx, || {
+        let mut settings = settings_object(ctx)?;
+        let mut sync = sync_section(&settings);
+        let mut devices = roster(&settings)?;
+        if devices.iter().any(|device| device.device_id == device_id) {
+            return Ok(());
+        }
+        devices.push(DeviceEntry {
+            device_id: device_id.to_string(),
+            label: format!("Device {short}"),
+            enrolled_ms: now_ms(),
+            epoch,
+        });
+        sync["devices"] = serde_json::to_value(&devices).map_err(|err| {
+            EngineError::internal_error(format!("cannot encode the device roster: {err}"))
+        })?;
+        settings["sync"] = sync;
+        SettingsHandler::write_settings_file(ctx, settings)
+    })
+}
+
 /// The five configuration layers and when each last changed on this device. `enabled` is the
 /// caller's decision (mode `prefs`), not a property of local data.
 pub(crate) async fn sync_layer_statuses(
@@ -1625,6 +1682,27 @@ fn map_secret(err: StorageError) -> EngineError {
     EngineError::internal_error(format!("secret store: {err}"))
 }
 
+/// Whether this device already holds the account's master key. Recovery only targets a device
+/// that has none: adopting a second master would orphan every blob sealed under the first.
+pub(crate) async fn has_master_key(ctx: &EngineContext) -> Result<bool, EngineError> {
+    match ctx.secrets.get_secret(MASTER_KEY_SECRET).await {
+        Ok(_) => Ok(true),
+        Err(StorageError::SecretNotFound(_)) => Ok(false),
+        Err(err) => Err(map_secret(err)),
+    }
+}
+
+/// Stores a master key recovered from the escrow, exactly where first use would have put it.
+pub(crate) async fn store_master_key(
+    ctx: &EngineContext,
+    key: &MasterKey,
+) -> Result<(), EngineError> {
+    ctx.secrets
+        .set_secret(MASTER_KEY_SECRET, &BASE64.encode(key.expose_secret()))
+        .await
+        .map_err(map_secret)
+}
+
 fn decode_32(text: &str, name: &str) -> Result<[u8; 32], EngineError> {
     let bytes = BASE64
         .decode(text.trim())
@@ -1665,7 +1743,12 @@ async fn create_recovery_phrase(ctx: &EngineContext) -> Result<Vec<String>, Engi
         salt_b64: BASE64.encode(salt),
         nonce_b64: BASE64.encode(nonce),
         verifier_hex,
+        escrow_b64: BASE64.encode(&escrow),
     };
+
+    // Publish first: the words are returned only when the server actually holds what opens them,
+    // so the user is never shown a phrase that no fresh device could use.
+    crate::sync::publish_escrow(ctx, &escrow).await?;
 
     let words: Vec<String> = mnemonic.words().map(str::to_string).collect();
     SettingsHandler::with_settings_lock(ctx, || {
@@ -1746,7 +1829,7 @@ fn escrow_blob(
     )
 }
 
-/// The phrase wraps the master key into the blob a future server upload will carry. The wrap is
+/// The phrase wraps the master key into the blob published to the sync server. The wrap is
 /// `argon2id(phrase) -> ChaCha20-Poly1305(master)`; the phrase is the only input to the key, so
 /// the server never holds anything that opens it.
 fn escrow_blob_with(
@@ -1763,17 +1846,9 @@ fn escrow_blob_with(
             "the recovery record's salt or nonce has the wrong length",
         ));
     }
-    let params = Params::new(m_cost, t_cost, p_cost, Some(RECOVERY_KEY_LEN)).map_err(|err| {
-        EngineError::internal_error(format!("invalid recovery KDF parameters: {err}"))
+    let key = derive_wrapper_key(mnemonic, salt, m_cost, t_cost, p_cost).map_err(|err| {
+        EngineError::internal_error(format!("cannot derive the recovery key: {err}"))
     })?;
-    let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
-    let mut key = Zeroizing::new([0u8; RECOVERY_KEY_LEN]);
-    argon
-        .hash_password_into(mnemonic.to_string().as_bytes(), salt, &mut key[..])
-        .map_err(|err| {
-            EngineError::internal_error(format!("cannot derive the recovery key: {err}"))
-        })?;
-
     let cipher = ChaCha20Poly1305::new(
         &Key::try_from(&key[..])
             .map_err(|_| EngineError::internal_error("the recovery key is not 32 bytes"))?,
@@ -1791,7 +1866,7 @@ fn escrow_blob_with(
 
     let blob = EscrowBlob {
         version: ESCROW_VERSION,
-        kdf: "argon2id",
+        kdf: ESCROW_KDF.to_string(),
         m_cost,
         t_cost,
         p_cost,
@@ -1801,6 +1876,100 @@ fn escrow_blob_with(
     };
     serde_json::to_vec(&blob)
         .map_err(|err| EngineError::internal_error(format!("cannot encode the escrow: {err}")))
+}
+
+/// `argon2id(phrase, salt)`, the one key that opens an escrow blob.
+fn derive_wrapper_key(
+    mnemonic: &Mnemonic,
+    salt: &[u8],
+    m_cost: u32,
+    t_cost: u32,
+    p_cost: u32,
+) -> Result<Zeroizing<[u8; RECOVERY_KEY_LEN]>, argon2::Error> {
+    let params = Params::new(m_cost, t_cost, p_cost, Some(RECOVERY_KEY_LEN))?;
+    let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+    let mut key = Zeroizing::new([0u8; RECOVERY_KEY_LEN]);
+    argon.hash_password_into(mnemonic.to_string().as_bytes(), salt, &mut key[..])?;
+    Ok(key)
+}
+
+/// Opens a server-held escrow blob with `words`. The parameters beside the blob come from an
+/// untrusted server, so they are validated before the KDF runs. Every failure after a well-formed
+/// blob is one indistinguishable `recovery_rejected`: a wrong word and a phrase from another
+/// account must look the same, and the message never names a word.
+pub(crate) fn unwrap_escrow(words: &[String], body: &[u8]) -> Result<MasterKey, EngineError> {
+    if words.len() != RECOVERY_WORDS {
+        return Err(EngineError::recovery_rejected(format!(
+            "a recovery phrase has {RECOVERY_WORDS} words, not {}",
+            words.len()
+        )));
+    }
+    let mnemonic =
+        Mnemonic::parse_in_normalized(Language::English, &words.join(" ")).map_err(|_| {
+            EngineError::recovery_rejected("the phrase does not open the recovery escrow")
+        })?;
+
+    let blob: EscrowBlob = serde_json::from_slice(body).map_err(|_| {
+        EngineError::unavailable("the sync server's recovery escrow is not a valid blob")
+    })?;
+    if blob.version != ESCROW_VERSION || blob.kdf != ESCROW_KDF {
+        return Err(EngineError::unavailable(
+            "the sync server's recovery escrow uses a format this build does not open",
+        ));
+    }
+    if !(RECOVERY_M_COST_MIN..=RECOVERY_M_COST_MAX).contains(&blob.m_cost)
+        || !(1..=RECOVERY_T_COST_MAX).contains(&blob.t_cost)
+        || !(1..=RECOVERY_P_COST_MAX).contains(&blob.p_cost)
+    {
+        return Err(EngineError::unavailable(
+            "the sync server's recovery escrow asks for KDF parameters outside the accepted range",
+        ));
+    }
+    let salt = decode_b64(&blob.salt_b64, "recovery salt").map_err(|_| {
+        EngineError::unavailable("the sync server's recovery escrow has a malformed salt")
+    })?;
+    let nonce = decode_b64(&blob.nonce_b64, "recovery nonce").map_err(|_| {
+        EngineError::unavailable("the sync server's recovery escrow has a malformed nonce")
+    })?;
+    let ciphertext = decode_b64(&blob.ciphertext_b64, "recovery ciphertext").map_err(|_| {
+        EngineError::unavailable("the sync server's recovery escrow has a malformed body")
+    })?;
+    if salt.len() != RECOVERY_SALT_LEN
+        || nonce.len() != RECOVERY_NONCE_LEN
+        || ciphertext.len() != RECOVERY_KEY_LEN + 16
+    {
+        return Err(EngineError::unavailable(
+            "the sync server's recovery escrow has the wrong shape",
+        ));
+    }
+
+    let key = derive_wrapper_key(&mnemonic, &salt, blob.m_cost, blob.t_cost, blob.p_cost).map_err(
+        |err| EngineError::internal_error(format!("cannot derive the recovery key: {err}")),
+    )?;
+    let cipher = ChaCha20Poly1305::new(
+        &Key::try_from(&key[..])
+            .map_err(|_| EngineError::internal_error("the recovery key is not 32 bytes"))?,
+    );
+    let plaintext = Zeroizing::new(
+        cipher
+            .decrypt(
+                &Nonce::try_from(&nonce[..]).map_err(|_| {
+                    EngineError::internal_error("the recovery nonce is not 12 bytes")
+                })?,
+                Payload {
+                    msg: &ciphertext,
+                    aad: ESCROW_AAD,
+                },
+            )
+            .map_err(|_| {
+                EngineError::recovery_rejected("the phrase does not open the recovery escrow")
+            })?,
+    );
+    let bytes: [u8; RECOVERY_KEY_LEN] = plaintext
+        .as_slice()
+        .try_into()
+        .map_err(|_| EngineError::recovery_rejected("the recovery escrow holds no master key"))?;
+    Ok(MasterKey::from_bytes(bytes))
 }
 
 fn decode_b64(text: &str, name: &str) -> Result<Vec<u8>, EngineError> {
