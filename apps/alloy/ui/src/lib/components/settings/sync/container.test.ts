@@ -565,6 +565,61 @@ describe('DevicesSyncLive fresh-device recovery', () => {
   });
 });
 
+describe('DevicesSyncLive fresh predicate', () => {
+  function thisDevice(epoch: number) {
+    return {
+      device_id: 'demo-this',
+      label: 'Laptop',
+      enrolled_ms: 1,
+      epoch,
+      current: true,
+    };
+  }
+
+  it('does not show the fresh form for a device with epoch 1 and an empty roster', async () => {
+    engine.invoke.mockImplementation(async (command: EngineCommand) => {
+      switch (command.action) {
+        case 'ListDevices':
+          return { type: 'DevicesList', payload: { devices: [thisDevice(1)] } };
+        case 'SyncStatus':
+          return {
+            type: 'SyncStatus',
+            payload: { status: status({ recovery_stale: true }) },
+          };
+        default:
+          throw new Error(`unexpected command ${command.action}`);
+      }
+    });
+
+    const target = render();
+    await settle();
+
+    expect(target.querySelector('form.recover'), 'an account device is not fresh').toBeNull();
+    expect(target.textContent, 'the stale-phrase remedy stays reachable').toContain(
+      t('sync-recovery-stale')
+    );
+  });
+
+  it('shows the fresh form for a device with epoch 0, an empty roster and no phrase', async () => {
+    engine.invoke.mockImplementation(async (command: EngineCommand) => {
+      switch (command.action) {
+        case 'ListDevices':
+          return { type: 'DevicesList', payload: { devices: [thisDevice(0)] } };
+        case 'SyncStatus':
+          return { type: 'SyncStatus', payload: { status: status() } };
+        default:
+          throw new Error(`unexpected command ${command.action}`);
+      }
+    });
+
+    const target = render();
+    await settle();
+
+    expect(target.querySelector('form.recover'), 'a never-enrolled device is fresh').toBeTruthy();
+    expect(target.textContent).toContain(t('sync-recovery-recover-title'));
+  });
+});
+
 describe('DevicesSyncLive revoke result', () => {
   const THIS_DEVICE = {
     device_id: 'demo-this',

@@ -452,12 +452,13 @@
   }
 
   /**
-   * The phrase is the only way back for a device with no configuration: no sibling to pair with,
-   * no server endpoint yet, no master key. The pin is captured on the first `https` connection.
+   * The phrase is the only way back for a device that never adopted an account key: no sibling to
+   * pair with, no server endpoint yet, no master key. Epoch 0 is the engine's proof of that; the
+   * length of the *other*-device list is not, since revoking everyone still leaves this device in
+   * an account. A revoked-to-empty account is served by the stale-phrase remedy instead. The pin is
+   * captured on the first `https` connection.
    */
-  const fresh = $derived(
-    server.mode === 'off' && devices.length === 0 && !recovery.hasPhrase
-  );
+  const fresh = $derived(device.epoch === 0 && !recovery.hasPhrase);
 
   async function recoverFromPhrase(input: RecoverFromPhraseInput) {
     recovery = { ...recovery, recovering: true, error: null, recovered: null };
