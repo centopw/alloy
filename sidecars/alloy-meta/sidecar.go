@@ -669,7 +669,7 @@ func mapMetaError(err error) *WireError {
 	msg := err.Error()
 	if strings.Contains(msg, "connection") || strings.Contains(msg, "network") ||
 		strings.Contains(msg, "tls:") || strings.Contains(msg, "dial ") ||
-		strings.Contains(msg, "no such host") {
+		strings.Contains(msg, "no such host") || socketNotReady(err) {
 		return errNetwork(msg)
 	}
 	return errProtocol(msg)

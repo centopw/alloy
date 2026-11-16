@@ -137,7 +137,9 @@ pub async fn run(ctx: EngineContext, runtime: Arc<AccountRuntime>) {
                     }
                     let wake = instant_at(next_attempt_at);
                     next_wake = Some(next_wake.map_or(wake, |scheduled| scheduled.min(wake)));
-                    tracing::warn!(txn = %item.txn_id, error = %message, "outbox row will retry");
+                    // A retry is ordinary: the message waits for the connection or for a rate
+                    // limit to lift. Only a permanent failure below is worth a warning.
+                    tracing::debug!(txn = %item.txn_id, error = %message, "outbox row will retry");
                 }
                 Err(PerformError::Fatal {
                     message,

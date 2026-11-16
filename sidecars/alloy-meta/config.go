@@ -117,7 +117,7 @@ func proxyAddress(u *url.URL) string {
 // path. The proxy goes into the client settings because messagix captures its websocket dialer when
 // it builds the client: applying it only afterwards would leave the socket direct.
 func (s settings) newMessagixClient(log zerolog.Logger, c *cookies.Cookies) *messagix.Client {
-	cli := messagix.NewClient(c, log, s.config)
+	cli := messagix.NewClient(c, quietMessagixLog(log), s.config)
 	if s.proxy != nil {
 		addr := s.proxy.String()
 		// Mirror mautrix-meta (pkg/connector/login.go getMessagixClient): the HTTP client asks for

@@ -114,8 +114,17 @@ func (m *Messenger) sendMeta(ctx context.Context, cli *messagix.Client, msg Outg
 	m.txns[otid] = msg.TxnID
 	m.mu.Unlock()
 
-	if err := cli.WaitUntilCanSendMessages(ctx, 15*time.Second); err != nil {
-		m.log.Warn().Err(err).Msg("Socket not ready to send; trying anyway")
+	if waitErr := cli.WaitUntilCanSendMessages(ctx, 15*time.Second); waitErr != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, mapMetaError(ctxErr)
+		}
+		// The socket is still dialing (or reconnecting). Sending now would only earn
+		// dgw.ErrSocketNotOpen, so the row goes back to the queue as transport instead: the host
+		// retries it, and it goes out when the socket is up.
+		m.mu.Lock()
+		delete(m.txns, otid)
+		m.mu.Unlock()
+		return nil, errNetwork("the connection is still opening: " + waitErr.Error())
 	}
 	resp, err := cli.ExecuteTasks(ctx, task)
 	if err != nil {

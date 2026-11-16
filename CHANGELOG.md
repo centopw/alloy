@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.15 (pre-release)
+
+### Fixed
+- **A message sent while the app is still connecting now waits for the connection instead of failing.** The network's socket opens a few seconds after launch (and again after a reconnect), and a send attempted during that window came back as `protocol error: dgw: socket is not open`. The send was retried, but every attempt waited 15 seconds and then tried anyway, so it produced that error each time and a warning in the log. The sidecar now reports "the connection is still opening" as a retryable transport error and the queue retries it once the socket is up; a retry is logged at debug level, not as a warning.
+- **The log is no longer flooded with the Messenger library's per-row sync warnings.** During the initial sync the library warns once for every dependency and table column its model does not implement — "Skipping dependency with unrecognized type", "Failed to set int64" and similar, thousands of lines a minute. Those warnings are now dropped at the library boundary; its errors still reach the log.
+
 ## 0.4.14 (pre-release)
 
 ### Fixed
