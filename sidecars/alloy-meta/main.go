@@ -64,6 +64,8 @@ func main() {
 		Msg("Messenger sidecar starting")
 	// stdout carries protocol frames only; libsignal's default logger writes to stdout.
 	installSignalLogger(logger)
+	// mautrix-meta's table decoder logs through zerolog's global logger, not the one it was given.
+	installGlobalLogger(logger)
 	out := newWriter(os.Stdout)
 	messenger := newMessenger(logger, out, cfg)
 

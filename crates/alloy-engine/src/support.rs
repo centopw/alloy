@@ -98,10 +98,11 @@ pub async fn message_in_chat(
 
 /// The network id of a message that has already been accepted by the network.
 pub fn remote_id(record: &MessageRecord) -> Result<String, EngineError> {
-    record
-        .remote_msg_id
-        .clone()
-        .ok_or_else(|| EngineError::unavailable("the message has not reached the network yet"))
+    record.remote_msg_id.clone().ok_or_else(|| {
+        EngineError::unavailable(
+            "That message is still being sent. Try again once it has gone through.",
+        )
+    })
 }
 
 /// A file the outbox must upload with a message.

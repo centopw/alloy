@@ -652,7 +652,7 @@
     {/if}
 
     {#if timelineStore.error || timelineStore.receiptError}
-      <div class="toast" role="alert">{timelineStore.error ?? timelineStore.receiptError}</div>
+      <div class="toast" class:warning={timelineStore.errorIsWarning} role="alert">{timelineStore.error ?? timelineStore.receiptError}</div>
     {/if}
   </div>
   <TypingIndicator {roomId} />
@@ -835,5 +835,10 @@
     color: var(--alloy-color-text-on-accent);
     padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-4);
     border-radius: var(--alloy-radii-md);
+  }
+  /* The action is refused for now, not broken: say so without the red of a failure. */
+  .toast.warning {
+    background: var(--alloy-color-status-warning);
+    color: var(--alloy-color-text-on-accent);
   }
 </style>

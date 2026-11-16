@@ -20,7 +20,6 @@
   } from '$lib/platform/files';
   import { nativeClipboardHasImage, nativeClipboardImage } from '$lib/platform/clipboardImage';
   import { stageFile, stagePictureFromPath, type StagedPicture } from './stageHelper';
-  import { errorMessage } from '$lib/stores/errors';
   import { isVoiceMessagesSupported } from '$lib/platform/capabilities';
   import VoiceRecorder from './VoiceRecorder.svelte';
   import { contextmenu } from '$lib/platform/contextmenu';

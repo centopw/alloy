@@ -1,7 +1,7 @@
 import { client, applyDiff } from '../ipc/index.js';
 import type { CapabilitiesDto, EngineEvent, TimelineItemDto, UserId } from '../generated/index.js';
 import { FrameBatcher, Subscription } from './subscription.js';
-import { errorMessage, expect } from './errors.js';
+import { errorMessage, expect, isSoftError } from './errors.js';
 import { uploadsStore } from './uploads.svelte.js';
 import { roomsStore } from './rooms.svelte.js';
 import { voiceExtension, writeTempFile } from '../platform/files.js';
@@ -143,6 +143,26 @@ class TimelineStore {
   paginating = $state(false);
   reachedStart = $state(false);
   error = $state<string | null>(null);
+  /** True when the shown error is a warning: the action is refused for now, not broken. */
+  errorIsWarning = $state(false);
+
+  /** Shows a failed engine call, keeping whether it deserves a warning instead of an error. */
+  setError(e: unknown): void {
+    this.error = errorMessage(e);
+    this.errorIsWarning = isSoftError(e);
+  }
+
+  /** Shows a message the UI produced itself rather than an engine error. */
+  setMessage(message: string, warning = false): void {
+    this.error = message;
+    this.errorIsWarning = warning;
+  }
+
+  /** Hides the current error and its tone. */
+  clearError(): void {
+    this.error = null;
+    this.errorIsWarning = false;
+  }
   replyTo = $state<TimelineItemDto | null>(null);
   editing = $state<TimelineItemDto | null>(null);
   highlightedEventId = $state<string | null>(null);
@@ -192,7 +212,7 @@ class TimelineStore {
     if (!roomId) return closing;
     void closing;
     this.roomId = roomId;
-    this.error = null;
+    this.clearError();
     this.fetchedPinned = [];
     const cached = this.cache.get(roomId);
     if (cached) {
@@ -240,7 +260,7 @@ class TimelineStore {
       );
       sub.attach(res.payload.subscription_id);
     } catch (e) {
-      this.error = errorMessage(e);
+      this.setError(e);
       this.loading = false;
     }
   }
@@ -310,7 +330,7 @@ class TimelineStore {
         ? [{ ...item, pinned: true }, ...this.fetchedPinned.filter((p) => p.event_id !== eventId)]
         : this.fetchedPinned.filter((p) => p.event_id !== eventId);
     } catch (e) {
-      if (this.roomId === roomId) this.error = errorMessage(e);
+      if (this.roomId === roomId) this.setError(e);
     }
   }
 
@@ -354,7 +374,7 @@ class TimelineStore {
       // The user may have switched rooms meanwhile: another room's start says nothing about this one.
       if (this.roomId === roomId) this.reachedStart = res.payload.reached_start;
     } catch (e) {
-      if (this.roomId === roomId) this.error = errorMessage(e);
+      if (this.roomId === roomId) this.setError(e);
     } finally {
       this.paginating = false;
     }
@@ -383,7 +403,7 @@ class TimelineStore {
         });
       }
     } catch (e) {
-      this.error = errorMessage(e);
+      this.setError(e);
     }
   }
 
@@ -403,7 +423,7 @@ class TimelineStore {
         params: { room_id: roomId, file_path: path, duration_ms: clip.durationMs, txn_id: txnId },
       });
     } catch (e) {
-      this.error = errorMessage(e);
+      this.setError(e);
     } finally {
       uploadsStore.end(txnId);
     }
@@ -426,7 +446,7 @@ class TimelineStore {
         },
       });
     } catch (e) {
-      this.error = errorMessage(e);
+      this.setError(e);
     } finally {
       uploadsStore.end(txnId);
     }
@@ -441,7 +461,7 @@ class TimelineStore {
         params: { room_id: this.roomId, event_id: item.event_id, key },
       })
       .catch((e) => {
-        this.error = errorMessage(e);
+        this.setError(e);
       });
   }
 
@@ -457,7 +477,7 @@ class TimelineStore {
           params: { room_id: roomId, event_id: item.event_id, for_everyone: true },
         });
       } catch (e) {
-        this.error = errorMessage(e);
+        this.setError(e);
       }
     }
   }
@@ -485,7 +505,7 @@ class TimelineStore {
     await client
       .invoke({ action: 'RetrySend', params: { room_id: this.roomId, txn_id: txnId } })
       .catch((e) => {
-        this.error = errorMessage(e);
+        this.setError(e);
       });
   }
 
@@ -495,7 +515,7 @@ class TimelineStore {
     await client
       .invoke({ action: 'CancelSend', params: { room_id: this.roomId, txn_id: txnId } })
       .catch((e) => {
-        this.error = errorMessage(e);
+        this.setError(e);
       });
   }
 

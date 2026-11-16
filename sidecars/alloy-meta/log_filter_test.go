@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/rs/zerolog"
+	zlog "github.com/rs/zerolog/log"
 	"go.mau.fi/mautrix-meta/pkg/messagix/dgw"
 )
 
@@ -35,6 +36,27 @@ func TestQuietMessagixLogDropsOnlySyncNoise(t *testing.T) {
 	}
 	if !strings.Contains(out, "Something the host should see") {
 		t.Errorf("unrelated warning was dropped:\n%s", out)
+	}
+}
+
+func TestInstallGlobalLoggerFiltersTheTableNoise(t *testing.T) {
+	previous := zlog.Logger
+	t.Cleanup(func() { zlog.Logger = previous })
+
+	var buf bytes.Buffer
+	installGlobalLogger(zerolog.New(&buf).Level(zerolog.DebugLevel))
+
+	zlog.Warn().Str("ls_type", "LSTruncateMiActMappingTableForSyncGroup").
+		Msg("Skipping dependency with unrecognized type")
+	zlog.Warn().Msg("Failed to set int64")
+	zlog.Error().Msg("Failed to set the socket up")
+
+	out := buf.String()
+	if strings.Contains(out, "Skipping dependency") || strings.Contains(out, "Failed to set int64") {
+		t.Errorf("table noise reached the global logger:\n%s", out)
+	}
+	if !strings.Contains(out, "Failed to set the socket up") {
+		t.Errorf("an error from the global logger was dropped:\n%s", out)
 	}
 }
 

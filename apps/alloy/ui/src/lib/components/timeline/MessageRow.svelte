@@ -28,7 +28,6 @@
   import { membersStore } from '$lib/stores/members.svelte';
   import { forwardStore } from '$lib/stores/forward.svelte';
   import { resolveAvatar } from '$lib/stores/avatars.svelte';
-  import { errorMessage } from '$lib/stores/errors';
   import { profileCard } from '$lib/stores/profileCard.svelte';
   import { contextMenu, type MenuItem, type MenuOptions } from '$lib/stores/contextmenu.svelte';
   import { client } from '$lib/ipc';

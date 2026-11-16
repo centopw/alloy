@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.16 (pre-release)
+
+### Fixed
+- **The Messenger library's sync warnings are actually gone now.** 0.4.15 filtered the logger the library is handed, but its table decoder logs through Go's zerolog *global* logger instead, which no one had claimed — it wrote its own trace-level JSON straight to stderr: a line per sync dependency and per table column, with whole payloads. The sidecar now claims that global logger and routes it through the same filter, so those lines stop and real errors from the same code still appear.
+- **A refused action on a message that is still sending reads like a person wrote it.** Reacting to, editing, deleting or marking read a message whose network acknowledgement has not arrived answered "the message has not reached the network yet" in red. It now says "That message is still being sent. Try again once it has gone through." and shows as an amber warning: the action is refused for now, nothing is broken. The same tone now covers every "cannot do that right now" refusal from the engine (`unavailable`, `not_supported`), such as editing a message the network no longer allows to be edited.
+
 ## 0.4.15 (pre-release)
 
 ### Fixed

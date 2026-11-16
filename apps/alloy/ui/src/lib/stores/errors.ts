@@ -41,6 +41,16 @@ export function errorReason(e: unknown): string | null {
   return null;
 }
 
+/**
+ * True when the engine refused a request because it cannot apply right now, not because the
+ * request was wrong: an unavailable action, or one this network does not support. Those deserve a
+ * warning rather than an error.
+ */
+export function isSoftError(e: unknown): boolean {
+  const code = errorCode(e);
+  return code === 'unavailable' || code === 'not_supported';
+}
+
 /** Narrow a response to one variant or throw (a protocol bug, not a user error). */
 export function expect<T extends EngineResponse['type']>(
   res: EngineResponse,
