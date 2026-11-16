@@ -6,21 +6,18 @@ use alloy_theme::{ThemeLoader, ThemeResolver};
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::PoisonError;
 
 /// Handler for theme and settings operations (`CommandGroup::Settings`).
 ///
 /// Owned by stream: `theme-runtime`
 /// Provides a complete vertical slice for theme management and user preferences.
 #[derive(Default)]
-pub struct SettingsHandler {
-    /// Serializes settings read-modify-write cycles, so two commands cannot lose each other's keys.
-    settings_lock: Mutex<()>,
-}
+pub struct SettingsHandler;
 
 impl SettingsHandler {
     pub fn new() -> Self {
-        Self::default()
+        Self
     }
 
     /// Returns the directory that holds user theme files.
@@ -28,7 +25,7 @@ impl SettingsHandler {
     /// Release builds read only `<data_dir>/themes`, so files placed in a working directory or
     /// named by an environment variable cannot inject CSS. Debug builds also honour the
     /// development locations from `dev_themes_dir`.
-    fn themes_dir(ctx: &EngineContext) -> Option<PathBuf> {
+    pub(crate) fn themes_dir(ctx: &EngineContext) -> Option<PathBuf> {
         if let Some(dev) = Self::dev_themes_dir() {
             return Some(dev);
         }
@@ -70,7 +67,7 @@ impl SettingsHandler {
     }
 
     /// Theme ids become registry keys and CSS selector fragments, so keep them to a plain slug.
-    fn is_valid_theme_id(id: &str) -> bool {
+    pub(crate) fn is_valid_theme_id(id: &str) -> bool {
         !id.is_empty()
             && id.len() <= 64
             && id
@@ -189,7 +186,7 @@ impl SettingsHandler {
     }
 
     /// Gets settings.json from data_dir, or returns empty object if not present.
-    fn get_settings_file(&self, ctx: &EngineContext) -> Result<serde_json::Value, EngineError> {
+    pub(crate) fn get_settings_file(ctx: &EngineContext) -> Result<serde_json::Value, EngineError> {
         let settings_path = ctx.data_dir.join("settings.json");
         if !settings_path.exists() {
             return Ok(serde_json::json!({}));
@@ -207,16 +204,17 @@ impl SettingsHandler {
     }
 
     /// Runs a settings read-modify-write with the write lock held. The callback must not await:
-    /// the lock is a `std::sync::Mutex` and everything it guards is synchronous file I/O.
-    fn with_settings_lock<T>(
-        &self,
+    /// the lock is a `std::sync::Mutex` and everything it guards is synchronous file I/O. The
+    /// lock lives on the context so the sync handler's writes exclude this handler's too.
+    pub(crate) fn with_settings_lock<T>(
+        ctx: &EngineContext,
         update: impl FnOnce() -> Result<T, EngineError>,
     ) -> Result<T, EngineError> {
         // A panic elsewhere must not make settings permanently unwritable.
-        let _guard = self
+        let _guard = ctx
             .settings_lock
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(PoisonError::into_inner);
         update()
     }
 
@@ -224,10 +222,9 @@ impl SettingsHandler {
     ///
     /// The write goes to `settings.json.tmp`, is flushed to disk, and is then renamed over
     /// `settings.json`. A crash mid-write therefore leaves the previous readable file in place
-    /// instead of a truncated one. Callers hold [`Self::settings_lock`], so the one temp path is
-    /// never shared by two writers.
-    fn write_settings_file(
-        &self,
+    /// instead of a truncated one. Callers hold [`Self::with_settings_lock`], so the one temp path
+    /// is never shared by two writers.
+    pub(crate) fn write_settings_file(
         ctx: &EngineContext,
         settings: serde_json::Value,
     ) -> Result<(), EngineError> {
@@ -287,16 +284,20 @@ impl GroupHandler for SettingsHandler {
                 let _ = self.get_theme(ctx, &id).await?;
 
                 // Store in settings
-                self.with_settings_lock(|| {
-                    let mut settings = self.get_settings_file(ctx)?;
+                Self::with_settings_lock(ctx, || {
+                    let mut settings = Self::get_settings_file(ctx)?;
                     settings["active_theme"] = serde_json::Value::String(id);
-                    self.write_settings_file(ctx, settings)
+                    crate::handlers::sync::note_layer_change(
+                        &mut settings,
+                        crate::support::now_ms(),
+                    );
+                    Self::write_settings_file(ctx, settings)
                 })?;
 
                 Ok(EngineResponse::ThemeSetActive)
             }
             EngineCommand::GetSettings => {
-                let settings = self.get_settings_file(ctx)?;
+                let settings = Self::get_settings_file(ctx)?;
                 let settings_json = serde_json::to_string(&settings).map_err(|e| {
                     EngineError::internal_error(format!("Failed to serialize settings: {}", e))
                 })?;
@@ -310,14 +311,18 @@ impl GroupHandler for SettingsHandler {
 
                 // Load, update, and save under the write lock, so concurrent commands cannot
                 // lose each other's keys.
-                self.with_settings_lock(|| {
-                    let mut settings = self.get_settings_file(ctx)?;
+                Self::with_settings_lock(ctx, || {
+                    let mut settings = Self::get_settings_file(ctx)?;
                     if let serde_json::Value::Object(obj) = &mut settings {
                         obj.insert(key.clone(), value);
                     } else {
                         return Err(EngineError::internal_error("Settings is not a JSON object"));
                     }
-                    self.write_settings_file(ctx, settings)
+                    crate::handlers::sync::note_layer_change(
+                        &mut settings,
+                        crate::support::now_ms(),
+                    );
+                    Self::write_settings_file(ctx, settings)
                 })?;
 
                 Ok(EngineResponse::SettingSet { key })

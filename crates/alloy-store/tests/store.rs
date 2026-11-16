@@ -998,3 +998,82 @@ async fn a_topic_message_is_found_through_its_forum_only() {
             .is_none()
     );
 }
+
+#[tokio::test]
+async fn a_tag_write_stamps_the_set_and_only_tagged_chats_are_listed() {
+    let store = Store::open_in_memory(KEY).expect("open store");
+    let (_, tagged) = account_and_chat(&store).await;
+    let plain = {
+        let account = store
+            .insert_account(NewAccount {
+                account_id: None,
+                network: Network::Telegram,
+                remote_user_id: Some("remote-user-2".to_owned()),
+                display_name: None,
+                state: AccountState::Active,
+            })
+            .await
+            .expect("insert account");
+        store
+            .upsert_chat(ChatUpsert {
+                account_id: account.account_id.clone(),
+                remote_chat_id: "remote-chat-2".to_owned(),
+                kind: ChatKind::Group,
+                title: Some("Untagged".to_owned()),
+                avatar_media_id: None,
+                last_message_id: None,
+                last_activity_at: None,
+                parent_remote_chat_id: None,
+                is_forum: false,
+            })
+            .await
+            .expect("upsert chat")
+    };
+
+    // A bundle import sets its own stamp; the tags land with it, not with the local clock.
+    let stamped = store
+        .update_chat_flags(
+            &tagged,
+            ChatFlagsUpdate {
+                tags: Some(vec!["work".to_owned()]),
+                tags_updated_at: Some(1_700_000_000_000),
+                ..ChatFlagsUpdate::default()
+            },
+        )
+        .await
+        .expect("tag the chat");
+    assert_eq!(stamped.tags_updated_at, 1_700_000_000_000);
+
+    let listed = store.list_tagged_chats().await.expect("tagged chats");
+    assert_eq!(
+        listed
+            .iter()
+            .map(|chat| chat.chat_id.clone())
+            .collect::<Vec<_>>(),
+        vec![tagged.clone()],
+        "an untagged chat is not in the export set"
+    );
+    assert!(
+        !listed.iter().any(|chat| chat.chat_id == plain),
+        "the untagged chat stays out of the set"
+    );
+
+    // Clearing the tags drops it out of the set again.
+    store
+        .update_chat_flags(
+            &tagged,
+            ChatFlagsUpdate {
+                tags: Some(Vec::new()),
+                ..ChatFlagsUpdate::default()
+            },
+        )
+        .await
+        .expect("clear the tags");
+    assert!(
+        store
+            .list_tagged_chats()
+            .await
+            .expect("tagged chats")
+            .is_empty()
+    );
+}

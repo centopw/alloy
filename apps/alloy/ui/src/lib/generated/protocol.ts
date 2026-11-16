@@ -125,6 +125,25 @@ export type CodeChannel =
 /**  Delivered inside the network's own app or by an already logged-in session. */
 "app" | "sms" | "email" | "other";
 
+/**  What a configuration bundle carries, so the UI can say it before the user shares the string. */
+export type ConfigBundleSummary = {
+	settings: boolean,
+	catalogue: boolean,
+	tags: number,
+	backgrounds: number,
+	/**  Id of the selected theme, when the bundle carries one. */
+	theme: string | null,
+};
+
+/**  What an import changed. All-false means the bundle was already covered by local state. */
+export type ConfigImportReport = {
+	settings: boolean,
+	catalogue: boolean,
+	tags: number,
+	backgrounds: number,
+	theme: boolean,
+};
+
 /**  Connection state of one account's connector. */
 export type ConnectionStatus = "Disconnected" | "Connecting" | "Syncing" | "Connected" | { Reconnecting: {
 	attempt: number,
@@ -139,6 +158,17 @@ export type CookieFieldDto = {
 	label: string,
 	/**  The connector cannot log in without this cookie. */
 	required: boolean,
+};
+
+/**  One entry of the local device roster. */
+export type DeviceDto = {
+	device_id: string,
+	label: string,
+	enrolled_ms: number,
+	/**  Key epoch this device is enrolled at; revocation advances it. */
+	epoch: number,
+	/**  True for the device serving this response. */
+	current: boolean,
 };
 
 /**  A message draft for a chat. */
@@ -274,6 +304,73 @@ export type EngineCommand =
 /**  Removes a tag from the catalogue and from every chat that carries it. */
 { action: "DeleteRoomTag"; params: {
 	tag_id: string,
+} } | 
+/**
+ *  Assembles this device's configuration bundle for enrolment (`docs/plan/11-sync-ipc.md`).
+ * 
+ *  `include_backgrounds` is off by default in the UI because background images dominate the
+ *  bundle size; `include_themes` carries the active user theme's file. Nothing is uploaded.
+ */
+{ action: "ExportConfigBundle"; params: {
+	include_backgrounds: boolean,
+	include_themes: boolean,
+} } | 
+/**
+ *  Validates a bundle and, when `apply` is false, reports exactly what applying it would do.
+ * 
+ *  The bundle's schema must equal this build's: anything else is refused with
+ *  `bundle_rejected` naming both versions, before a single byte is written.
+ */
+{ action: "ImportConfigBundle"; params: {
+	bundle_json: string,
+	apply: boolean,
+} } | 
+/**
+ *  Starts a device-to-device pairing with no server in the path.
+ * 
+ *  Only the offering side starts here; the new device answers the ticket it was shown with
+ *  [`Self::AcceptPairingTicket`].
+ */
+{ action: "BeginPairing"; params: {
+	role: PairingRole,
+} } | 
+/**
+ *  Joins a pairing from the new device, using the ticket the offering device shows and the
+ *  8-character code beside it. A wrong code fails the SAS comparison, not a string check.
+ */
+{ action: "AcceptPairingTicket"; params: {
+	ticket: string,
+	code: string,
+} } | 
+/**  Reads the live state of one pairing; transitions also arrive as `PairingChanged`. */
+{ action: "PairingStatus"; params: {
+	pairing_id: string,
+} } | 
+/**
+ *  Answers the SAS comparison. Accepting on both sides is the only way the bundle crosses;
+ *  declining on either side cancels the transfer.
+ */
+{ action: "ConfirmPairing"; params: {
+	pairing_id: string,
+	accept: boolean,
+} } | 
+/**
+ *  Creates a 24-word recovery phrase and keeps only a verifier of the escrow blob it wraps
+ *  the master key into. The words exist only in the response and are never stored.
+ */
+{ action: "CreateRecoveryPhrase" } | 
+/**
+ *  Checks that `words` is the recovery phrase this device holds. A wrong word fails with
+ *  `recovery_rejected` and no hint of which word it was.
+ */
+{ action: "VerifyRecoveryPhrase"; params: {
+	words: string[],
+} } | 
+/**  Lists the local device roster. `current` marks this device. */
+{ action: "ListDevices" } | 
+/**  Removes one device from the local roster and advances the local key epoch. */
+{ action: "RevokeDevice"; params: {
+	device_id: string,
 } } | 
 /**  Marks the whole chat as read and clears its unread notifications. */
 { action: "MarkRoomRead"; params: {
@@ -483,6 +580,20 @@ export type EngineEvent = { type: "ConnectionStatus"; payload: {
 } } | { type: "ToastNotice"; payload: {
 	message: string,
 	level: string,
+} } | 
+/**  Any transition of a live pairing, including expiry decline and failure. */
+{ type: "PairingChanged"; payload: {
+	pairing_id: string,
+	state: PairingPhase,
+	sas: string | null,
+} } | 
+/**
+ *  Sync moved between idle, running, done, failed and blocked, so the UI never polls for it.
+ *  A head-chain violation or a pin mismatch is `blocked` with a reason code in `detail`.
+ */
+{ type: "SyncStateChanged"; payload: {
+	state: SyncState,
+	detail: string | null,
 } };
 
 export type EngineResponse = { type: "AccountsList"; payload: {
@@ -600,7 +711,48 @@ export type EngineResponse = { type: "AccountsList"; payload: {
 	settings_json: string,
 } } | { type: "SettingSet"; payload: {
 	key: string,
-} };
+} } | 
+/**  The bundle as the string the user shares, with what it carries. */
+{ type: "ConfigBundleExported"; payload: {
+	bundle_json: string,
+	bytes: number,
+	summary: ConfigBundleSummary,
+} } | 
+/**  What the import changed; `applied` is false for a dry run and when nothing was newer. */
+{ type: "ConfigBundleImported"; payload: {
+	report: ConfigImportReport,
+	applied: boolean,
+} } | 
+/**
+ *  The offer is listening, or the accepting side dialled. `ticket` is the QR payload string,
+ *  `code` the 8-character rendezvous code shown beside it.
+ */
+{ type: "PairingStarted"; payload: {
+	pairing_id: string,
+	ticket: string,
+	code: string,
+	endpoint: string,
+	expires_at_ms: number,
+} } | 
+/**  The live state of one pairing. */
+{ type: "PairingState"; payload: {
+	state: PairingPhase,
+	sas: string | null,
+	peer_label: string | null,
+	/**  Bytes of bundle that crossed; 0 until the transfer started. */
+	transferred: number,
+	error: string | null,
+} } | { type: "DevicesList"; payload: {
+	devices: DeviceDto[],
+} } | 
+/**  The roster change landed; `epoch` is the new local key epoch. */
+{ type: "DeviceRevoked"; payload: {
+	epoch: number,
+} } | 
+/**  The words exist only here: they are never stored, and the engine keeps a verifier. */
+{ type: "RecoveryPhraseCreated"; payload: {
+	words: string[],
+} } | { type: "RecoveryVerified" };
 
 /**
  *  Local message id: the `messages.message_id` row of the on-device store.
@@ -903,6 +1055,32 @@ export type NotificationCount = {
 	notification_count: number,
 };
 
+/**  How far one live pairing has got. Every transition also arrives as `PairingChanged`. */
+export type PairingPhase = 
+/**  The offer is listening, or the accepting side is dialling. */
+"waiting" | 
+/**  The peer answered and the handshake is running. */
+"peer_found" | 
+/**  Both sides show the SAS the people compare. */
+"sas_ready" | 
+/**  Both sides accepted; the bundle is crossing. */
+"transferring" | 
+/**  The bundle arrived (accepting side) or left (offering side) and was applied. */
+"done" | 
+/**  One of the two people rejected the SAS; nothing crossed. */
+"declined" | 
+/**  The code's 90-second window closed with no completed transfer. */
+"expired" | 
+/**  The pairing broke; `error` carries the reason the UI shows. */
+"failed";
+
+/**  Which side of a device-to-device pairing this device plays. */
+export type PairingRole = 
+/**  This device already has the configuration: it shows the ticket and the code. */
+"offer" | 
+/**  This device is the new one and receives the bundle. */
+"accept";
+
 /**  Aggregated reactions for one key on a message. */
 export type ReactionSummary = {
 	key: string,
@@ -1039,6 +1217,11 @@ export type RoomTagDef = {
 
 /**  Id of a live subscription created by `SubscribeRoomList` or `SubscribeTimeline`. */
 export type SubscriptionId = string;
+
+/**  State of a sync run, for `SyncStateChanged`. */
+export type SyncState = "idle" | "running" | "done" | "failed" | 
+/**  A head-chain violation or a pin mismatch stopped sync; `detail` names the reason code. */
+"blocked";
 
 /**  Palette colour of a chat tag. */
 export type TagColour = "grey" | "red" | "orange" | "amber" | "green" | "teal" | "blue" | "violet" | "pink";

@@ -161,6 +161,9 @@ pub struct ChatRecord {
     pub is_marked_unread: bool,
     pub draft: Option<String>,
     pub local_tags: Vec<String>,
+    /// When `local_tags` last changed, for last-write-wins merges of a configuration bundle.
+    #[serde(default)]
+    pub tags_updated_at: i64,
     pub note: Option<String>,
     /// The remote id of the forum this chat is a topic of; `None` for every chat that is not one.
     #[serde(default)]
@@ -198,6 +201,8 @@ pub struct ChatFlagsUpdate {
     pub is_marked_unread: Option<bool>,
     pub draft: Option<Option<String>>,
     pub tags: Option<Vec<String>>,
+    /// Stamp for a `tags` change; `None` stamps the write time. Ignored when `tags` is `None`.
+    pub tags_updated_at: Option<i64>,
     pub note: Option<Option<String>>,
 }
 

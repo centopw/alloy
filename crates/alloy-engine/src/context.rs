@@ -53,6 +53,9 @@ pub struct EngineContext {
     pub bus: ChangeBus,
     /// Open timeline windows, one per subscribed chat.
     pub timelines: TimelineRegistry,
+    /// Serialises read-modify-write cycles on `settings.json`, which the settings and sync
+    /// handlers both write. A per-handler lock would not: two handles mean two locks.
+    pub settings_lock: Arc<Mutex<()>>,
     attachments: Arc<Mutex<AttachmentAllowlist>>,
     unrestricted_attachments: bool,
 }
@@ -103,6 +106,7 @@ impl EngineContext {
             factory,
             bus: ChangeBus::new(),
             timelines: TimelineRegistry::new(),
+            settings_lock: Arc::new(Mutex::new(())),
             attachments: Arc::new(Mutex::new(AttachmentAllowlist::default())),
             unrestricted_attachments: false,
         }

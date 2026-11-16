@@ -101,6 +101,21 @@ impl Store {
         .await
     }
 
+    /// Every chat that carries at least one tag, across accounts and archived state, oldest tag
+    /// stamp first. The configuration bundle export reads them; nothing else needs the whole set.
+    pub async fn list_tagged_chats(&self) -> Result<Vec<ChatRecord>, StoreError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT * FROM chats
+                 WHERE local_tags IS NOT NULL AND local_tags != '[]'
+                 ORDER BY tags_updated_at ASC, chat_id ASC",
+            )?;
+            let rows = stmt.query_map([], rows::chat)?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+        .await
+    }
+
     /// Apply user-owned chat state; unspecified fields keep their stored value.
     pub async fn update_chat_flags(
         &self,
@@ -156,6 +171,7 @@ impl Store {
             }
             if let Some(value) = update.tags {
                 record.local_tags = value;
+                record.tags_updated_at = update.tags_updated_at.unwrap_or_else(now_ms);
             }
             if let Some(value) = update.note {
                 record.note = value;
@@ -172,7 +188,8 @@ impl Store {
                      draft = ?7,
                      local_tags = ?8,
                      note = ?9,
-                     pin_order = ?10
+                     pin_order = ?10,
+                     tags_updated_at = ?11
                  WHERE chat_id = ?1",
                 rusqlite::params![
                     chat_id,
@@ -184,7 +201,8 @@ impl Store {
                     record.draft,
                     tags,
                     record.note,
-                    record.pin_order
+                    record.pin_order,
+                    record.tags_updated_at
                 ],
             )?;
             events::append(

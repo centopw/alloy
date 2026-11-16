@@ -18,6 +18,7 @@ pub enum CommandGroup {
     Timeline,
     Media,
     Settings,
+    Sync,
 }
 
 impl CommandGroup {
@@ -89,6 +90,17 @@ impl CommandGroup {
             | EngineCommand::SetActiveTheme { .. }
             | EngineCommand::GetSettings
             | EngineCommand::SetSetting { .. } => CommandGroup::Settings,
+
+            EngineCommand::ExportConfigBundle { .. }
+            | EngineCommand::ImportConfigBundle { .. }
+            | EngineCommand::BeginPairing { .. }
+            | EngineCommand::AcceptPairingTicket { .. }
+            | EngineCommand::PairingStatus { .. }
+            | EngineCommand::ConfirmPairing { .. }
+            | EngineCommand::CreateRecoveryPhrase
+            | EngineCommand::VerifyRecoveryPhrase { .. }
+            | EngineCommand::ListDevices
+            | EngineCommand::RevokeDevice { .. } => CommandGroup::Sync,
         }
     }
 }
@@ -177,6 +189,7 @@ impl AppEngine {
         router.register_handler(Box::new(crate::handlers::timeline::TimelineHandler::new()));
         router.register_handler(Box::new(crate::handlers::media::MediaHandler::new()));
         router.register_handler(Box::new(crate::handlers::settings::SettingsHandler::new()));
+        router.register_handler(Box::new(crate::handlers::sync::SyncHandler::new()));
         Self { router }
     }
 

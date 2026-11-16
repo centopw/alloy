@@ -302,14 +302,14 @@ fn data_dir_mentions(root: &Path, needle: &str) -> bool {
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_dir() {
-            if data_dir_mentions(&path, needle) {
-                return true;
-            }
-        } else if let Ok(bytes) = std::fs::read(&path) {
-            if String::from_utf8_lossy(&bytes).contains(needle) {
-                return true;
-            }
+        if path.is_dir() && data_dir_mentions(&path, needle) {
+            return true;
+        }
+        if !path.is_dir()
+            && let Ok(bytes) = std::fs::read(&path)
+            && String::from_utf8_lossy(&bytes).contains(needle)
+        {
+            return true;
         }
     }
     false

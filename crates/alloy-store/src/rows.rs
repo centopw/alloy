@@ -59,6 +59,7 @@ pub(crate) fn chat(row: &Row<'_>) -> rusqlite::Result<ChatRecord> {
         is_marked_unread: row.get("is_marked_unread")?,
         draft: row.get("draft")?,
         local_tags,
+        tags_updated_at: row.get("tags_updated_at")?,
         note: row.get("note")?,
     })
 }

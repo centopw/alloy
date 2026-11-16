@@ -877,6 +877,90 @@ pub struct ForwardFailure {
     pub error: String,
 }
 
+// === Devices and sync (ADR 0020) ===
+
+/// Which side of a device-to-device pairing this device plays.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "lowercase")]
+pub enum PairingRole {
+    /// This device already has the configuration: it shows the ticket and the code.
+    Offer,
+    /// This device is the new one and receives the bundle.
+    Accept,
+}
+
+/// How far one live pairing has got. Every transition also arrives as `PairingChanged`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum PairingPhase {
+    /// The offer is listening, or the accepting side is dialling.
+    Waiting,
+    /// The peer answered and the handshake is running.
+    PeerFound,
+    /// Both sides show the SAS the people compare.
+    SasReady,
+    /// Both sides accepted; the bundle is crossing.
+    Transferring,
+    /// The bundle arrived (accepting side) or left (offering side) and was applied.
+    Done,
+    /// One of the two people rejected the SAS; nothing crossed.
+    Declined,
+    /// The code's 90-second window closed with no completed transfer.
+    Expired,
+    /// The pairing broke; `error` carries the reason the UI shows.
+    Failed,
+}
+
+/// What a configuration bundle carries, so the UI can say it before the user shares the string.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct ConfigBundleSummary {
+    pub settings: bool,
+    pub catalogue: bool,
+    #[specta(type = Number)]
+    pub tags: usize,
+    #[specta(type = Number)]
+    pub backgrounds: usize,
+    /// Id of the selected theme, when the bundle carries one.
+    pub theme: Option<String>,
+}
+
+/// What an import changed. All-false means the bundle was already covered by local state.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct ConfigImportReport {
+    pub settings: bool,
+    pub catalogue: bool,
+    #[specta(type = Number)]
+    pub tags: usize,
+    #[specta(type = Number)]
+    pub backgrounds: usize,
+    pub theme: bool,
+}
+
+/// One entry of the local device roster.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct DeviceDto {
+    pub device_id: String,
+    pub label: String,
+    #[specta(type = Number)]
+    pub enrolled_ms: i64,
+    /// Key epoch this device is enrolled at; revocation advances it.
+    pub epoch: u32,
+    /// True for the device serving this response.
+    pub current: bool,
+}
+
+/// State of a sync run, for `SyncStateChanged`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncState {
+    Idle,
+    Running,
+    Done,
+    Failed,
+    /// A head-chain violation or a pin mismatch stopped sync; `detail` names the reason code.
+    Blocked,
+}
+
 // === Commands ===
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -998,6 +1082,60 @@ pub enum EngineCommand {
     /// Removes a tag from the catalogue and from every chat that carries it.
     DeleteRoomTag {
         tag_id: String,
+    },
+    // Devices and sync (ADR 0020)
+    /// Assembles this device's configuration bundle for enrolment (`docs/plan/11-sync-ipc.md`).
+    ///
+    /// `include_backgrounds` is off by default in the UI because background images dominate the
+    /// bundle size; `include_themes` carries the active user theme's file. Nothing is uploaded.
+    ExportConfigBundle {
+        include_backgrounds: bool,
+        include_themes: bool,
+    },
+    /// Validates a bundle and, when `apply` is false, reports exactly what applying it would do.
+    ///
+    /// The bundle's schema must equal this build's: anything else is refused with
+    /// `bundle_rejected` naming both versions, before a single byte is written.
+    ImportConfigBundle {
+        bundle_json: String,
+        apply: bool,
+    },
+    /// Starts a device-to-device pairing with no server in the path.
+    ///
+    /// Only the offering side starts here; the new device answers the ticket it was shown with
+    /// [`Self::AcceptPairingTicket`].
+    BeginPairing {
+        role: PairingRole,
+    },
+    /// Joins a pairing from the new device, using the ticket the offering device shows and the
+    /// 8-character code beside it. A wrong code fails the SAS comparison, not a string check.
+    AcceptPairingTicket {
+        ticket: String,
+        code: String,
+    },
+    /// Reads the live state of one pairing; transitions also arrive as `PairingChanged`.
+    PairingStatus {
+        pairing_id: String,
+    },
+    /// Answers the SAS comparison. Accepting on both sides is the only way the bundle crosses;
+    /// declining on either side cancels the transfer.
+    ConfirmPairing {
+        pairing_id: String,
+        accept: bool,
+    },
+    /// Creates a 24-word recovery phrase and keeps only a verifier of the escrow blob it wraps
+    /// the master key into. The words exist only in the response and are never stored.
+    CreateRecoveryPhrase,
+    /// Checks that `words` is the recovery phrase this device holds. A wrong word fails with
+    /// `recovery_rejected` and no hint of which word it was.
+    VerifyRecoveryPhrase {
+        words: Vec<String>,
+    },
+    /// Lists the local device roster. `current` marks this device.
+    ListDevices,
+    /// Removes one device from the local roster and advances the local key epoch.
+    RevokeDevice {
+        device_id: String,
     },
     // Chat flags
     /// Marks the whole chat as read and clears its unread notifications.
@@ -1334,6 +1472,51 @@ pub enum EngineResponse {
     SettingSet {
         key: String,
     },
+    // Devices and sync
+    /// The bundle as the string the user shares, with what it carries.
+    ConfigBundleExported {
+        bundle_json: String,
+        #[specta(type = Number)]
+        bytes: u64,
+        summary: ConfigBundleSummary,
+    },
+    /// What the import changed; `applied` is false for a dry run and when nothing was newer.
+    ConfigBundleImported {
+        report: ConfigImportReport,
+        applied: bool,
+    },
+    /// The offer is listening, or the accepting side dialled. `ticket` is the QR payload string,
+    /// `code` the 8-character rendezvous code shown beside it.
+    PairingStarted {
+        pairing_id: String,
+        ticket: String,
+        code: String,
+        endpoint: String,
+        #[specta(type = Number)]
+        expires_at_ms: i64,
+    },
+    /// The live state of one pairing.
+    PairingState {
+        state: PairingPhase,
+        sas: Option<String>,
+        peer_label: Option<String>,
+        /// Bytes of bundle that crossed; 0 until the transfer started.
+        #[specta(type = Number)]
+        transferred: u64,
+        error: Option<String>,
+    },
+    DevicesList {
+        devices: Vec<DeviceDto>,
+    },
+    /// The roster change landed; `epoch` is the new local key epoch.
+    DeviceRevoked {
+        epoch: u32,
+    },
+    /// The words exist only here: they are never stored, and the engine keeps a verifier.
+    RecoveryPhraseCreated {
+        words: Vec<String>,
+    },
+    RecoveryVerified,
 }
 
 // === Errors ===
@@ -1431,6 +1614,37 @@ impl EngineError {
             reason: None,
         }
     }
+
+    /// A configuration bundle came from another schema. Both versions are named so the UI can
+    /// tell the user which device needs updating; nothing was written.
+    pub fn bundle_rejected(found: u32, supported: u32) -> Self {
+        Self {
+            code: "bundle_rejected".to_string(),
+            message: format!(
+                "bundle schema {found} is not supported; this build reads and writes schema {supported}"
+            ),
+            reason: Some(format!("schema:{found}")),
+        }
+    }
+
+    /// A device-to-device pairing broke; the message carries the storage crate's error.
+    pub fn pairing_failed(msg: impl Into<String>) -> Self {
+        Self {
+            code: "pairing_failed".to_string(),
+            message: msg.into(),
+            reason: None,
+        }
+    }
+
+    /// A recovery phrase check failed. The message never names the word, or the position, that
+    /// did not match: a verifier that leaked either would narrow a brute-force search.
+    pub fn recovery_rejected(msg: impl Into<String>) -> Self {
+        Self {
+            code: "recovery_rejected".to_string(),
+            message: msg.into(),
+            reason: None,
+        }
+    }
 }
 
 // === Events ===
@@ -1487,6 +1701,18 @@ pub enum EngineEvent {
         message: String,
         level: String, // "info" | "warning" | "error"
     },
+    /// Any transition of a live pairing, including expiry decline and failure.
+    PairingChanged {
+        pairing_id: String,
+        state: PairingPhase,
+        sas: Option<String>,
+    },
+    /// Sync moved between idle, running, done, failed and blocked, so the UI never polls for it.
+    /// A head-chain violation or a pin mismatch is `blocked` with a reason code in `detail`.
+    SyncStateChanged {
+        state: SyncState,
+        detail: Option<String>,
+    },
 }
 
 pub fn register_types() -> Types {
@@ -1529,6 +1755,12 @@ pub fn register_types() -> Types {
         .register::<DraftDto>()
         .register::<DraftSummary>()
         .register::<ForwardFailure>()
+        .register::<PairingRole>()
+        .register::<PairingPhase>()
+        .register::<ConfigBundleSummary>()
+        .register::<ConfigImportReport>()
+        .register::<DeviceDto>()
+        .register::<SyncState>()
         .register::<VectorDiffDto<RoomSummary>>()
         .register::<VectorDiffDto<TimelineItemDto>>()
         .register::<ConnectionStatus>()
