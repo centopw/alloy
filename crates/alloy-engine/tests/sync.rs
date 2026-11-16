@@ -16,10 +16,15 @@ use alloy_protocol::{
     PairingPhase, PairingRole,
 };
 use alloy_storage::config_bundle::ConfigState;
-use alloy_storage::pairing::{self, DeviceProver, PairingError, PairingOffer, PairingTicket};
+use alloy_storage::pairing::{
+    self, DeviceProver, MasterEnvelope, MasterEnvelopeProvider, PairedPeer, PairingError,
+    PairingOffer, PairingTicket,
+};
 use alloy_storage::{InMemorySecretStore, SecretStore};
 use alloy_store::{AccountState, ChatFlagsUpdate, ChatKind, ChatUpsert, Network, NewAccount};
-use ed25519_dalek::SigningKey;
+use alloy_sync::device::{DeviceSecretKey, open_master, wrap_master};
+use alloy_sync::keys::MasterKey;
+use ed25519_dalek::{Signer, SigningKey};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 use tokio::sync::broadcast;
@@ -117,6 +122,15 @@ fn write_json(path: &Path, value: &Value) {
         std::fs::create_dir_all(parent).expect("create dir");
     }
     std::fs::write(path, serde_json::to_vec_pretty(value).expect("encode")).expect("write json");
+}
+
+async fn master_secret(engine: &AppEngine) -> Option<String> {
+    engine
+        .context()
+        .secrets
+        .get_secret("alloy.sync.master_key.v1")
+        .await
+        .ok()
 }
 
 fn read_json(path: &Path) -> Value {
@@ -544,6 +558,17 @@ async fn pairing_moves_a_real_bundle_between_two_engines() {
         .expect("read chat")
         .expect("chat exists");
     assert_eq!(chat.local_tags, vec!["work".to_string()]);
+
+    let offer_master = master_secret(&offer)
+        .await
+        .expect("the offering device holds a master key");
+    let receiver_master = master_secret(&receiver)
+        .await
+        .expect("pairing delivers the master key");
+    assert_eq!(
+        offer_master, receiver_master,
+        "the paired device holds byte-identical master bytes"
+    );
 }
 
 #[tokio::test]
@@ -879,7 +904,10 @@ async fn a_tampered_identity_proof_fails_and_leaves_both_rosters_alone() {
 
     wait_phase(&mut offer_events, &offer_id, PairingPhase::SasReady).await;
     confirm(&offer, &offer_id, true).await;
-    pending.finish(true).await.expect("the imposter accepts");
+    assert!(
+        pending.finish(true).await.is_err(),
+        "the offering device must not send the bundle to a peer that cannot prove itself"
+    );
 
     wait_phase(&mut offer_events, &offer_id, PairingPhase::Failed).await;
     assert_eq!(
@@ -898,6 +926,7 @@ async fn a_tampered_identity_proof_fails_and_leaves_both_rosters_alone() {
         "127.0.0.1:0".parse().expect("loopback"),
         None,
         TamperedProver::shared("imposter", 42),
+        None,
     )
     .await
     .expect("bind the imposter offer");
@@ -927,4 +956,174 @@ async fn a_tampered_identity_proof_fails_and_leaves_both_rosters_alone() {
         !accept_dir.path().join("tags.json").exists(),
         "no config layer is imported from a peer that cannot prove itself"
     );
+}
+
+/// A proveable offering identity shaped exactly as the engine's: Ed25519, its X25519 wrap
+/// target, then a label.
+struct AddressableProver {
+    key: SigningKey,
+    identity: Vec<u8>,
+}
+
+impl AddressableProver {
+    fn new(label: &str, seed: u8) -> Self {
+        let key = SigningKey::from_bytes(&[seed; 32]);
+        let mut identity = key.verifying_key().as_bytes().to_vec();
+        identity.extend_from_slice(
+            &DeviceSecretKey::from_bytes([seed.wrapping_add(1); 32]).public_key(),
+        );
+        identity.extend_from_slice(label.as_bytes());
+        Self { key, identity }
+    }
+}
+
+impl DeviceProver for AddressableProver {
+    fn identity(&self) -> &[u8] {
+        &self.identity
+    }
+
+    fn sign(&self, transcript: &[u8; 32]) -> [u8; 64] {
+        self.key.sign(transcript).to_bytes()
+    }
+}
+
+/// Wraps a real master key to a device that is deliberately not the acceptor.
+struct MisaddressedEnvelope {
+    master: MasterKey,
+    signer: SigningKey,
+    sender_id: String,
+    epoch: u32,
+}
+
+impl MasterEnvelopeProvider for MisaddressedEnvelope {
+    fn envelope(&self, _peer: &PairedPeer) -> Result<Option<MasterEnvelope>, PairingError> {
+        let foreign = DeviceSecretKey::from_bytes([200u8; 32]);
+        let bytes = wrap_master(
+            &self.master,
+            &"f".repeat(64),
+            &foreign.public_key(),
+            self.epoch,
+            &self.sender_id,
+            &self.signer,
+        )
+        .map_err(|err| PairingError::Protocol(format!("test wrap failed: {err}")))?;
+        Ok(Some(MasterEnvelope {
+            epoch: self.epoch,
+            bytes,
+        }))
+    }
+}
+
+#[tokio::test]
+async fn an_envelope_addressed_to_another_device_applies_nothing() {
+    let accept_dir = TempDir::new().expect("accept dir");
+    let receiver = open_engine(accept_dir.path()).await;
+    write_json(
+        &accept_dir.path().join("settings.json"),
+        &json!({"density": "spacious", "window": {"width": 900}}),
+    );
+    let before = read_json(&accept_dir.path().join("settings.json"));
+    let mut accept_events = receiver.sink().subscribe();
+
+    let prover = AddressableProver::new("misaddressed-offer", 61);
+    let provider = MisaddressedEnvelope {
+        master: MasterKey::generate(),
+        signer: prover.key.clone(),
+        sender_id: hex(prover.key.verifying_key().as_bytes()),
+        epoch: 0,
+    };
+    let offer = PairingOffer::bind(
+        ConfigState::default().export("misaddressed", 1),
+        "127.0.0.1:0".parse().expect("loopback"),
+        None,
+        Arc::new(prover),
+        Some(Arc::new(provider)),
+    )
+    .await
+    .expect("bind the misaddressed offer");
+    let ticket = offer.ticket().to_qr_string();
+    let code = offer.code().to_string();
+    let offer_task = tokio::spawn(async move {
+        let handshake = offer.wait_for_peer().await?;
+        handshake.finish(true).await
+    });
+
+    let accept_id = accept(&receiver, &ticket, &code).await;
+    wait_phase(&mut accept_events, &accept_id, PairingPhase::SasReady).await;
+    confirm(&receiver, &accept_id, true).await;
+    offer_task
+        .await
+        .expect("offer task")
+        .expect("the offer sends an envelope to the wrong device");
+
+    wait_phase(&mut accept_events, &accept_id, PairingPhase::Failed).await;
+    assert_eq!(
+        read_json(&accept_dir.path().join("settings.json"))["density"],
+        before["density"],
+        "a refused envelope applies no bundle settings"
+    );
+    assert!(
+        read_json(&accept_dir.path().join("settings.json"))["sync"]["devices"]
+            .as_array()
+            .expect("roster")
+            .iter()
+            .all(|device| device["label"] != json!("misaddressed")),
+        "a refused envelope adds no roster entry for the peer"
+    );
+    assert_eq!(
+        list_devices(&receiver).await.len(),
+        1,
+        "the receiver's roster still names only itself"
+    );
+    assert!(
+        master_secret(&receiver).await.is_none(),
+        "a refused envelope stores no master key"
+    );
+    assert!(
+        !accept_dir.path().join("tags.json").exists(),
+        "no config layer is imported when the envelope does not open"
+    );
+}
+
+#[test]
+fn a_master_envelope_replayed_on_a_third_device_never_opens() {
+    let master = MasterKey::generate();
+    let signer = SigningKey::from_bytes(&[71u8; 32]);
+    let sender_id = hex(signer.verifying_key().as_bytes());
+    let addressed = DeviceSecretKey::from_bytes([72u8; 32]);
+    let addressed_id = "a".repeat(64);
+    let envelope = wrap_master(
+        &master,
+        &addressed_id,
+        &addressed.public_key(),
+        3,
+        &sender_id,
+        &signer,
+    )
+    .expect("wrap for the addressed device");
+
+    let (opened, sender) = open_master(
+        &addressed,
+        &addressed_id,
+        3,
+        &signer.verifying_key(),
+        &envelope,
+    )
+    .expect("the addressed device opens its envelope");
+    assert_eq!(opened.expose_secret(), master.expose_secret());
+    assert_eq!(sender, sender_id);
+
+    let third = DeviceSecretKey::from_bytes([73u8; 32]);
+    assert!(
+        open_master(&third, &addressed_id, 3, &signer.verifying_key(), &envelope).is_err(),
+        "a third device replaying the same ciphertext cannot open it"
+    );
+}
+
+fn hex(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push_str(&format!("{byte:02x}"));
+    }
+    out
 }

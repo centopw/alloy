@@ -40,8 +40,13 @@ use zeroize::Zeroizing;
 
 use crate::config_bundle::{BundleError, ConfigBundle, MAX_BUNDLE_JSON_BYTES};
 
-/// Protocol version. Both the QR payload tag and the hello frames name it.
-pub const PAIRING_VERSION: u8 = 1;
+/// Protocol version. The hello frames name it; the QR payload tag stays `v1`, because the ticket
+/// shape did not change and an old client must still parse a ticket before its version check
+/// refuses the hello (see [`PairingError::Protocol`]).
+///
+/// Version 2 adds the optional master-key envelope to the bundle payload. A version-1 acceptor
+/// refuses a version-2 offer at the hello instead of misparsing the payload.
+pub const PAIRING_VERSION: u8 = 2;
 
 /// How long a code stays valid, from `bind` to the end of the handshake.
 pub const CODE_TTL: Duration = Duration::from_secs(90);
@@ -58,7 +63,27 @@ const PAIRING_ID_BYTES: usize = 16;
 const HELLO_OFFER_LEN: usize = 1 + PAIRING_ID_BYTES + 32 + 32;
 const HELLO_ACCEPT_LEN: usize = 1 + 32 + 32;
 const MAX_HELLO_FRAME: usize = 128;
-const MAX_SEALED_FRAME: usize = MAX_BUNDLE_JSON_BYTES + 64;
+
+/// Largest master-key envelope this layer carries. The wrap helper in `alloy-sync` produces a
+/// few hundred bytes for a 64-hex device id; the bound is generous but finite, so a peer cannot
+/// make the frame parser allocate more than this before authenticating anything.
+pub const MAX_MASTER_ENVELOPE_BYTES: usize = 1024;
+
+/// Bundle payload header: the payload version and a flags byte.
+const PAYLOAD_HEADER_LEN: usize = 2;
+/// Epoch and envelope length that precede an envelope in the payload.
+const MASTER_PREFIX_LEN: usize = 4 + 4;
+/// Bit set in the payload flags when a master-key envelope follows.
+const PAYLOAD_FLAG_MASTER: u8 = 1;
+/// Bits a version-2 payload may set. Anything else is refused rather than ignored.
+const PAYLOAD_FLAGS_KNOWN: u8 = PAYLOAD_FLAG_MASTER;
+const AEAD_TAG_LEN: usize = 16;
+
+const MAX_SEALED_FRAME: usize = MAX_BUNDLE_JSON_BYTES
+    + PAYLOAD_HEADER_LEN
+    + MASTER_PREFIX_LEN
+    + MAX_MASTER_ENVELOPE_BYTES
+    + AEAD_TAG_LEN;
 
 const HKDF_INFO: &[u8] = b"alloy-pairing-v1";
 const CODE_INFO: &[u8] = b"alloy-pairing-v1/code";
@@ -116,11 +141,37 @@ pub struct PairedPeer {
     pub sas: String,
 }
 
-/// The accepting side's result: the bundle, plus the identity the offering device proved.
+/// The accepting side's result: the bundle, the identity the offering device proved, and the
+/// optional sealed master-key envelope addressed to this device.
 #[derive(Debug, Clone)]
 pub struct PairedBundle {
     pub bundle: ConfigBundle,
     pub peer: PairedPeer,
+    /// `None` for a version-1 offer (settings only) or an offer that carries no master key.
+    pub master: Option<MasterEnvelope>,
+}
+
+/// A sealed master-key envelope addressed to the accepting device.
+///
+/// The bytes are opaque to this crate: the offering side builds them with
+/// `alloy_sync::device::wrap_master`, and only the addressed device's `DeviceSecretKey` can open
+/// them. `epoch` is the epoch the envelope installs, authenticated by the wrap's own header, and
+/// is carried in the clear only so the acceptor knows which epoch to expect before opening.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MasterEnvelope {
+    pub epoch: u32,
+    pub bytes: Vec<u8>,
+}
+
+/// Supplies the optional master-key envelope for one accept, after the acceptor's X25519 key is
+/// known.
+///
+/// The offering side learns the peer's identity only when the accept frame arrives, so the
+/// envelope cannot be built at [`PairingOffer::bind`]. The provider receives the unverified
+/// [`PairedPeer`]; it must check the proof before wrapping the master key to that identity, and
+/// every failure it returns aborts the transfer before the bundle is sent.
+pub trait MasterEnvelopeProvider {
+    fn envelope(&self, peer: &PairedPeer) -> Result<Option<MasterEnvelope>, PairingError>;
 }
 
 /// What the UI renders as a QR code. Plain text so this crate needs no QR dependency: pairing id,
@@ -185,6 +236,7 @@ pub struct PairingOffer {
     listener: TcpListener,
     bundle: ConfigBundle,
     prover: Arc<dyn DeviceProver + Send + Sync>,
+    master: Option<Arc<dyn MasterEnvelopeProvider + Send + Sync>>,
     secret: StaticSecret,
     public: PublicKey,
     nonce: [u8; 32],
@@ -199,13 +251,15 @@ impl PairingOffer {
     /// Bind `bind_addr` and return a offer that is valid for [`CODE_TTL`]. `advertise` is the
     /// endpoint a second machine should dial when `bind_addr` is wildcard; it defaults to the
     /// bound address. `prover` supplies this device's identity and its proof over the transcript.
+    /// `master` supplies the optional master-key envelope once the acceptor is known.
     pub async fn bind(
         bundle: ConfigBundle,
         bind_addr: SocketAddr,
         advertise: Option<String>,
         prover: Arc<dyn DeviceProver + Send + Sync>,
+        master: Option<Arc<dyn MasterEnvelopeProvider + Send + Sync>>,
     ) -> Result<Self, PairingError> {
-        Self::bind_with_ttl(bundle, bind_addr, advertise, CODE_TTL, prover).await
+        Self::bind_with_ttl(bundle, bind_addr, advertise, CODE_TTL, prover, master).await
     }
 
     /// Same as [`PairingOffer::bind`] with an explicit TTL, for tests and for a UI that offers a
@@ -216,6 +270,7 @@ impl PairingOffer {
         advertise: Option<String>,
         ttl: Duration,
         prover: Arc<dyn DeviceProver + Send + Sync>,
+        master: Option<Arc<dyn MasterEnvelopeProvider + Send + Sync>>,
     ) -> Result<Self, PairingError> {
         bundle.validate()?;
         let listener = TcpListener::bind(bind_addr).await?;
@@ -235,6 +290,7 @@ impl PairingOffer {
             listener,
             bundle,
             prover,
+            master,
             secret,
             public,
             nonce,
@@ -285,6 +341,12 @@ impl PairingOffer {
 
         let ack = read_frame(&mut stream, MAX_HELLO_FRAME).await?;
         let accept_public = parse_accept_hello(&ack)?;
+        if accept_public.version != PAIRING_VERSION {
+            return Err(PairingError::Protocol(format!(
+                "peer answered pairing version {} to an offer that spoke {PAIRING_VERSION}",
+                accept_public.version
+            )));
+        }
 
         if Instant::now() >= self.deadline {
             return Err(PairingError::CodeExpired(self.ttl));
@@ -319,6 +381,8 @@ impl PairingOffer {
             channel,
             transcript,
             prover: self.prover,
+            master: self.master,
+            wire_version: PAIRING_VERSION,
         })
     }
 }
@@ -330,6 +394,8 @@ pub struct OfferedHandshake {
     channel: Channel,
     transcript: [u8; 32],
     prover: Arc<dyn DeviceProver + Send + Sync>,
+    master: Option<Arc<dyn MasterEnvelopeProvider + Send + Sync>>,
+    wire_version: u8,
 }
 
 impl OfferedHandshake {
@@ -354,14 +420,22 @@ impl OfferedHandshake {
         let Some(peer) = peer else {
             return Err(PairingError::Declined("the other device rejected the SAS"));
         };
-        let bytes = self.bundle.to_json()?;
-        self.channel.send(MSG_BUNDLE, &bytes).await?;
-        Ok(PairedPeer {
+        let peer = PairedPeer {
             identity: peer.identity,
             proof: peer.proof,
             transcript: self.transcript,
             sas: self.sas,
-        })
+        };
+        // The envelope is built here, after the acceptor's identity arrived: the provider checks
+        // the proof and wraps the master key to that device before a single bundle byte leaves.
+        let master = match &self.master {
+            Some(provider) => provider.envelope(&peer)?,
+            None => None,
+        };
+        let bytes = self.bundle.to_json()?;
+        let payload = encode_payload(&bytes, master.as_ref(), self.wire_version)?;
+        self.channel.send(MSG_BUNDLE, &payload).await?;
+        Ok(peer)
     }
 }
 
@@ -370,6 +444,8 @@ pub struct PendingPairing {
     sas: String,
     channel: Channel,
     transcript: [u8; 32],
+    /// The version the offer's hello named. `1` means a legacy offer with a raw bundle payload.
+    wire_version: u8,
     /// The sealed identity this device will send when it accepts; built in [`connect`].
     accept_frame: Vec<u8>,
 }
@@ -399,14 +475,16 @@ impl PendingPairing {
             return Err(PairingError::Declined("the other device rejected the SAS"));
         };
         let bytes = self.channel.recv(MSG_BUNDLE).await?;
+        let (bundle_json, master) = decode_payload(&bytes, self.wire_version)?;
         Ok(PairedBundle {
-            bundle: ConfigBundle::from_json(&bytes)?,
+            bundle: ConfigBundle::from_json(&bundle_json)?,
             peer: PairedPeer {
                 identity: peer.identity,
                 proof: peer.proof,
                 transcript: self.transcript,
                 sas: self.sas,
             },
+            master,
         })
     }
 }
@@ -427,9 +505,9 @@ pub async fn connect(
 
     let hello = read_frame(&mut stream, MAX_HELLO_FRAME).await?;
     let (version, pairing_id, offer_public, offer_nonce) = parse_offer_hello(&hello)?;
-    if version != PAIRING_VERSION {
+    if version == 0 || version > PAIRING_VERSION {
         return Err(PairingError::Protocol(format!(
-            "peer speaks pairing version {version}, this build speaks {PAIRING_VERSION}"
+            "peer speaks pairing version {version}, this build speaks 1..={PAIRING_VERSION}"
         )));
     }
     if pairing_id != expected_id {
@@ -447,7 +525,7 @@ pub async fn connect(
     let public = PublicKey::from(&secret);
     let accept_nonce = random_bytes::<32>();
     let mut ack = Vec::with_capacity(HELLO_ACCEPT_LEN);
-    ack.push(PAIRING_VERSION);
+    ack.push(version);
     ack.extend_from_slice(public.as_bytes());
     ack.extend_from_slice(&accept_nonce);
     write_frame(&mut stream, &ack).await?;
@@ -476,6 +554,7 @@ pub async fn connect(
         sas: sas(&transcript),
         channel,
         transcript,
+        wire_version: version,
         accept_frame: accept_frame(prover, true, &transcript)?,
     })
 }
@@ -541,6 +620,7 @@ impl Channel {
 }
 
 struct AcceptHello {
+    version: u8,
     public: PublicKey,
     nonce: [u8; 32],
 }
@@ -571,9 +651,9 @@ fn parse_accept_hello(hello: &[u8]) -> Result<AcceptHello, PairingError> {
             hello.len()
         )));
     }
-    if hello[0] != PAIRING_VERSION {
+    if hello[0] == 0 || hello[0] > PAIRING_VERSION {
         return Err(PairingError::Protocol(format!(
-            "peer speaks pairing version {}, this build speaks {PAIRING_VERSION}",
+            "peer speaks pairing version {}, this build speaks 1..={PAIRING_VERSION}",
             hello[0]
         )));
     }
@@ -582,6 +662,7 @@ fn parse_accept_hello(hello: &[u8]) -> Result<AcceptHello, PairingError> {
     let mut nonce = [0u8; 32];
     nonce.copy_from_slice(&hello[33..]);
     Ok(AcceptHello {
+        version: hello[0],
         public: PublicKey::from(public),
         nonce,
     })
@@ -644,6 +725,124 @@ fn parse_accept(reply: &[u8]) -> Result<Option<SealedPeer>, PairingError> {
             other.len()
         ))),
     }
+}
+
+/// Builds the bundle payload: version and flags, the optional epoch and envelope, then the bundle
+/// JSON. A version-1 payload stays the raw bundle bytes, so an old offer's frame is unchanged.
+fn encode_payload(
+    bundle: &[u8],
+    master: Option<&MasterEnvelope>,
+    wire_version: u8,
+) -> Result<Vec<u8>, PairingError> {
+    if bundle.len() > MAX_BUNDLE_JSON_BYTES {
+        return Err(PairingError::Protocol(format!(
+            "bundle is {} bytes, above the {MAX_BUNDLE_JSON_BYTES}-byte payload bound",
+            bundle.len()
+        )));
+    }
+    if wire_version == 1 {
+        // Nothing on a version-1 wire may carry an envelope: the old peer would treat it as JSON.
+        return Ok(bundle.to_vec());
+    }
+    let mut out = Vec::with_capacity(
+        PAYLOAD_HEADER_LEN
+            + MASTER_PREFIX_LEN
+            + master.map(|envelope| envelope.bytes.len()).unwrap_or(0)
+            + bundle.len(),
+    );
+    out.push(PAIRING_VERSION);
+    out.push(if master.is_some() {
+        PAYLOAD_FLAG_MASTER
+    } else {
+        0
+    });
+    if let Some(envelope) = master {
+        if envelope.bytes.len() > MAX_MASTER_ENVELOPE_BYTES {
+            return Err(PairingError::Protocol(format!(
+                "master envelope is {} bytes, above the {MAX_MASTER_ENVELOPE_BYTES}-byte bound",
+                envelope.bytes.len()
+            )));
+        }
+        out.extend_from_slice(&envelope.epoch.to_be_bytes());
+        out.extend_from_slice(&(envelope.bytes.len() as u32).to_be_bytes());
+        out.extend_from_slice(&envelope.bytes);
+    }
+    out.extend_from_slice(bundle);
+    Ok(out)
+}
+
+/// Splits a received payload into the bundle JSON and the optional envelope. A version-1 offer
+/// sent raw JSON; anything else is framed and its unknown bits or versions are refused.
+fn decode_payload(
+    payload: &[u8],
+    wire_version: u8,
+) -> Result<(Vec<u8>, Option<MasterEnvelope>), PairingError> {
+    if wire_version == 1 {
+        if payload.len() > MAX_BUNDLE_JSON_BYTES {
+            return Err(PairingError::Protocol(format!(
+                "bundle is {} bytes, above the {MAX_BUNDLE_JSON_BYTES}-byte payload bound",
+                payload.len()
+            )));
+        }
+        return Ok((payload.to_vec(), None));
+    }
+    if payload.len() <= PAYLOAD_HEADER_LEN {
+        return Err(PairingError::Protocol(format!(
+            "bundle payload is {} bytes, too short to hold a header and a bundle",
+            payload.len()
+        )));
+    }
+    if payload[0] != PAIRING_VERSION {
+        return Err(PairingError::Protocol(format!(
+            "bundle payload names version {}, this build speaks {PAIRING_VERSION}",
+            payload[0]
+        )));
+    }
+    let flags = payload[1];
+    if flags & !PAYLOAD_FLAGS_KNOWN != 0 {
+        return Err(PairingError::Protocol(format!(
+            "bundle payload sets unknown flags {flags:#04x}"
+        )));
+    }
+    let mut cursor = PAYLOAD_HEADER_LEN;
+    let master = if flags & PAYLOAD_FLAG_MASTER != 0 {
+        let prefix = payload
+            .get(cursor..cursor + MASTER_PREFIX_LEN)
+            .ok_or_else(|| {
+                PairingError::Protocol("bundle payload ends inside the envelope prefix".into())
+            })?;
+        let epoch = u32::from_be_bytes(prefix[..4].try_into().expect("four bytes"));
+        let len = u32::from_be_bytes(prefix[4..].try_into().expect("four bytes")) as usize;
+        if len == 0 || len > MAX_MASTER_ENVELOPE_BYTES {
+            return Err(PairingError::Protocol(format!(
+                "master envelope length {len} is outside 1..={MAX_MASTER_ENVELOPE_BYTES}"
+            )));
+        }
+        cursor += MASTER_PREFIX_LEN;
+        let bytes = payload.get(cursor..cursor + len).ok_or_else(|| {
+            PairingError::Protocol("bundle payload ends inside the master envelope".into())
+        })?;
+        cursor += len;
+        Some(MasterEnvelope {
+            epoch,
+            bytes: bytes.to_vec(),
+        })
+    } else {
+        None
+    };
+    let bundle = &payload[cursor..];
+    if bundle.is_empty() {
+        return Err(PairingError::Protocol(
+            "bundle payload carries no bundle after the envelope".into(),
+        ));
+    }
+    if bundle.len() > MAX_BUNDLE_JSON_BYTES {
+        return Err(PairingError::Protocol(format!(
+            "bundle is {} bytes, above the {MAX_BUNDLE_JSON_BYTES}-byte payload bound",
+            bundle.len()
+        )));
+    }
+    Ok((bundle.to_vec(), master))
 }
 
 fn transcript(

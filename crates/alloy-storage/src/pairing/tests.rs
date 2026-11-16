@@ -39,6 +39,16 @@ impl DeviceProver for TestProver {
     }
 }
 
+/// An offering-side provider with a fixed envelope, so the transport tests prove the bytes cross
+/// without duplicating the wrap crypto that belongs to the engine.
+struct TestEnvelope(MasterEnvelope);
+
+impl MasterEnvelopeProvider for TestEnvelope {
+    fn envelope(&self, _peer: &PairedPeer) -> Result<Option<MasterEnvelope>, PairingError> {
+        Ok(Some(self.0.clone()))
+    }
+}
+
 /// The check the engine performs: the first 32 identity bytes sign the peer's transcript.
 fn verify_peer(peer: &PairedPeer) -> bool {
     let Ok(key) = <[u8; 32]>::try_from(&peer.identity[..32]) else {
@@ -114,7 +124,7 @@ fn codes_use_the_unambiguous_alphabet() {
 #[tokio::test]
 async fn loopback_transfers_and_imports_a_bundle() {
     let offer_prover = TestProver::shared("offer-label", 7);
-    let offer = PairingOffer::bind(bundle(), loopback(), None, offer_prover)
+    let offer = PairingOffer::bind(bundle(), loopback(), None, offer_prover, None)
         .await
         .unwrap();
     assert_eq!(offer.code().len(), 8);
@@ -161,6 +171,7 @@ async fn loopback_transfers_and_imports_a_bundle() {
     assert_eq!(offer_peer.sas, client_sas);
     assert_eq!(received.peer.sas, offer_sas);
     assert_eq!(received.bundle, bundle());
+    assert_eq!(received.master, None, "no provider, no envelope");
 
     let mut state = ConfigState::default();
     let report = received.bundle.import_into(&mut state).unwrap();
@@ -179,6 +190,7 @@ async fn a_wrong_code_is_rejected_and_no_bundle_crosses() {
         loopback(),
         None,
         TestProver::shared("offer-device", 7),
+        None,
     )
     .await
     .unwrap();
@@ -213,6 +225,7 @@ async fn an_expired_code_never_listens() {
         None,
         Duration::ZERO,
         TestProver::shared("offer-device", 7),
+        None,
     )
     .await
     .unwrap();
@@ -234,6 +247,7 @@ async fn mitm_proxy_yields_different_sas_on_each_side_and_both_refuse() {
         loopback(),
         None,
         TestProver::shared("real-offer", 1),
+        None,
     )
     .await
     .unwrap();
@@ -252,6 +266,7 @@ async fn mitm_proxy_yields_different_sas_on_each_side_and_both_refuse() {
         loopback(),
         None,
         TestProver::shared("proxy-offer", 2),
+        None,
     )
     .await
     .unwrap();
@@ -311,6 +326,7 @@ async fn a_ticket_with_a_different_pairing_id_is_refused() {
         loopback(),
         None,
         TestProver::shared("offer-device", 7),
+        None,
     )
     .await
     .unwrap();
@@ -327,5 +343,214 @@ async fn a_ticket_with_a_different_pairing_id_is_refused() {
     assert!(
         offer_task.await.unwrap().is_err(),
         "the offer must not complete a handshake the client refused"
+    );
+}
+
+#[tokio::test]
+async fn a_master_key_envelope_reaches_the_addressed_acceptor() {
+    let envelope = MasterEnvelope {
+        epoch: 4,
+        bytes: vec![0xa5; 240],
+    };
+    let offer = PairingOffer::bind(
+        bundle(),
+        loopback(),
+        None,
+        TestProver::shared("offer-device", 7),
+        Some(Arc::new(TestEnvelope(envelope.clone()))),
+    )
+    .await
+    .unwrap();
+    let ticket = offer.ticket().clone();
+    let code = offer.code().to_string();
+    let offer_task = tokio::spawn(async move { offer.wait_for_peer().await?.finish(true).await });
+
+    let prover = TestProver::new("client-device", 9);
+    let pending = connect(&ticket.endpoint, &ticket, &code, &prover)
+        .await
+        .unwrap();
+    let received = pending.finish(true).await.unwrap();
+    offer_task.await.unwrap().unwrap();
+
+    assert_eq!(received.bundle, bundle());
+    assert_eq!(
+        received.master,
+        Some(envelope),
+        "the acceptor receives the envelope bytes and epoch intact"
+    );
+}
+
+#[test]
+fn the_bundle_payload_bound_is_enforced_at_the_edge() {
+    let bundle = vec![b'{'; MAX_BUNDLE_JSON_BYTES];
+    let envelope = MasterEnvelope {
+        epoch: 7,
+        bytes: vec![0x11; MAX_MASTER_ENVELOPE_BYTES],
+    };
+    let payload = encode_payload(&bundle, Some(&envelope), PAIRING_VERSION).unwrap();
+    assert_eq!(
+        payload.len(),
+        PAYLOAD_HEADER_LEN + MASTER_PREFIX_LEN + MAX_MASTER_ENVELOPE_BYTES + MAX_BUNDLE_JSON_BYTES,
+        "a payload at both bounds still fits the frame exactly"
+    );
+    assert!(
+        payload.len() + AEAD_TAG_LEN <= MAX_SEALED_FRAME,
+        "the sealed frame bound covers the largest payload"
+    );
+    let (decoded, master) = decode_payload(&payload, PAIRING_VERSION).unwrap();
+    assert_eq!(decoded, bundle);
+    assert_eq!(master, Some(envelope));
+
+    let too_big = vec![b'{'; MAX_BUNDLE_JSON_BYTES + 1];
+    assert!(matches!(
+        encode_payload(&too_big, None, PAIRING_VERSION),
+        Err(PairingError::Protocol(_))
+    ));
+    assert!(matches!(
+        decode_payload(&too_big, 1),
+        Err(PairingError::Protocol(_))
+    ));
+    let oversized_envelope = MasterEnvelope {
+        epoch: 0,
+        bytes: vec![0; MAX_MASTER_ENVELOPE_BYTES + 1],
+    };
+    assert!(matches!(
+        encode_payload(b"{}", Some(&oversized_envelope), PAIRING_VERSION),
+        Err(PairingError::Protocol(_))
+    ));
+
+    let mut unknown_flags = payload.clone();
+    unknown_flags[1] |= 0x80;
+    assert!(matches!(
+        decode_payload(&unknown_flags, PAIRING_VERSION),
+        Err(PairingError::Protocol(_))
+    ));
+    let mut wrong_version = payload.clone();
+    wrong_version[0] = 1;
+    assert!(matches!(
+        decode_payload(&wrong_version, PAIRING_VERSION),
+        Err(PairingError::Protocol(_))
+    ));
+    assert!(
+        matches!(
+            decode_payload(&payload[..payload.len() - MAX_BUNDLE_JSON_BYTES], 2),
+            Err(PairingError::Protocol(_))
+        ),
+        "a payload that ends before its bundle is refused, never parsed as empty"
+    );
+}
+
+/// A version-1 offering device, spoken by hand: its hello names 1 and its bundle frame is the raw
+/// JSON, with no payload header. A current acceptor must still pair with it.
+async fn version_one_offer(
+    bundle: ConfigBundle,
+) -> (
+    PairingTicket,
+    String,
+    tokio::task::JoinHandle<Result<(), PairingError>>,
+) {
+    let listener = TcpListener::bind(loopback()).await.unwrap();
+    let local = listener.local_addr().unwrap();
+    let secret = StaticSecret::from([21u8; 32]);
+    let public = PublicKey::from(&secret);
+    let nonce = [22u8; 32];
+    let pairing_id = [23u8; PAIRING_ID_BYTES];
+    let code = "ABCD2345".to_string();
+    let task_code = code.clone();
+    let ticket = PairingTicket {
+        pairing_id: to_hex(&pairing_id),
+        endpoint: local.to_string(),
+        nonce,
+        lan_hint: None,
+    };
+    let task = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await?;
+        let mut hello = Vec::new();
+        hello.push(1u8);
+        hello.extend_from_slice(&pairing_id);
+        hello.extend_from_slice(public.as_bytes());
+        hello.extend_from_slice(&nonce);
+        write_frame(&mut stream, &hello).await?;
+
+        let ack = read_frame(&mut stream, MAX_HELLO_FRAME).await?;
+        let accept = parse_accept_hello(&ack)?;
+        assert_eq!(accept.version, 1, "the acceptor echoes the old version");
+        let shared = secret.diffie_hellman(&accept.public);
+        let transcript = transcript(
+            &pairing_id,
+            public.as_bytes(),
+            &nonce,
+            accept.public.as_bytes(),
+            &accept.nonce,
+        );
+        let salt = salt(&nonce, &accept.nonce);
+        let key = expand(shared.as_bytes(), &salt, HKDF_INFO)?;
+        let gate = expand(task_code.as_bytes(), &salt, CODE_INFO)?;
+        let mut channel = Channel::new(stream, key, 0);
+
+        let proof = channel.recv(MSG_CODE_PROOF).await?;
+        let opened = open_code_proof(&gate, &proof)?;
+        assert_eq!(opened.as_slice(), transcript.as_slice());
+
+        let accept_frame = channel.recv(MSG_ACCEPT).await?;
+        assert!(parse_accept(&accept_frame)?.is_some());
+        let ours = super::accept_frame(&TestProver::new("legacy-offer", 31), true, &transcript)?;
+        channel.send(MSG_ACCEPT, &ours).await?;
+        // Version 1: the bundle is the raw JSON, no payload header.
+        channel.send(MSG_BUNDLE, &bundle.to_json()?).await?;
+        Ok(())
+    });
+    (ticket, code, task)
+}
+
+#[tokio::test]
+async fn a_version_one_offer_still_pairs_with_settings_only() {
+    let (ticket, code, task) = version_one_offer(bundle()).await;
+    let prover = TestProver::new("client-device", 9);
+    let pending = connect(&ticket.endpoint, &ticket, &code, &prover)
+        .await
+        .unwrap();
+    let received = pending.finish(true).await.unwrap();
+    task.await.unwrap().unwrap();
+
+    assert_eq!(received.bundle, bundle());
+    assert_eq!(received.master, None, "a v1 offer carries no master key");
+}
+
+#[tokio::test]
+async fn a_version_one_acceptor_refuses_a_version_two_offer() {
+    let offer = PairingOffer::bind(
+        bundle(),
+        loopback(),
+        None,
+        TestProver::shared("offer-device", 7),
+        None,
+    )
+    .await
+    .unwrap();
+    let endpoint = offer.ticket().endpoint.clone();
+    let offer_task = tokio::spawn(async move { offer.wait_for_peer().await.map(|_| ()) });
+
+    // What a v1 acceptor's `connect` does: read the hello, then refuse any version but its own.
+    let mut stream = TcpStream::connect(&endpoint).await.unwrap();
+    let hello = read_frame(&mut stream, MAX_HELLO_FRAME).await.unwrap();
+    let version = hello[0];
+    let refusal = if version != 1u8 {
+        PairingError::Protocol(format!(
+            "peer speaks pairing version {version}, this build speaks 1"
+        ))
+    } else {
+        panic!("a new offer must not pretend to be version 1");
+    };
+    drop(stream);
+
+    assert!(
+        matches!(refusal, PairingError::Protocol(_)),
+        "the v1 acceptor reports a typed protocol error, not a parse failure"
+    );
+    assert_eq!(version, PAIRING_VERSION);
+    assert!(
+        offer_task.await.unwrap().is_err(),
+        "the offer cannot complete when the acceptor refuses at the hello"
     );
 }

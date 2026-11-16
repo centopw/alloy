@@ -31,11 +31,11 @@ use alloy_storage::config_bundle::{
     ThemeSelection,
 };
 use alloy_storage::pairing::{
-    self, CODE_TTL, DeviceProver, PairedBundle, PairedPeer, PairingError, PairingOffer,
-    PairingTicket,
+    self, CODE_TTL, DeviceProver, MasterEnvelope, MasterEnvelopeProvider, PairedBundle, PairedPeer,
+    PairingError, PairingOffer, PairingTicket,
 };
 use alloy_store::ChatFlagsUpdate;
-use alloy_sync::device::DeviceSecretKey;
+use alloy_sync::device::{DeviceSecretKey, open_master, wrap_master};
 use alloy_sync::keys::MasterKey;
 use argon2::{Algorithm, Argon2, Params, Version};
 use base64::Engine as _;
@@ -355,9 +355,27 @@ impl SyncHandler {
         let bundle = build_bundle(ctx, false, true).await?;
         let bytes = bundle.to_json().map_err(map_bundle)?.len() as u64;
         let prover = EngineProver::load(ctx).await?;
-        let offer = PairingOffer::bind(bundle, lan_bind_addr(), None, Arc::new(prover))
-            .await
-            .map_err(map_pairing)?;
+        // The master key and the epoch it belongs to travel with the settings: a device that
+        // enrolled without them could open no server blob the offering device published.
+        let master = master_key(ctx).await?;
+        let key = device_key(ctx).await?;
+        let sender_id = hex(key.verifying_key().as_bytes());
+        let epoch = sync_epoch(&sync_section(&settings_object(ctx)?));
+        let delivery = Arc::new(EngineMasterEnvelope {
+            master,
+            signer: key,
+            sender_id,
+            epoch,
+        });
+        let offer = PairingOffer::bind(
+            bundle,
+            lan_bind_addr(),
+            None,
+            Arc::new(prover),
+            Some(delivery),
+        )
+        .await
+        .map_err(map_pairing)?;
         let ticket = offer.ticket().clone();
         let code = offer.code().to_string();
         let pairing_id = ticket.pairing_id.clone();
@@ -571,25 +589,38 @@ fn spawn_accept(
             set_phase(&pairings, &sink, &pairing_id, PairingPhase::Transferring);
         }
         match pending.finish(accepted).await {
-            Ok(PairedBundle { bundle, peer }) => {
+            Ok(PairedBundle {
+                bundle,
+                peer,
+                master,
+            }) => {
                 let label = bundle.device_label.clone();
                 set_peer_label(&pairings, &pairing_id, label);
-                // The proof is checked before any layer is written: a peer that cannot prove
-                // its identity gets nothing imported and no roster entry.
+                // The proof is checked before any layer or key is written: a peer that cannot
+                // prove its identity gets nothing imported and no roster entry.
                 let verified = verify_peer(&peer);
                 let outcome = match verified {
                     Ok((device_id, peer_label, x25519_pub)) => {
-                        let imported = match bundle.to_json() {
-                            Ok(bytes) => import_bundle_value(&ctx, &bundle, true)
-                                .await
-                                .map(|_| bytes.len() as u64),
-                            Err(err) => Err(map_bundle(err)),
-                        };
-                        match imported {
-                            Ok(bytes) => {
-                                enrol_verified_peer(&ctx, device_id, peer_label, x25519_pub)
-                                    .await
-                                    .map(|()| bytes)
+                        // The master key is unwrapped and stored first. A failure here leaves the
+                        // bundle untouched: no half-adopted account with settings but no key.
+                        let adopted =
+                            adopt_paired_master(&ctx, &peer, master.as_ref(), &device_id).await;
+                        match adopted {
+                            Ok(()) => {
+                                let imported = match bundle.to_json() {
+                                    Ok(bytes) => import_bundle_value(&ctx, &bundle, true)
+                                        .await
+                                        .map(|_| bytes.len() as u64),
+                                    Err(err) => Err(map_bundle(err)),
+                                };
+                                match imported {
+                                    Ok(bytes) => {
+                                        enrol_verified_peer(&ctx, device_id, peer_label, x25519_pub)
+                                            .await
+                                            .map(|()| bytes)
+                                    }
+                                    Err(err) => Err(err),
+                                }
                             }
                             Err(err) => Err(err),
                         }
@@ -756,6 +787,43 @@ impl DeviceProver for EngineProver {
     }
 }
 
+/// Seals this device's master key to the peer that just accepted the SAS.
+///
+/// The envelope is built only after the peer's identity arrived. It verifies the peer's proof
+/// first, so a device that cannot prove the Ed25519 key it claims never receives a wrap, and
+/// then uses the wrap helper from `alloy-sync` with the epoch this device is on. A failure aborts
+/// the transfer before the bundle is sent.
+struct EngineMasterEnvelope {
+    master: MasterKey,
+    signer: SigningKey,
+    sender_id: String,
+    epoch: u32,
+}
+
+impl MasterEnvelopeProvider for EngineMasterEnvelope {
+    fn envelope(&self, peer: &PairedPeer) -> Result<Option<MasterEnvelope>, PairingError> {
+        let (device_id, _label, x25519_pub) =
+            verify_peer(peer).map_err(|err| PairingError::Protocol(err.message))?;
+        let recipient_key =
+            decode_device_key(&x25519_pub).map_err(|err| PairingError::Protocol(err.message))?;
+        let bytes = wrap_master(
+            &self.master,
+            &device_id,
+            &recipient_key,
+            self.epoch,
+            &self.sender_id,
+            &self.signer,
+        )
+        .map_err(|err| {
+            PairingError::Protocol(format!("cannot wrap the master key for the peer: {err}"))
+        })?;
+        Ok(Some(MasterEnvelope {
+            epoch: self.epoch,
+            bytes,
+        }))
+    }
+}
+
 /// Bytes of the Ed25519 key every pairing identity starts with.
 const IDENTITY_KEY_LEN: usize = 32;
 /// Bytes of the X25519 key that follows it.
@@ -806,6 +874,67 @@ fn verify_peer(peer: &PairedPeer) -> Result<(String, String, String), EngineErro
         label.to_string()
     };
     Ok((hex(&key_bytes), label, hex(&x25519)))
+}
+
+/// Opens the pairing envelope and installs the master key it carries, then moves onto its epoch.
+///
+/// The peer's proof must already be verified (the caller does that with [`verify_peer`]): the
+/// envelope's signature is checked against that proven Ed25519 key, and the wrap is addressed to
+/// this device's X25519 key and id. A wrong recipient, a replay on another device or a tampered
+/// envelope fails here, and the caller applies nothing. `None` is a version-1 offer, which never
+/// carried a master key; a fresh device then stays settings-only exactly as before.
+async fn adopt_paired_master(
+    ctx: &EngineContext,
+    peer: &PairedPeer,
+    envelope: Option<&MasterEnvelope>,
+    peer_id: &str,
+) -> Result<(), EngineError> {
+    let Some(envelope) = envelope else {
+        return Ok(());
+    };
+    let this = ensure_this_device(ctx).await?;
+    let sender_bytes: [u8; IDENTITY_KEY_LEN] = peer
+        .identity
+        .get(..IDENTITY_KEY_LEN)
+        .and_then(|bytes| bytes.try_into().ok())
+        .ok_or_else(|| EngineError::pairing_failed("the peer identity holds no Ed25519 key"))?;
+    let sender = VerifyingKey::from_bytes(&sender_bytes)
+        .map_err(|_| EngineError::pairing_failed("the peer identity holds no valid Ed25519 key"))?;
+    let secret = device_exchange_key(ctx).await?;
+    let (master, sender_id) = open_master(
+        &secret,
+        &this.device_id,
+        envelope.epoch,
+        &sender,
+        &envelope.bytes,
+    )
+    .map_err(|err| {
+        EngineError::pairing_failed(format!(
+            "the pairing envelope did not open for this device: {err}"
+        ))
+    })?;
+    if sender_id != peer_id {
+        return Err(EngineError::pairing_failed(
+            "the pairing envelope was signed by a device other than the one that proved itself",
+        ));
+    }
+    // Never replace a different master: that would orphan every blob this device sealed under
+    // the key it already holds. Recovery refuses a second master for the same reason.
+    match ctx.secrets.get_secret(MASTER_KEY_SECRET).await {
+        Ok(text) => {
+            let existing = decode_32(&text, MASTER_KEY_SECRET)?;
+            if existing != *master.expose_secret() {
+                return Err(EngineError::pairing_failed(
+                    "this device already holds a different master key; pairing will not replace it",
+                ));
+            }
+        }
+        Err(StorageError::SecretNotFound(_)) => {}
+        Err(err) => return Err(map_secret(err)),
+    }
+    store_master_key(ctx, &master).await?;
+    adopt_epoch(ctx, envelope.epoch)?;
+    Ok(())
 }
 
 /// Writes an already-verified peer into this device's roster at the current epoch.

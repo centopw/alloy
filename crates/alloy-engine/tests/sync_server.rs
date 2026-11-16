@@ -12,7 +12,10 @@ use std::time::Duration;
 
 use alloy_engine::factory::{ConnectorFactory, DefaultConnectorFactory};
 use alloy_engine::{AppEngine, Engine, EngineContext, EngineError};
-use alloy_protocol::{EngineCommand, EngineResponse, SyncMode, SyncState, SyncStatusReport};
+use alloy_protocol::{
+    EngineCommand, EngineEvent, EngineResponse, PairingPhase, PairingRole, SyncMode, SyncState,
+    SyncStatusReport,
+};
 use alloy_storage::{InMemorySecretStore, SecretStore};
 use alloy_store::{AccountState, ChatFlagsUpdate, ChatKind, ChatUpsert, Network, NewAccount};
 use alloy_sync::device::{DeviceSecretKey, DeviceWrapError, open_master};
@@ -23,6 +26,7 @@ use serde_json::{Value, json};
 use tempfile::TempDir;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
+use tokio::sync::broadcast;
 use tokio::time::{sleep, timeout};
 
 const WAIT: Duration = Duration::from_secs(20);
@@ -2210,5 +2214,163 @@ async fn a_rotated_master_reports_the_recovery_phrase_stale_and_a_new_phrase_cle
         status(&a).await.recovery_stale,
         Some(false),
         "a phrase created after the rotation wraps the current master"
+    );
+}
+
+// === Pairing + server journey ===
+
+async fn begin_pairing(engine: &AppEngine) -> (String, String, String) {
+    match engine
+        .handle(EngineCommand::BeginPairing {
+            role: PairingRole::Offer,
+        })
+        .await
+        .expect("begin pairing")
+    {
+        EngineResponse::PairingStarted {
+            pairing_id,
+            ticket,
+            code,
+            ..
+        } => (pairing_id, ticket, code),
+        other => panic!("unexpected response: {other:?}"),
+    }
+}
+
+async fn accept_ticket(engine: &AppEngine, ticket: &str, code: &str) -> String {
+    match engine
+        .handle(EngineCommand::AcceptPairingTicket {
+            ticket: ticket.to_string(),
+            code: code.to_string(),
+        })
+        .await
+        .expect("accept ticket")
+    {
+        EngineResponse::PairingStarted { pairing_id, .. } => pairing_id,
+        other => panic!("unexpected response: {other:?}"),
+    }
+}
+
+async fn wait_pairing(
+    events: &mut broadcast::Receiver<EngineEvent>,
+    pairing_id: &str,
+    phase: PairingPhase,
+) {
+    let deadline = tokio::time::Instant::now() + WAIT;
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        let event = timeout(remaining, events.recv())
+            .await
+            .unwrap_or_else(|_| panic!("no {phase:?} event for pairing {pairing_id}"))
+            .expect("event channel open");
+        if let EngineEvent::PairingChanged {
+            pairing_id: id,
+            state,
+            ..
+        } = event
+            && id == pairing_id
+            && state == phase
+        {
+            return;
+        }
+    }
+}
+
+async fn confirm(engine: &AppEngine, pairing_id: &str) {
+    engine
+        .handle(EngineCommand::ConfirmPairing {
+            pairing_id: pairing_id.to_string(),
+            accept: true,
+        })
+        .await
+        .expect("confirm pairing");
+}
+
+/// The flagship journey: pair over the LAN, then use the delivered master key to pull the
+/// layers this account published to a real sync server before the pairing.
+#[tokio::test]
+async fn a_paired_device_pulls_the_servers_layers_with_the_delivered_master() {
+    if !node_available().await {
+        eprintln!("skipping: node is not on PATH, so the real sync server cannot be spawned");
+        return;
+    }
+    let server = start_server().await;
+    let offer_dir = TempDir::new().expect("offer dir");
+    let offer_secrets = vault();
+    let offer = open_engine(offer_dir.path(), offer_secrets.clone()).await;
+    let offer_chat = seed_chat(&offer, Some("work")).await;
+    write_settings(offer_dir.path(), &json!({"density": "compact"}));
+    configure(&offer, &server.base(), TOKEN, false)
+        .await
+        .expect("configure the offering device");
+    sync(&offer)
+        .await
+        .expect("the offering device publishes its layers");
+
+    let accept_dir = TempDir::new().expect("accept dir");
+    let accept_secrets = vault();
+    let receiver = open_engine(accept_dir.path(), accept_secrets.clone()).await;
+    let chat_id = seed_chat(&receiver, None).await;
+
+    let mut offer_events = offer.sink().subscribe();
+    let mut accept_events = receiver.sink().subscribe();
+    let (offer_id, ticket, code) = begin_pairing(&offer).await;
+    let accept_id = accept_ticket(&receiver, &ticket, &code).await;
+    wait_pairing(&mut offer_events, &offer_id, PairingPhase::SasReady).await;
+    wait_pairing(&mut accept_events, &accept_id, PairingPhase::SasReady).await;
+    confirm(&offer, &offer_id).await;
+    confirm(&receiver, &accept_id).await;
+    wait_pairing(&mut offer_events, &offer_id, PairingPhase::Done).await;
+    wait_pairing(&mut accept_events, &accept_id, PairingPhase::Done).await;
+
+    let offer_master = stored_master(&offer_secrets).await;
+    let delivered = stored_master(&accept_secrets).await;
+    assert_eq!(
+        offer_master.expose_secret(),
+        delivered.expose_secret(),
+        "the paired device holds the offering device's master bytes"
+    );
+
+    // Change the account after the pairing, so a successful pull is the only way the receiver
+    // sees the new settings and tag.
+    std::thread::sleep(Duration::from_millis(5));
+    merge_settings(offer_dir.path(), &json!({"density": "cozy"}));
+    offer
+        .context()
+        .store
+        .update_chat_flags(
+            &offer_chat,
+            ChatFlagsUpdate {
+                tags: Some(vec!["later".to_string()]),
+                tags_updated_at: Some(1_800_000_000_000),
+                ..ChatFlagsUpdate::default()
+            },
+        )
+        .await
+        .expect("retag the offering device's chat");
+    sync(&offer)
+        .await
+        .expect("the offering device publishes a second batch");
+
+    configure(&receiver, &server.base(), TOKEN, false)
+        .await
+        .expect("the paired device joins the same server");
+    let (_, downloaded, _, epoch) = sync(&receiver).await.expect("the paired device pulls");
+
+    assert!(
+        downloaded > 0,
+        "the paired device downloaded the server's layers"
+    );
+    assert_eq!(epoch, 0, "the delivered epoch matches the head");
+    assert_eq!(
+        read_settings(accept_dir.path())["density"],
+        json!("cozy"),
+        "a layer the pairing never carried came from the server"
+    );
+    let tags = chat_tags(&receiver, &chat_id).await;
+    assert_eq!(
+        tags,
+        vec!["later".to_string()],
+        "the newer server tag overrode the paired one"
     );
 }

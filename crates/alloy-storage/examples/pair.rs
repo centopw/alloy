@@ -99,6 +99,7 @@ async fn offer(options: &Options) -> Result<(), Box<dyn std::error::Error>> {
         bind,
         options.get("advertise").map(str::to_string),
         Arc::new(DemoProver::new(label, 1)),
+        None,
     )
     .await?;
     let local = offer.local_addr()?;
