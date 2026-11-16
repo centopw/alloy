@@ -60,6 +60,28 @@ describe('LoginStep browser sign-in', () => {
     });
   });
 
+  it('renders a checkpoint challenge with the site action and no code field', () => {
+    render({ type: 'challenge', kind: 'checkpoint', message: 'confirm this sign-in' });
+    const text = document.body.textContent ?? '';
+    expect(text).toContain('confirm this sign-in');
+    const labels = [...document.querySelectorAll('button')].map((b) => b.textContent?.trim());
+    expect(labels).toContain('Open Facebook');
+    // A checkpoint is cleared on the network's site; a code field there would be dead.
+    expect(document.querySelector('input[autocomplete="one-time-code"]')).toBeNull();
+  });
+
+  it('renders a two-factor challenge with the code field the attempt is waiting for', () => {
+    const { onsubmit } = render({ type: 'challenge', kind: 'two_factor', message: 'enter the code' });
+    const input = document.querySelector<HTMLInputElement>('input[autocomplete="one-time-code"]');
+    expect(input).not.toBeNull();
+    input!.value = '123456';
+    input!.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    document.querySelector('form')!.dispatchEvent(new Event('submit', { cancelable: true }));
+    // The attempt stays open across a challenge, so the code is a plain `code` input.
+    expect(onsubmit).toHaveBeenCalledWith({ type: 'code', code: '123456' });
+  });
+
   it('names the required cookies a paste lacks and keeps the form closed', () => {
     const { onsubmit, submit, type } = render();
     type("curl 'https://www.messenger.com/' -H 'cookie: datr=D1'");
