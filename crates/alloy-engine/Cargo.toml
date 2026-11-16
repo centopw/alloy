@@ -28,6 +28,12 @@ chacha20poly1305 = "0.11"
 # The device's own Ed25519 identity, countersigned into the roster on enrolment.
 ed25519-dalek = "2.2"
 getrandom = "0.3"
+# Blob ids are HMAC-SHA256(addr_key, slot), exactly as ADR 0020 defines them.
+hmac = "0.12"
+# Sync server transport. rustls only: http is accepted for loopback endpoints alone.
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2"] }
+# The pin verifier hooks into reqwest's rustls client; the provider matches reqwest's.
+rustls = { version = "0.23", default-features = false, features = ["std", "aws_lc_rs"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
@@ -65,4 +71,9 @@ required-features = ["testing"]
 [[test]]
 name = "sync"
 path = "tests/sync.rs"
+required-features = ["testing"]
+
+[[test]]
+name = "sync_server"
+path = "tests/sync_server.rs"
 required-features = ["testing"]

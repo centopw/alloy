@@ -100,7 +100,10 @@ impl CommandGroup {
             | EngineCommand::CreateRecoveryPhrase
             | EngineCommand::VerifyRecoveryPhrase { .. }
             | EngineCommand::ListDevices
-            | EngineCommand::RevokeDevice { .. } => CommandGroup::Sync,
+            | EngineCommand::RevokeDevice { .. }
+            | EngineCommand::ConfigureSync { .. }
+            | EngineCommand::SyncStatus
+            | EngineCommand::SyncNow => CommandGroup::Sync,
         }
     }
 }

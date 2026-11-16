@@ -372,6 +372,29 @@ export type EngineCommand =
 { action: "RevokeDevice"; params: {
 	device_id: string,
 } } | 
+/**
+ *  Points this device at the optional sync server (ADR 0020).
+ * 
+ *  A `https` endpoint is pinned to the SPKI of its TLS leaf on first success; a later
+ *  certificate change fails with `pin_mismatch` unless `accept_new_pin` is true. Plain `http`
+ *  is accepted only for a loopback host. The token is stored in the secret store, never in
+ *  `settings.json`. With `mode: off` nothing is uploaded and no network call is made.
+ */
+{ action: "ConfigureSync"; params: {
+	url: string,
+	token: string,
+	mode: SyncMode,
+	accept_new_pin: boolean,
+} } | 
+/**  Reports the configured endpoint, the pin, the last run and the layer timestamps. */
+{ action: "SyncStatus" } | 
+/**
+ *  Publishes this device's enabled layers and pulls the server head, once.
+ * 
+ *  A conflicting head is re-read and rebased; a fork, branch or signature failure stops with
+ *  `sync_blocked` and leaves local state untouched.
+ */
+{ action: "SyncNow" } | 
 /**  Marks the whole chat as read and clears its unread notifications. */
 { action: "MarkRoomRead"; params: {
 	room_id: RoomId,
@@ -747,6 +770,25 @@ export type EngineResponse = { type: "AccountsList"; payload: {
 } } | 
 /**  The roster change landed; `epoch` is the new local key epoch. */
 { type: "DeviceRevoked"; payload: {
+	epoch: number,
+} } | 
+/**
+ *  The endpoint answered and the configuration was stored; `pin` is the endpoint identity now
+ *  enforced, absent for a loopback `http` endpoint.
+ */
+{ type: "SyncConfigured"; payload: {
+	pin: string | null,
+	status: SyncStatusReport,
+} } | 
+/**  The current configuration, pin and last run, without touching the network. */
+{ type: "SyncStatus"; payload: {
+	status: SyncStatusReport,
+} } | 
+/**  One completed run: ciphertext bytes moved and the head this device now holds. */
+{ type: "SyncCompleted"; payload: {
+	uploaded: number,
+	downloaded: number,
+	head_hex: string,
 	epoch: number,
 } } | 
 /**  The words exist only here: they are never stored, and the engine keeps a verifier. */
@@ -1218,10 +1260,41 @@ export type RoomTagDef = {
 /**  Id of a live subscription created by `SubscribeRoomList` or `SubscribeTimeline`. */
 export type SubscriptionId = string;
 
+/**  One store layer as `SyncStatus` reports it. */
+export type SyncLayerStatus = {
+	/**  `settings | tags | catalogue | backgrounds | theme | messages`. */
+	key: string,
+	enabled: boolean,
+	updated_at_ms: number,
+};
+
+/**  What the optional sync server holds. `off` keeps every layer local. */
+export type SyncMode = "off" | 
+/**  Encrypted configuration layers only: settings, tags, catalogue, backgrounds, theme. */
+"prefs";
+
 /**  State of a sync run, for `SyncStateChanged`. */
 export type SyncState = "idle" | "running" | "done" | "failed" | 
 /**  A head-chain violation or a pin mismatch stopped sync; `detail` names the reason code. */
 "blocked";
+
+/**
+ *  Everything `SyncStatus` reports, and the body of `SyncConfigured`.
+ * 
+ *  The token is reported as `token_configured` only: its value never crosses the IPC boundary.
+ */
+export type SyncStatusReport = {
+	mode: SyncMode,
+	url: string | null,
+	/**  Lower-case hex SPKI SHA-256 of the pinned endpoint, when one is configured. */
+	pin: string | null,
+	token_configured: boolean,
+	state: SyncState,
+	last_sync_ms: number | null,
+	last_error: string | null,
+	layers: SyncLayerStatus[],
+	devices: DeviceDto[],
+};
 
 /**  Palette colour of a chat tag. */
 export type TagColour = "grey" | "red" | "orange" | "amber" | "green" | "teal" | "blue" | "violet" | "pink";

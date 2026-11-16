@@ -1,0 +1,769 @@
+//! The optional sync server (ADR 0020): configure, publish, pull, and the pin gate.
+//!
+//! The server is a byte store with one compare-and-swap `head`. This module is the only place
+//! that talks to it:
+//!
+//! - every layer is sealed with [`alloy_sync::seal`] under the master key's epoch key, and named
+//!   with `HMAC(addr_key, slot)` so the server cannot enumerate or correlate blobs;
+//! - the published `head` is a signed [`SignedBatch`]; a `Fork`, `Branch` or signature failure
+//!   stops with `sync_blocked` and leaves local state exactly as it was;
+//! - a competing `PUT /v1/head` is re-read and rebased, never overwritten;
+//! - the endpoint is pinned to its leaf's SPKI on first success, and plain `http` is loopback
+//!   only.
+//!
+//! Pulled layers go through the existing bundle import (`handlers::sync`), so the server path
+//! merges with the same timestamp rules as a LAN pairing.
+
+mod http;
+mod tls;
+
+use std::collections::BTreeMap;
+
+use alloy_protocol::{EngineError, SyncMode, SyncState, SyncStatusReport};
+use alloy_storage::SecretStore;
+use alloy_storage::StorageError;
+use alloy_storage::config_bundle::{BUNDLE_SCHEMA, ChatKey, ConfigBundle, TagSet};
+use alloy_sync::chain::{Head, HeadStore};
+use alloy_sync::{
+    BatchHeader, BlobAddr, BlobKeyRing, ChainError, FileHeadStore, Layer, MasterKey, Pin,
+    SignedBatch, open, seal, verify_batch,
+};
+use base64::Engine as _;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use ed25519_dalek::{SigningKey, VerifyingKey};
+use hmac::{Hmac, Mac};
+use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
+
+use crate::context::EngineContext;
+use crate::handlers::settings::SettingsHandler;
+use crate::handlers::sync::{
+    build_bundle, device_key, import_bundle_value, list_devices, master_key, settings_object,
+    sync_epoch, sync_layer_statuses, sync_section,
+};
+use crate::support::now_ms;
+
+use http::{Endpoint, Precondition, WriteOutcome, parse_target};
+
+/// The bearer token. It lives in the platform secret store (ADR 0019), never in `settings.json`.
+const TOKEN_SECRET: &str = "alloy.sync.server_token.v1";
+
+/// Verified heads, persisted between runs so a replay is detectable across restarts.
+const HEAD_STORE_FILE: &str = "sync-heads.json";
+
+/// Domain separator for the batch content root.
+const ROOT_DOMAIN: &[u8] = b"alloy-sync-v1/root/1";
+
+/// Domain separator for blob ids derived from [`BlobAddr`].
+const ADDR_DOMAIN: &[u8] = b"alloy-sync-v1/blob/id/1";
+
+/// At most this many head CAS retries before the run reports the server is churning.
+const MAX_REBASE_ATTEMPTS: usize = 4;
+
+/// The configuration layers the `prefs` mode mirrors, in a fixed order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum LayerKey {
+    Settings,
+    Tags,
+    Catalogue,
+    Backgrounds,
+    Theme,
+}
+
+impl LayerKey {
+    const ALL: [Self; 5] = [
+        Self::Settings,
+        Self::Tags,
+        Self::Catalogue,
+        Self::Backgrounds,
+        Self::Theme,
+    ];
+
+    fn id(self) -> &'static str {
+        match self {
+            Self::Settings => "settings",
+            Self::Tags => "tags",
+            Self::Catalogue => "catalogue",
+            Self::Backgrounds => "backgrounds",
+            Self::Theme => "theme",
+        }
+    }
+
+    fn layer(self) -> Layer {
+        match self {
+            Self::Tags => Layer::Tags,
+            _ => Layer::Config,
+        }
+    }
+}
+
+/// The persisted server section of `settings.json`, plus what the last run reported.
+#[derive(Debug, Clone)]
+struct ServerState {
+    mode: SyncMode,
+    url: Option<String>,
+    pin: Option<Pin>,
+    state: SyncState,
+    last_sync_ms: Option<i64>,
+    last_error: Option<String>,
+}
+
+impl Default for ServerState {
+    fn default() -> Self {
+        Self {
+            mode: SyncMode::Off,
+            url: None,
+            pin: None,
+            state: SyncState::Idle,
+            last_sync_ms: None,
+            last_error: None,
+        }
+    }
+}
+
+impl ServerState {
+    fn from_settings(settings: &Value) -> Self {
+        let server = settings
+            .get("sync")
+            .and_then(|sync| sync.get("server"))
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        let mode = server
+            .get("mode")
+            .cloned()
+            .and_then(|value| serde_json::from_value::<SyncMode>(value).ok())
+            .unwrap_or(SyncMode::Off);
+        let state = server
+            .get("state")
+            .cloned()
+            .and_then(|value| serde_json::from_value::<SyncState>(value).ok())
+            .unwrap_or(SyncState::Idle);
+        Self {
+            mode,
+            url: server
+                .get("url")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            pin: server
+                .get("pin")
+                .and_then(Value::as_str)
+                .and_then(|text| Pin::parse(text).ok()),
+            state,
+            last_sync_ms: server.get("last_sync_ms").and_then(Value::as_i64),
+            last_error: server
+                .get("last_error")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        }
+    }
+}
+
+/// `ConfigureSync`: validate the endpoint, probe it, pin it on first success, then sync once.
+pub async fn configure(
+    ctx: &EngineContext,
+    url: String,
+    token: String,
+    mode: SyncMode,
+    accept_new_pin: bool,
+) -> Result<(Option<String>, SyncStatusReport), EngineError> {
+    let target = parse_target(&url)?;
+    let settings = SettingsHandler::get_settings_file(ctx)?;
+    let stored = ServerState::from_settings(&settings);
+    let token = if token.trim().is_empty() {
+        read_token(ctx).await?.ok_or_else(|| {
+            EngineError::invalid_argument("no sync token is stored; provide one to configure sync")
+        })?
+    } else {
+        token
+    };
+
+    if mode == SyncMode::Off {
+        store_token(ctx, &token).await?;
+        update_server(ctx, |server| {
+            server["mode"] = json!("off");
+            server["url"] = json!(url);
+            server["pin"] = Value::Null;
+            server["state"] = json!("idle");
+            server["last_error"] = Value::Null;
+        })?;
+        return Ok((None, status(ctx).await?));
+    }
+
+    // With a stored pin the handshake must match it before any request (and the token) is sent.
+    // Without one, or when the caller accepts a rotation, the verifier captures the leaf instead.
+    let enforce = if target.secure && !accept_new_pin {
+        stored.pin
+    } else {
+        None
+    };
+    let endpoint = Endpoint::new(&target, token.clone(), enforce)?;
+    let probe = match endpoint.get_head().await {
+        Ok(probe) => probe,
+        Err(error) if error.code == "pin_mismatch" => {
+            update_server(ctx, |server| {
+                server["state"] = json!("blocked");
+                server["last_error"] = json!("pin_mismatch");
+            })?;
+            ctx.sink
+                .emit(alloy_protocol::EngineEvent::SyncStateChanged {
+                    state: SyncState::Blocked,
+                    detail: Some("pin_mismatch".to_string()),
+                });
+            return Err(error);
+        }
+        Err(error) => return Err(error),
+    };
+    let pin = if target.secure {
+        let observed = endpoint.observed_pin().ok_or_else(|| {
+            EngineError::internal_error("the sync endpoint presented no certificate")
+        })?;
+        if let Some(expected) = enforce
+            && expected != observed
+        {
+            return Err(EngineError::pin_mismatch(
+                &expected.to_hex(),
+                &observed.to_hex(),
+            ));
+        }
+        Some(observed)
+    } else {
+        None
+    };
+    drop(probe);
+
+    store_token(ctx, &token).await?;
+    update_server(ctx, |server| {
+        server["mode"] = json!(mode);
+        server["url"] = json!(url);
+        server["pin"] = match pin {
+            Some(pin) => json!(pin.to_hex()),
+            None => Value::Null,
+        };
+        server["state"] = json!("idle");
+        server["last_error"] = Value::Null;
+    })?;
+
+    sync_now(ctx).await?;
+    let status = status(ctx).await?;
+    Ok((pin.map(Pin::to_hex), status))
+}
+
+/// `SyncStatus`: what is configured and when each layer last changed. Never the token.
+pub async fn status(ctx: &EngineContext) -> Result<SyncStatusReport, EngineError> {
+    let settings = SettingsHandler::get_settings_file(ctx)?;
+    let server = ServerState::from_settings(&settings);
+    let token_configured = read_token(ctx).await?.is_some();
+    let mut layers = sync_layer_statuses(ctx).await?;
+    for layer in &mut layers {
+        layer.enabled = server.mode == SyncMode::Prefs && layer.key != "messages";
+    }
+    Ok(SyncStatusReport {
+        mode: server.mode,
+        url: server.url,
+        pin: server.pin.map(Pin::to_hex),
+        token_configured,
+        state: server.state,
+        last_sync_ms: server.last_sync_ms,
+        last_error: server.last_error,
+        layers,
+        devices: list_devices(ctx).await?,
+    })
+}
+
+/// `SyncNow`: one publish/pull pass. A chain violation is `sync_blocked`, never a retry loop.
+pub async fn sync_now(ctx: &EngineContext) -> Result<(u64, u64, String, u32), EngineError> {
+    ctx.sink
+        .emit(alloy_protocol::EngineEvent::SyncStateChanged {
+            state: SyncState::Running,
+            detail: None,
+        });
+    match run_once(ctx).await {
+        Ok((uploaded, downloaded, head_hex, epoch)) => {
+            update_server(ctx, |server| {
+                server["state"] = json!("done");
+                server["last_sync_ms"] = json!(now_ms());
+                server["last_error"] = Value::Null;
+            })?;
+            ctx.sink
+                .emit(alloy_protocol::EngineEvent::SyncStateChanged {
+                    state: SyncState::Done,
+                    detail: None,
+                });
+            Ok((uploaded, downloaded, head_hex, epoch))
+        }
+        Err(error) if error.code == "sync_blocked" || error.code == "pin_mismatch" => {
+            let reason = error.reason.clone().unwrap_or_else(|| "chain".to_string());
+            update_server(ctx, |server| {
+                server["state"] = json!("blocked");
+                server["last_sync_ms"] = json!(now_ms());
+                server["last_error"] = json!(reason);
+            })?;
+            ctx.sink
+                .emit(alloy_protocol::EngineEvent::SyncStateChanged {
+                    state: SyncState::Blocked,
+                    detail: Some(reason),
+                });
+            Err(error)
+        }
+        Err(error) => {
+            update_server(ctx, |server| {
+                server["state"] = json!("failed");
+                server["last_sync_ms"] = json!(now_ms());
+                server["last_error"] = json!(error.code);
+            })?;
+            ctx.sink
+                .emit(alloy_protocol::EngineEvent::SyncStateChanged {
+                    state: SyncState::Failed,
+                    detail: Some(error.code.clone()),
+                });
+            Err(error)
+        }
+    }
+}
+
+/// One pass: verify and pull the server head, then publish our layers on top of it.
+async fn run_once(ctx: &EngineContext) -> Result<(u64, u64, String, u32), EngineError> {
+    let settings = SettingsHandler::get_settings_file(ctx)?;
+    let server = ServerState::from_settings(&settings);
+    if server.mode != SyncMode::Prefs {
+        return Err(EngineError::unavailable(
+            "sync is off; configure a server and mode 'prefs' first",
+        ));
+    }
+    let url = server
+        .url
+        .clone()
+        .ok_or_else(|| EngineError::unavailable("no sync endpoint is configured"))?;
+    let target = parse_target(&url)?;
+    if target.secure && server.pin.is_none() {
+        // Never run an https endpoint unpinned after configuration: a lost pin is a reconfigure,
+        // not a silent trust-on-first-use.
+        return Err(EngineError::unavailable(
+            "the sync endpoint has no stored pin; configure it again",
+        ));
+    }
+    let token = read_token(ctx)
+        .await?
+        .ok_or_else(|| EngineError::unavailable("no sync token is stored for this endpoint"))?;
+    let endpoint = Endpoint::new(&target, token, server.pin.filter(|_| target.secure))?;
+
+    let settings = SettingsHandler::get_settings_file(ctx)?;
+    let sync = sync_section(&settings);
+    let epoch = sync_epoch(&sync);
+    let master = master_key(ctx).await?;
+    let signing = device_key(ctx).await?;
+    let device_id = hex(signing.verifying_key().as_bytes());
+
+    let store_path = ctx.data_dir.join(HEAD_STORE_FILE);
+    let mut store = FileHeadStore::open(&store_path)
+        .map_err(|error| EngineError::sync_blocked(reason_for_store(&error)))?;
+
+    let mut uploaded = 0u64;
+    let mut downloaded = 0u64;
+    let mut remote_root: Option<[u8; 32]> = None;
+
+    match endpoint.get_head().await? {
+        None => {
+            if store.current().is_some() {
+                // The server lost a head this device already verified: a rollback, not a fresh
+                // start. Keep every local byte and stop.
+                return Err(EngineError::sync_blocked("branch"));
+            }
+        }
+        Some((bytes, _etag)) => {
+            downloaded += bytes.len() as u64;
+            let before = store.current().map(|record| record.head);
+            let (_, batch) = observe_head(&mut store, &bytes)?;
+            remote_root = Some(batch.header.root_hash);
+            let changed = store.current().map(|record| record.head) != before;
+            if changed {
+                downloaded += pull_layers(ctx, &endpoint, &master, &batch).await?;
+            }
+        }
+    }
+
+    // Build what we have *after* the pull: importing the remote layers is what makes the two
+    // sides converge, and publishing a pre-import bundle would overwrite the winner's content.
+    let bundle = build_bundle(ctx, true, true).await?;
+    let local_root = content_root(&bundle)?;
+    if remote_root != Some(local_root) {
+        let (sent, _) = publish(
+            &endpoint, &mut store, &master, &signing, &device_id, epoch, &bundle, local_root,
+        )
+        .await?;
+        uploaded += sent;
+    }
+
+    let head_hex = store
+        .current()
+        .map(|record| record.head.to_hex())
+        .unwrap_or_default();
+    Ok((uploaded, downloaded, head_hex, epoch))
+}
+
+/// Verifies one head against the persisted chain and appends it only on success.
+///
+/// A head the store already recorded but does not currently trust is a replay or a rollback, and
+/// is refused as `branch`; a parent it never saw is `fork`; a bad signature names itself.
+fn observe_head(
+    store: &mut FileHeadStore,
+    bytes: &[u8],
+) -> Result<(Head, SignedBatch), EngineError> {
+    let batch = SignedBatch::from_bytes(bytes).map_err(|_| EngineError::sync_blocked("chain"))?;
+    let verifying = verifying_key(&batch.header.device_id)?;
+    let head = batch.head().map_err(blocked_chain)?;
+    if store.current().map(|record| record.head) == Some(head) {
+        return Ok((head, batch));
+    }
+    if store.get(&head).is_some() {
+        return Err(EngineError::sync_blocked("branch"));
+    }
+    if store.current().is_none() {
+        // A fresh device (the master key and endpoint pin came from enrolment) has no history to
+        // check the parent against. Trust this one signed head as the starting cursor; every
+        // later read is verified against it, so a rollback after this point is still detected.
+        batch.verify_signature(&verifying).map_err(blocked_chain)?;
+        store
+            .append(alloy_sync::chain::HeadRecord {
+                head,
+                device_id: batch.header.device_id.clone(),
+                seq: batch.header.seq,
+                epoch: batch.header.epoch,
+            })
+            .map_err(blocked_chain)?;
+        return Ok((head, batch));
+    }
+    verify_batch(&batch, &verifying, store).map_err(blocked_chain)?;
+    Ok((head, batch))
+}
+
+/// Publishes the local layers, re-reading and rebasing on every competing head.
+#[allow(clippy::too_many_arguments)]
+async fn publish(
+    endpoint: &Endpoint,
+    store: &mut FileHeadStore,
+    master: &MasterKey,
+    signing: &SigningKey,
+    device_id: &str,
+    epoch: u32,
+    bundle: &ConfigBundle,
+    local_root: [u8; 32],
+) -> Result<(u64, Head), EngineError> {
+    let mut uploaded = 0u64;
+    for _ in 0..MAX_REBASE_ATTEMPTS {
+        let (prev, seq, precondition) = match endpoint.get_head().await? {
+            None => {
+                if store.current().is_some() {
+                    // The server lost a head this device already verified.
+                    return Err(EngineError::sync_blocked("branch"));
+                }
+                (Head::GENESIS, 1u64, Precondition::CreateOnly)
+            }
+            Some((bytes, etag)) => {
+                let (head, batch) = observe_head(store, &bytes)?;
+                if batch.header.root_hash == local_root {
+                    return Ok((uploaded, head));
+                }
+                (
+                    head,
+                    batch.header.seq.saturating_add(1),
+                    Precondition::Match(etag),
+                )
+            }
+        };
+
+        let (blobs, root) = prepare_layers(master, epoch, seq, bundle)?;
+        for (id, blob) in blobs {
+            uploaded += blob.len() as u64;
+            endpoint.put_blob(&id, blob).await?;
+        }
+
+        let header = BatchHeader {
+            device_id: device_id.to_string(),
+            seq,
+            prev_head: prev,
+            root_hash: root,
+            epoch,
+            created_ms: now_ms() as u64,
+        };
+        let batch = SignedBatch::sign(header, signing).map_err(blocked_chain)?;
+        let bytes = batch.to_bytes().map_err(blocked_chain)?;
+        uploaded += bytes.len() as u64;
+        match endpoint.put_head(&bytes, precondition).await? {
+            WriteOutcome::Written => {
+                // Our own batch is the new head; record it in the same chain the pulls use.
+                let verifying = signing.verifying_key();
+                let head = verify_batch(&batch, &verifying, store).map_err(blocked_chain)?;
+                return Ok((uploaded, head));
+            }
+            WriteOutcome::Conflict { bytes, etag } => {
+                // Another writer won between our read and our write: verify the head it returned
+                // (the next loop re-reads it anyway) and publish on top instead of overwriting.
+                if let (Some(bytes), Some(_etag)) = (bytes.as_deref(), etag.as_deref()) {
+                    let _ = observe_head(store, bytes)?;
+                }
+                continue;
+            }
+        }
+    }
+    Err(EngineError::network_error(
+        "another device kept writing the sync head; try again",
+    ))
+}
+
+/// Seals every layer for slot `(seq, epoch)`, returning `(blob id, blob)` and the content root.
+type PreparedLayers = (Vec<(String, Vec<u8>)>, [u8; 32]);
+
+fn prepare_layers(
+    master: &MasterKey,
+    epoch: u32,
+    seq: u64,
+    bundle: &ConfigBundle,
+) -> Result<PreparedLayers, EngineError> {
+    let key = master.blob_key(epoch);
+    let mut blobs = Vec::with_capacity(LayerKey::ALL.len());
+    for layer in LayerKey::ALL {
+        let plaintext = layer_plaintext(bundle, layer)?;
+        let addr = BlobAddr::new(layer.layer(), layer.id(), seq, epoch);
+        let bytes = seal(&key, &addr, &plaintext).map_err(|error| match error {
+            alloy_sync::BlobError::PlaintextTooLarge { .. }
+            | alloy_sync::BlobError::OversizedDeclaration { .. } => {
+                EngineError::payload_too_large()
+            }
+            other => EngineError::internal_error(format!(
+                "cannot seal the {} layer: {other}",
+                layer.id()
+            )),
+        })?;
+        blobs.push((blob_id(master, &addr), bytes));
+    }
+    Ok((blobs, content_root(bundle)?))
+}
+
+/// The stable content root of the five layers, independent of seq and epoch.
+fn content_root(bundle: &ConfigBundle) -> Result<[u8; 32], EngineError> {
+    let mut root = Sha256::new();
+    root.update(ROOT_DOMAIN);
+    for layer in LayerKey::ALL {
+        let plaintext = layer_plaintext(bundle, layer)?;
+        root.update([1u8]);
+        root.update((layer.id().len() as u16).to_be_bytes());
+        root.update(layer.id().as_bytes());
+        root.update(Sha256::digest(&plaintext));
+    }
+    Ok(root.finalize().into())
+}
+
+/// One layer as it travels in a blob. Every layer is JSON; tags travel as the bundle's
+/// array-of-pairs form because JSON object keys are strings only.
+fn layer_plaintext(bundle: &ConfigBundle, layer: LayerKey) -> Result<Vec<u8>, EngineError> {
+    let value = match layer {
+        LayerKey::Settings => Ok(bundle.settings.clone()),
+        LayerKey::Tags => serde_json::to_value(bundle.tags.iter().collect::<Vec<_>>()),
+        LayerKey::Catalogue => Ok(bundle.catalogue.clone()),
+        LayerKey::Backgrounds => serde_json::to_value(&bundle.backgrounds),
+        LayerKey::Theme => serde_json::to_value(&bundle.theme),
+    }
+    .map_err(|error| {
+        EngineError::internal_error(format!("cannot encode {}: {error}", layer.id()))
+    })?;
+    serde_json::to_vec(&value).map_err(|error| {
+        EngineError::internal_error(format!("cannot encode {}: {error}", layer.id()))
+    })
+}
+
+/// `HMAC-SHA256(addr_key(epoch), domain || slot)`, base64url without padding: 43 characters, the
+/// only shape the server accepts and the only name the blob has on the wire.
+fn blob_id(master: &MasterKey, addr: &BlobAddr) -> String {
+    let addr_key = master.addr_key(addr.epoch);
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(addr_key.as_bytes()).expect("HMAC accepts a 32-byte key");
+    mac.update(ADDR_DOMAIN);
+    mac.update(&[addr.layer.as_u8()]);
+    mac.update(&(addr.logical_id.len() as u16).to_be_bytes());
+    mac.update(addr.logical_id.as_bytes());
+    mac.update(&addr.seq.to_be_bytes());
+    mac.update(&addr.epoch.to_be_bytes());
+    URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes())
+}
+
+/// Fetches and imports the layers a verified batch names.
+async fn pull_layers(
+    ctx: &EngineContext,
+    endpoint: &Endpoint,
+    master: &MasterKey,
+    batch: &SignedBatch,
+) -> Result<u64, EngineError> {
+    let ring = BlobKeyRing::new(master, [batch.header.epoch]);
+    let mut downloaded = 0u64;
+    let mut values: BTreeMap<LayerKey, Value> = BTreeMap::new();
+    for layer in LayerKey::ALL {
+        let addr = BlobAddr::new(
+            layer.layer(),
+            layer.id(),
+            batch.header.seq,
+            batch.header.epoch,
+        );
+        let id = blob_id(master, &addr);
+        let Some(bytes) = endpoint.get_blob(&id).await? else {
+            continue;
+        };
+        downloaded += bytes.len() as u64;
+        let plaintext =
+            open(&ring, &addr, &bytes).map_err(|_| EngineError::sync_blocked("content"))?;
+        let value: Value =
+            serde_json::from_slice(&plaintext).map_err(|_| EngineError::sync_blocked("content"))?;
+        values.insert(layer, value);
+    }
+
+    let mut bundle = ConfigBundle {
+        schema: BUNDLE_SCHEMA,
+        exported_at_ms: i64::try_from(batch.header.created_ms).unwrap_or(i64::MAX),
+        device_label: "paired device".to_string(),
+        settings: Value::Null,
+        tags: BTreeMap::new(),
+        catalogue: Value::Null,
+        backgrounds: Vec::new(),
+        theme: None,
+    };
+    for (layer, value) in values {
+        match layer {
+            LayerKey::Settings => bundle.settings = value,
+            LayerKey::Tags => {
+                let pairs: Vec<(ChatKey, TagSet)> = serde_json::from_value(value)
+                    .map_err(|_| EngineError::sync_blocked("content"))?;
+                bundle.tags = pairs.into_iter().collect();
+            }
+            LayerKey::Catalogue => bundle.catalogue = value,
+            LayerKey::Backgrounds => {
+                bundle.backgrounds = serde_json::from_value(value)
+                    .map_err(|_| EngineError::sync_blocked("content"))?;
+            }
+            LayerKey::Theme => {
+                bundle.theme = serde_json::from_value(value)
+                    .map_err(|_| EngineError::sync_blocked("content"))?;
+            }
+        }
+    }
+    bundle
+        .validate()
+        .map_err(|_| EngineError::sync_blocked("content"))?;
+    import_bundle_value(ctx, &bundle, true).await?;
+    Ok(downloaded)
+}
+
+/// The key that signed a batch, named by the batch itself. The chain, not the server, proves it.
+fn verifying_key(device_id: &str) -> Result<VerifyingKey, EngineError> {
+    if device_id.len() != 64 {
+        return Err(EngineError::sync_blocked("chain"));
+    }
+    let mut bytes = [0u8; 32];
+    for (index, pair) in device_id.as_bytes().as_chunks::<2>().0.iter().enumerate() {
+        let pair = std::str::from_utf8(pair).map_err(|_| EngineError::sync_blocked("chain"))?;
+        bytes[index] =
+            u8::from_str_radix(pair, 16).map_err(|_| EngineError::sync_blocked("chain"))?;
+    }
+    VerifyingKey::from_bytes(&bytes).map_err(|_| EngineError::sync_blocked("chain"))
+}
+
+fn blocked_chain(error: ChainError) -> EngineError {
+    let reason = match &error {
+        ChainError::Branch { .. } => "branch",
+        ChainError::Fork { .. } => "fork",
+        ChainError::Signature => "signature",
+        _ => "chain",
+    };
+    EngineError::sync_blocked(reason)
+}
+
+fn reason_for_store(error: &ChainError) -> &'static str {
+    match error {
+        ChainError::Branch { .. } => "branch",
+        ChainError::Fork { .. } => "fork",
+        ChainError::Signature => "signature",
+        _ => "chain",
+    }
+}
+
+async fn read_token(ctx: &EngineContext) -> Result<Option<String>, EngineError> {
+    match ctx.secrets.get_secret(TOKEN_SECRET).await {
+        Ok(token) => Ok(Some(token)),
+        Err(StorageError::SecretNotFound(_)) => Ok(None),
+        Err(error) => Err(EngineError::internal_error(format!(
+            "cannot read the sync token from the secret store: {error}"
+        ))),
+    }
+}
+
+async fn store_token(ctx: &EngineContext, token: &str) -> Result<(), EngineError> {
+    ctx.secrets
+        .set_secret(TOKEN_SECRET, token)
+        .await
+        .map_err(|error| {
+            EngineError::internal_error(format!(
+                "cannot store the sync token in the secret store: {error}"
+            ))
+        })
+}
+
+/// Read-modify-write of `sync.server`, under the settings lock the rest of the engine uses.
+fn update_server(ctx: &EngineContext, update: impl FnOnce(&mut Value)) -> Result<(), EngineError> {
+    SettingsHandler::with_settings_lock(ctx, || {
+        let mut settings = settings_object(ctx)?;
+        let mut sync = sync_section(&settings);
+        let mut server = sync.get("server").cloned().unwrap_or_else(|| json!({}));
+        if !server.is_object() {
+            server = json!({});
+        }
+        update(&mut server);
+        sync["server"] = server;
+        settings["sync"] = sync;
+        SettingsHandler::write_settings_file(ctx, settings)
+    })
+}
+
+fn hex(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        let _ = write!(out, "{byte:02x}");
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blob_ids_are_the_servers_shape_and_slot_bound() {
+        let master = MasterKey::generate();
+        let addr = BlobAddr::new(Layer::Config, "settings", 7, 2);
+        let id = blob_id(&master, &addr);
+        assert_eq!(id.len(), 43);
+        assert!(
+            id.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        );
+        let mut other = addr.clone();
+        other.seq = 8;
+        assert_ne!(id, blob_id(&master, &other));
+    }
+
+    #[test]
+    fn the_content_root_ignores_seq_and_epoch() {
+        let bundle = ConfigBundle {
+            schema: BUNDLE_SCHEMA,
+            exported_at_ms: 1,
+            device_label: "device".to_string(),
+            settings: json!({"density": "compact"}),
+            tags: BTreeMap::new(),
+            catalogue: Value::Null,
+            backgrounds: Vec::new(),
+            theme: None,
+        };
+        let root = content_root(&bundle).expect("root");
+        let (_, sealed_root) = prepare_layers(&MasterKey::generate(), 0, 1, &bundle).expect("seal");
+        assert_eq!(root, sealed_root);
+    }
+}

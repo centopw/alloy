@@ -28,6 +28,7 @@ pub mod registry;
 pub mod router;
 pub mod sink;
 pub mod support;
+pub mod sync;
 
 pub use context::EngineContext;
 pub use error::EngineError;

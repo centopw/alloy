@@ -961,6 +961,43 @@ pub enum SyncState {
     Blocked,
 }
 
+/// What the optional sync server holds. `off` keeps every layer local.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncMode {
+    Off,
+    /// Encrypted configuration layers only: settings, tags, catalogue, backgrounds, theme.
+    Prefs,
+}
+
+/// One store layer as `SyncStatus` reports it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct SyncLayerStatus {
+    /// `settings | tags | catalogue | backgrounds | theme | messages`.
+    pub key: String,
+    pub enabled: bool,
+    #[specta(type = Number)]
+    pub updated_at_ms: i64,
+}
+
+/// Everything `SyncStatus` reports, and the body of `SyncConfigured`.
+///
+/// The token is reported as `token_configured` only: its value never crosses the IPC boundary.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct SyncStatusReport {
+    pub mode: SyncMode,
+    pub url: Option<String>,
+    /// Lower-case hex SPKI SHA-256 of the pinned endpoint, when one is configured.
+    pub pin: Option<String>,
+    pub token_configured: bool,
+    pub state: SyncState,
+    #[specta(type = Option<Number>)]
+    pub last_sync_ms: Option<i64>,
+    pub last_error: Option<String>,
+    pub layers: Vec<SyncLayerStatus>,
+    pub devices: Vec<DeviceDto>,
+}
+
 // === Commands ===
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -1137,6 +1174,25 @@ pub enum EngineCommand {
     RevokeDevice {
         device_id: String,
     },
+    /// Points this device at the optional sync server (ADR 0020).
+    ///
+    /// A `https` endpoint is pinned to the SPKI of its TLS leaf on first success; a later
+    /// certificate change fails with `pin_mismatch` unless `accept_new_pin` is true. Plain `http`
+    /// is accepted only for a loopback host. The token is stored in the secret store, never in
+    /// `settings.json`. With `mode: off` nothing is uploaded and no network call is made.
+    ConfigureSync {
+        url: String,
+        token: String,
+        mode: SyncMode,
+        accept_new_pin: bool,
+    },
+    /// Reports the configured endpoint, the pin, the last run and the layer timestamps.
+    SyncStatus,
+    /// Publishes this device's enabled layers and pulls the server head, once.
+    ///
+    /// A conflicting head is re-read and rebased; a fork, branch or signature failure stops with
+    /// `sync_blocked` and leaves local state untouched.
+    SyncNow,
     // Chat flags
     /// Marks the whole chat as read and clears its unread notifications.
     MarkRoomRead {
@@ -1512,6 +1568,25 @@ pub enum EngineResponse {
     DeviceRevoked {
         epoch: u32,
     },
+    /// The endpoint answered and the configuration was stored; `pin` is the endpoint identity now
+    /// enforced, absent for a loopback `http` endpoint.
+    SyncConfigured {
+        pin: Option<String>,
+        status: SyncStatusReport,
+    },
+    /// The current configuration, pin and last run, without touching the network.
+    SyncStatus {
+        status: SyncStatusReport,
+    },
+    /// One completed run: ciphertext bytes moved and the head this device now holds.
+    SyncCompleted {
+        #[specta(type = Number)]
+        uploaded: u64,
+        #[specta(type = Number)]
+        downloaded: u64,
+        head_hex: String,
+        epoch: u32,
+    },
     /// The words exist only here: they are never stored, and the engine keeps a verifier.
     RecoveryPhraseCreated {
         words: Vec<String>,
@@ -1645,6 +1720,47 @@ impl EngineError {
             reason: None,
         }
     }
+
+    /// The endpoint's TLS certificate is not the pinned one. Both fingerprints cross, because
+    /// they are public; no token, key or ciphertext does.
+    pub fn pin_mismatch(stored: &str, presented: &str) -> Self {
+        Self {
+            code: "pin_mismatch".to_string(),
+            message: format!(
+                "the sync endpoint certificate changed: pinned {stored}, presented {presented}"
+            ),
+            reason: Some("pin_mismatch".to_string()),
+        }
+    }
+
+    /// The head chain refused the server's data: a fork, branch or bad signature. Sync stops and
+    /// local state is kept; the reason code is one of `fork | branch | signature | chain`.
+    pub fn sync_blocked(reason: impl Into<String>) -> Self {
+        let reason = reason.into();
+        Self {
+            code: "sync_blocked".to_string(),
+            message: format!("sync is blocked: {reason}"),
+            reason: Some(reason),
+        }
+    }
+
+    /// The server refused a body over its size cap.
+    pub fn payload_too_large() -> Self {
+        Self {
+            code: "payload_too_large".to_string(),
+            message: "the sync server refused the body: over its size limit".to_string(),
+            reason: Some("too_large".to_string()),
+        }
+    }
+
+    /// The server's quota for this device's token is exhausted.
+    pub fn rate_limited() -> Self {
+        Self {
+            code: "rate_limited".to_string(),
+            message: "the sync server asked this device to slow down".to_string(),
+            reason: Some("quota".to_string()),
+        }
+    }
 }
 
 // === Events ===
@@ -1761,6 +1877,9 @@ pub fn register_types() -> Types {
         .register::<ConfigImportReport>()
         .register::<DeviceDto>()
         .register::<SyncState>()
+        .register::<SyncMode>()
+        .register::<SyncLayerStatus>()
+        .register::<SyncStatusReport>()
         .register::<VectorDiffDto<RoomSummary>>()
         .register::<VectorDiffDto<TimelineItemDto>>()
         .register::<ConnectionStatus>()

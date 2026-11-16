@@ -1,9 +1,11 @@
-//! Devices and sync: the configuration bundle, LAN pairing and the recovery phrase (ADR 0020).
+//! Devices and sync: the configuration bundle, LAN pairing, the recovery phrase and the server
+//! commands (ADR 0020).
 //!
-//! Every command here is local. Nothing in this handler makes a network call: pairing is
-//! device-to-device over the LAN, the bundle is read from and written to the files the rest of
-//! the engine already owns, and the server commands (`ConfigureSync`, `SyncStatus`, `SyncNow`)
-//! belong to a later slice and do not exist yet.
+//! The bundle, pairing and recovery phrase are local: pairing is device-to-device over the LAN
+//! and the bundle is read from and written to the files the rest of the engine already owns.
+//! `ConfigureSync`, `SyncStatus` and `SyncNow` delegate to [`crate::sync`], which is the only
+//! module that talks to the sync server; its secrets stay in the platform secret store and the
+//! endpoint is pinned before a request carries the token.
 //!
 //! Three pieces of state live outside the files this handler writes:
 //!
@@ -21,7 +23,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use alloy_protocol::{
     ConfigBundleSummary, ConfigImportReport, DeviceDto, EngineCommand, EngineEvent, EngineResponse,
-    PairingPhase, PairingRole, RoomTagDef,
+    PairingPhase, PairingRole, RoomTagDef, SyncLayerStatus,
 };
 use alloy_storage::StorageError;
 use alloy_storage::config_bundle::{
@@ -252,6 +254,29 @@ impl GroupHandler for SyncHandler {
             EngineCommand::RevokeDevice { device_id } => {
                 let epoch = revoke_device(ctx, &device_id).await?;
                 Ok(EngineResponse::DeviceRevoked { epoch })
+            }
+            EngineCommand::ConfigureSync {
+                url,
+                token,
+                mode,
+                accept_new_pin,
+            } => {
+                let (pin, status) =
+                    crate::sync::configure(ctx, url, token, mode, accept_new_pin).await?;
+                Ok(EngineResponse::SyncConfigured { pin, status })
+            }
+            EngineCommand::SyncStatus => {
+                let status = crate::sync::status(ctx).await?;
+                Ok(EngineResponse::SyncStatus { status })
+            }
+            EngineCommand::SyncNow => {
+                let (uploaded, downloaded, head_hex, epoch) = crate::sync::sync_now(ctx).await?;
+                Ok(EngineResponse::SyncCompleted {
+                    uploaded,
+                    downloaded,
+                    head_hex,
+                    epoch,
+                })
             }
             _ => Err(EngineError::invalid_argument(format!(
                 "Command '{}' does not belong to Sync group",
@@ -616,7 +641,7 @@ fn lock(pairings: &Pairings) -> MutexGuard<'_, HashMap<String, PairingEntry>> {
 // === Configuration bundle ===
 
 /// Export: read every layer this device owns and assemble the bundle.
-async fn build_bundle(
+pub(crate) async fn build_bundle(
     ctx: &EngineContext,
     include_backgrounds: bool,
     include_themes: bool,
@@ -671,7 +696,7 @@ async fn import_bundle(
 /// leaves the device untouched and a dry run returns exactly the report an apply produces. The
 /// writes are ordered so `settings.json` (the layer that carries the theme selection) lands
 /// last: a failure halfway leaves a state the next import retries.
-async fn import_bundle_value(
+pub(crate) async fn import_bundle_value(
     ctx: &EngineContext,
     bundle: &ConfigBundle,
     apply: bool,
@@ -1199,7 +1224,7 @@ fn map_bundle(err: BundleError) -> EngineError {
 
 // === Device roster ===
 
-async fn list_devices(ctx: &EngineContext) -> Result<Vec<DeviceDto>, EngineError> {
+pub(crate) async fn list_devices(ctx: &EngineContext) -> Result<Vec<DeviceDto>, EngineError> {
     let this = ensure_this_device(ctx).await?;
     let settings = SettingsHandler::get_settings_file(ctx)?;
     let mut devices = roster(&settings)?;
@@ -1220,6 +1245,66 @@ async fn list_devices(ctx: &EngineContext) -> Result<Vec<DeviceDto>, EngineError
             epoch: device.epoch,
         })
         .collect())
+}
+
+/// The five configuration layers and when each last changed on this device. `enabled` is the
+/// caller's decision (mode `prefs`), not a property of local data.
+pub(crate) async fn sync_layer_statuses(
+    ctx: &EngineContext,
+) -> Result<Vec<SyncLayerStatus>, EngineError> {
+    let settings = SettingsHandler::get_settings_file(ctx)?;
+    let tags_updated_at_ms = tag_map(ctx)
+        .await?
+        .values()
+        .map(|set| set.updated_at_ms)
+        .max()
+        .unwrap_or(0);
+    let catalogue = catalogue_path(ctx);
+    let catalogue_updated_at_ms = if catalogue.exists() {
+        mtime_ms(&catalogue)
+    } else {
+        0
+    };
+    let backgrounds_updated_at_ms = scan_backgrounds_stamps(ctx)?
+        .iter()
+        .map(|asset| asset.updated_at_ms)
+        .max()
+        .unwrap_or(0);
+    let theme_updated_at_ms = local_theme(ctx, &settings)
+        .map(|theme| theme.updated_at_ms)
+        .unwrap_or(0);
+    Ok(vec![
+        SyncLayerStatus {
+            key: "settings".to_string(),
+            enabled: true,
+            updated_at_ms: layer_updated_at_ms(&settings),
+        },
+        SyncLayerStatus {
+            key: "tags".to_string(),
+            enabled: true,
+            updated_at_ms: tags_updated_at_ms,
+        },
+        SyncLayerStatus {
+            key: "catalogue".to_string(),
+            enabled: true,
+            updated_at_ms: catalogue_updated_at_ms,
+        },
+        SyncLayerStatus {
+            key: "backgrounds".to_string(),
+            enabled: true,
+            updated_at_ms: backgrounds_updated_at_ms,
+        },
+        SyncLayerStatus {
+            key: "theme".to_string(),
+            enabled: true,
+            updated_at_ms: theme_updated_at_ms,
+        },
+        SyncLayerStatus {
+            key: "messages".to_string(),
+            enabled: false,
+            updated_at_ms: 0,
+        },
+    ])
 }
 
 async fn revoke_device(ctx: &EngineContext, device_id: &str) -> Result<u32, EngineError> {
@@ -1288,7 +1373,7 @@ async fn ensure_this_device(ctx: &EngineContext) -> Result<DeviceEntry, EngineEr
 }
 
 /// The versioned `sync` section. A device that never synced starts at version 1, epoch 0.
-fn sync_section(settings: &Value) -> Value {
+pub(crate) fn sync_section(settings: &Value) -> Value {
     match settings.get("sync") {
         Some(Value::Object(_)) => {
             let mut sync = settings["sync"].clone();
@@ -1303,7 +1388,7 @@ fn sync_section(settings: &Value) -> Value {
 
 /// Reads `settings.json` for a read-modify-write that indexes into it. A file holding a JSON
 /// value that is not an object is corruption, not a settings layer, and must not panic.
-fn settings_object(ctx: &EngineContext) -> Result<Value, EngineError> {
+pub(crate) fn settings_object(ctx: &EngineContext) -> Result<Value, EngineError> {
     let settings = SettingsHandler::get_settings_file(ctx)?;
     if settings.is_object() {
         Ok(settings)
@@ -1314,7 +1399,7 @@ fn settings_object(ctx: &EngineContext) -> Result<Value, EngineError> {
     }
 }
 
-fn sync_epoch(sync: &Value) -> u32 {
+pub(crate) fn sync_epoch(sync: &Value) -> u32 {
     sync.get("epoch")
         .and_then(Value::as_u64)
         .and_then(|epoch| u32::try_from(epoch).ok())
@@ -1341,7 +1426,7 @@ fn default_label() -> String {
         .unwrap_or_else(|| "This device".to_string())
 }
 
-async fn device_key(ctx: &EngineContext) -> Result<SigningKey, EngineError> {
+pub(crate) async fn device_key(ctx: &EngineContext) -> Result<SigningKey, EngineError> {
     match ctx.secrets.get_secret(DEVICE_KEY_SECRET).await {
         Ok(text) => Ok(SigningKey::from_bytes(&decode_32(
             &text,
@@ -1364,7 +1449,7 @@ async fn device_key(ctx: &EngineContext) -> Result<SigningKey, EngineError> {
 
 /// The master key, created on first use. It is the root of every sync key (ADR 0020); nothing
 /// here derives from it yet, but the recovery phrase wraps it.
-async fn master_key(ctx: &EngineContext) -> Result<MasterKey, EngineError> {
+pub(crate) async fn master_key(ctx: &EngineContext) -> Result<MasterKey, EngineError> {
     match ctx.secrets.get_secret(MASTER_KEY_SECRET).await {
         Ok(text) => Ok(MasterKey::from_bytes(decode_32(&text, MASTER_KEY_SECRET)?)),
         Err(StorageError::SecretNotFound(_)) => {
