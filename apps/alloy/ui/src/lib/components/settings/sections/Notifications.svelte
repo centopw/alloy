@@ -116,7 +116,7 @@
     cursor: pointer;
   }
   .permissions-link:hover {
-    color: var(--alloy-color-accent-hover);
+    color: var(--alloy-color-text-link);
     text-decoration: underline;
   }
   .permissions-link:focus-visible {

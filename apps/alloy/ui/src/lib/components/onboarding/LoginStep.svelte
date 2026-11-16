@@ -634,7 +634,7 @@
     cursor: pointer;
   }
   .link:hover:not(:disabled) {
-    color: var(--alloy-color-accent-hover);
+    color: var(--alloy-color-text-link);
   }
   .link:disabled {
     cursor: not-allowed;

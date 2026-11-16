@@ -104,7 +104,9 @@
     <button
       type="button"
       class="identity"
-      aria-label={t('chat-header-room-info', { room: title })}
+      aria-label={subtitle
+        ? `${t('chat-header-room-info', { room: title })}, ${subtitle}`
+        : t('chat-header-room-info', { room: title })}
       data-tooltip={t('chat-header-room-info-2')}
       onclick={() => ui.toggleRoomInfo()}
     >

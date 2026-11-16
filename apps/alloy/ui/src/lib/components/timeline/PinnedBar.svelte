@@ -164,7 +164,12 @@
   /* Phones: one step taller (40px) and the close button keeps its 28px mark inside the bar. */
   @media (max-width: 899px) {
     .pinned-bar {
-      height: 40px;
+      height: 44px;
+    }
+    /* The bar is a phone surface too: its close control keeps the 44px touch target. */
+    .unpin {
+      width: 44px;
+      height: 44px;
     }
   }
 </style>

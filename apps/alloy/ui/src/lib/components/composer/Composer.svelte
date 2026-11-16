@@ -1067,7 +1067,9 @@
       flex: 1 1 0;
       width: 100%;
       min-width: 0;
-      min-height: 0;
+      /* The field is centred, so the textarea no longer stretches: without this the tap target is
+         one 24px text line and a thumb lands on the container instead of the input. */
+      min-height: var(--alloy-layout-control-height);
       font-size: var(--alloy-typography-size-lg);
       padding: var(--alloy-spacing-scale-1);
     }

@@ -394,7 +394,7 @@
     cursor: pointer;
   }
   .link:hover {
-    color: var(--alloy-color-accent-hover);
+    color: var(--alloy-color-text-link);
   }
   .link:focus-visible {
     outline: 2px solid var(--alloy-color-accent-primary);

@@ -12,6 +12,9 @@
 
 ### Fixed
 - **The empty state's hint broke a word.** "…pick one from the chat list." no longer wraps "list." onto a line of its own.
+- **A hovered link stayed readable.** Link hover used a fill colour as text, which dropped to about 2.5:1 against the panel in every dark theme; hover now uses the link colour and keeps its underline.
+- **Phone touch targets that had shrunk are back to 44px**: the pinned bar's close control and the composer's text field, where a thumb used to land on the container instead of the input.
+- **The room subtitle is announced again.** The second header line (a topic's forum, or a forum's topic count) moved inside a button whose label replaced the whole subtree, so screen readers only heard the room name.
 
 ## 0.4.6 (pre-release)
 
