@@ -152,6 +152,14 @@ func (m *Messenger) startE2EE(ctx context.Context) error {
 		return fmt.Errorf("prepare e2ee client: %w", err)
 	}
 	e2ee.AddEventHandlerWithSuccessStatus(m.handleE2EEEvent)
+	// Retry receipts for outgoing messages are answered by whatsmeow itself: it looks the original
+	// plaintext up, re-encrypts it for the device that failed to decrypt and re-sends the frame
+	// (retry.go handleRetryReceipt). The in-memory ring buffer only covers the current process, so
+	// persist the payloads in the device store as well: this sidecar reconnects constantly, and a
+	// retry for a frame sent before the last restart still has to be answerable.
+	if e2ee.Store != nil && e2ee.Store.EventBuffer != nil {
+		e2ee.UseRetryMessageStore = true
+	}
 
 	m.e2eeMu.Lock()
 	m.e2ee = e2ee
@@ -171,9 +179,11 @@ func (m *Messenger) handleE2EEEvent(raw any) bool {
 	case *events.FBMessage:
 		m.handleFBMessage(ctx, evt)
 	case *events.Receipt:
-		m.handleE2EEReceipt(evt)
+		m.handleE2EEReceipt(ctx, evt)
 	case *events.ChatPresence:
 		m.handleE2EETyping(evt)
+	case *events.UndecryptableMessage:
+		m.handleE2EEUndecryptable(evt)
 	case *events.Connected:
 		m.log.Debug().Msg("E2EE socket connected")
 		m.e2eeMu.Lock()
@@ -184,6 +194,7 @@ func (m *Messenger) handleE2EEEvent(raw any) bool {
 			if err := client.SendPresence(ctx, waTypes.PresenceAvailable); err != nil {
 				m.log.Debug().Err(err).Msg("Failed to mark the E2EE client available")
 			}
+			m.topUpE2EEPreKeys(ctx, client)
 		}
 	case *events.Disconnected:
 		m.scheduleE2EEReconnect("socket closed")
@@ -321,6 +332,64 @@ func (m *Messenger) reconnectE2EE(ctx context.Context, attempt int) {
 		// if that loop stops (it does nothing when the device has no saved WhatsApp id).
 		m.scheduleE2EEReconnect("socket still down")
 	}
+}
+
+// e2eePreKeyTarget is the number of prekeys kept on the WhatsApp server. whatsmeow only uploads a
+// batch of its own when the server count drops under MinPreKeyCount, so a server that is merely
+// running low is never refilled; senders starting new sessions read one of those keys each time.
+const e2eePreKeyTarget = whatsmeow.WantedPreKeyCount
+
+// e2eePreKeyTimeout bounds the prekey reconciliation IQs so a stalled server never holds up the
+// connect event handler.
+const e2eePreKeyTimeout = 15 * time.Second
+
+// needsE2EEPreKeyTopUp reports whether the server holds fewer prekeys than e2eePreKeyTarget.
+func needsE2EEPreKeyTopUp(serverCount int) bool {
+	return serverCount < e2eePreKeyTarget
+}
+
+// topUpE2EEPreKeys reconciles the device prekey store with the server after a connect: it reports
+// the drift between the uploaded keys and the keys the server still holds, and uploads a fresh
+// batch while the server is below e2eePreKeyTarget. The upload itself reuses the run context; a
+// timeout keeps the two IQs bounded.
+func (m *Messenger) topUpE2EEPreKeys(ctx context.Context, client *whatsmeow.Client) {
+	if ctx == nil || client == nil || client.Store == nil || client.Store.PreKeys == nil || !client.IsConnected() {
+		return
+	}
+	uploadCtx, cancel := context.WithTimeout(ctx, e2eePreKeyTimeout)
+	defer cancel()
+
+	localCount, err := client.Store.PreKeys.UploadedPreKeyCount(uploadCtx)
+	if err != nil {
+		m.log.Warn().Err(err).Msg("Failed to read the local WhatsApp prekey count")
+		return
+	}
+	internals := client.DangerousInternals()
+	serverCount, err := internals.GetServerPreKeyCount(uploadCtx)
+	if err != nil {
+		m.log.Warn().Err(err).Msg("Failed to read the WhatsApp prekey count on the server")
+		return
+	}
+	m.log.Debug().Int("uploaded", localCount).Int("server", serverCount).
+		Msg("E2EE prekey counts")
+	if !needsE2EEPreKeyTopUp(serverCount) {
+		return
+	}
+
+	internals.UploadPreKeys(uploadCtx, false)
+	// UploadPreKeys reports a failed IQ only through its own logger, so read the count back: a
+	// server count that did not move means the batch never landed and new sessions will fail.
+	after, err := internals.GetServerPreKeyCount(uploadCtx)
+	if err != nil {
+		m.log.Warn().Err(err).Msg("Failed to read the WhatsApp prekey count after an upload")
+		return
+	}
+	if after <= serverCount {
+		m.log.Warn().Int("before", serverCount).Int("after", after).Int("uploaded", localCount).
+			Msg("WhatsApp prekey upload did not increase the server count")
+		return
+	}
+	m.log.Info().Int("before", serverCount).Int("after", after).Msg("Topped up WhatsApp prekeys")
 }
 
 // ensureE2EEChat makes sure the host knows the chat an encrypted event belongs to.
@@ -611,7 +680,35 @@ func transportRef(mediaType whatsmeow.MediaType, transport *waMediaTransport.WAM
 	return ref
 }
 
-func (m *Messenger) handleE2EEReceipt(evt *events.Receipt) {
+// handleE2EEReceipt turns read receipts into host read markers. Retry receipts are answered by
+// whatsmeow itself — retry.go handleRetryReceipt re-encrypts the original payload and re-sends the
+// frame to the device that failed to decrypt — so the sidecar only surfaces them here: a retry the
+// library cannot satisfy (no stored payload) is exactly what leaves a message undecrypted.
+func (m *Messenger) handleE2EEReceipt(ctx context.Context, evt *events.Receipt) {
+	if evt.Type == waTypes.ReceiptTypeRetry {
+		ids := make([]string, 0, len(evt.MessageIDs))
+		for _, id := range evt.MessageIDs {
+			ids = append(ids, string(id))
+		}
+		event := m.log.Warn().
+			Str("chat", evt.Chat.String()).
+			Str("recipient", evt.Sender.String()).
+			Strs("message_ids", ids)
+		m.e2eeMu.Lock()
+		client := m.e2ee
+		m.e2eeMu.Unlock()
+		if ctx != nil && client != nil && len(evt.MessageIDs) > 0 {
+			msg, err := client.DangerousInternals().GetMessageForRetry(ctx, evt, evt.MessageIDs[0])
+			switch {
+			case err != nil:
+				event = event.Err(err)
+			case msg == nil || msg.IsEmpty():
+				event = event.Bool("retry_payload_missing", true)
+			}
+		}
+		event.Msg("WhatsApp asked us to re-send an outgoing message to another device")
+		return
+	}
 	if evt.Type != waTypes.ReceiptTypeRead && evt.Type != waTypes.ReceiptTypeReadSelf {
 		return
 	}
@@ -624,6 +721,23 @@ func (m *Messenger) handleE2EEReceipt(evt *events.Receipt) {
 		user = evt.Chat.User
 	}
 	m.emit(NewReadMarkerEvent(chatID, user, string(evt.MessageIDs[len(evt.MessageIDs)-1])))
+}
+
+// handleE2EEUndecryptable logs a message the E2EE layer could not open and returns so the sync loop
+// keeps going. whatsmeow has already sent a retry receipt to the sender's devices and re-emits the
+// message as a normal event once one of them re-sends it decryptable, so nothing is dropped here.
+func (m *Messenger) handleE2EEUndecryptable(evt *events.UndecryptableMessage) {
+	info := evt.Info
+	event := m.log.Warn().
+		Str("message_id", string(info.ID)).
+		Str("chat", info.Chat.String()).
+		Str("sender", info.Sender.String()).
+		Bool("unavailable", evt.IsUnavailable).
+		Str("decrypt_fail_mode", string(evt.DecryptFailMode))
+	if evt.UnavailableType != events.UnavailableTypeUnknown {
+		event = event.Str("unavailable_type", string(evt.UnavailableType))
+	}
+	event.Msg("Failed to decrypt a WhatsApp message; a retry receipt was sent to the sender")
 }
 
 func (m *Messenger) handleE2EETyping(evt *events.ChatPresence) {
