@@ -1608,7 +1608,11 @@ impl Connector for TelegramConnector {
         self.require_login()?;
         let client = self.ensure_pool(&mut inner).await?;
         let pointer = mapping::decode_pointer(&media.remote_ref)?;
-        let peer = self.resolve_peer(&pointer.chat).await?;
+        // A media pointer names the chat its message lives in, which is a topic id when the message
+        // is inside a forum topic. Telegram resolves files and message ids on the forum itself, so
+        // the suffix is stripped here as well as when the pointer is written: rows stored before
+        // that fix still carry a topic id.
+        let peer = self.resolve_forum_peer(&pointer.chat).await?.0;
 
         let mut location = Some(mapping::pointer_location(&pointer, peer)?);
         for attempt in 0..MAX_MEDIA_ATTEMPTS {

@@ -101,6 +101,15 @@ pub(crate) fn topic_chat_id(forum_remote_id: &str, topic: Option<i32>) -> String
     }
 }
 
+/// The peer a media pointer must name: a topic's media lives on its forum, and Telegram's file
+/// and message calls take channel-wide ids, so the topic suffix is dropped.
+pub(crate) fn media_peer_chat(chat_id: &str) -> &str {
+    match split_topic(chat_id) {
+        Some((forum, Some(_))) => forum,
+        _ => chat_id,
+    }
+}
+
 /// The grammers identity for a peer, or `None` when the id is outside the range Telegram uses for
 /// that kind.
 pub(crate) fn peer_id(kind: PeerKindTag, bare_id: i64) -> Option<PeerId> {
@@ -446,7 +455,7 @@ fn photo_ref(media: &tl::types::MessageMediaPhoto, chat_id: &str, msg_id: i32) -
     let (thumb, width, height, size) = largest_photo_size(&photo.sizes);
     let pointer = MediaPointer {
         kind: PointerKind::Photo,
-        chat: chat_id.to_string(),
+        chat: media_peer_chat(chat_id).to_string(),
         msg: msg_id,
         id: photo.id,
         access_hash: photo.access_hash,
@@ -533,7 +542,7 @@ fn document_ref(
     let size = u64::try_from(document.size).ok();
     let pointer = MediaPointer {
         kind: PointerKind::Document,
-        chat: chat_id.to_string(),
+        chat: media_peer_chat(chat_id).to_string(),
         msg: msg_id,
         id: document.id,
         access_hash: document.access_hash,
@@ -1456,6 +1465,15 @@ mod tests {
         assert_eq!(split_topic("ch123/t45"), Some(("ch123", Some(45))));
         assert_eq!(split_topic("ch123"), Some(("ch123", None)));
         assert_eq!(split_topic("ch123/t1"), Some(("ch123", Some(1))));
+    }
+
+    #[test]
+    fn media_in_a_topic_is_addressed_on_its_forum() {
+        // Telegram files a topic message's media on the channel, and its message ids are
+        // channel-wide, so a pointer that carried the topic id could not be downloaded at all.
+        assert_eq!(media_peer_chat("ch123/t45"), "ch123");
+        assert_eq!(media_peer_chat("ch123"), "ch123");
+        assert_eq!(media_peer_chat("u7"), "u7");
     }
 
     #[test]
