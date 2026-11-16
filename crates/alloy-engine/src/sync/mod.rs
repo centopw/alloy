@@ -42,8 +42,9 @@ use sha2::{Digest, Sha256};
 use crate::context::EngineContext;
 use crate::handlers::settings::SettingsHandler;
 use crate::handlers::sync::{
-    adopt_epoch, build_bundle, decode_device_key, device_exchange_key, device_key,
-    enroll_recovered_device, has_master_key, import_bundle_value, key_wrap_targets, list_devices,
+    MIRROR_LAYER_ID, MessageMirror, adopt_epoch, build_bundle, build_message_mirror,
+    decode_device_key, device_exchange_key, device_key, enroll_recovered_device, has_master_key,
+    import_bundle_value, import_message_mirror, key_wrap_targets, list_devices,
     mark_recovery_stale, master_key, recovery_stale, settings_object, store_master_key, sync_epoch,
     sync_layer_statuses, sync_section, unwrap_escrow,
 };
@@ -399,7 +400,7 @@ pub async fn configure(
 pub(crate) async fn publish_escrow(ctx: &EngineContext, blob: &[u8]) -> Result<(), EngineError> {
     let settings = SettingsHandler::get_settings_file(ctx)?;
     let server = ServerState::from_settings(&settings);
-    if server.mode != SyncMode::Prefs {
+    if server.mode == SyncMode::Off {
         return Ok(());
     }
     let Some(url) = server.url.clone() else {
@@ -485,11 +486,13 @@ pub async fn recover(
     let mut store = FileHeadStore::open(&store_path)
         .map_err(|error| EngineError::sync_blocked(reason_for_store(&error)))?;
     let mut signer: Option<(String, u32)> = None;
+    let mut recovered_mirror = false;
     if let Some((bytes, _etag)) = endpoint.get_head().await? {
         let (_, batch) = observe_head(&mut store, &bytes)?;
         // A recovered device starts at epoch 0; the head names the epoch the account is on.
         adopt_epoch(ctx, batch.header.epoch)?;
-        pull_layers(ctx, &endpoint, &master, &batch).await?;
+        pull_layers(ctx, &endpoint, &master, &batch, true).await?;
+        recovered_mirror = batch.header.mirror;
         signer = Some((batch.header.device_id.clone(), batch.header.epoch));
     }
 
@@ -513,7 +516,11 @@ pub async fn recover(
     };
     let pin_hex = pin.map(Pin::to_hex);
     update_server(ctx, |server| {
-        server["mode"] = json!(SyncMode::Prefs);
+        server["mode"] = json!(if recovered_mirror {
+            SyncMode::Full
+        } else {
+            SyncMode::Prefs
+        });
         server["url"] = json!(url);
         server["pin"] = match &pin_hex {
             Some(pin) => json!(pin),
@@ -534,10 +541,7 @@ pub async fn status(ctx: &EngineContext) -> Result<SyncStatusReport, EngineError
     let settings = SettingsHandler::get_settings_file(ctx)?;
     let server = ServerState::from_settings(&settings);
     let token_configured = read_token(ctx).await?.is_some();
-    let mut layers = sync_layer_statuses(ctx).await?;
-    for layer in &mut layers {
-        layer.enabled = server.mode == SyncMode::Prefs && layer.key != "messages";
-    }
+    let layers = sync_layer_statuses(ctx, server.mode).await?;
     Ok(SyncStatusReport {
         mode: server.mode,
         url: server.url,
@@ -690,11 +694,7 @@ pub(crate) async fn reseal_after_revoke(ctx: &EngineContext, epoch: u32) -> Revo
         }
     };
     let server = ServerState::from_settings(&settings);
-    let Some(url) = server
-        .url
-        .clone()
-        .filter(|_| server.mode == SyncMode::Prefs)
-    else {
+    let Some(url) = server.url.clone().filter(|_| server.mode != SyncMode::Off) else {
         outcome.error = Some(
             "sync is off, so only the master key rotated: no layers were re-sealed and no server \
              blobs were deleted"
@@ -720,7 +720,39 @@ pub(crate) async fn reseal_after_revoke(ctx: &EngineContext, epoch: u32) -> Revo
             return outcome;
         }
     };
-    let local_root = match content_root(&bundle) {
+    // A rotated key re-seals the message mirror exactly like every configuration layer. The old
+    // epoch's message blobs are in the index and are deleted by the sweep below.
+    let mirror = if server.mode == SyncMode::Full {
+        match build_message_mirror(ctx).await {
+            Ok(mirror) => Some(mirror),
+            Err(error) => {
+                outcome.error = Some(format!(
+                    "the message mirror could not be read: {}",
+                    error.message
+                ));
+                return outcome;
+            }
+        }
+    } else {
+        None
+    };
+    let mirror_bytes = match mirror
+        .as_ref()
+        .map(serde_json::to_vec)
+        .transpose()
+        .map_err(|error| {
+            EngineError::internal_error(format!("cannot encode the message mirror: {error}"))
+        }) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            outcome.error = Some(format!(
+                "the message mirror could not be encoded: {}",
+                error.message
+            ));
+            return outcome;
+        }
+    };
+    let local_root = match content_root(&bundle, mirror_bytes.as_deref()) {
         Ok(root) => root,
         Err(error) => {
             outcome.error = Some(format!("the layers could not be sealed: {}", error.message));
@@ -823,7 +855,15 @@ pub(crate) async fn reseal_after_revoke(ctx: &EngineContext, epoch: u32) -> Revo
     // Re-publish first. Every enabled layer goes out under the rotated key; only a head that
     // names our new epoch proves the server holds what the revoked device cannot open.
     if let Err(error) = publish(
-        &endpoint, &mut store, &mut index, &master, &signing, &device_id, epoch, &bundle,
+        &endpoint,
+        &mut store,
+        &mut index,
+        &master,
+        &signing,
+        &device_id,
+        epoch,
+        &bundle,
+        mirror_bytes.as_deref(),
         local_root,
     )
     .await
@@ -835,6 +875,14 @@ pub(crate) async fn reseal_after_revoke(ctx: &EngineContext, epoch: u32) -> Revo
         return outcome;
     }
     outcome.re_sealed = true;
+    if let Some(mirror) = &mirror
+        && let Err(error) = record_mirror_window(ctx, mirror)
+    {
+        outcome.error = Some(format!(
+            "the revocation stands, but the message window could not be recorded: {}",
+            error.message
+        ));
+    }
 
     // The new epoch is live; now the old ciphertext leaves. Leftovers are retried by the next
     // revocation, because the index keeps every id the server did not confirm gone.
@@ -865,6 +913,19 @@ pub(crate) async fn reseal_after_revoke(ctx: &EngineContext, epoch: u32) -> Revo
     outcome
 }
 
+/// Records what the last successful `full` publish put in the message layer, so `SyncStatus` can
+/// say a window was published without re-reading the whole local store.
+fn record_mirror_window(ctx: &EngineContext, mirror: &MessageMirror) -> Result<(), EngineError> {
+    update_server(ctx, |server| {
+        server["message_window"] = json!({
+            "windowed": mirror.truncated,
+            "updated_at_ms": mirror.newest_at_ms(),
+            "chats": mirror.chats.len(),
+            "messages": mirror.messages.len(),
+        });
+    })
+}
+
 /// Builds the endpoint exactly as a sync run would, without deciding whether sync is on.
 async fn configured_endpoint(
     server: &ServerState,
@@ -887,9 +948,9 @@ async fn configured_endpoint(
 async fn run_once(ctx: &EngineContext) -> Result<(u64, u64, String, u32), EngineError> {
     let settings = SettingsHandler::get_settings_file(ctx)?;
     let server = ServerState::from_settings(&settings);
-    if server.mode != SyncMode::Prefs {
+    if server.mode == SyncMode::Off {
         return Err(EngineError::unavailable(
-            "sync is off; configure a server and mode 'prefs' first",
+            "sync is off; configure a server and mode 'prefs' or 'full' first",
         ));
     }
     let url = server
@@ -940,7 +1001,14 @@ async fn run_once(ctx: &EngineContext) -> Result<(u64, u64, String, u32), Engine
             remote_root = Some(batch.header.root_hash);
             let changed = store.current().map(|record| record.head) != before;
             if changed {
-                downloaded += pull_layers(ctx, &endpoint, &master, &batch).await?;
+                downloaded += pull_layers(
+                    ctx,
+                    &endpoint,
+                    &master,
+                    &batch,
+                    server.mode == SyncMode::Full,
+                )
+                .await?;
             }
         }
     }
@@ -948,15 +1016,40 @@ async fn run_once(ctx: &EngineContext) -> Result<(u64, u64, String, u32), Engine
     // Build what we have *after* the pull: importing the remote layers is what makes the two
     // sides converge, and publishing a pre-import bundle would overwrite the winner's content.
     let bundle = build_bundle(ctx, true, true).await?;
-    let local_root = content_root(&bundle)?;
+    // The message mirror is opt-in per account. `prefs` never reads the local message store
+    // at all, so no message data can leak through this path by accident.
+    let mirror = if server.mode == SyncMode::Full {
+        Some(build_message_mirror(ctx).await?)
+    } else {
+        None
+    };
+    let mirror_bytes = mirror
+        .as_ref()
+        .map(serde_json::to_vec)
+        .transpose()
+        .map_err(|error| {
+            EngineError::internal_error(format!("cannot encode the message mirror: {error}"))
+        })?;
+    let local_root = content_root(&bundle, mirror_bytes.as_deref())?;
     let mut index = BlobIndex::open(blob_index_path(ctx))?;
     if remote_root != Some(local_root) {
         let (sent, _) = publish(
-            &endpoint, &mut store, &mut index, &master, &signing, &device_id, epoch, &bundle,
+            &endpoint,
+            &mut store,
+            &mut index,
+            &master,
+            &signing,
+            &device_id,
+            epoch,
+            &bundle,
+            mirror_bytes.as_deref(),
             local_root,
         )
         .await?;
         uploaded += sent;
+    }
+    if let Some(mirror) = &mirror {
+        record_mirror_window(ctx, mirror)?;
     }
 
     let head_hex = store
@@ -1013,6 +1106,7 @@ async fn publish(
     device_id: &str,
     epoch: u32,
     bundle: &ConfigBundle,
+    mirror: Option<&[u8]>,
     local_root: [u8; 32],
 ) -> Result<(u64, Head), EngineError> {
     let mut uploaded = 0u64;
@@ -1041,7 +1135,7 @@ async fn publish(
             }
         };
 
-        let (blobs, root) = prepare_layers(master, epoch, seq, bundle)?;
+        let (blobs, root) = prepare_layers(master, epoch, seq, bundle, mirror)?;
         for blob in blobs {
             uploaded += blob.bytes.len() as u64;
             endpoint.put_blob(&blob.id, blob.bytes).await?;
@@ -1056,6 +1150,7 @@ async fn publish(
             prev_head: prev,
             root_hash: root,
             epoch,
+            mirror: mirror.is_some(),
             created_ms: now_ms() as u64,
         };
         let batch = SignedBatch::sign(header, signing).map_err(blocked_chain)?;
@@ -1098,33 +1193,47 @@ fn prepare_layers(
     epoch: u32,
     seq: u64,
     bundle: &ConfigBundle,
+    mirror: Option<&[u8]>,
 ) -> Result<PreparedLayers, EngineError> {
     let key = master.blob_key(epoch);
-    let mut blobs = Vec::with_capacity(LayerKey::ALL.len());
+    let mut blobs = Vec::with_capacity(LayerKey::ALL.len() + usize::from(mirror.is_some()));
     for layer in LayerKey::ALL {
         let plaintext = layer_plaintext(bundle, layer)?;
         let addr = BlobAddr::new(layer.layer(), layer.id(), seq, epoch);
-        let bytes = seal(&key, &addr, &plaintext).map_err(|error| match error {
-            alloy_sync::BlobError::PlaintextTooLarge { .. }
-            | alloy_sync::BlobError::OversizedDeclaration { .. } => {
-                EngineError::payload_too_large()
-            }
-            other => EngineError::internal_error(format!(
-                "cannot seal the {} layer: {other}",
-                layer.id()
-            )),
-        })?;
-        blobs.push(PreparedBlob {
-            id: blob_id(master, &addr),
-            layer: layer.id(),
-            bytes,
-        });
+        blobs.push(sealed_blob(master, &key, layer.id(), &addr, &plaintext)?);
     }
-    Ok((blobs, content_root(bundle)?))
+    if let Some(mirror) = mirror {
+        let addr = BlobAddr::new(Layer::Message, MIRROR_LAYER_ID, seq, epoch);
+        blobs.push(sealed_blob(master, &key, MIRROR_LAYER_ID, &addr, mirror)?);
+    }
+    Ok((blobs, content_root(bundle, mirror)?))
 }
 
-/// The stable content root of the five layers, independent of seq and epoch.
-fn content_root(bundle: &ConfigBundle) -> Result<[u8; 32], EngineError> {
+/// Seal one layer and name it, mapping a size refusal to the typed payload error.
+fn sealed_blob(
+    master: &MasterKey,
+    key: &alloy_sync::BlobKey,
+    layer: &'static str,
+    addr: &BlobAddr,
+    plaintext: &[u8],
+) -> Result<PreparedBlob, EngineError> {
+    let bytes = seal(key, addr, plaintext).map_err(|error| match error {
+        alloy_sync::BlobError::PlaintextTooLarge { .. }
+        | alloy_sync::BlobError::OversizedDeclaration { .. } => EngineError::payload_too_large(),
+        other => EngineError::internal_error(format!("cannot seal the {layer} layer: {other}")),
+    })?;
+    Ok(PreparedBlob {
+        id: blob_id(master, addr),
+        layer,
+        bytes,
+    })
+}
+
+/// The stable content root of the published layers, independent of seq and epoch.
+///
+/// The message mirror is included only when one exists: a `prefs` root keeps its old value, and
+/// a `full` root covers the message window so a changed window forces a new batch.
+fn content_root(bundle: &ConfigBundle, mirror: Option<&[u8]>) -> Result<[u8; 32], EngineError> {
     let mut root = Sha256::new();
     root.update(ROOT_DOMAIN);
     for layer in LayerKey::ALL {
@@ -1133,6 +1242,12 @@ fn content_root(bundle: &ConfigBundle) -> Result<[u8; 32], EngineError> {
         root.update((layer.id().len() as u16).to_be_bytes());
         root.update(layer.id().as_bytes());
         root.update(Sha256::digest(&plaintext));
+    }
+    if let Some(mirror) = mirror {
+        root.update([1u8]);
+        root.update((MIRROR_LAYER_ID.len() as u16).to_be_bytes());
+        root.update(MIRROR_LAYER_ID.as_bytes());
+        root.update(Sha256::digest(mirror));
     }
     Ok(root.finalize().into())
 }
@@ -1243,6 +1358,7 @@ async fn pull_layers(
     endpoint: &Endpoint,
     master: &MasterKey,
     batch: &SignedBatch,
+    want_mirror: bool,
 ) -> Result<u64, EngineError> {
     let ring = BlobKeyRing::new(master, [batch.header.epoch]);
     let mut downloaded = 0u64;
@@ -1299,7 +1415,37 @@ async fn pull_layers(
     bundle
         .validate()
         .map_err(|_| EngineError::sync_blocked("content"))?;
+
+    // Read and authenticate the message layer before the first store write: a swapped blob, a
+    // blob from another epoch or a truncated layer then blocks with the previous state intact.
+    let mirror = if want_mirror && batch.header.mirror {
+        let addr = BlobAddr::new(
+            Layer::Message,
+            MIRROR_LAYER_ID,
+            batch.header.seq,
+            batch.header.epoch,
+        );
+        let id = blob_id(master, &addr);
+        let bytes = endpoint
+            .get_blob(&id)
+            .await?
+            .ok_or_else(|| EngineError::sync_blocked("content"))?;
+        downloaded += bytes.len() as u64;
+        let plaintext =
+            open(&ring, &addr, &bytes).map_err(|_| EngineError::sync_blocked("content"))?;
+        let mirror: MessageMirror =
+            serde_json::from_slice(&plaintext).map_err(|_| EngineError::sync_blocked("content"))?;
+        mirror.validate()?;
+        Some(mirror)
+    } else {
+        None
+    };
+
     import_bundle_value(ctx, &bundle, true).await?;
+    if let Some(mirror) = &mirror {
+        import_message_mirror(ctx, mirror).await?;
+        record_mirror_window(ctx, mirror)?;
+    }
     Ok(downloaded)
 }
 
@@ -1413,8 +1559,9 @@ mod tests {
             backgrounds: Vec::new(),
             theme: None,
         };
-        let root = content_root(&bundle).expect("root");
-        let (_, sealed_root) = prepare_layers(&MasterKey::generate(), 0, 1, &bundle).expect("seal");
+        let root = content_root(&bundle, None).expect("root");
+        let (_, sealed_root) =
+            prepare_layers(&MasterKey::generate(), 0, 1, &bundle, None).expect("seal");
         assert_eq!(root, sealed_root);
     }
 }

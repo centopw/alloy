@@ -25,7 +25,7 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 /// Chain encoding version.
-pub const CHAIN_VERSION: u8 = 1;
+pub const CHAIN_VERSION: u8 = 2;
 
 /// Length of a head hash.
 pub const HEAD_LEN: usize = 32;
@@ -38,7 +38,7 @@ pub const MAX_CHAIN_RECORDS: usize = 4096;
 
 const HEAD_DOMAIN: &[u8] = b"alloy-sync-v1/head";
 const BATCH_DOMAIN: &[u8] = b"alloy-sync-v1/batch";
-const MAX_BATCH_BYTES: usize = 1 + 2 + MAX_DEVICE_ID + 8 + HEAD_LEN + HEAD_LEN + 4 + 8 + 64;
+const MAX_BATCH_BYTES: usize = 1 + 2 + MAX_DEVICE_ID + 8 + HEAD_LEN + HEAD_LEN + 4 + 1 + 8 + 64;
 
 /// A chain head: SHA-256 over the domain, the canonical header and its signature.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -126,6 +126,9 @@ pub struct BatchHeader {
     pub prev_head: Head,
     pub root_hash: [u8; HEAD_LEN],
     pub epoch: u32,
+    /// The writer also publishes the opt-in message mirror at this batch's `(seq, epoch)`. It is
+    /// signed, so a server cannot silently drop or invent a message layer.
+    pub mirror: bool,
     pub created_ms: u64,
 }
 
@@ -140,7 +143,7 @@ impl BatchHeader {
             });
         }
         let mut out = Vec::with_capacity(
-            BATCH_DOMAIN.len() + 1 + 2 + self.device_id.len() + 8 + HEAD_LEN + HEAD_LEN + 4 + 8,
+            BATCH_DOMAIN.len() + 1 + 2 + self.device_id.len() + 8 + HEAD_LEN + HEAD_LEN + 4 + 1 + 8,
         );
         out.extend_from_slice(BATCH_DOMAIN);
         out.push(CHAIN_VERSION);
@@ -150,6 +153,7 @@ impl BatchHeader {
         out.extend_from_slice(self.prev_head.as_bytes());
         out.extend_from_slice(&self.root_hash);
         out.extend_from_slice(&self.epoch.to_be_bytes());
+        out.push(u8::from(self.mirror));
         out.extend_from_slice(&self.created_ms.to_be_bytes());
         Ok(out)
     }
@@ -226,7 +230,7 @@ impl SignedBatch {
                 limit: MAX_DEVICE_ID,
             });
         }
-        let needed = 3 + device_len + 8 + HEAD_LEN + HEAD_LEN + 4 + 8 + 64;
+        let needed = 3 + device_len + 8 + HEAD_LEN + HEAD_LEN + 4 + 1 + 8 + 64;
         if bytes.len() < needed {
             return Err(ChainError::Truncated {
                 needed,
@@ -254,6 +258,16 @@ impl SignedBatch {
         root_hash.copy_from_slice(&bytes[cursor..cursor + HEAD_LEN]);
         cursor += HEAD_LEN;
         let epoch = take_u32(bytes, &mut cursor);
+        let mirror = match bytes[cursor] {
+            0 => false,
+            1 => true,
+            _ => {
+                return Err(ChainError::Malformed {
+                    reason: "mirror flag is not 0 or 1",
+                });
+            }
+        };
+        cursor += 1;
         let created_ms = take_u64(bytes, &mut cursor);
         let mut signature = [0u8; 64];
         signature.copy_from_slice(&bytes[cursor..cursor + 64]);
@@ -265,6 +279,7 @@ impl SignedBatch {
                 prev_head: Head(prev_head),
                 root_hash,
                 epoch,
+                mirror,
                 created_ms,
             },
             signature,
@@ -585,6 +600,7 @@ mod tests {
             prev_head: prev,
             root_hash: [root; HEAD_LEN],
             epoch: 0,
+            mirror: false,
             created_ms: 1_000 + seq,
         }
     }

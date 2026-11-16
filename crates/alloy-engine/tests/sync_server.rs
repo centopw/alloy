@@ -17,7 +17,10 @@ use alloy_protocol::{
     SyncStatusReport,
 };
 use alloy_storage::{InMemorySecretStore, SecretStore};
-use alloy_store::{AccountState, ChatFlagsUpdate, ChatKind, ChatUpsert, Network, NewAccount};
+use alloy_store::{
+    AccountState, ChatFlagsUpdate, ChatKind, ChatUpsert, MessageKind, Network, NewAccount,
+    NewMessage, SendState,
+};
 use alloy_sync::device::{DeviceSecretKey, DeviceWrapError, open_master};
 use alloy_sync::{BlobAddr, BlobError, BlobKeyRing, Layer, MasterKey, SignedBatch, open};
 use base64::Engine as _;
@@ -102,6 +105,61 @@ async fn seed_chat(engine: &AppEngine, tag: Option<&str>) -> String {
     chat_id
 }
 
+async fn seed_message(
+    engine: &AppEngine,
+    chat_id: &str,
+    remote_id: &str,
+    body: &str,
+    sent_at: i64,
+) {
+    engine
+        .context()
+        .store
+        .upsert_message(NewMessage {
+            chat_id: chat_id.to_string(),
+            message_id: None,
+            remote_msg_id: Some(remote_id.to_string()),
+            txn_id: None,
+            sender_remote_id: "1001".into(),
+            is_own: false,
+            sent_at,
+            edited_at: None,
+            kind: MessageKind::Text,
+            body: Some(body.to_string()),
+            formatted: None,
+            reply_to_message_id: None,
+            media_id: None,
+            send_state: Some(SendState::Sent),
+            extra: None,
+        })
+        .await
+        .expect("insert message");
+}
+
+async fn message_bodies(engine: &AppEngine, chat_id: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut before = None;
+    loop {
+        let page = engine
+            .context()
+            .store
+            .page_messages(chat_id, before.clone(), 500)
+            .await
+            .expect("page messages");
+        if page.is_empty() {
+            break;
+        }
+        before = page
+            .last()
+            .map(|message| (message.sent_at, message.message_id.clone()));
+        out.extend(
+            page.into_iter()
+                .filter_map(|message| message.body.map(|body| (message.message_id, body))),
+        );
+    }
+    out
+}
+
 fn write_settings(dir: &Path, value: &Value) {
     std::fs::write(
         dir.join("settings.json"),
@@ -132,11 +190,21 @@ async fn configure(
     token: &str,
     accept_new_pin: bool,
 ) -> Result<(Option<String>, SyncStatusReport), EngineError> {
+    configure_mode(engine, url, token, SyncMode::Prefs, accept_new_pin).await
+}
+
+async fn configure_mode(
+    engine: &AppEngine,
+    url: &str,
+    token: &str,
+    mode: SyncMode,
+    accept_new_pin: bool,
+) -> Result<(Option<String>, SyncStatusReport), EngineError> {
     match engine
         .handle(EngineCommand::ConfigureSync {
             url: url.to_string(),
             token: token.to_string(),
-            mode: SyncMode::Prefs,
+            mode,
             accept_new_pin,
         })
         .await?
@@ -201,6 +269,19 @@ struct SyncServer {
 impl SyncServer {
     fn base(&self) -> String {
         format!("http://127.0.0.1:{}", self.port)
+    }
+
+    /// The directory the disk adapter keeps opaque keys in, for assertions the wire cannot make.
+    fn data_dir(&self) -> &Path {
+        self._dir.path()
+    }
+
+    /// How many blobs the server holds. Used to prove a `prefs` device never wrote a message one.
+    fn blob_count(&self) -> usize {
+        let root = self.data_dir().join("blob");
+        std::fs::read_dir(root)
+            .map(|entries| entries.filter_map(Result::ok).count())
+            .unwrap_or(0)
     }
 }
 
@@ -692,6 +773,10 @@ async fn device_secret(secrets: &Arc<dyn SecretStore>) -> DeviceSecretKey {
 }
 
 async fn verifying_key(secrets: &Arc<dyn SecretStore>) -> ed25519_dalek::VerifyingKey {
+    signing_key_of(secrets).await.verifying_key()
+}
+
+async fn signing_key_of(secrets: &Arc<dyn SecretStore>) -> SigningKey {
     let seed: [u8; 32] = decode_b64(
         &secrets
             .get_secret("alloy.device.ed25519_key.v1")
@@ -700,7 +785,14 @@ async fn verifying_key(secrets: &Arc<dyn SecretStore>) -> ed25519_dalek::Verifyi
     )
     .try_into()
     .expect("the Ed25519 seed is 32 bytes");
-    SigningKey::from_bytes(&seed).verifying_key()
+    SigningKey::from_bytes(&seed)
+}
+
+fn head_mirror(bytes: &[u8]) -> bool {
+    SignedBatch::from_bytes(bytes)
+        .expect("the server head is a signed batch")
+        .header
+        .mirror
 }
 
 /// Writes both sides of an enrolment: each roster names the other device with its wrap target.
@@ -747,6 +839,28 @@ async fn blob_bytes(base: &str, id: &str) -> Vec<u8> {
         .expect("get blob");
     assert_eq!(response.status(), reqwest::StatusCode::OK);
     response.bytes().await.expect("blob body").to_vec()
+}
+
+async fn write_blob(base: &str, id: &str, bytes: &[u8]) {
+    let response = reqwest::Client::new()
+        .put(format!("{base}/v1/blob/{id}"))
+        .bearer_auth(TOKEN)
+        .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+        .body(bytes.to_vec())
+        .send()
+        .await
+        .expect("put blob");
+    assert_eq!(response.status(), reqwest::StatusCode::NO_CONTENT);
+}
+
+async fn delete_blob(base: &str, id: &str) {
+    let response = reqwest::Client::new()
+        .delete(format!("{base}/v1/blob/{id}"))
+        .bearer_auth(TOKEN)
+        .send()
+        .await
+        .expect("delete blob");
+    assert_eq!(response.status(), reqwest::StatusCode::NO_CONTENT);
 }
 
 async fn stored_master(secrets: &Arc<dyn SecretStore>) -> MasterKey {
@@ -2372,5 +2486,508 @@ async fn a_paired_device_pulls_the_servers_layers_with_the_delivered_master() {
         tags,
         vec!["later".to_string()],
         "the newer server tag overrode the paired one"
+    );
+}
+
+// === Message mirror (`full`) ===
+
+/// Device A publishes `full`, device B enrols and pulls it. The roster entry for B is real (it
+/// carries B's X25519 key), so a rotation can seal the new master to B.
+struct FullPair {
+    server: SyncServer,
+    a: AppEngine,
+    b: AppEngine,
+    a_dir: TempDir,
+    _b_dir: TempDir,
+    a_vault: Arc<dyn SecretStore>,
+    b_vault: Arc<dyn SecretStore>,
+    a_chat: String,
+    b_chat: String,
+    a_id: String,
+}
+
+async fn full_pair() -> FullPair {
+    let server = start_server().await;
+    let a_dir = TempDir::new().expect("a data dir");
+    let b_dir = TempDir::new().expect("b data dir");
+    let a_vault = vault();
+    let b_vault = vault();
+    let a = open_engine(a_dir.path(), a_vault.clone()).await;
+    let b = open_engine(b_dir.path(), b_vault.clone()).await;
+    let a_chat = seed_chat(&a, Some("work")).await;
+    let b_chat = seed_chat(&b, None).await;
+    seed_message(&a, &a_chat, "m-1", "first mirrored body", 1_700_000_000_001).await;
+    seed_message(
+        &a,
+        &a_chat,
+        "m-2",
+        "second mirrored body",
+        1_700_000_000_002,
+    )
+    .await;
+    let marker = a
+        .context()
+        .store
+        .page_messages(&a_chat, None, 1)
+        .await
+        .expect("newest message")
+        .into_iter()
+        .next()
+        .expect("a message exists");
+    a.context()
+        .store
+        .set_read_marker(&a_chat, "1001", &marker.message_id, 1_700_000_000_003)
+        .await
+        .expect("read marker");
+    a.context()
+        .store
+        .set_unread(&a_chat, 4, 2)
+        .await
+        .expect("unread counters");
+
+    let (a_id, _b_id) = enrol(&a, a_dir.path(), &a_vault, &b, b_dir.path(), &b_vault).await;
+    configure_mode(&a, &server.base(), TOKEN, SyncMode::Full, false)
+        .await
+        .expect("a publishes full");
+    copy_master(&a_vault, &b_vault).await;
+    configure_mode(&b, &server.base(), TOKEN, SyncMode::Full, false)
+        .await
+        .expect("b pulls full");
+    FullPair {
+        server,
+        a,
+        b,
+        a_dir,
+        _b_dir: b_dir,
+        a_vault,
+        b_vault,
+        a_chat,
+        b_chat,
+        a_id,
+    }
+}
+
+#[tokio::test]
+async fn full_mode_round_trip_carries_chat_titles_and_messages() {
+    if !node_available().await {
+        eprintln!("skipping: node is not on PATH, so the real sync server cannot be spawned");
+        return;
+    }
+    let pair = full_pair().await;
+    let (head, _) = read_head(&pair.server.base()).await;
+    assert!(head_mirror(&head), "a full writer signs the mirror flag");
+
+    let chat = pair
+        .b
+        .context()
+        .store
+        .get_chat(&pair.b_chat)
+        .await
+        .expect("b chat")
+        .expect("b chat exists");
+    assert_eq!(chat.title.as_deref(), Some("Ada"));
+    assert_eq!(chat.unread_count, 4);
+    assert_eq!(chat.mention_count, 2);
+
+    let bodies: Vec<String> = message_bodies(&pair.b, &pair.b_chat)
+        .await
+        .into_iter()
+        .map(|(_, body)| body)
+        .collect();
+    assert_eq!(
+        bodies,
+        vec![
+            "second mirrored body".to_string(),
+            "first mirrored body".to_string()
+        ],
+        "newest first, both bodies arrived"
+    );
+    let markers = pair
+        .b
+        .context()
+        .store
+        .list_read_markers(&pair.b_chat)
+        .await
+        .expect("b markers");
+    assert_eq!(markers.len(), 1, "the read marker crossed");
+
+    // A re-pull resolves to the same rows, so the chat keeps exactly two messages.
+    let before = message_bodies(&pair.b, &pair.b_chat).await.len();
+    sync(&pair.b).await.expect("a no-op re-pull succeeds");
+    assert_eq!(
+        message_bodies(&pair.b, &pair.b_chat).await.len(),
+        before,
+        "re-pulling the mirror does not duplicate messages"
+    );
+
+    let status = status(&pair.a).await;
+    let messages = status
+        .layers
+        .iter()
+        .find(|layer| layer.key == "messages")
+        .expect("the messages layer is reported");
+    assert!(messages.enabled);
+    assert_eq!(messages.windowed, Some(false));
+    assert!(messages.updated_at_ms > 0);
+}
+
+#[tokio::test]
+async fn prefs_publishes_no_message_layer() {
+    if !node_available().await {
+        eprintln!("skipping: node is not on PATH, so the real sync server cannot be spawned");
+        return;
+    }
+    let server = start_server().await;
+    let dir = TempDir::new().expect("data dir");
+    let secrets = vault();
+    let engine = open_engine(dir.path(), secrets.clone()).await;
+    let chat = seed_chat(&engine, None).await;
+    seed_message(&engine, &chat, "m-1", "never uploaded", 1_700_000_000_001).await;
+
+    configure(&engine, &server.base(), TOKEN, false)
+        .await
+        .expect("prefs sync");
+    let (head, _) = read_head(&server.base()).await;
+    assert!(!head_mirror(&head), "prefs never advertises a mirror");
+    assert_eq!(
+        server.blob_count(),
+        5,
+        "only the five configuration layers were written"
+    );
+
+    let index = read_json_file(&dir.path().join("sync-blobs.json"));
+    let layers: Vec<&str> = index["epochs"]["0"]
+        .as_array()
+        .expect("epoch entries")
+        .iter()
+        .filter_map(|blob| blob["layer"].as_str())
+        .collect();
+    assert!(
+        !layers.contains(&"messages"),
+        "the client index records no message blob: {layers:?}"
+    );
+    let status = status(&engine).await;
+    let messages = status
+        .layers
+        .iter()
+        .find(|layer| layer.key == "messages")
+        .expect("the messages layer is reported");
+    assert!(!messages.enabled);
+}
+
+#[tokio::test]
+async fn an_oversized_mirror_publishes_a_documented_newest_first_window() {
+    if !node_available().await {
+        eprintln!("skipping: node is not on PATH, so the real sync server cannot be spawned");
+        return;
+    }
+    let server = start_server().await;
+    let a_dir = TempDir::new().expect("a data dir");
+    let b_dir = TempDir::new().expect("b dir");
+    let a_vault = vault();
+    let b_vault = vault();
+    let a = open_engine(a_dir.path(), a_vault.clone()).await;
+    let b = open_engine(b_dir.path(), b_vault.clone()).await;
+    let a_chat = seed_chat(&a, None).await;
+    let b_chat = seed_chat(&b, None).await;
+    let body = "x".repeat(1024);
+    for index in 0..1_500i64 {
+        seed_message(
+            &a,
+            &a_chat,
+            &format!("bulk-{index:04}"),
+            &format!("{index:04}-{body}"),
+            1_700_000_000_000 + index,
+        )
+        .await;
+    }
+
+    let (_, configured) = configure_mode(&a, &server.base(), TOKEN, SyncMode::Full, false)
+        .await
+        .expect("a publishes full");
+    let messages = configured
+        .layers
+        .iter()
+        .find(|layer| layer.key == "messages")
+        .expect("messages layer");
+    assert_eq!(
+        messages.windowed,
+        Some(true),
+        "the layer reports its window"
+    );
+
+    let index = read_json_file(&a_dir.path().join("sync-blobs.json"));
+    let message_id = index["epochs"]["0"]
+        .as_array()
+        .expect("epoch entries")
+        .iter()
+        .find(|blob| blob["layer"] == json!("messages"))
+        .and_then(|blob| blob["id"].as_str())
+        .expect("the messages blob is indexed");
+    let size = blob_bytes(&server.base(), message_id).await.len();
+    assert!(
+        size <= 1024 * 1024,
+        "the sealed message blob fits the server body cap: {size}"
+    );
+
+    copy_master(&a_vault, &b_vault).await;
+    configure_mode(&b, &server.base(), TOKEN, SyncMode::Full, false)
+        .await
+        .expect("b pulls the window");
+    let pulled = message_bodies(&b, &b_chat).await;
+    let total = a
+        .context()
+        .store
+        .list_mirror_messages(5_000)
+        .await
+        .expect("all messages")
+        .len();
+    assert!(
+        pulled.len() < total,
+        "the window is smaller than the store: pulled {}, total {total}",
+        pulled.len()
+    );
+    assert!(!pulled.is_empty(), "the newest rows still crossed");
+    assert!(
+        pulled
+            .iter()
+            .any(|(_, body)| body.ends_with(&body_for(1_499))),
+        "the newest message is inside the window"
+    );
+    let status = status(&a).await;
+    let messages = status
+        .layers
+        .iter()
+        .find(|layer| layer.key == "messages")
+        .expect("messages layer");
+    assert_eq!(messages.windowed, Some(true));
+}
+
+fn body_for(index: i64) -> String {
+    format!("{index:04}-{}", "x".repeat(1024))
+}
+
+#[tokio::test]
+async fn revocation_re_seals_and_deletes_the_published_message_blob() {
+    if !node_available().await {
+        eprintln!("skipping: node is not on PATH, so the real sync server cannot be spawned");
+        return;
+    }
+    let server = start_server().await;
+    let first_dir = TempDir::new().expect("first data dir");
+    let first_secrets = vault();
+    let first = open_engine(first_dir.path(), first_secrets.clone()).await;
+    let chat = seed_chat(&first, None).await;
+    seed_message(&first, &chat, "m-1", "revocation target", 1_700_000_000_001).await;
+
+    let second_dir = TempDir::new().expect("second data dir");
+    let second_secrets = vault();
+    let second = open_engine(second_dir.path(), second_secrets).await;
+    let (_, revoked_id) = roster_ids(&second).await;
+    let revoked_id = revoked_id.expect("the second device names itself");
+
+    configure_mode(&first, &server.base(), TOKEN, SyncMode::Full, false)
+        .await
+        .expect("the first device publishes full");
+    add_roster_entry(first_dir.path(), &revoked_id);
+
+    let old = indexed_blobs(first_dir.path(), 0);
+    assert_eq!(old.len(), 6, "five configuration layers plus messages");
+    assert!(
+        old.iter().any(|(_, layer, _)| layer == "messages"),
+        "the message blob is indexed"
+    );
+    for (id, _, _) in &old {
+        assert_eq!(
+            blob_status(&server.base(), id).await,
+            reqwest::StatusCode::OK
+        );
+    }
+
+    let revoked = revoke(&first, &revoked_id).await;
+    assert_eq!(revoked.re_sealed, Some(true));
+    assert_eq!(revoked.blobs_deleted, Some(old.len() as u32));
+    assert_eq!(revoked.blobs_remaining, Some(0));
+    assert!(revoked.error.is_none(), "{:?}", revoked.error);
+    for (id, _, _) in &old {
+        assert_eq!(
+            blob_status(&server.base(), id).await,
+            reqwest::StatusCode::NOT_FOUND,
+            "the old message/blob ciphertext is gone"
+        );
+    }
+    let new = indexed_blobs(first_dir.path(), 1);
+    assert_eq!(new.len(), 6, "the mirror is re-sealed under the new epoch");
+    assert!(new.iter().any(|(_, layer, _)| layer == "messages"));
+}
+
+// === Hostile server suite against the real server ===
+
+async fn b_state(pair: &FullPair) -> (Option<String>, Vec<String>) {
+    let chat = pair
+        .b
+        .context()
+        .store
+        .get_chat(&pair.b_chat)
+        .await
+        .expect("b chat")
+        .expect("b chat exists");
+    let bodies = message_bodies(&pair.b, &pair.b_chat)
+        .await
+        .into_iter()
+        .map(|(_, body)| body)
+        .collect();
+    (chat.title, bodies)
+}
+
+/// (a) A head signed by nobody: the signature check refuses it before any content is read.
+#[tokio::test]
+async fn hostile_a_forged_head_is_refused_and_local_state_is_kept() {
+    if !node_available().await {
+        eprintln!("skipping: node is not on PATH, so the real sync server cannot be spawned");
+        return;
+    }
+    let pair = full_pair().await;
+    let before = b_state(&pair).await;
+    let (bytes, etag) = read_head(&pair.server.base()).await;
+    let mut forged = bytes.clone();
+    let last = forged.len() - 1;
+    forged[last] ^= 0x01;
+    write_head(&pair.server.base(), &forged, &etag).await;
+
+    let error = sync(&pair.b).await.expect_err("a forged head is refused");
+    assert_eq!(error.code, "sync_blocked");
+    assert_eq!(error.reason.as_deref(), Some("signature"));
+    assert_eq!(b_state(&pair).await, before, "no layer was imported");
+}
+
+/// (b) An older head served after a newer one was accepted: a recorded ancestor is a branch.
+#[tokio::test]
+async fn hostile_b_replayed_old_head_is_a_branch_and_local_state_is_kept() {
+    if !node_available().await {
+        eprintln!("skipping: node is not on PATH, so the real sync server cannot be spawned");
+        return;
+    }
+    let pair = full_pair().await;
+    let (old_head, _) = read_head(&pair.server.base()).await;
+
+    merge_settings(pair.a_dir.path(), &json!({"accent": "green"}));
+    sync(&pair.a).await.expect("a publishes a second batch");
+    let (new_head, new_etag) = read_head(&pair.server.base()).await;
+    assert_ne!(old_head, new_head);
+    sync(&pair.b).await.expect("b accepts the newer head");
+    let before = b_state(&pair).await;
+
+    write_head(&pair.server.base(), &old_head, &new_etag).await;
+    let error = sync(&pair.b).await.expect_err("a replay is refused");
+    assert_eq!(error.code, "sync_blocked");
+    assert_eq!(error.reason.as_deref(), Some("branch"));
+    assert_eq!(b_state(&pair).await, before, "the newer state stays");
+}
+
+/// (d) A configuration blob served in the message slot: the AAD names the layer, so it fails.
+#[tokio::test]
+async fn hostile_d_config_blob_in_the_message_slot_is_refused() {
+    if !node_available().await {
+        eprintln!("skipping: node is not on PATH, so the real sync server cannot be spawned");
+        return;
+    }
+    let pair = full_pair().await;
+    merge_settings(pair.a_dir.path(), &json!({"accent": "green"}));
+    sync(&pair.a).await.expect("a publishes seq 2");
+    let (_, head_etag) = read_head(&pair.server.base()).await;
+    let _ = head_etag;
+
+    let blobs = indexed_blobs(pair.a_dir.path(), 0);
+    let settings = blobs
+        .iter()
+        .find(|(_, layer, seq)| layer == "settings" && *seq == 2)
+        .expect("the second batch's settings blob");
+    let messages = blobs
+        .iter()
+        .find(|(_, layer, seq)| layer == "messages" && *seq == 2)
+        .expect("the second batch's message blob");
+    let settings_bytes = blob_bytes(&pair.server.base(), &settings.0).await;
+    write_blob(&pair.server.base(), &messages.0, &settings_bytes).await;
+
+    let before = b_state(&pair).await;
+    let error = sync(&pair.b).await.expect_err("a layer swap is refused");
+    assert_eq!(error.code, "sync_blocked");
+    assert_eq!(error.reason.as_deref(), Some("content"));
+    assert_eq!(b_state(&pair).await, before, "the swap imported nothing");
+}
+
+/// (e) The message blob deleted while the signed head still advertises it: missing is a refusal,
+/// not a silently empty layer.
+#[tokio::test]
+async fn hostile_e_truncated_message_layer_is_refused() {
+    if !node_available().await {
+        eprintln!("skipping: node is not on PATH, so the real sync server cannot be spawned");
+        return;
+    }
+    let pair = full_pair().await;
+    merge_settings(pair.a_dir.path(), &json!({"accent": "green"}));
+    sync(&pair.a).await.expect("a publishes seq 2");
+    let messages = indexed_blobs(pair.a_dir.path(), 0)
+        .into_iter()
+        .find(|(_, layer, seq)| layer == "messages" && *seq == 2)
+        .expect("the second batch's message blob");
+    delete_blob(&pair.server.base(), &messages.0).await;
+
+    let before = b_state(&pair).await;
+    let error = sync(&pair.b)
+        .await
+        .expect_err("a truncated layer is refused");
+    assert_eq!(error.code, "sync_blocked");
+    assert_eq!(error.reason.as_deref(), Some("content"));
+    assert_eq!(b_state(&pair).await, before, "the previous window stays");
+}
+
+/// (c) A message blob from the previous epoch served inside a new-epoch batch: the AAD's epoch
+/// check fails before anything is imported.
+#[tokio::test]
+async fn hostile_c_message_blob_from_another_epoch_is_refused() {
+    if !node_available().await {
+        eprintln!("skipping: node is not on PATH, so the real sync server cannot be spawned");
+        return;
+    }
+    let pair = full_pair().await;
+    let epoch0_messages = indexed_blobs(pair.a_dir.path(), 0)
+        .into_iter()
+        .find(|(_, layer, _)| layer == "messages")
+        .expect("epoch 0 message blob");
+    let old_bytes = blob_bytes(&pair.server.base(), &epoch0_messages.0).await;
+
+    // A third, fabricated device is revoked so the account really rotates to epoch 1.
+    let dead_id = "ab".repeat(32);
+    add_roster_entry(pair.a_dir.path(), &dead_id);
+    let revoked = revoke(&pair.a, &dead_id).await;
+    assert_eq!(revoked.epoch, 1);
+    assert!(revoked.error.is_none(), "{:?}", revoked.error);
+    sync(&pair.b).await.expect("b adopts the rotation");
+
+    // A publishes a fresh epoch-1 batch, then the server swaps its message blob for the old one.
+    merge_settings(pair.a_dir.path(), &json!({"accent": "green"}));
+    sync(&pair.a).await.expect("a publishes at epoch 1");
+    let current = indexed_blobs(pair.a_dir.path(), 1);
+    let message = current
+        .iter()
+        .filter(|(_, layer, _)| layer == "messages")
+        .max_by_key(|(_, _, seq)| *seq)
+        .expect("the newest epoch-1 message blob");
+    write_blob(&pair.server.base(), &message.0, &old_bytes).await;
+
+    let before = b_state(&pair).await;
+    let error = sync(&pair.b)
+        .await
+        .expect_err("an old-epoch blob is refused");
+    assert_eq!(error.code, "sync_blocked");
+    assert_eq!(error.reason.as_deref(), Some("content"));
+    assert_eq!(b_state(&pair).await, before, "the previous window stays");
+    let _ = (
+        &pair.a_vault,
+        &pair.b_vault,
+        pair.a_id.as_str(),
+        &pair.a_chat,
     );
 }

@@ -116,6 +116,23 @@ impl Store {
         .await
     }
 
+    /// Every chat across accounts, newest activity first, for the opt-in message mirror.
+    ///
+    /// The mirror publishes a newest-first window; this order is what decides which chats fit
+    /// the payload budget. Archived chats are included because the mirror carries their state
+    /// too.
+    pub async fn list_mirror_chats(&self) -> Result<Vec<ChatRecord>, StoreError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT * FROM chats
+                 ORDER BY COALESCE(last_activity_at, 0) DESC, chat_id ASC",
+            )?;
+            let rows = stmt.query_map([], rows::chat)?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+        .await
+    }
+
     /// Apply user-owned chat state; unspecified fields keep their stored value.
     pub async fn update_chat_flags(
         &self,

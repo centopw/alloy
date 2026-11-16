@@ -12,6 +12,24 @@ use crate::model::{
 use crate::rows;
 
 impl Store {
+    /// Newest messages across every chat, newest first, for the opt-in message mirror.
+    ///
+    /// The mirror keeps a bounded newest-first window, so it asks for a bounded slice rather
+    /// than paging every chat. `limit` is the caller's bound; the store never sizes the result
+    /// from a remote value.
+    pub async fn list_mirror_messages(&self, limit: u32) -> Result<Vec<MessageRecord>, StoreError> {
+        self.with_conn(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT * FROM messages
+                 ORDER BY sent_at DESC, message_id DESC
+                 LIMIT ?1",
+            )?;
+            let rows = stmt.query_map([limit], rows::message)?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+        .await
+    }
+
     /// Insert a message, or update the row it resolves to.
     ///
     /// Identity order: an explicit `message_id`, then `txn_id` (a remote echo carries the same

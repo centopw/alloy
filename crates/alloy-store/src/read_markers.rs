@@ -82,4 +82,18 @@ impl Store {
         })
         .await
     }
+
+    /// Every participant's read position, for the opt-in message mirror.
+    pub async fn list_all_read_markers(&self) -> Result<Vec<ReadMarkerRecord>, StoreError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT chat_id, remote_user_id, up_to_message_id, read_at
+                 FROM read_markers
+                 ORDER BY chat_id ASC, read_at DESC, remote_user_id ASC",
+            )?;
+            let rows = stmt.query_map([], rows::read_marker)?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+        .await
+    }
 }

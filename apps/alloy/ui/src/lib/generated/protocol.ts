@@ -1306,12 +1306,22 @@ export type SyncLayerStatus = {
 	key: string,
 	enabled: boolean,
 	updated_at_ms: number,
+	/**
+	 *  Set on the `messages` layer in `full` mode: true when the published window omits older
+	 *  rows to stay inside the server's per-body limit. Absent for every other layer.
+	 */
+	windowed?: boolean | null,
 };
 
 /**  What the optional sync server holds. `off` keeps every layer local. */
 export type SyncMode = "off" | 
 /**  Encrypted configuration layers only: settings, tags, catalogue, backgrounds, theme. */
-"prefs";
+"prefs" | 
+/**
+ *  The configuration layers plus the opt-in message mirror: chat metadata, read markers
+ *  and message bodies. Opt-in per account; media stays on the device.
+ */
+"full";
 
 /**  State of a sync run, for `SyncStateChanged`. */
 export type SyncState = "idle" | "running" | "done" | "failed" | 

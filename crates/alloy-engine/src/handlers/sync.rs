@@ -23,7 +23,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use alloy_protocol::{
     ConfigBundleSummary, ConfigImportReport, DeviceDto, EngineCommand, EngineEvent, EngineResponse,
-    PairingPhase, PairingRole, RoomTagDef, SyncLayerStatus,
+    PairingPhase, PairingRole, RoomTagDef, SyncLayerStatus, SyncMode,
 };
 use alloy_storage::StorageError;
 use alloy_storage::config_bundle::{
@@ -34,7 +34,7 @@ use alloy_storage::pairing::{
     self, CODE_TTL, DeviceProver, MasterEnvelope, MasterEnvelopeProvider, PairedBundle, PairedPeer,
     PairingError, PairingOffer, PairingTicket,
 };
-use alloy_store::ChatFlagsUpdate;
+use alloy_store::{ChatFlagsUpdate, ChatKind, ChatUpsert, MessageKind, NewMessage};
 use alloy_sync::device::{DeviceSecretKey, open_master, wrap_master};
 use alloy_sync::keys::MasterKey;
 use argon2::{Algorithm, Argon2, Params, Version};
@@ -1191,6 +1191,363 @@ pub(crate) async fn import_bundle_value(
     Ok((report, applied))
 }
 
+// === Opt-in message mirror (`full` mode) ===
+
+/// Mirror payload version. A payload this build does not know is refused, never guessed at.
+pub(crate) const MIRROR_SCHEMA: u32 = 1;
+
+/// Blob logical id of the one message-layer blob per batch.
+pub(crate) const MIRROR_LAYER_ID: &str = "messages";
+
+/// Largest plaintext that seals into one server-accepted body.
+///
+/// The server caps a body at 1 MiB (`MAX_BLOB_BYTES`), and the blob codec pads to 4 KiB. The
+/// documented window therefore stops below that; it is not the pairing bundle's 48 MiB bound,
+/// which never travels to the server. Bodies above 1 MiB would be refused with `413`.
+pub(crate) const MIRROR_PLAINTEXT_LIMIT: usize = 1000 * 1024;
+
+/// How many newest messages are considered before the byte budget stops the window. A bound on
+/// the local read, not on what is published.
+const MIRROR_MESSAGE_SCAN: u32 = 50_000;
+
+/// One chat's metadata in the mirror. Identity is the network identity, never a local UUID.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct MirrorChat {
+    pub network: String,
+    pub account_remote_id: String,
+    pub remote_chat_id: String,
+    pub kind: ChatKind,
+    pub title: Option<String>,
+    pub last_activity_at: Option<i64>,
+    pub unread_count: i64,
+    pub mention_count: i64,
+    #[serde(default)]
+    pub read_markers: Vec<MirrorReadMarker>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct MirrorReadMarker {
+    pub remote_user_id: String,
+    pub up_to_message_id: String,
+    pub read_at: i64,
+}
+
+/// One message body in the mirror. Media is out of scope: `has_media` records that an attachment
+/// existed, and the bytes stay on the publishing device.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct MirrorMessage {
+    /// The publishing device's stable local id. Reused on import when the row is unknown, and the
+    /// identity a re-pull resolves to.
+    pub message_id: String,
+    pub remote_msg_id: Option<String>,
+    pub chat_remote_id: String,
+    pub sender_remote_id: String,
+    pub is_own: bool,
+    pub sent_at: i64,
+    pub edited_at: Option<i64>,
+    pub deleted_at: Option<i64>,
+    pub kind: MessageKind,
+    pub body: Option<String>,
+    pub formatted: Option<String>,
+    pub reply_to_message_id: Option<String>,
+    pub has_media: bool,
+}
+
+/// The message layer as one blob travels: chat metadata, read markers and message bodies,
+/// newest first, bounded to [`MIRROR_PLAINTEXT_LIMIT`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct MessageMirror {
+    pub schema: u32,
+    /// Always true: the window keeps the newest rows and drops older ones first.
+    pub newest_first: bool,
+    /// True when the payload budget omitted chats or messages; older history is not mirrored.
+    pub truncated: bool,
+    pub chats: Vec<MirrorChat>,
+    pub messages: Vec<MirrorMessage>,
+}
+
+impl MessageMirror {
+    /// Newest timestamp the window carries, for `SyncLayerStatus.updated_at_ms`.
+    pub(crate) fn newest_at_ms(&self) -> i64 {
+        let chats = self
+            .chats
+            .iter()
+            .filter_map(|chat| chat.last_activity_at)
+            .max()
+            .unwrap_or(0);
+        let messages = self
+            .messages
+            .iter()
+            .map(|message| message.sent_at)
+            .max()
+            .unwrap_or(0);
+        chats.max(messages)
+    }
+
+    /// Refuse a payload this build does not understand. Sizes are bounded by the blob codec.
+    pub(crate) fn validate(&self) -> Result<(), EngineError> {
+        if self.schema != MIRROR_SCHEMA {
+            return Err(EngineError::sync_blocked("content"));
+        }
+        if !self.newest_first {
+            return Err(EngineError::sync_blocked("content"));
+        }
+        Ok(())
+    }
+}
+
+/// Read the store into a newest-first mirror window.
+///
+/// Chats are considered in newest-activity order, then messages newest first. A row that does not
+/// fit once serialised ends the window and sets `truncated`; nothing is silently half-written.
+pub(crate) async fn build_message_mirror(
+    ctx: &EngineContext,
+) -> Result<MessageMirror, EngineError> {
+    let accounts = ctx.store.list_accounts().await.map_err(map_store)?;
+    let mut account_keys = BTreeMap::new();
+    for account in accounts {
+        if let Some(remote_id) = account.remote_user_id {
+            account_keys.insert(
+                account.account_id.clone(),
+                (account.network.as_str().to_string(), remote_id),
+            );
+        }
+    }
+
+    let mut markers_by_chat: BTreeMap<String, Vec<MirrorReadMarker>> = BTreeMap::new();
+    for marker in ctx.store.list_all_read_markers().await.map_err(map_store)? {
+        markers_by_chat
+            .entry(marker.chat_id)
+            .or_default()
+            .push(MirrorReadMarker {
+                remote_user_id: marker.remote_user_id,
+                up_to_message_id: marker.up_to_message_id,
+                read_at: marker.read_at,
+            });
+    }
+
+    let mut mirror = MessageMirror {
+        schema: MIRROR_SCHEMA,
+        newest_first: true,
+        truncated: false,
+        chats: Vec::new(),
+        messages: Vec::new(),
+    };
+    let mut budget = serde_json::to_vec(&mirror)
+        .map_err(|err| EngineError::internal_error(format!("cannot encode the mirror: {err}")))?
+        .len();
+
+    let mut chat_remote_ids: BTreeMap<String, String> = BTreeMap::new();
+    for chat in ctx.store.list_mirror_chats().await.map_err(map_store)? {
+        let Some((network, account_remote_id)) = account_keys.get(&chat.account_id) else {
+            // An account with no remote identity cannot be named on another device.
+            continue;
+        };
+        let entry = MirrorChat {
+            network: network.clone(),
+            account_remote_id: account_remote_id.clone(),
+            remote_chat_id: chat.remote_chat_id.clone(),
+            kind: chat.kind,
+            title: chat.title,
+            last_activity_at: chat.last_activity_at,
+            unread_count: chat.unread_count,
+            mention_count: chat.mention_count,
+            read_markers: markers_by_chat.remove(&chat.chat_id).unwrap_or_default(),
+        };
+        let size = serde_json::to_vec(&entry)
+            .map_err(|err| EngineError::internal_error(format!("cannot encode a chat: {err}")))?
+            .len();
+        if budget.saturating_add(size).saturating_add(1) > MIRROR_PLAINTEXT_LIMIT {
+            mirror.truncated = true;
+            break;
+        }
+        budget += size + 1;
+        chat_remote_ids.insert(chat.chat_id, chat.remote_chat_id);
+        mirror.chats.push(entry);
+    }
+
+    let candidates = ctx
+        .store
+        .list_mirror_messages(MIRROR_MESSAGE_SCAN)
+        .await
+        .map_err(map_store)?;
+    let scanned = candidates.len();
+    for message in candidates {
+        let Some(chat_remote_id) = chat_remote_ids.get(&message.chat_id) else {
+            continue;
+        };
+        let entry = MirrorMessage {
+            message_id: message.message_id,
+            remote_msg_id: message.remote_msg_id,
+            chat_remote_id: chat_remote_id.clone(),
+            sender_remote_id: message.sender_remote_id,
+            is_own: message.is_own,
+            sent_at: message.sent_at,
+            edited_at: message.edited_at,
+            deleted_at: message.deleted_at,
+            kind: message.kind,
+            body: message.body,
+            formatted: message.formatted,
+            reply_to_message_id: message.reply_to_message_id,
+            has_media: message.media_id.is_some(),
+        };
+        let size = serde_json::to_vec(&entry)
+            .map_err(|err| EngineError::internal_error(format!("cannot encode a message: {err}")))?
+            .len();
+        if budget.saturating_add(size).saturating_add(1) > MIRROR_PLAINTEXT_LIMIT {
+            mirror.truncated = true;
+            break;
+        }
+        budget += size + 1;
+        mirror.messages.push(entry);
+    }
+    // The scan bound is a second, independent window: hitting it means older rows exist and are
+    // not in the payload, which the layer must say rather than hide.
+    if scanned as u32 >= MIRROR_MESSAGE_SCAN {
+        mirror.truncated = true;
+    }
+
+    // Keep the promise to the codec even after array separators and closing brackets.
+    while serde_json::to_vec(&mirror)
+        .map_err(|err| EngineError::internal_error(format!("cannot encode the mirror: {err}")))?
+        .len()
+        > MIRROR_PLAINTEXT_LIMIT
+    {
+        if mirror.messages.pop().is_none() && mirror.chats.pop().is_none() {
+            return Err(EngineError::internal_error(
+                "the message mirror cannot fit in one blob",
+            ));
+        }
+        mirror.truncated = true;
+    }
+    Ok(mirror)
+}
+
+/// Apply a verified mirror to the local store, idempotently.
+///
+/// Chats resolve by `(network, account remote id)` then `remote_chat_id`; messages resolve by
+/// their recorded id and fall back to the network message id. A re-pull therefore updates the
+/// same rows instead of duplicating them. Unknown accounts are skipped: the mirror never creates
+/// an account.
+pub(crate) async fn import_message_mirror(
+    ctx: &EngineContext,
+    mirror: &MessageMirror,
+) -> Result<(), EngineError> {
+    mirror.validate()?;
+    let mut accounts: BTreeMap<(String, String), String> = BTreeMap::new();
+    for account in ctx.store.list_accounts().await.map_err(map_store)? {
+        if let Some(remote_id) = account.remote_user_id {
+            accounts.insert(
+                (account.network.as_str().to_string(), remote_id),
+                account.account_id,
+            );
+        }
+    }
+
+    let mut local_chats: BTreeMap<String, String> = BTreeMap::new();
+    for chat in &mirror.chats {
+        let Some(account_id) =
+            accounts.get(&(chat.network.clone(), chat.account_remote_id.clone()))
+        else {
+            continue;
+        };
+        let chat_id = match ctx
+            .store
+            .find_chat(account_id, &chat.remote_chat_id)
+            .await
+            .map_err(map_store)?
+        {
+            Some(existing) => existing.chat_id,
+            None => ctx
+                .store
+                .upsert_chat(ChatUpsert {
+                    account_id: account_id.clone(),
+                    remote_chat_id: chat.remote_chat_id.clone(),
+                    kind: chat.kind,
+                    title: chat.title.clone(),
+                    avatar_media_id: None,
+                    last_message_id: None,
+                    last_activity_at: chat.last_activity_at,
+                    parent_remote_chat_id: None,
+                    is_forum: false,
+                })
+                .await
+                .map_err(map_store)?,
+        };
+        let stored = ctx
+            .store
+            .get_chat(&chat_id)
+            .await
+            .map_err(map_store)?
+            .ok_or_else(|| {
+                EngineError::internal_error("the mirrored chat vanished after upsert")
+            })?;
+        if stored.unread_count != chat.unread_count || stored.mention_count != chat.mention_count {
+            ctx.store
+                .set_unread(&chat_id, chat.unread_count, chat.mention_count)
+                .await
+                .map_err(map_store)?;
+        }
+        local_chats.insert(chat.remote_chat_id.clone(), chat_id);
+    }
+
+    for message in &mirror.messages {
+        let Some(chat_id) = local_chats.get(&message.chat_remote_id) else {
+            continue;
+        };
+        let record = ctx
+            .store
+            .upsert_message(NewMessage {
+                chat_id: chat_id.clone(),
+                message_id: Some(message.message_id.clone()),
+                remote_msg_id: message.remote_msg_id.clone(),
+                txn_id: None,
+                sender_remote_id: message.sender_remote_id.clone(),
+                is_own: message.is_own,
+                sent_at: message.sent_at,
+                edited_at: message.edited_at,
+                kind: message.kind,
+                body: message.body.clone(),
+                formatted: message.formatted.clone(),
+                reply_to_message_id: message.reply_to_message_id.clone(),
+                media_id: None,
+                send_state: None,
+                extra: None,
+            })
+            .await
+            .map_err(map_store)?;
+        if let Some(deleted_at) = message.deleted_at
+            && record.deleted_at.is_none()
+        {
+            ctx.store
+                .mark_deleted(&record.message_id, deleted_at)
+                .await
+                .map_err(map_store)?;
+        }
+    }
+
+    for chat in &mirror.chats {
+        let Some(chat_id) = local_chats.get(&chat.remote_chat_id) else {
+            continue;
+        };
+        for marker in &chat.read_markers {
+            ctx.store
+                .set_read_marker(
+                    chat_id,
+                    &marker.remote_user_id,
+                    &marker.up_to_message_id,
+                    marker.read_at,
+                )
+                .await
+                .map_err(map_store)?;
+        }
+    }
+    if !mirror.chats.is_empty() || !mirror.messages.is_empty() {
+        ctx.bus.chats();
+    }
+    Ok(())
+}
+
 /// Local state for the merge: the layers as they are now, stamped so `import_into` can compare.
 async fn local_state(ctx: &EngineContext) -> Result<ConfigState, EngineError> {
     let raw_settings = SettingsHandler::get_settings_file(ctx)?;
@@ -1658,10 +2015,11 @@ pub(crate) fn adopt_epoch(ctx: &EngineContext, epoch: u32) -> Result<(), EngineE
     })
 }
 
-/// The five configuration layers and when each last changed on this device. `enabled` is the
-/// caller's decision (mode `prefs`), not a property of local data.
+/// The five configuration layers plus the message mirror, and when each last changed on this
+/// device. `enabled` follows the configured mode, never a property of local data.
 pub(crate) async fn sync_layer_statuses(
     ctx: &EngineContext,
+    mode: SyncMode,
 ) -> Result<Vec<SyncLayerStatus>, EngineError> {
     let settings = SettingsHandler::get_settings_file(ctx)?;
     let tags_updated_at_ms = tag_map(ctx)
@@ -1684,36 +2042,56 @@ pub(crate) async fn sync_layer_statuses(
     let theme_updated_at_ms = local_theme(ctx, &settings)
         .map(|theme| theme.updated_at_ms)
         .unwrap_or(0);
+    // What the last successful publish actually put in the message layer. Absent until a `full`
+    // device publishes once; the status never guesses from an unsynced local store.
+    let window = settings
+        .get("sync")
+        .and_then(|sync| sync.get("server"))
+        .and_then(|server| server.get("message_window"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    let messages_updated_at_ms = window
+        .get("updated_at_ms")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    let messages_windowed = window.get("windowed").and_then(Value::as_bool);
+    let config_enabled = mode != SyncMode::Off;
     Ok(vec![
         SyncLayerStatus {
             key: "settings".to_string(),
-            enabled: true,
+            enabled: config_enabled,
             updated_at_ms: layer_updated_at_ms(&settings),
+            windowed: None,
         },
         SyncLayerStatus {
             key: "tags".to_string(),
-            enabled: true,
+            enabled: config_enabled,
             updated_at_ms: tags_updated_at_ms,
+            windowed: None,
         },
         SyncLayerStatus {
             key: "catalogue".to_string(),
-            enabled: true,
+            enabled: config_enabled,
             updated_at_ms: catalogue_updated_at_ms,
+            windowed: None,
         },
         SyncLayerStatus {
             key: "backgrounds".to_string(),
-            enabled: true,
+            enabled: config_enabled,
             updated_at_ms: backgrounds_updated_at_ms,
+            windowed: None,
         },
         SyncLayerStatus {
             key: "theme".to_string(),
-            enabled: true,
+            enabled: config_enabled,
             updated_at_ms: theme_updated_at_ms,
+            windowed: None,
         },
         SyncLayerStatus {
             key: "messages".to_string(),
-            enabled: false,
-            updated_at_ms: 0,
+            enabled: mode == SyncMode::Full,
+            updated_at_ms: messages_updated_at_ms,
+            windowed: messages_windowed,
         },
     ])
 }

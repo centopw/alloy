@@ -968,6 +968,9 @@ pub enum SyncMode {
     Off,
     /// Encrypted configuration layers only: settings, tags, catalogue, backgrounds, theme.
     Prefs,
+    /// The configuration layers plus the opt-in message mirror: chat metadata, read markers
+    /// and message bodies. Opt-in per account; media stays on the device.
+    Full,
 }
 
 /// One store layer as `SyncStatus` reports it.
@@ -978,6 +981,10 @@ pub struct SyncLayerStatus {
     pub enabled: bool,
     #[specta(type = Number)]
     pub updated_at_ms: i64,
+    /// Set on the `messages` layer in `full` mode: true when the published window omits older
+    /// rows to stay inside the server's per-body limit. Absent for every other layer.
+    #[specta(optional)]
+    pub windowed: Option<bool>,
 }
 
 /// Everything `SyncStatus` reports, and the body of `SyncConfigured`.

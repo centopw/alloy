@@ -129,6 +129,7 @@ fn header(seq: u64, prev: Head, root: [u8; 32]) -> BatchHeader {
         prev_head: prev,
         root_hash: root,
         epoch: 0,
+        mirror: false,
         created_ms: 1_000 + seq,
     }
 }
