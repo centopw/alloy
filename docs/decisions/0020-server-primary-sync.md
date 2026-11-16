@@ -84,7 +84,8 @@ Messenger's own clouds:
 | Settings, theme, wallpaper, keybinds, layout | mirror on server | pure client state, nothing else holds it |
 | Tags, groups, pins, read markers, drafts, notes | mirror on server | Alloy-authored, unrecoverable if lost |
 | Connector session material (`account_secrets`) | **never** leaves the device | cloning an auth key makes two clients one session and splits updates; each device logs in with the connector's own QR login |
-| Message bodies, media | off; opt-in per account | connectors already re-sync history; mirroring it duplicates a corpus the user does not control us to keep |
+| Message bodies | off; opt-in per account (`full`) | built: one sealed window of chats, bodies and read markers per batch; connectors already re-sync history, so the mirror is a convenience, not the source |
+| Media | **never** mirrored | attachment bytes stay on the device; `has_media` in the mirror is the only trace that one exists |
 
 A fresh device enrols, unseals the master key, pulls the layers the user enabled, and populates its
 local SQLCipher database. The local database stays the working set — the server is authoritative for
@@ -107,7 +108,7 @@ setup:
 |---|---|---|
 | `off` (default) | nothing | any build |
 | `prefs` | encrypted config/tag/group blobs, `head` CAS | Cloudflare Workers + KV or D1, Vercel + KV, a $0 tier, or Docker |
-| `full` | the above plus opt-in message/media mirror | self-hosted Docker, or R2 + Durable Objects; not Vercel/Workers — serverless has no process for incremental push and free-tier KV is the wrong store for a growing archive |
+| `full` | the above plus the opt-in message mirror (chat metadata, bodies, read markers; no media) | self-hosted Docker, or R2 + Durable Objects; not Vercel/Workers — serverless has no process for incremental push and free-tier KV is the wrong store for a growing archive |
 
 The wire contract is one small HTTP API (blob `GET`/`PUT` under a `head` CAS, roster `GET`, escrow
 `GET`/`PUT`), so a self-hosted deployment is a container the user runs, and the hosted options are
@@ -209,7 +210,7 @@ paper and identical against the threat that mattered (other users, offline disk)
 | Endpoint pin | pin on first connect | warn-and-confirm when the pin changes | a MITM server gains ciphertext and metadata, never plaintext |
 | Device roster | list with last-seen and last-sync | collapsed under Advanced | a forgotten device stays enrolled longer |
 | Remote wipe | best-effort flag | absent | nothing; the device simply keeps its local state |
-| Message mirror | off | opt-in per account | more ciphertext toward the epoch key, so device loss matters more |
+| Message mirror | off | opt-in per account (`full`) | shipped: bodies, chats and read markers only; more ciphertext toward the epoch key, so device loss matters more |
 
 Never relaxable, because relaxing them is indistinguishable from deleting the control:
 
@@ -266,7 +267,32 @@ and groups until you revoke this device"* is.
 | C | `prefs` server (Workers-compatible contract) + client sync loop | fresh device enrols and pulls config; server stopped → app unchanged |
 | D | Device roster, revocation, and epoch rotation with re-seal | revoke a device, assert it cannot decrypt the next config blob; remaining devices converge |
 | E | Recovery phrase + escrow | recover on a clean device from the phrase alone |
-| F | Opt-in message/media mirror (`full`) | gated on B's hostile-server suite; documented as self-host/R2 only |
+| F | Opt-in message mirror (`full`): one sealed window of chats, bodies and read markers per batch; media excluded | shipped; B's hostile-server suite lives in `crates/alloy-engine/tests/sync_server.rs` (`hostile_a`–`hostile_e`); self-host/R2 only |
 
 Slice F is the only one that enlarges the blast radius of a stolen device, which is why it comes
 after D rather than with B.
+
+## Implementation notes: the message mirror (slice F)
+
+- **What ships.** `SyncMode::Full` publishes one sealed `messages` blob per batch beside the five
+  configuration layers: chat metadata, message bodies and read markers, newest first. Media is
+  excluded by decision: `has_media` records that an attachment existed and the bytes stay on the
+  publishing device. The payload is bounded to one server body — the server refuses anything over
+  1 MiB, and `MIRROR_PLAINTEXT_LIMIT` (1000 KiB) stops the window below that. The 48 MiB figure
+  elsewhere in the tree is the LAN pairing bundle's JSON cap, a different limit that never reaches
+  the server.
+- **B's gate is met.** `crates/alloy-engine/tests/sync_server.rs` runs five hostile cases against
+  the real server binary: `hostile_a` a forged head (signature), `hostile_b` a replayed older head
+  (branch), `hostile_c` a message blob from another epoch (AAD epoch), `hostile_d` a configuration
+  blob served in the message slot (AAD layer), `hostile_e` a deleted message layer the signed head
+  still names (content). Each is refused with `sync_blocked` and the device keeps its previous
+  state.
+- **Known break: `CHAIN_VERSION` 2.** The mirror flag is signed into the batch header, so the
+  encoding moved from 1 to 2. A device whose `sync-heads.json` was written by a v1 build refuses
+  the first v2 head (`UnsupportedVersion`) and stays blocked until it is reconfigured. That is a
+  real upgrade break, not a compatibility shim, and there is no downgrade path.
+- **Remaining limits.** There is no chunked mirror: the message layer is one blob per batch, so
+  history older than the newest-first window the byte budget allows is not mirrored, and the
+  `messages` layer reports `windowed: true` when that happened. And because the account has one
+  `head` chain, a `prefs` device and a `full` device alternate its mirror flag; while a `prefs`
+  head is current there is no message layer, so mirroring pauses until the next `full` publish.
