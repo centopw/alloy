@@ -80,6 +80,8 @@
 
   // Same sender within this window continues the previous message as a compact row.
   const GROUP_MS = 7 * 60_000;
+  /** Space between the body's last line and an inline time: --alloy-spacing-scale-1. */
+  const TIME_GAP = 4;
   const isMessage = (i: TimelineItemDto | null) =>
     !!i && ['TextMessage', 'Media', 'Location', 'Deleted'].includes(i.content.kind);
 
@@ -177,6 +179,20 @@
   let toolbarTop = $state<number | null>(null);
   /** Compact = reply and an overflow menu only; derived on every show, never remembered. */
   let compact = $state(false);
+  /** The quick reactions hang above the message unless the pane's top edge would clip them. */
+  let quickBelow = $state(false);
+  /**
+   * Telegram's timestamp shares the body's last line when that line still has room for it and takes
+   * a line of its own when it does not, or when a reaction strip owns the row under the text. The
+   * measurement only sets this flag; the stylesheet owns the look.
+   */
+  let timeInline = $state(false);
+  /** Room the inline time keeps on that last line: its measured width plus the gap before it. */
+  let timeSpace = $state(0);
+  /** Pending animation frame of the timestamp measurement, 0 when none is queued. */
+  let measureFrame = 0;
+  /** Extra passes allowed after a flip: the bubble's width changes with it, so the wrap moves. */
+  let settlePasses = 0;
 
   $effect(() => {
     // A layout switch invalidates a measured position; the CSS fallback takes over again.
@@ -184,14 +200,18 @@
     toolbarLeft = null;
     toolbarTop = null;
     compact = false;
+    quickBelow = false;
   });
 
   $effect(() => {
     // Registered here rather than in markup: the row is a container, not a widget, and the handlers
-    // only exist to time the one measurement the placement needs.
+    // only exist to time the one measurement each bar needs.
     const row = rowEl;
     if (!row) return;
-    const show = () => placeToolbar();
+    const show = () => {
+      placeQuickBar();
+      void placeToolbar();
+    };
     row.addEventListener('mouseenter', show);
     row.addEventListener('focusin', show);
     return () => {
@@ -199,6 +219,25 @@
       row.removeEventListener('focusin', show);
     };
   });
+
+  /**
+   * The quick reactions hang above the message, where the conversation's top edge clips them: on a
+   * message at the top of the pane the bar slid behind the header. The bar is laid out while it is
+   * hidden, so its height is readable before it paints; when the space above the message cannot
+   * hold it, it drops under the message instead. Measured once when the bar is shown.
+   */
+  function placeQuickBar() {
+    const row = rowEl;
+    const bar = row?.querySelector<HTMLElement>('.quick-float');
+    const anchor = row?.querySelector<HTMLElement>('.message-anchor');
+    if (!row || !bar || !anchor || bar.offsetHeight === 0) return;
+    const gap = 4; // --alloy-spacing-scale-1, the gap the CSS keeps between the bar and the message
+    // The scrollport the conversation clips against; on a viewport without one the window top is it.
+    const clipTop =
+      row.closest<HTMLElement>('[data-conversation-feed]')?.getBoundingClientRect().top ?? 0;
+    const anchorTop = anchor.getBoundingClientRect().top;
+    quickBelow = anchorTop - gap - bar.offsetHeight < clipTop + gap;
+  }
 
   /**
    * Places the action bar against the message itself, not against its containing box: a wrapped
@@ -281,6 +320,136 @@
     }
   }
 
+  /**
+   * Queues one timestamp measurement on the next painted frame. Repeated calls (a resize storm, a
+   * content change while an observer fires) collapse into one; a flip schedules a single settle
+   * pass, because the inline time also changes the bubble's own width.
+   */
+  function scheduleTimeMeasure(settle = false) {
+    if (!settle) settlePasses = 0;
+    if (measureFrame !== 0) return;
+    measureFrame = requestAnimationFrame(() => {
+      measureFrame = 0;
+      const changed = measureTimePlacement();
+      if (changed && settlePasses < 2) {
+        settlePasses += 1;
+        scheduleTimeMeasure(true);
+        return;
+      }
+      settlePasses = 0;
+    });
+  }
+
+  /**
+   * Decides where the timestamp goes and returns whether the flag changed.
+   *
+   * It is measured, never guessed: the body's last rendered line comes from a Range over its last
+   * text run, the time's own width from a Range over the timestamp itself (a block's rect would
+   * report the whole bubble), and the room it may use from the bubble's cap. That cap lives on the
+   * anchor, so a computed percentage there is already resolved against the row — which lets a
+   * short message grow by the time's width instead of being forced to wrap, the way Telegram does.
+   */
+  function measureTimePlacement(): boolean {
+    const row = rowEl;
+    if (!row || layout !== 'bubbles') return setTimeInline(false);
+    const bubble = row.querySelector<HTMLElement>('.bubble');
+    const timeEl = row.querySelector<HTMLElement>('.bubble-time');
+    const body = bubble?.querySelector<HTMLElement>('.body') ?? null;
+    if (!bubble || !timeEl || !body) return setTimeInline(false);
+
+    // A reaction strip, a pending label or a failed-retry line owns the row under the text, so the
+    // time stays on its own line there (under the chips, as Telegram draws it).
+    const lastFlow = Array.from(bubble.children).filter((el) => el !== timeEl).pop();
+    if (
+      item.content.kind !== 'TextMessage' ||
+      lastFlow !== body ||
+      (canReact && item.reactions.length > 0) ||
+      sending ||
+      failed
+    ) {
+      return setTimeInline(false);
+    }
+
+    const style = getComputedStyle(bubble);
+    const bubbleRect = bubble.getBoundingClientRect();
+    const borderLeft = Number.parseFloat(style.borderLeftWidth) || 0;
+    const paddingLeft = Number.parseFloat(style.paddingLeft) || 0;
+    const innerLeft = bubbleRect.left + borderLeft + paddingLeft;
+    const insets =
+      borderLeft + paddingLeft + (Number.parseFloat(style.borderRightWidth) || 0) + (Number.parseFloat(style.paddingRight) || 0);
+    const innerWidth = bubbleRect.width - insets;
+    // The cap lives on the anchor as a token percentage (`72%`, `85%` on phones). Browsers keep a
+    // computed `max-width: 72%` as a percentage, so it has to be resolved here against the anchor's
+    // containing block — the stack it sits in, which is the width the percentage is measured from.
+    // Reading it as px (or giving up and using the hugging width) left every message on its own line.
+    const anchor = bubble.closest<HTMLElement>('.message-anchor');
+    const rawCap = anchor ? getComputedStyle(anchor).maxWidth.trim() : '';
+    const capBox = anchor?.parentElement?.getBoundingClientRect().width ?? 0;
+    let cap = Number.NaN;
+    if (rawCap.endsWith('%') && capBox > 0) {
+      cap = (capBox * Number.parseFloat(rawCap)) / 100 - insets;
+    } else if (rawCap.endsWith('px')) {
+      cap = Number.parseFloat(rawCap) - insets;
+    }
+    const timeWidth = timeTextWidth(timeEl);
+    const ink = lastLineInk(body);
+    if (!(timeWidth > 0) || !ink) return setTimeInline(false);
+    // The time can only share the very last line: when the body ends in a block (a quote, a code
+    // block, a trailing newline) the ink sits more than half a line above the body's bottom edge.
+    const bodyStyle = getComputedStyle(body);
+    const lineHeight = Number.parseFloat(bodyStyle.lineHeight) || 0;
+    const bodyBottom =
+      body.getBoundingClientRect().bottom - (Number.parseFloat(bodyStyle.paddingBottom) || 0);
+    if (bodyBottom - ink.bottom > Math.max(4, lineHeight / 2)) return setTimeInline(false);
+
+    const available = cap > 0 ? Math.max(cap, innerWidth) : innerWidth;
+    const space = Math.ceil(timeWidth) + TIME_GAP;
+    return setTimeInline(ink.right - innerLeft + space <= available + 0.5, space);
+  }
+
+  /** Sets the inline flag and the room it keeps; true when either changed. */
+  function setTimeInline(next: boolean, space = timeSpace): boolean {
+    if (next === timeInline && (!next || space === timeSpace)) return false;
+    timeInline = next;
+    if (next) timeSpace = space;
+    return true;
+  }
+
+  /**
+   * The last rendered line of a body: its right ink edge and its bottom. Only text runs count, because
+   * the body's own box always ends at the bubble's content edge and would report a full line.
+   */
+  function lastLineInk(body: HTMLElement): { right: number; bottom: number } | null {
+    const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+    let last: Text | null = null;
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if ((node.textContent ?? '').trim() !== '') last = node as Text;
+    }
+    if (!last) return null;
+    const range = document.createRange();
+    range.selectNodeContents(last);
+    const rects = Array.from(range.getClientRects()).filter((r) => r.width > 0 && r.height > 0);
+    // The last line is the lowest rect; a trailing inline span shares its bottom and reaches further.
+    let line: DOMRect | null = null;
+    for (const rect of rects) {
+      if (
+        !line ||
+        rect.bottom > line.bottom + 1 ||
+        (Math.abs(rect.bottom - line.bottom) <= 1 && rect.right > line.right)
+      ) {
+        line = rect;
+      }
+    }
+    return line ? { right: line.right, bottom: line.bottom } : null;
+  }
+
+  /** The timestamp's own width, delivery ticks included. */
+  function timeTextWidth(timeEl: HTMLElement): number {
+    const range = document.createRange();
+    range.selectNodeContents(timeEl);
+    return range.getBoundingClientRect().width;
+  }
+
   /** The compact bar's overflow: the same menu right-click offers, so no action is ever unreachable. */
   function openMoreActions(button: HTMLElement) {
     const rect = button.getBoundingClientRect();
@@ -358,6 +527,43 @@
       item.event_id === timelineStore.lastOwnEventId &&
       membersStore.membersOf(timelineStore.roomId).length <= 20
   );
+
+  /**
+   * Timestamp measurement. The inline/block decision follows the row's width, the layout and density
+   * tokens, the body's text (its edited marker included), the reaction strip and the tick, so it is
+   * re-measured when any of them changes and whenever the row is resized. Fonts and pictures settle
+   * after the first paint and resize the row, which the observer catches; the fonts promise covers
+   * the first settle of a row whose width does not change at all.
+   */
+  $effect(() => {
+    const row = rowEl;
+    void layout;
+    void themeStore.density;
+    void time;
+    void showTick;
+    void readByOthers;
+    void item.content;
+    void (canReact && item.reactions.length);
+    if (!row) return;
+    scheduleTimeMeasure();
+    let live = true;
+    void document.fonts?.ready.then(() => {
+      if (live) scheduleTimeMeasure();
+    });
+    if (typeof ResizeObserver === 'undefined') {
+      return () => {
+        live = false;
+      };
+    }
+    const observer = new ResizeObserver(() => scheduleTimeMeasure());
+    observer.observe(row);
+    return () => {
+      live = false;
+      observer.disconnect();
+      if (measureFrame !== 0) cancelAnimationFrame(measureFrame);
+      measureFrame = 0;
+    };
+  });
 
   // Who reacted: the sheet lists every reactor per emoji.
   let whoOpen = $state(false);
@@ -626,6 +832,7 @@
     style:--toolbar-left={toolbarLeft === null ? undefined : `${toolbarLeft}px`}
     style:--toolbar-right={toolbarLeft === null ? undefined : 'auto'}
     style:--toolbar-top={toolbarTop === null ? undefined : `${toolbarTop}px`}
+    style:--bubble-time-space={timeInline ? `${timeSpace}px` : undefined}
     style:transform={swipeX > 0 ? `translateX(${swipeX}px)` : undefined}
     data-layout={layout}
     data-event-id={item.event_id ?? undefined}
@@ -673,7 +880,7 @@
           <ReplyQuote replyTo={item.reply_to} stacked own={item.is_own} />
         {/if}
 
-        <div class="bubble" class:has-reactions={canReact && item.reactions.length > 0}>
+        <div class="bubble" class:has-reactions={canReact && item.reactions.length > 0} class:time-inline={timeInline}>
           {#if item.reply_to && !stackedReply}
             <div class="reply-slot">
               <ReplyQuote replyTo={item.reply_to} inOwnBubble={layout === 'bubbles' && item.is_own} />
@@ -683,9 +890,9 @@
           {#if item.content.kind === 'TextMessage'}
             {#if html}
               <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-              <div class="body html" onclick={onBodyClick} onauxclick={interceptLinks}>{@html html}{#if item.edited}<span class="edited">{t('message-row-edited')}</span>{/if}</div>
+              <div class="body html" onclick={onBodyClick} onauxclick={interceptLinks}>{@html html}{#if item.edited}<span class="edited">{t('message-row-edited')}</span>{/if}{#if timeInline}<span class="time-space" aria-hidden="true"></span>{/if}</div>
             {:else}
-              <div class="body">{item.content.data.body}{#if item.edited}<span class="edited">{t('message-row-edited')}</span>{/if}</div>
+              <div class="body">{item.content.data.body}{#if item.edited}<span class="edited">{t('message-row-edited')}</span>{/if}{#if timeInline}<span class="time-space" aria-hidden="true"></span>{/if}</div>
             {/if}
           {:else if item.content.kind === 'Media'}
             <div class="block">
@@ -784,7 +991,7 @@
       {#if canAct && canReact}
         <!-- Desktop: the quick reactions float over the message's top edge on hover or keyboard focus.
              Touch devices get the same bar from the long-press menu (`menuOptions().reactions`). -->
-        <div class="quick-float" class:hidden={contextMenu.isOpen}>
+        <div class="quick-float" class:hidden={contextMenu.isOpen} class:below={quickBelow}>
           <QuickReactions
             emojis={prefs.quickReactions}
             active={myReactions}
@@ -862,7 +1069,9 @@
   .row:not(.grouped) {
     padding-top: var(--alloy-spacing-message-padding);
   }
-  .row:focus-within {
+  /* Keyboard focus only: a click that leaves focus on a chip or a link must not keep the row lit
+     once the pointer has moved away, so the tint follows `:focus-visible`, not `:focus-within`. */
+  .row:is(:focus-visible, :has(:focus-visible)) {
     background: var(--alloy-color-surface-hover);
   }
   @media (hover: hover) {
@@ -874,7 +1083,7 @@
       background: transparent;
     }
   }
-  .row[data-layout='bubbles']:focus-within:not(.selected):not(.highlighted) {
+  .row[data-layout='bubbles']:is(:focus-visible, :has(:focus-visible)):not(.selected):not(.highlighted) {
     background: transparent;
   }
   .row.highlighted {
@@ -1007,7 +1216,7 @@
     opacity: 0;
   }
   .row:hover .gutter-time,
-  .row:focus-within .gutter-time {
+  .row:is(:focus-visible, :has(:focus-visible)) .gutter-time {
     opacity: 1;
   }
   .stack {
@@ -1286,7 +1495,7 @@
   }
   @media (min-width: 900px) and (hover: hover) {
     .row:hover .toolbar,
-    .row:focus-within .toolbar {
+    .row:has(:focus-visible) .toolbar {
       opacity: 1;
       visibility: visible;
       translate: 0 0;
@@ -1317,7 +1526,7 @@
   @media (prefers-reduced-motion: reduce) {
     .toolbar,
     .row:hover .toolbar,
-    .row:focus-within .toolbar,
+    .row:has(:focus-visible) .toolbar,
     .row:focus-visible .toolbar {
       translate: none;
       transition:
@@ -1356,12 +1565,18 @@
     left: auto;
     right: 0;
   }
+  /* Measured: a message at the top of the pane has no room above it, so the bar opens downwards
+     instead of sliding behind the header. */
+  .quick-float.below {
+    top: calc(100% + var(--alloy-spacing-scale-1));
+    bottom: auto;
+  }
   .quick-float.hidden {
     display: none;
   }
   @media (min-width: 900px) and (hover: hover) {
     .row:hover .quick-float,
-    .row:focus-within .quick-float {
+    .row:has(:focus-visible) .quick-float {
       opacity: 1;
       visibility: visible;
       translate: 0 0;
@@ -1385,7 +1600,7 @@
   @media (prefers-reduced-motion: reduce) {
     .quick-float,
     .row:hover .quick-float,
-    .row:focus-within .quick-float {
+    .row:has(:focus-visible) .quick-float {
       translate: none;
       transition:
         opacity 1ms linear,
@@ -1651,9 +1866,12 @@
     color: var(--alloy-color-bubble-own-text);
     background: color-mix(in srgb, var(--alloy-color-bubble-own-text) 18%, transparent);
   }
-  /* Reactions sit on the bottom edge of the bubble, half over it, as in Messenger. */
+  /* Reactions sit on the bottom edge of the bubble, half over it, as in Messenger. Their inner half
+     is the message's last band, so the time's own line starts under the chips instead of on top of
+     them: the bubble keeps half a chip box more padding at the bottom. */
   .row[data-layout='bubbles'] .bubble.has-reactions {
     margin-bottom: var(--alloy-spacing-scale-3);
+    padding-bottom: calc(var(--alloy-spacing-bubble-y) + var(--alloy-spacing-scale-3));
   }
   .row[data-layout='bubbles'] .reactions {
     position: absolute;
@@ -1707,7 +1925,26 @@
     text-align: right;
     font-size: var(--alloy-typography-size-xs);
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
     color: var(--alloy-color-text-muted);
+  }
+  /* Telegram's inline time: the measured class lifts it out of the flow to the bubble's bottom-right
+     corner, where the spacer inside the body has already kept the last line clear of it. */
+  .row[data-layout='bubbles'] .bubble.time-inline .bubble-time {
+    position: absolute;
+    right: var(--alloy-spacing-bubble-x);
+    bottom: var(--alloy-spacing-bubble-y);
+    margin-top: 0;
+    line-height: var(--alloy-typography-line-height-normal);
+  }
+  /* The room the inline time keeps on that line, set from the measurement. An inline-block rather
+     than a float: it joins the line the measurement cleared without re-wrapping the text above it,
+     and it makes a bubble that hugs one short line grow by the time's width, as Telegram's does. */
+  .time-space {
+    display: inline-block;
+    width: var(--bubble-time-space, 0);
+    height: 0;
+    vertical-align: baseline;
   }
   /* Ticks follow the timestamp's muted token; on the own bubble they take the bubble's own text. */
   .row[data-layout='bubbles'] .bubble-time .tick {
@@ -1808,7 +2045,9 @@
       padding: 0 var(--alloy-spacing-scale-1);
     }
     .row[data-layout='bubbles'] .bubble.has-reactions {
+      /* A 44px chip box reaches 22px into the bubble: the time's line clears it (scale-6 = 24px). */
       margin-bottom: var(--alloy-spacing-scale-6);
+      padding-bottom: calc(var(--alloy-spacing-bubble-y) + var(--alloy-spacing-scale-6));
     }
     .failed-actions button {
       display: inline-flex;

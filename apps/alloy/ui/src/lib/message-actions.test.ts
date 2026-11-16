@@ -126,7 +126,11 @@ describe('message actions', () => {
     // One ToggleReaction path for every entry point: hover bar, long-press menu and double-tap.
     expect(rowSource.slice(float, anchorEnd)).toContain('onpick={reactWith}');
     expect(rowSource).toContain('onpick: reactWith,');
-    expect(rowSource).toContain('.row:hover .quick-float,\n    .row:focus-within .quick-float {');
+    // Reveal is pointer hover or *visible* keyboard focus: `:focus-within` kept the bar on screen
+    // after a click left focus inside a bubble, so the bar showed without a hover.
+    expect(rowSource).toContain('.row:hover .quick-float,');
+    expect(rowSource).toContain('.row:has(:focus-visible) .quick-float {');
+    expect(rowSource).not.toContain('.row:focus-within .quick-float');
     expect(rowSource).toMatch(/@media \(pointer: coarse\) \{\s*\.quick-float \{\s*display: none;/);
     expect(rowSource).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.quick-float,/);
     // The toolbar no longer carries a reaction strip.
