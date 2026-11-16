@@ -242,7 +242,7 @@ export class MockTransport implements Transport {
     string,
     { state: PairingPhase; sas: string | null; polls: number }
   >();
-  /** The local device roster: this device only, until a revoke runs. */
+  /** The local device roster: this device, plus any device the dev walk pairs. */
   private devices: DeviceDto[] = [
     {
       device_id: 'demo-device-this-one',
@@ -262,6 +262,8 @@ export class MockTransport implements Transport {
     state: SyncState;
     lastSyncMs: number | null;
     lastError: string | null;
+    /** Set by a revoke and cleared by `CreateRecoveryPhrase`, as the engine reports it. */
+    recoveryStale: boolean;
   } = {
     mode: 'off',
     url: null,
@@ -270,6 +272,7 @@ export class MockTransport implements Transport {
     state: 'idle',
     lastSyncMs: null,
     lastError: null,
+    recoveryStale: false,
   };
   private counter = 0;
   private txnCounter = 0;
@@ -375,6 +378,7 @@ export class MockTransport implements Transport {
       state: this.sync.state,
       last_sync_ms: this.sync.lastSyncMs,
       last_error: this.sync.lastError,
+      recovery_stale: this.sync.recoveryStale,
       layers: ['settings', 'tags', 'catalogue', 'backgrounds', 'theme', 'messages'].map((key) => ({
         key,
         // The message mirror is opt-in and not part of this slice, so it stays off.
@@ -1731,6 +1735,22 @@ export class MockTransport implements Transport {
         // digits immediately so the comparison step is reachable without a second device.
         live.state = command.params.accept ? 'done' : 'declined';
         live.sas = command.params.accept ? live.sas ?? '497092' : live.sas;
+        if (command.params.accept) {
+          // A completed pairing enrols the other device, so the revoke path is walkable.
+          const deviceId = `demo-device-paired-${command.params.pairing_id}`;
+          if (!this.devices.some((device) => device.device_id === deviceId)) {
+            this.devices = [
+              ...this.devices,
+              {
+                device_id: deviceId,
+                label: 'Paired phone',
+                enrolled_ms: Date.now(),
+                epoch: this.epoch,
+                current: false,
+              },
+            ];
+          }
+        }
         this.emit({
           type: 'PairingChanged',
           payload: {
@@ -1752,6 +1772,8 @@ export class MockTransport implements Transport {
       }
 
       case 'CreateRecoveryPhrase':
+        // The new phrase is sealed under the current account key, so the stale flag clears.
+        this.sync = { ...this.sync, recoveryStale: false };
         return {
           type: 'RecoveryPhraseCreated',
           payload: {
@@ -1816,7 +1838,20 @@ export class MockTransport implements Transport {
         if (target.current) throw invalidArgument('this device cannot revoke itself');
         this.devices = this.devices.filter((device) => device !== target);
         this.epoch += 1;
-        return { type: 'DeviceRevoked', payload: { epoch: this.epoch } };
+        // The dev walk keeps two previous-epoch blobs and a now-stale phrase, so both warnings
+        // and the recovery remedy are reachable without a real server.
+        this.sync = { ...this.sync, recoveryStale: true };
+        return {
+          type: 'DeviceRevoked',
+          payload: {
+            epoch: this.epoch,
+            re_sealed: true,
+            blobs_deleted: 3,
+            blobs_remaining: 2,
+            recovery_stale: true,
+            error: null,
+          },
+        };
       }
 
       case 'ConfigureSync': {

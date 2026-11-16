@@ -100,6 +100,27 @@ export interface RecoveryView {
   recovering?: boolean;
   /** Set by a successful recovery; cleared when a new attempt starts. */
   recovered?: RecoveredView | null;
+  /**
+   * The phrase on record predates a key rotation, so it opens only the retired key.
+   * `CreateRecoveryPhrase` is the remedy and the next `SyncStatus` clears the flag.
+   */
+  stale?: boolean;
+}
+
+/** What `RevokeDevice` answered: the new epoch and how much of the old ciphertext went. */
+export interface RevokedView {
+  /** The device that was removed, as the roster named it before the revoke. */
+  label: string;
+  /** The epoch every layer is sealed under now. */
+  epoch: number;
+  /** True when the response confirmed every enabled layer was re-published. Null means unstated. */
+  resealed: boolean | null;
+  /** Previous-epoch blobs the server confirmed deleted, including ones already gone. */
+  blobsDeleted: number | null;
+  /** Previous-epoch blobs the server still holds; the revocation is valid regardless. */
+  blobsRemaining: number | null;
+  /** The server half was incomplete, as the engine reported it. */
+  error: string | null;
 }
 
 /** What the fresh-device branch of the recovery panel submits. */

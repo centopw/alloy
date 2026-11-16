@@ -20,6 +20,7 @@
     PinMismatchView,
     RecoverFromPhraseInput,
     RecoveryView,
+    RevokedView,
     ServerView,
     SyncResultView,
     ThisDeviceView,
@@ -59,6 +60,8 @@
     /** Set when a configured endpoint presented a different certificate. */
     pinMismatch?: PinMismatchView | null;
     ontrustnewpin?: () => void;
+    /** The last `RevokeDevice` answer, rendered under the roster it changed. */
+    revoked?: RevokedView | null;
     /** Failure that is not tied to one panel (roster load, revoke). */
     error?: string | null;
   }
@@ -100,6 +103,7 @@
     syncResult = null,
     pinMismatch = null,
     ontrustnewpin = () => {},
+    revoked = null,
     error = null,
   }: Props = $props();
 
@@ -146,6 +150,11 @@
   );
 
   const enrolled = $derived(formatSyncTime(device.enrolledAtMs));
+
+  // Only the response's own fields are rendered. A zero is a server confirmation; null is silence.
+  const leftoverCount = $derived(revoked?.blobsRemaining ?? 0);
+  const hasLeftover = $derived(leftoverCount > 0);
+  const partialRevoke = $derived(hasLeftover || revoked?.error != null);
 
   // The import field keeps its text locally; the dry-run result comes from the container. Apply is
   // offered only for the exact bundle that was checked, so editing the field hides it again.
@@ -387,7 +396,35 @@
   </SettingGroup>
 
   <SettingGroup title={t('sync-devices')} description={t('sync-devices-description')}>
+    <p class="hint">{t('sync-devices-survivors')}</p>
     <DeviceList {devices} onrevoke={onrevoke} />
+
+    {#if revoked}
+      <div class="revoke-result" role="status">
+        <h4 class="revoke-title">
+          {t('sync-revoke-result-title', { device: revoked.label, epoch: revoked.epoch })}
+        </h4>
+        {#if revoked.resealed === true}
+          <p>{t('sync-revoke-resealed')}</p>
+        {:else if revoked.resealed === false}
+          <p class="warning">{t('sync-revoke-not-resealed')}</p>
+        {/if}
+        {#if revoked.blobsDeleted !== null}
+          <p>{t('sync-revoke-blobs-deleted', { count: revoked.blobsDeleted })}</p>
+        {/if}
+        {#if hasLeftover}
+          <p class="warning">{t('sync-revoke-leftover', { count: leftoverCount })}</p>
+        {/if}
+        {#if revoked.error}
+          <p class="warning">{t('sync-revoke-error', { message: revoked.error })}</p>
+        {/if}
+        {#if partialRevoke}
+          <p class="warning">{t('sync-revoke-retroactive')}</p>
+        {:else if revoked.blobsRemaining === 0}
+          <p>{t('sync-revoke-clean')}</p>
+        {/if}
+      </div>
+    {/if}
   </SettingGroup>
 
   <SettingGroup title={t('sync-recovery')} description={t('sync-recovery-description')}>
@@ -481,6 +518,30 @@
     margin: 0;
     font-size: var(--alloy-font-size-preview);
     color: var(--alloy-color-text-secondary);
+  }
+
+  .revoke-result {
+    display: flex;
+    flex-direction: column;
+    gap: var(--alloy-spacing-scale-1);
+    padding: var(--alloy-spacing-scale-3) 0;
+    font-size: var(--alloy-font-size-preview);
+    color: var(--alloy-color-text-secondary);
+  }
+
+  .revoke-result p {
+    margin: 0;
+  }
+
+  .revoke-title {
+    margin: 0;
+    font-size: var(--alloy-font-size-row);
+    font-weight: var(--alloy-typography-weight-medium);
+    color: var(--alloy-color-text-primary);
+  }
+
+  .revoke-result .warning {
+    color: var(--alloy-color-status-error);
   }
 
   .summary {

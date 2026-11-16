@@ -19,6 +19,7 @@
     PinMismatchView,
     RecoverFromPhraseInput,
     RecoveryView,
+    RevokedView,
     ServerView,
     SyncResultView,
     ThisDeviceView,
@@ -61,6 +62,8 @@
   let importState = $state<ImportView | null>(null);
   let syncResult = $state<SyncResultView | null>(null);
   let pinMismatch = $state<PinMismatchView | null>(null);
+  /** The last `RevokeDevice` answer; only its own fields are rendered, nothing inferred. */
+  let revoked = $state<RevokedView | null>(null);
   let error = $state<string | null>(null);
 
   /** The live pairing the engine knows; null while the accepting side is still entering a ticket. */
@@ -118,6 +121,8 @@
   async function loadStatus() {
     const res = expect(await client.invoke({ action: 'SyncStatus' }), 'SyncStatus');
     server = mapServer(res.payload.status);
+    // The flag rides on the status, not on the recovery response, so every read refreshes it.
+    recovery = { ...recovery, stale: res.payload.status.recovery_stale === true };
   }
 
   async function load() {
@@ -385,8 +390,24 @@
 
   async function revokeDevice(deviceId: string) {
     error = null;
+    revoked = null;
+    const label = devices.find((entry) => entry.id === deviceId)?.label ?? '';
     try {
-      expect(await client.invoke({ action: 'RevokeDevice', params: { device_id: deviceId } }), 'DeviceRevoked');
+      const res = expect(
+        await client.invoke({ action: 'RevokeDevice', params: { device_id: deviceId } }),
+        'DeviceRevoked'
+      );
+      revoked = {
+        label,
+        epoch: res.payload.epoch,
+        resealed: res.payload.re_sealed ?? null,
+        blobsDeleted: res.payload.blobs_deleted ?? null,
+        blobsRemaining: res.payload.blobs_remaining ?? null,
+        error: res.payload.error ?? null,
+      };
+      if (res.payload.recovery_stale === true) {
+        recovery = { ...recovery, stale: true };
+      }
       await loadDevices();
     } catch (e) {
       error = syncErrorMessage(e);
@@ -399,7 +420,15 @@
         await client.invoke({ action: 'CreateRecoveryPhrase' }),
         'RecoveryPhraseCreated'
       );
-      recovery = { hasPhrase: true, words: res.payload.words, verified: false, error: null };
+      // The response proves the phrase exists; only the fresh status can say the flag is gone.
+      await loadStatus();
+      recovery = {
+        ...recovery,
+        hasPhrase: true,
+        words: res.payload.words,
+        verified: false,
+        error: null,
+      };
     } catch (e) {
       recovery = { ...recovery, error: syncErrorMessage(e) };
     }
@@ -556,6 +585,7 @@
   {importState}
   {syncResult}
   {pinMismatch}
+  {revoked}
   {error}
   onbeginpairing={(next) => void beginPairing(next)}
   onsubmitpairing={(ticket, code) => void submitPairing(ticket, code)}

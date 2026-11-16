@@ -132,7 +132,12 @@
     </div>
   {:else}
     <div class="state">
-      {#if recovery.hasPhrase}
+      {#if recovery.stale}
+        <p class="warning" role="status">{t('sync-recovery-stale')}</p>
+        <Button variant="secondary" size="sm" onclick={oncreate}>
+          {t('sync-recovery-stale-create')}
+        </Button>
+      {:else if recovery.hasPhrase}
         <p class="status" role="status">{t('sync-recovery-has-phrase')}</p>
       {:else}
         <Button variant="secondary" size="sm" onclick={oncreate}>

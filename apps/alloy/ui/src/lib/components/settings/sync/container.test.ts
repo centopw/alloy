@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import type { EngineCommand, EngineEvent, SyncStatusReport } from '$lib/generated';
+import type { EngineCommand, EngineEvent, EngineResponse, SyncStatusReport } from '$lib/generated';
 import { t } from '$lib/i18n';
 
 const engine = vi.hoisted(() => {
@@ -562,5 +562,163 @@ describe('DevicesSyncLive fresh-device recovery', () => {
     expect(calls('ListDevices'), 'a rejected phrase writes nothing').toHaveLength(1);
     expect(calls('SyncStatus'), 'a rejected phrase writes nothing').toHaveLength(1);
     expect(target.textContent).not.toContain(t('sync-recovery-recovered-title'));
+  });
+});
+
+describe('DevicesSyncLive revoke result', () => {
+  const THIS_DEVICE = {
+    device_id: 'demo-this',
+    label: 'Laptop',
+    enrolled_ms: 1,
+    epoch: 1,
+    current: true,
+  };
+  const PEER = {
+    device_id: 'demo-peer',
+    label: 'Old phone',
+    enrolled_ms: 1,
+    epoch: 1,
+    current: false,
+  };
+
+  function revokeSetup(revoked: Extract<EngineResponse, { type: 'DeviceRevoked' }>['payload']) {
+    let remaining = true;
+    engine.invoke.mockImplementation(async (command: EngineCommand) => {
+      switch (command.action) {
+        case 'ListDevices':
+          return {
+            type: 'DevicesList',
+            payload: { devices: remaining ? [THIS_DEVICE, PEER] : [THIS_DEVICE] },
+          };
+        case 'SyncStatus':
+          return { type: 'SyncStatus', payload: { status: status({ devices: [THIS_DEVICE] }) } };
+        case 'RevokeDevice':
+          remaining = false;
+          return { type: 'DeviceRevoked', payload: revoked };
+        default:
+          throw new Error(`unexpected command ${command.action}`);
+      }
+    });
+  }
+
+  async function revoke(target: HTMLElement) {
+    button(target, t('sync-devices-revoke')).click();
+    await settle();
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog, 'the confirmation is a dialog').toBeTruthy();
+    const confirm = [...dialog!.querySelectorAll('button')].find(
+      (entry) => entry.textContent?.trim() === t('sync-devices-revoke-confirm')
+    );
+    expect(confirm, 'the confirmation is offered').toBeTruthy();
+    confirm!.click();
+    await settle();
+  }
+
+  it('renders the blob leftovers and the old-data warning when the server kept ciphertext', async () => {
+    revokeSetup({
+      epoch: 4,
+      re_sealed: true,
+      blobs_deleted: 5,
+      blobs_remaining: 2,
+      recovery_stale: false,
+      error: null,
+    });
+
+    const target = render();
+    await settle();
+    await revoke(target);
+
+    const rendered = target.textContent ?? '';
+    expect(rendered).toContain(t('sync-revoke-result-title', { device: 'Old phone', epoch: 4 }));
+    expect(rendered).toContain(t('sync-revoke-resealed'));
+    expect(rendered).toContain(t('sync-revoke-blobs-deleted', { count: 5 }));
+    expect(rendered).toContain(t('sync-revoke-leftover', { count: 2 }));
+    expect(rendered, 'the old ciphertext is not presented as protected').toContain(
+      t('sync-revoke-retroactive')
+    );
+    expect(rendered, 'no clean sweep is claimed').not.toContain(t('sync-revoke-clean'));
+  });
+
+  it('reports an incomplete server half from the response error', async () => {
+    revokeSetup({
+      epoch: 4,
+      re_sealed: false,
+      blobs_deleted: 0,
+      blobs_remaining: null,
+      recovery_stale: false,
+      error: 'delete timed out',
+    });
+
+    const target = render();
+    await settle();
+    await revoke(target);
+
+    const rendered = target.textContent ?? '';
+    expect(rendered).toContain(t('sync-revoke-not-resealed'));
+    expect(rendered).toContain(t('sync-revoke-error', { message: 'delete timed out' }));
+    expect(rendered).toContain(t('sync-revoke-retroactive'));
+    expect(rendered).not.toContain(t('sync-revoke-clean'));
+  });
+
+  it('shows no warning when the server reported every old blob gone', async () => {
+    revokeSetup({
+      epoch: 4,
+      re_sealed: true,
+      blobs_deleted: 5,
+      blobs_remaining: 0,
+      recovery_stale: false,
+      error: null,
+    });
+
+    const target = render();
+    await settle();
+    await revoke(target);
+
+    const rendered = target.textContent ?? '';
+    expect(rendered).toContain(t('sync-revoke-clean'));
+    expect(rendered).not.toContain(t('sync-revoke-leftover', { count: 2 }));
+    expect(rendered).not.toContain(t('sync-revoke-retroactive'));
+    expect(target.querySelectorAll('.revoke-result .warning')).toHaveLength(0);
+  });
+});
+
+describe('DevicesSyncLive stale recovery phrase', () => {
+  it('shows the remedy and clears the flag after CreateRecoveryPhrase', async () => {
+    let stale = true;
+    engine.invoke.mockImplementation(async (command: EngineCommand) => {
+      switch (command.action) {
+        case 'ListDevices':
+          return { type: 'DevicesList', payload: { devices: [] } };
+        case 'SyncStatus':
+          return {
+            type: 'SyncStatus',
+            payload: { status: status({ recovery_stale: stale }) },
+          };
+        case 'CreateRecoveryPhrase':
+          stale = false;
+          return {
+            type: 'RecoveryPhraseCreated',
+            payload: { words: Array.from({ length: 24 }, () => 'abandon') },
+          };
+        default:
+          throw new Error(`unexpected command ${command.action}`);
+      }
+    });
+
+    const target = render();
+    await settle();
+
+    expect(target.textContent).toContain(t('sync-recovery-stale'));
+    button(target, t('sync-recovery-stale-create')).click();
+    // CreateRecoveryPhrase, then the SyncStatus re-read that clears the flag, then the words.
+    await settle();
+    await settle();
+
+    const calls = (action: EngineCommand['action']) =>
+      engine.invoke.mock.calls.filter(([command]) => command.action === action);
+    expect(calls('CreateRecoveryPhrase'), 'the remedy is the create command').toHaveLength(1);
+    expect(calls('SyncStatus'), 'the status is re-read after creating').toHaveLength(2);
+    expect(target.textContent).toContain(t('sync-recovery-created-title'));
+    expect(target.textContent, 'the stale flag is gone').not.toContain(t('sync-recovery-stale'));
   });
 });
