@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, tick } from 'svelte';
 import LoginStep from './LoginStep.svelte';
@@ -170,5 +172,75 @@ describe('LoginStep phone number', () => {
     document.querySelector('form')!.dispatchEvent(new Event('submit', { cancelable: true }));
 
     expect(onsubmit).toHaveBeenCalledWith({ type: 'phone_number', phone: '+84367337123' });
+  });
+});
+
+/** Extracts the body of a top-level brace-delimited block starting at `headerIndex`. */
+function extractBlock(source: string, headerIndex: number): string {
+  const open = source.indexOf('{', headerIndex);
+  expect(open).toBeGreaterThanOrEqual(0);
+  let depth = 0;
+  for (let i = open; i < source.length; i++) {
+    if (source[i] === '{') depth++;
+    else if (source[i] === '}') {
+      depth--;
+      if (depth === 0) return source.slice(open + 1, i);
+    }
+  }
+  throw new Error('Unclosed CSS block');
+}
+
+describe('Onboarding mobile scroll and Account mount regression', () => {
+  it('allows vertical scrolling on mobile in Onboarding.svelte without Grid + overflow: hidden deadlock', () => {
+    const onboarding = readFileSync(resolve(__dirname, 'Onboarding.svelte'), 'utf8');
+    const styleStart = onboarding.indexOf('<style>');
+    expect(styleStart).toBeGreaterThanOrEqual(0);
+    const style = onboarding.slice(styleStart);
+
+    const onboardingRule = extractBlock(style, style.indexOf('.onboarding {'));
+    expect(onboardingRule).toMatch(/display:\s*flex;/);
+    expect(onboardingRule).toMatch(/flex-direction:\s*column;/);
+    expect(onboardingRule).toMatch(/overflow-y:\s*auto;/);
+    expect(onboardingRule).toMatch(/overscroll-behavior:\s*contain;/);
+    expect(onboardingRule).toMatch(/touch-action:\s*pan-y;/);
+
+    const panelRule = extractBlock(style, style.indexOf('.panel {'));
+    expect(panelRule).toMatch(/margin:\s*auto;/);
+    expect(panelRule).toMatch(/flex-shrink:\s*0;/);
+
+    const mobileQueryIdx = style.indexOf('@media (max-width: 899px) {');
+    expect(mobileQueryIdx).toBeGreaterThanOrEqual(0);
+    const mobileBlock = extractBlock(style, mobileQueryIdx);
+
+    const mobileOnboarding = extractBlock(mobileBlock, mobileBlock.indexOf('.onboarding {'));
+    expect(mobileOnboarding).toMatch(/padding:\s*0;/);
+
+    const mobilePanel = extractBlock(mobileBlock, mobileBlock.indexOf('.panel,'));
+    expect(mobilePanel).toMatch(/overflow:\s*visible;/);
+    expect(mobilePanel).toMatch(/min-height:\s*100%;/);
+    expect(mobilePanel).toMatch(/height:\s*auto;/);
+    expect(mobilePanel).toMatch(/flex:\s*1\s+0\s+auto;/);
+    expect(mobilePanel).toMatch(/margin:\s*0;/);
+
+    const mobileClose = extractBlock(mobileBlock, mobileBlock.indexOf('.panel-close {'));
+    expect(mobileClose).toMatch(/position:\s*sticky;/);
+    expect(mobileBlock).toMatch(/var\(--alloy-safe-area-bottom\)/);
+  });
+
+  it('guards hover and adds touch target heights and bottom clearance in LoginStep.svelte', () => {
+    const loginStep = readFileSync(resolve(__dirname, 'LoginStep.svelte'), 'utf8');
+    const style = loginStep.slice(loginStep.indexOf('<style>'));
+
+    expect(style).toContain('@media (hover: hover)');
+    expect(style).toMatch(/@media \(max-width:\s*899px\),\s*\(pointer:\s*coarse\)/);
+    expect(style).toMatch(/min-height:\s*var\(--alloy-touch-target,\s*44px\)/);
+    expect(style).toMatch(/var\(--alloy-safe-area-bottom\)/);
+  });
+
+  it('does not import or mount <Onboarding inside Account.svelte', () => {
+    const account = readFileSync(resolve(__dirname, '../settings/sections/Account.svelte'), 'utf8');
+    expect(account).not.toContain('<Onboarding');
+    expect(account).not.toContain('Onboarding.svelte');
+    expect(account).toContain('session.openAddAccount()');
   });
 });

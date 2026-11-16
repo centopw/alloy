@@ -159,7 +159,10 @@
   }
   .dialog {
     width: var(--alloy-modal-width);
-    max-height: 88vh;
+    max-height: min(
+      88dvh,
+      calc(100dvh - var(--alloy-spacing-scale-8) - var(--alloy-safe-area-top) - var(--alloy-safe-area-bottom))
+    );
     display: flex;
     flex-direction: column;
     background: var(--alloy-glass-sheen), var(--alloy-glass-fill-strong);
@@ -174,6 +177,7 @@
   }
   header {
     display: flex;
+    flex: none;
     justify-content: space-between;
     align-items: center;
     height: var(--alloy-layout-header-height);
@@ -194,11 +198,24 @@
     height: 32px;
     display: grid;
     place-items: center;
+    transition:
+      background-color var(--alloy-motion-duration-fast) var(--alloy-motion-easing-ease),
+      color var(--alloy-motion-duration-fast) var(--alloy-motion-easing-ease),
+      transform var(--alloy-motion-duration-instant) var(--alloy-motion-easing-ease);
   }
   @media (hover: hover) {
     header button:hover {
       background: var(--alloy-glass-control);
     }
+  }
+  header button:active {
+    background: var(--alloy-glass-control-hover);
+    color: var(--alloy-color-text-primary);
+    transform: scale(0.95);
+  }
+  header button:focus-visible {
+    outline: 2px solid var(--alloy-color-accent-primary);
+    outline-offset: 2px;
   }
   /* Controls a dialog adds to its own header; they inherit the round button styling above. */
   .header-side {
@@ -207,8 +224,13 @@
     gap: var(--alloy-spacing-scale-1);
   }
   .content {
+    flex: 1 1 auto;
+    min-height: 0;
     padding: var(--alloy-layout-gutter);
     overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
   }
 
   /* Grab zone: drag handle of the phone bottom sheet. Hidden on desktop. */
@@ -222,6 +244,13 @@
     background: var(--alloy-color-border-prominent);
   }
 
+  @media (max-width: 899px), (pointer: coarse) {
+    header button {
+      width: var(--alloy-touch-target);
+      height: var(--alloy-touch-target);
+    }
+  }
+
   /* Phone (<= 899px): bottom sheet, full width, at most 90% of the viewport, rounded top corners.
      Pinned to the bottom edge and padded above the home indicator. */
   @media (max-width: 899px) {
@@ -231,12 +260,12 @@
     .dialog {
       width: 100%;
       max-width: 100%;
-      max-height: 90dvh;
+      max-height: min(90dvh, calc(100dvh - var(--alloy-safe-area-top) - var(--alloy-spacing-scale-4)));
       border-left: 0;
       border-right: 0;
       border-bottom: 0;
       border-radius: var(--alloy-glass-radius-panel) var(--alloy-glass-radius-panel) 0 0;
-      padding-bottom: var(--alloy-safe-area-bottom);
+      padding: 0 var(--alloy-safe-area-right) var(--alloy-safe-area-bottom) var(--alloy-safe-area-left);
       animation: alloy-sheet-up var(--alloy-motion-duration-normal) ease-out backwards;
     }
     .grab {
@@ -247,14 +276,6 @@
       height: 24px;
       touch-action: none;
       cursor: grab;
-    }
-    header button {
-      width: var(--alloy-touch-target);
-      height: var(--alloy-touch-target);
-    }
-    .content {
-      flex: 1 1 auto;
-      min-height: 0;
     }
   }
 

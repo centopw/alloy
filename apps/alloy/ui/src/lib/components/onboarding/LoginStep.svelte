@@ -710,6 +710,7 @@
   .actions :global(.alloy-button) {
     width: 100%;
     min-height: var(--alloy-layout-control-height);
+    touch-action: manipulation;
   }
   .error {
     margin: 0;
@@ -751,8 +752,14 @@
   }
   summary {
     cursor: pointer;
+    touch-action: manipulation;
   }
-  summary:hover {
+  @media (hover: hover) {
+    summary:hover {
+      color: var(--alloy-color-text-primary);
+    }
+  }
+  summary:active {
     color: var(--alloy-color-text-primary);
   }
   summary:focus-visible {
@@ -785,9 +792,16 @@
     font-size: var(--alloy-font-size-row);
     text-decoration: underline;
     cursor: pointer;
+    touch-action: manipulation;
   }
-  .link:hover:not(:disabled) {
+  @media (hover: hover) {
+    .link:hover:not(:disabled) {
+      color: var(--alloy-color-text-link);
+    }
+  }
+  .link:active:not(:disabled) {
     color: var(--alloy-color-text-link);
+    opacity: 0.75;
   }
   .link:disabled {
     cursor: not-allowed;
@@ -801,8 +815,26 @@
     .phone-row {
       grid-template-columns: minmax(0, 1fr);
     }
-    .link {
-      min-height: var(--alloy-layout-control-height);
+  }
+  @media (max-width: 899px), (pointer: coarse) {
+    .login-step {
+      padding-bottom: calc(var(--alloy-spacing-scale-4) + var(--alloy-safe-area-bottom));
+    }
+    .actions :global(.alloy-button),
+    .login-step :global(.select-trigger),
+    .login-step :global(.text-field) {
+      min-height: var(--alloy-touch-target, 44px);
+    }
+    summary {
+      min-height: var(--alloy-touch-target, 44px);
+      padding-block: var(--alloy-spacing-scale-2);
+    }
+    .link,
+    .steps .link {
+      min-height: var(--alloy-touch-target, 44px);
+      display: inline-flex;
+      align-items: center;
+      text-align: start;
     }
   }
 </style>

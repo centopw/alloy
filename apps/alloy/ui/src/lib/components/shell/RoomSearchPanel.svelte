@@ -276,8 +276,14 @@
     cursor: pointer;
   }
 
-  .icon-btn:hover {
-    background: var(--alloy-glass-control);
+  @media (hover: hover) {
+    .icon-btn:hover {
+      background: var(--alloy-glass-control);
+      color: var(--alloy-color-text-primary);
+    }
+  }
+  .icon-btn:active {
+    background: var(--alloy-glass-control-hover);
     color: var(--alloy-color-text-primary);
   }
 
@@ -295,10 +301,14 @@
     min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
     display: flex;
     flex-direction: column;
     gap: var(--alloy-spacing-scale-2);
-    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-gutter);
+    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-gutter)
+      calc(var(--alloy-spacing-scale-3) + var(--alloy-safe-area-bottom));
   }
 
   .hint {
@@ -330,7 +340,7 @@
     flex-direction: column;
     gap: var(--alloy-spacing-scale-1);
     width: 100%;
-    min-height: 44px;
+    min-height: var(--alloy-touch-target, 44px);
     padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
     border: 0;
     border-radius: var(--alloy-radii-sm);
@@ -342,7 +352,16 @@
     overflow: hidden;
   }
 
-  .hit:hover,
+  @media (hover: hover) {
+    .hit:hover {
+      background: var(--alloy-glass-control);
+    }
+  }
+
+  .hit:active {
+    background: var(--alloy-glass-control-hover);
+  }
+
   .hit:focus-visible {
     background: var(--alloy-glass-control);
   }
@@ -384,7 +403,7 @@
 
   .action {
     align-self: flex-start;
-    min-height: 44px;
+    min-height: var(--alloy-touch-target, 44px);
     padding: 0 var(--alloy-spacing-scale-3);
     border: 0;
     border-radius: var(--alloy-radii-sm);
@@ -394,15 +413,19 @@
     cursor: pointer;
   }
 
+  .action:active:not(:disabled) {
+    background: var(--alloy-color-surface-hover);
+  }
+
   .action:disabled {
     opacity: 0.6;
     cursor: progress;
   }
 
-  @media (max-width: 899px) {
+  @media (max-width: 899px), (pointer: coarse) {
     .icon-btn {
-      width: 44px;
-      height: 44px;
+      width: var(--alloy-touch-target, 44px);
+      height: var(--alloy-touch-target, 44px);
     }
   }
 </style>

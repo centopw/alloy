@@ -199,6 +199,8 @@
     overflow-x: hidden;
     overflow-y: auto;
     overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
     border-right: 1px solid var(--alloy-chat-rim);
     scroll-padding-block: var(--alloy-spacing-scale-2);
   }
@@ -239,8 +241,13 @@
     scroll-margin-block: var(--alloy-spacing-scale-2);
     transition: background var(--alloy-motion-duration-fast) var(--alloy-motion-easing-ease);
   }
-  .topic:hover {
-    background: var(--alloy-glass-control);
+  @media (hover: hover) {
+    .topic:hover {
+      background: var(--alloy-glass-control);
+    }
+  }
+  .topic:not(.current):active {
+    background: var(--alloy-glass-control-hover);
   }
   /* The open topic is a filled surface with a start bar, so it is unmistakable at a glance. */
   .topic.current {
@@ -331,6 +338,9 @@
     padding: var(--alloy-spacing-scale-2) 0 0;
     overflow-x: auto;
     overflow-y: hidden;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x;
     border-right: 0;
     border-bottom: 1px solid var(--alloy-chat-rim);
     scrollbar-width: none;
@@ -387,5 +397,18 @@
     font-size: var(--alloy-typography-size-sm);
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  @media (pointer: coarse) {
+    .topic {
+      min-width: var(--alloy-touch-target, 44px);
+    }
+    .rail.phone .topic {
+      height: auto;
+      min-height: var(--alloy-touch-target, 44px);
+      min-width: var(--alloy-touch-target, 44px);
+    }
+    .rail.phone .topic::after {
+      content: none;
+    }
   }
 </style>

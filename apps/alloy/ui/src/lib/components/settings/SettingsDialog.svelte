@@ -14,6 +14,7 @@
   } from '$lib/icons';
   import { pushBack } from '$lib/platform/backstack';
   import { handleModalTabKey } from '$lib/platform/focusTrap';
+  import { session } from '$lib/stores/session.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
   import {
     capabilities,
@@ -152,6 +153,7 @@ import Debug from './sections/Debug.svelte';
   $effect(() => {
     if (!open) return;
     function onKey(e: KeyboardEvent) {
+      if (session.addingAccount) return;
       if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
@@ -295,9 +297,13 @@ import Debug from './sections/Debug.svelte';
     flex-direction: column;
     gap: 0;
     width: 240px;
+    min-height: 0;
     flex-shrink: 0;
     padding: 0 var(--alloy-layout-gutter) var(--alloy-layout-gutter);
     overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
     background: color-mix(in srgb, var(--alloy-color-surface-panel) 42%, transparent);
     border-right: 1px solid var(--alloy-glass-rim);
   }
@@ -357,10 +363,21 @@ import Debug from './sections/Debug.svelte';
     text-align: left;
     color: var(--alloy-color-text-secondary);
     cursor: pointer;
+    transition:
+      background-color var(--alloy-motion-duration-fast) var(--alloy-motion-easing-ease),
+      color var(--alloy-motion-duration-fast) var(--alloy-motion-easing-ease),
+      transform var(--alloy-motion-duration-instant) var(--alloy-motion-easing-ease);
   }
-  .nav-item:hover {
-    background: var(--alloy-glass-control);
+  @media (hover: hover) {
+    .nav-item:hover {
+      background: var(--alloy-glass-control);
+      color: var(--alloy-color-text-primary);
+    }
+  }
+  .nav-item:active {
+    background: var(--alloy-glass-control-hover);
     color: var(--alloy-color-text-primary);
+    transform: scale(0.99);
   }
   .nav-item[aria-current='page'] {
     border-color: color-mix(in srgb, var(--alloy-color-accent-primary) 26%, transparent);
@@ -383,17 +400,37 @@ import Debug from './sections/Debug.svelte';
     outline: 2px solid var(--alloy-color-accent-primary);
     outline-offset: 2px;
   }
-  .nav-close:hover,
-  .close:hover,
-  .back:hover {
-    background: var(--alloy-glass-control);
+  .nav-close,
+  .close,
+  .back {
+    transition:
+      background-color var(--alloy-motion-duration-fast) var(--alloy-motion-easing-ease),
+      color var(--alloy-motion-duration-fast) var(--alloy-motion-easing-ease),
+      transform var(--alloy-motion-duration-instant) var(--alloy-motion-easing-ease);
+  }
+  @media (hover: hover) {
+    .nav-close:hover,
+    .close:hover,
+    .back:hover {
+      background: var(--alloy-glass-control);
+      color: var(--alloy-color-text-primary);
+    }
+  }
+  .nav-close:active,
+  .close:active,
+  .back:active {
+    background: var(--alloy-glass-control-hover);
     color: var(--alloy-color-text-primary);
+    transform: scale(0.95);
   }
   .content {
     display: flex;
     flex: 1;
     min-width: 0;
+    min-height: 0;
     flex-direction: column;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
     background: transparent;
   }
   /* One measure, one gutter: the reading column is capped at 720px of content inside its 24px
@@ -431,9 +468,19 @@ import Debug from './sections/Debug.svelte';
     color: var(--alloy-color-text-secondary);
     cursor: pointer;
   }
+  @media (pointer: coarse) {
+    .close {
+      width: var(--alloy-touch-target);
+      height: var(--alloy-touch-target);
+    }
+  }
   .scroll {
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
   }
   .back {
     display: none;
@@ -451,8 +498,9 @@ import Debug from './sections/Debug.svelte';
       backdrop-filter: none;
     }
     .panel {
+      height: 100dvh;
       max-width: none;
-      max-height: none;
+      max-height: 100dvh;
       margin: 0;
       padding: var(--alloy-safe-area-top) var(--alloy-safe-area-right) 0 var(--alloy-safe-area-left);
       border: 0;
@@ -462,11 +510,9 @@ import Debug from './sections/Debug.svelte';
     .nav {
       width: 100%;
       gap: 0;
-      padding: 0 0 var(--alloy-safe-area-bottom);
+      padding: 0 0 calc(var(--alloy-spacing-scale-4) + var(--alloy-safe-area-bottom));
       background: var(--alloy-glass-sheen), var(--alloy-glass-fill);
       border-right: 0;
-      overscroll-behavior: contain;
-      -webkit-overflow-scrolling: touch;
     }
     .nav-header {
       min-height: 56px;
@@ -542,14 +588,12 @@ import Debug from './sections/Debug.svelte';
       display: none;
     }
     .scroll {
-      overscroll-behavior: contain;
-      -webkit-overflow-scrolling: touch;
+      padding-bottom: var(--alloy-safe-area-bottom);
     }
     .column {
       max-width: none;
       margin: 0;
-      padding: var(--alloy-spacing-scale-6) var(--alloy-layout-gutter)
-        calc(var(--alloy-spacing-scale-6) + var(--alloy-safe-area-bottom));
+      padding: var(--alloy-spacing-scale-6) var(--alloy-layout-gutter);
     }
   }
   /* One measure, one gutter: the column is a 768px box carrying 24px side padding, so the reading

@@ -251,6 +251,7 @@
     align-items: stretch;
     gap: var(--alloy-spacing-scale-2);
     min-width: 0;
+    min-height: var(--alloy-touch-target, 44px);
     padding: var(--alloy-spacing-scale-2);
     border: 1px solid var(--alloy-color-border-subtle);
     border-radius: var(--alloy-radii-lg);
@@ -259,10 +260,12 @@
     font: inherit;
     text-align: left;
     cursor: pointer;
+    touch-action: manipulation;
     transition:
       border-color var(--alloy-motion-duration-fast) var(--alloy-motion-easing-ease),
       background-color var(--alloy-motion-duration-fast) var(--alloy-motion-easing-ease),
-      box-shadow var(--alloy-motion-duration-fast) var(--alloy-motion-easing-ease);
+      box-shadow var(--alloy-motion-duration-fast) var(--alloy-motion-easing-ease),
+      transform var(--alloy-motion-duration-instant) var(--alloy-motion-easing-ease);
   }
 
   @media (hover: hover) {
@@ -270,6 +273,12 @@
       background: var(--alloy-color-surface-hover);
       border-color: var(--alloy-color-border-prominent);
     }
+  }
+
+  .theme-card:active {
+    background: var(--alloy-color-surface-active);
+    border-color: var(--alloy-color-border-prominent);
+    transform: scale(0.98);
   }
 
   .theme-card.selected {
@@ -476,5 +485,11 @@
 
   .pv-nick {
     color: var(--alloy-color-accent-primary);
+  }
+
+  @media (max-width: 599px) {
+    .theme-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
   }
 </style>

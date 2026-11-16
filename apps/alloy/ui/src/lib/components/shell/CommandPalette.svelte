@@ -281,11 +281,14 @@
     display: flex;
     justify-content: center;
     align-items: flex-start;
-    padding-top: 12vh;
+    padding-top: 12dvh;
     z-index: 50;
   }
   .palette {
+    display: flex;
+    flex-direction: column;
     width: min(520px, 92vw);
+    max-height: 82dvh;
     background: var(--alloy-glass-sheen), var(--alloy-glass-fill-strong);
     -webkit-backdrop-filter: var(--alloy-glass-filter-strong);
     backdrop-filter: var(--alloy-glass-filter-strong);
@@ -297,6 +300,7 @@
   .bar {
     display: flex;
     align-items: center;
+    flex-shrink: 0;
     gap: var(--alloy-spacing-scale-2);
     padding-left: var(--alloy-layout-gutter);
     border-bottom: 1px solid var(--alloy-glass-rim);
@@ -319,12 +323,17 @@
     padding: 0 var(--alloy-layout-gutter) 0 0;
   }
   ul {
+    flex: 1;
+    min-height: 0;
     list-style: none;
     margin: 0;
     padding: var(--alloy-layout-row-inset);
-    max-height: min(440px, 60vh);
+    max-height: min(440px, 60dvh);
     overflow-y: auto;
+    overflow-x: hidden;
     overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
   }
   .section-head {
     display: flex;
@@ -421,8 +430,13 @@
     color: var(--alloy-color-accent-primary);
   }
   .option.sel,
-  .option:hover {
+  .option:active {
     background: var(--alloy-glass-control-hover);
+  }
+  @media (hover: hover) {
+    .option:hover {
+      background: var(--alloy-glass-control-hover);
+    }
   }
   .none {
     padding: var(--alloy-spacing-scale-4);
@@ -432,6 +446,7 @@
   /* Keyboard affordances belong to the palette, not to the input placeholder. */
   .hints {
     display: flex;
+    flex-shrink: 0;
     align-items: center;
     gap: var(--alloy-spacing-scale-4);
     padding: var(--alloy-spacing-scale-2) var(--alloy-layout-gutter);
@@ -461,6 +476,25 @@
   .back {
     display: none;
   }
+  @media (hover: hover) {
+    .back:hover {
+      background: var(--alloy-glass-control);
+      color: var(--alloy-color-text-primary);
+    }
+  }
+  .back:active {
+    background: var(--alloy-glass-control-hover);
+    color: var(--alloy-color-text-primary);
+  }
+  .back:focus-visible {
+    outline: 2px solid var(--alloy-color-accent-primary);
+    outline-offset: 2px;
+  }
+  @media (max-width: 899px), (pointer: coarse) {
+    .option {
+      min-height: var(--alloy-touch-target, 44px);
+    }
+  }
   @media (max-width: 899px) {
     .backdrop {
       padding: 0;
@@ -471,7 +505,8 @@
       display: flex;
       flex-direction: column;
       width: 100%;
-      height: 100%;
+      height: 100dvh;
+      max-height: 100dvh;
       border: 0;
       border-radius: 0;
       box-shadow: none;
@@ -494,9 +529,9 @@
       display: grid;
       place-items: center;
       flex: none;
-      width: 44px;
-      height: 44px;
-      min-height: 44px;
+      width: var(--alloy-touch-target, 44px);
+      height: var(--alloy-touch-target, 44px);
+      min-height: var(--alloy-touch-target, 44px);
       margin-left: var(--alloy-spacing-scale-1);
       padding: 0;
       border: 0;
@@ -512,6 +547,7 @@
       overflow-y: auto;
       overscroll-behavior: contain;
       -webkit-overflow-scrolling: touch;
+      touch-action: pan-y;
       padding: var(--alloy-layout-row-inset) var(--alloy-layout-row-inset) calc(var(--alloy-safe-area-bottom) + var(--alloy-layout-row-inset));
     }
     .option {

@@ -744,8 +744,14 @@
     color: var(--alloy-color-text-secondary);
     cursor: pointer;
   }
-  .icon-btn:hover {
-    background: var(--alloy-glass-control);
+  @media (hover: hover) {
+    .icon-btn:hover {
+      background: var(--alloy-glass-control);
+      color: var(--alloy-color-text-primary);
+    }
+  }
+  .icon-btn:active {
+    background: var(--alloy-glass-control-hover);
     color: var(--alloy-color-text-primary);
   }
   .inspector-tabs {
@@ -755,7 +761,11 @@
     padding: var(--alloy-spacing-scale-2) var(--alloy-layout-gutter);
     border-bottom: 1px solid var(--alloy-glass-rim);
     overflow-x: auto;
+    overflow-y: hidden;
     scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    touch-action: pan-x;
     flex-shrink: 0;
   }
   .inspector-tabs::-webkit-scrollbar {
@@ -788,6 +798,10 @@
       color: var(--alloy-color-text-primary);
     }
   }
+  .inspector-tab:active {
+    background: var(--alloy-glass-control-hover);
+    color: var(--alloy-color-text-primary);
+  }
   .inspector-tab[aria-selected='true'] {
     border-color: var(--alloy-glass-rim);
     background: var(--alloy-glass-control-hover);
@@ -802,10 +816,15 @@
     flex: 1;
     min-height: 0;
     overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
     display: flex;
     flex-direction: column;
     gap: var(--alloy-spacing-scale-3);
-    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-gutter);
+    padding: var(--alloy-spacing-scale-3) var(--alloy-layout-gutter)
+      calc(var(--alloy-spacing-scale-3) + var(--alloy-safe-area-bottom));
   }
   .block {
     display: flex;
@@ -955,8 +974,13 @@
     text-align: start;
     cursor: pointer;
   }
-  .member:hover {
-    background: var(--alloy-glass-control);
+  @media (hover: hover) {
+    .member:hover {
+      background: var(--alloy-glass-control);
+    }
+  }
+  .member:active {
+    background: var(--alloy-glass-control-hover);
   }
   .member-name {
     flex: 1;
@@ -979,7 +1003,12 @@
   .tile {
     transition: background var(--alloy-motion-duration-fast) ease;
   }
-  .tile:hover {
+  @media (hover: hover) {
+    .tile:hover {
+      background: var(--alloy-glass-control-hover);
+    }
+  }
+  .tile:active {
     background: var(--alloy-glass-control-hover);
   }
   .note-read {
@@ -1024,7 +1053,6 @@
     transition: opacity var(--alloy-motion-duration-fast) ease;
   }
   .note-read.is-empty .note-edit,
-  .note-read:hover .note-edit,
   .note-read:focus-visible .note-edit {
     opacity: 1;
   }
@@ -1032,6 +1060,12 @@
     .note-read:hover {
       background: var(--alloy-glass-control);
     }
+    .note-read:hover .note-edit {
+      opacity: 1;
+    }
+  }
+  .note-read:active {
+    background: var(--alloy-glass-control-hover);
   }
   @media (hover: none) {
     .note-edit {
@@ -1046,18 +1080,15 @@
     outline-offset: 2px;
   }
   @media (max-width: 899px), (pointer: coarse) {
-    .inspector-tab {
+    .inspector-tab,
+    .member,
+    .note-read,
+    .tile {
       min-height: var(--alloy-touch-target, 44px);
     }
-  }
-  @media (max-width: 899px) {
-    .member,
-    .note-read {
-      min-height: 44px;
-    }
     .icon-btn {
-      width: 44px;
-      height: 44px;
+      width: var(--alloy-touch-target, 44px);
+      height: var(--alloy-touch-target, 44px);
     }
   }
 </style>

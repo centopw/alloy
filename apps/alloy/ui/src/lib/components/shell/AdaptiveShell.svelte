@@ -21,9 +21,11 @@
     closeChatBackgroundPicker,
   } from '../settings/controls/ChatBackground.svelte';
   import SettingsDialog from '../settings/SettingsDialog.svelte';
+  import Onboarding from '$lib/components/onboarding/Onboarding.svelte';
   import Hud from '../dev/Hud.svelte';
   import ConnectionBanner from './ConnectionBanner.svelte';
   import { connectivity } from '$lib/stores/connectivity.svelte';
+  import { session } from '$lib/stores/session.svelte';
   import { client } from '$lib/ipc';
   import { pushBack } from '$lib/platform/backstack';
   import { capabilities, currentEnv, type SettingsSectionId } from '$lib/platform/capabilities';
@@ -480,6 +482,9 @@
 
 <CommandPalette open={paletteOpen} onclose={() => (paletteOpen = false)} onpick={pick} />
 <SettingsDialog open={settingsOpen} initialSection={settingsSection} onclose={() => (settingsOpen = false)} />
+{#if session.addingAccount}
+  <Onboarding />
+{/if}
 <PermissionsGate onopensettings={() => openSettings('permissions')} />
 {#if import.meta.env.DEV}<Hud bind:visible={hudVisible} />{/if}
 
@@ -797,10 +802,22 @@
   .jump span {
     white-space: nowrap;
   }
-  .jump:hover {
+  @media (hover: hover) {
+    .jump:hover {
+      border-color: var(--alloy-glass-rim-strong);
+      background: var(--alloy-glass-control-hover);
+      color: var(--alloy-color-text-primary);
+    }
+  }
+  .jump:active {
     border-color: var(--alloy-glass-rim-strong);
     background: var(--alloy-glass-control-hover);
     color: var(--alloy-color-text-primary);
+  }
+  @media (max-width: 899px), (pointer: coarse) {
+    .jump {
+      min-height: var(--alloy-touch-target, 44px);
+    }
   }
   .jump:focus-visible {
     outline: 2px solid var(--alloy-color-accent-primary);
@@ -872,14 +889,15 @@
     inset: 0;
     z-index: 20;
     width: auto;
+    height: 100dvh;
+    max-height: 100dvh;
     border: 0;
     border-radius: 0;
     background: var(--alloy-glass-sheen), var(--alloy-glass-fill-strong);
     -webkit-backdrop-filter: var(--alloy-glass-filter-strong);
     backdrop-filter: var(--alloy-glass-filter-strong);
     box-shadow: none;
-    padding: var(--alloy-safe-area-top) var(--alloy-safe-area-right) var(--alloy-safe-area-bottom)
-      var(--alloy-safe-area-left);
+    padding: var(--alloy-safe-area-top) var(--alloy-safe-area-right) 0 var(--alloy-safe-area-left);
     animation: alloy-panel-in var(--alloy-motion-duration-normal) ease-out;
   }
   @keyframes alloy-panel-in {

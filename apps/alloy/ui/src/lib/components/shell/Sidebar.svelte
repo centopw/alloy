@@ -714,10 +714,7 @@
       class="scope-add"
       aria-label={t('account-add')}
       data-tooltip={t('account-add')}
-      onclick={() => {
-        session.openAddAccount();
-        onsettings?.('account');
-      }}
+      onclick={() => session.openAddAccount()}
     >
       <Icon icon={Plus} size={16} />
     </button>
@@ -951,7 +948,11 @@
     min-width: 0;
     padding: 2px 0;
     overflow-x: auto;
+    overflow-y: hidden;
     scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    touch-action: pan-x;
   }
   .scope-pills::-webkit-scrollbar {
     display: none;
@@ -983,6 +984,10 @@
       background: var(--alloy-glass-control-hover);
       color: var(--alloy-color-text-primary);
     }
+  }
+  .scope-pill:not(.on):active {
+    background: var(--alloy-glass-control-hover);
+    color: var(--alloy-color-text-primary);
   }
   .scope-pill.on {
     border-color: var(--alloy-color-accent-fill);
@@ -1017,6 +1022,11 @@
       color: var(--alloy-color-text-primary);
     }
   }
+  .scope-add:active {
+    border-color: var(--alloy-glass-rim-strong);
+    background: var(--alloy-glass-control-hover);
+    color: var(--alloy-color-text-primary);
+  }
   /* A quiet field: the sidebar's quick-switcher, not a toolbar. */
   .search {
     display: flex;
@@ -1034,9 +1044,11 @@
       border-color var(--alloy-motion-duration-fast) ease,
       background var(--alloy-motion-duration-fast) ease;
   }
-  .search:hover {
-    border-color: var(--alloy-glass-rim-strong);
-    background: var(--alloy-glass-control-hover);
+  @media (hover: hover) {
+    .search:hover {
+      border-color: var(--alloy-glass-rim-strong);
+      background: var(--alloy-glass-control-hover);
+    }
   }
   .search:focus-within {
     border-color: color-mix(in srgb, var(--alloy-color-accent-primary) 55%, transparent);
@@ -1121,6 +1133,10 @@
       color: var(--alloy-color-text-primary);
     }
   }
+  .filter-tab:not(.on):active {
+    background: var(--alloy-glass-control-hover);
+    color: var(--alloy-color-text-primary);
+  }
   .filter-tab.on {
     background: var(--alloy-color-accent-fill);
     color: var(--alloy-color-text-on-accent);
@@ -1150,6 +1166,10 @@
       color: var(--alloy-color-text-primary);
     }
   }
+  .filter-more:active {
+    background: var(--alloy-glass-control-hover);
+    color: var(--alloy-color-text-primary);
+  }
   .filter-more.on {
     background: var(--alloy-glass-control);
     color: var(--alloy-color-accent-primary);
@@ -1174,8 +1194,10 @@
   .tag-filter {
     display: flex;
     flex-wrap: wrap;
+    flex-shrink: 0;
     gap: var(--alloy-spacing-scale-1);
     margin: 0 var(--alloy-layout-row-inset) var(--alloy-spacing-scale-2);
+    touch-action: pan-x;
   }
   .error {
     margin: 0 var(--alloy-layout-row-inset) var(--alloy-spacing-scale-2);
@@ -1191,6 +1213,9 @@
        that eats a row's worth of height. The rows truncate their own text, so no row is ever
        meant to scroll sideways. */
     overflow-x: hidden;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
     /* 4px here plus 4px of row padding is the 8px inset the row highlight has always had; making the
        row itself carry more of it is what buys the preview its width back. */
     padding: 0 var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-2);
@@ -1417,8 +1442,13 @@
     text-align: left;
     cursor: pointer;
   }
-  .hit:hover {
-    background: var(--alloy-glass-control);
+  @media (hover: hover) {
+    .hit:hover {
+      background: var(--alloy-glass-control);
+    }
+  }
+  .hit:active {
+    background: var(--alloy-glass-control-hover);
   }
   .hit-meta {
     display: flex;
@@ -1557,7 +1587,13 @@
     color: var(--alloy-color-text-secondary);
     cursor: pointer;
   }
-  .icon:hover:not(:disabled) {
+  @media (hover: hover) {
+    .icon:hover:not(:disabled) {
+      background: var(--alloy-glass-control-hover);
+      color: var(--alloy-color-text-primary);
+    }
+  }
+  .icon:active:not(:disabled) {
     background: var(--alloy-glass-control-hover);
     color: var(--alloy-color-text-primary);
   }
@@ -1575,6 +1611,80 @@
     outline: 2px solid var(--alloy-color-accent-primary);
     outline-offset: 2px;
   }
+  @media (max-width: 899px), (pointer: coarse) {
+    .icon {
+      width: var(--alloy-touch-target, 44px);
+      height: var(--alloy-touch-target, 44px);
+    }
+    .search {
+      min-height: var(--alloy-touch-target, 44px);
+      box-sizing: border-box;
+    }
+    .search input {
+      min-height: var(--alloy-touch-target, 44px);
+    }
+    .scope-pill {
+      min-height: var(--alloy-touch-target, 44px);
+      height: var(--alloy-touch-target, 44px);
+      padding: 0 var(--alloy-spacing-scale-3);
+      font-size: var(--alloy-font-size-row);
+    }
+    .scope-add {
+      width: var(--alloy-touch-target, 44px);
+      height: var(--alloy-touch-target, 44px);
+    }
+    .filter-tabs {
+      gap: var(--alloy-spacing-scale-1);
+      padding: 0;
+      border: 0;
+      background: transparent;
+      overflow-x: auto;
+      overflow-y: hidden;
+      scrollbar-width: none;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior-x: contain;
+      touch-action: pan-x;
+    }
+    .filter-tabs::-webkit-scrollbar {
+      display: none;
+    }
+    .filter-tab {
+      flex: 1 0 auto;
+      min-height: var(--alloy-touch-target, 44px);
+      height: var(--alloy-touch-target, 44px);
+      padding: 0 var(--alloy-spacing-scale-3);
+      border-radius: var(--alloy-radii-full);
+      font-size: var(--alloy-font-size-row);
+    }
+    .filter-more {
+      width: var(--alloy-touch-target, 44px);
+      height: var(--alloy-touch-target, 44px);
+      border-radius: var(--alloy-radii-full);
+    }
+    .tag-filter {
+      flex-wrap: nowrap;
+      padding: 2px 0;
+      overflow-x: auto;
+      overflow-y: hidden;
+      scrollbar-width: none;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior-x: contain;
+      touch-action: pan-x;
+    }
+    .tag-filter::-webkit-scrollbar {
+      display: none;
+    }
+    .hit {
+      min-height: var(--alloy-touch-target, 44px);
+    }
+    button.row {
+      min-height: 56px;
+      box-sizing: border-box;
+    }
+    button.row:active {
+      background: var(--alloy-color-surface-hover);
+    }
+  }
   @media (max-width: 899px) {
     .head {
       height: 56px;
@@ -1583,18 +1693,11 @@
     .scope {
       font-size: var(--alloy-typography-size-xl);
     }
-    .icon {
-      width: 44px;
-      height: 44px;
-    }
     .search {
-      min-height: 44px;
-      box-sizing: border-box;
       margin: var(--alloy-spacing-scale-2) var(--alloy-layout-gutter);
       padding: 0 var(--alloy-layout-row-pad-x);
     }
     .search input {
-      min-height: 44px;
       font-size: var(--alloy-typography-size-lg);
     }
     .network-scope,
@@ -1603,43 +1706,6 @@
     .error {
       margin-left: var(--alloy-layout-gutter);
       margin-right: var(--alloy-layout-gutter);
-    }
-    .scope-pill {
-      height: 44px;
-      padding: 0 var(--alloy-spacing-scale-3);
-      font-size: var(--alloy-font-size-row);
-    }
-    .scope-add {
-      width: 44px;
-      height: 44px;
-    }
-    .filter-tabs {
-      gap: var(--alloy-spacing-scale-1);
-      padding: 0;
-      border: 0;
-      background: transparent;
-      overflow-x: auto;
-      scrollbar-width: none;
-    }
-    .filter-tabs::-webkit-scrollbar {
-      display: none;
-    }
-    .filter-tab {
-      flex: 1 0 auto;
-      height: 44px;
-      padding: 0 var(--alloy-spacing-scale-3);
-      border-radius: var(--alloy-radii-full);
-      font-size: var(--alloy-font-size-row);
-    }
-    .filter-more {
-      width: 44px;
-      height: 44px;
-      border-radius: var(--alloy-radii-full);
-    }
-    .groups {
-      padding: 0 var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-2);
-      overscroll-behavior: contain;
-      -webkit-overflow-scrolling: touch;
     }
     .group h3,
     .group h4 {
@@ -1651,13 +1717,6 @@
     }
     .group > h3:first-child {
       padding-top: 0;
-    }
-    button.row {
-      min-height: 56px;
-      box-sizing: border-box;
-    }
-    button.row:active {
-      background: var(--alloy-color-surface-hover);
     }
     .mark :global(.alloy-badge) {
       min-width: 20px !important;

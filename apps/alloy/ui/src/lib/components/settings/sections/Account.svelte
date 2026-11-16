@@ -1,6 +1,5 @@
 <script lang="ts">
   import { Button } from '$lib/components/common';
-  import Onboarding from '$lib/components/onboarding/Onboarding.svelte';
   import { session, networkLabel } from '$lib/stores/session.svelte';
   import type { Account, AccountId, ConnectionStatus } from '$lib/generated/index.js';
 
@@ -105,10 +104,6 @@
 
   {#if session.error}<p class="error" role="alert">{session.error}</p>{/if}
 </section>
-
-{#if session.addingAccount}
-  <Onboarding />
-{/if}
 
 <style>
   .section {

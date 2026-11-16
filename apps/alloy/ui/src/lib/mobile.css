@@ -9,6 +9,7 @@
  *
  *   --alloy-touch-target   minimum hit area for any touch control (44px)
  *   .scroll-y              inner scroll region: scrolls itself, never chains to the page
+ *   .scroll-x              horizontal scroll strip: scrolls itself on X, never chains to the page
  */
 
 :root {
@@ -17,9 +18,19 @@
 
 /* Scroll containment. Only inner lists and pages scroll; the document never does (see +layout). */
 .scroll-y {
+  min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+}
+
+.scroll-x {
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x;
 }
 
 /*
