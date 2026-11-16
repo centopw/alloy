@@ -583,13 +583,18 @@
 {#snippet forumRow(r: RoomItem)}
   {@const topics = topicsOf(roomsStore.rooms, r.id).filter((t) => !t.archived)}
   {@const totals = forumTotals(r, topics, (x) => roomsStore.unreadOf(x))}
-  {@const lastActivity = prefs.roomListPreviews ? r.latest_event?.body ?? null : null}
+  <!-- The forum row previews the conversation that moved last, the way Telegram's chat list does.
+       A forum has no messages of its own, so its own preview is always empty; the newest topic's
+       message is what a user is looking for, and the topic count only stands in when no topic has
+       history on this device yet. -->
+  {@const newest = topics[0] ?? null}
+  {@const lastMessage = prefs.roomListPreviews ? newest?.latest_event?.body ?? null : null}
   {@const count = topics.length > 0 ? t('forum-topic-count', { count: topics.length }) : null}
   {@render roomRow(r, {
     unread: totals.notifications,
     active: r.id === roomsStore.activeRoomId || r.id === activeForumId,
-    preview: [lastActivity, count].filter(Boolean).join(' · ') || null,
-    openId: topics[0]?.id ?? r.id,
+    preview: lastMessage ?? count,
+    openId: newest?.id ?? r.id,
   })}
 {/snippet}
 

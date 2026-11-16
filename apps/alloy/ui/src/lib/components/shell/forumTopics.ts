@@ -7,11 +7,20 @@ import type { RoomSummary } from '$lib/generated';
  */
 
 /** Newest activity first, then name: the order the room list and the topic rail share. */
+/**
+ * When a room last saw activity, in milliseconds.
+ *
+ * The chat's own timestamp is the network's "last message" time and exists even when this device
+ * has no history for the conversation; the preview's timestamp is only a fallback for a row that
+ * carries no activity clock. Sorting on the preview alone put every never-opened topic at the
+ * bottom, which is why the rail looked like a list of the first topics.
+ */
+function activityOf(room: RoomSummary): number {
+  return room.last_activity_millis ?? room.latest_event?.timestamp_millis ?? 0;
+}
+
 function byActivityThenName(a: RoomSummary, b: RoomSummary): number {
-  return (
-    (b.latest_event?.timestamp_millis ?? 0) - (a.latest_event?.timestamp_millis ?? 0) ||
-    (a.name ?? '').localeCompare(b.name ?? '')
-  );
+  return activityOf(b) - activityOf(a) || (a.name ?? '').localeCompare(b.name ?? '');
 }
 
 /**

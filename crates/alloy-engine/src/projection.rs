@@ -364,6 +364,7 @@ async fn room_summary(
             notification_count: u64::try_from(chat.unread_count).unwrap_or(0),
         },
         latest_event,
+        last_activity_millis: chat.last_activity_at.and_then(|at| u64::try_from(at).ok()),
         pinned: !is_topic && chat.is_pinned,
         pin_order: chat
             .pin_order

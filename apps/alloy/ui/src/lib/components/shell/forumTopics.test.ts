@@ -38,6 +38,18 @@ describe('topicsOf', () => {
     expect(topicsOf(rooms, 'forum').map((r) => r.id)).toEqual(['new', 'old']);
   });
 
+  it('sorts a topic by its own activity even before this device has its history', () => {
+    // A forum with 29 topics has history for a handful of them; the rest carry the network's
+    // timestamp and no preview. Ordering on the preview alone buried them at the bottom.
+    const rooms = [
+      room('forum', { is_forum: true }),
+      room('fetched', { parent_id: 'forum', latest_event: at(100) }),
+      room('never-opened', { parent_id: 'forum', last_activity_millis: 900 }),
+      room('quiet', { parent_id: 'forum' }),
+    ];
+    expect(topicsOf(rooms, 'forum').map((r) => r.id)).toEqual(['never-opened', 'fetched', 'quiet']);
+  });
+
   it('breaks a tie in activity by name, so the forum opens the same topic every time', () => {
     const rooms = [
       room('forum', { is_forum: true }),

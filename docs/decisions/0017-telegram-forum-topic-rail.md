@@ -45,6 +45,12 @@ beside it.
 
 - **One click to a conversation.** Selecting a forum opens its most recently active topic (newest
   activity, ties by name); a forum with no topics opens as an empty state with its name.
+- **The rail is ordered by the conversation that moved last.** Topics are conversations of their
+  own, and the rail sorts them by the newest activity the chat itself reports — the network's
+  "last message" timestamp, not merely the newest message stored on this device. A topic whose
+  history has not been fetched yet still sorts where the network says it belongs, and a message
+  arriving in any topic moves it to the top immediately. The forum's row in the chat list previews
+  that same newest topic's message; the topic count stands in only until a topic has history.
 - **The rail.** A narrow vertical column at the leading edge of the conversation pane lists the
   forum's topics: a circular initials badge coloured from the same palette as every other avatar
   (ADR 0001), a short two-line label, the unread count, a muted marker, and the active topic
