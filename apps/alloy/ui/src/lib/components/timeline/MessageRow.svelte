@@ -738,7 +738,7 @@
     void fetchMediaPath(source, mime_type)
       .then((path) => saveMediaFile(path, body || 'media', mime_type))
       .catch((err: unknown) => {
-        timelineStore.error = errorMessage(err);
+        timelineStore.setError(err);
       });
   }
 
@@ -748,7 +748,7 @@
       const { source, mime_type } = item.content.data;
       await copyImageFromUrl(await mediaFileUrl(source, mime_type));
     } catch (err: unknown) {
-      timelineStore.error = errorMessage(err);
+      timelineStore.setError(err);
     }
   }
 

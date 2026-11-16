@@ -370,11 +370,11 @@
     try {
       paths = await takeDroppedAttachments();
     } catch (err) {
-      timelineStore.error = errorMessage(err);
+      timelineStore.setError(err);
       return;
     }
     if (paths.length === 0 && dropped > 0) {
-      timelineStore.error = t('composer-drop-was-not-accepted');
+      timelineStore.setMessage(t('composer-drop-was-not-accepted'), true);
       return;
     }
     await stagePaths(paths);
@@ -428,7 +428,7 @@
         await focusAfterStaging();
       }
     } catch (err) {
-      timelineStore.error = errorMessage(err);
+      timelineStore.setError(err);
     }
   }
 
@@ -449,7 +449,7 @@
           });
           added = true;
         } catch (err) {
-          timelineStore.error = errorMessage(err);
+          timelineStore.setError(err);
         }
       }
       if (added) await focusAfterStaging();
@@ -471,7 +471,7 @@
     try {
       path = await importPastedImagePath(pasted);
     } catch (err) {
-      timelineStore.error = errorMessage(err);
+      timelineStore.setError(err);
     }
     if (path) {
       staged.push(await stageFile(path));
@@ -824,7 +824,7 @@
     {/if}
     {#if canRecord || recording}
       <div class="voice-slot" class:recording>
-        <VoiceRecorder bind:recording onsend={(clip) => timelineStore.sendVoice(clip)} onerror={(m) => (timelineStore.error = m)} />
+        <VoiceRecorder bind:recording onsend={(clip) => timelineStore.sendVoice(clip)} onerror={(m) => timelineStore.setMessage(m)} />
       </div>
     {/if}
 
