@@ -11,11 +11,20 @@ workspace = true
 [dependencies]
 alloy-protocol = { path = "../alloy-protocol" }
 async-trait = "0.1"
+# Pairing (ADR 0020 slice A): the same RustCrypto stack alloy-store already seals connector
+# material with, plus the X25519 and KDF primitives the handshake needs.
+chacha20poly1305 = "0.11"
+hkdf = "0.12"
+rand = "0.9"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+sha2 = "0.10"
 thiserror = "1.0"
-tokio = { version = "1.0", features = ["sync", "rt"] }
+tokio = { version = "1.0", features = ["sync", "rt", "net", "io-util", "time"] }
 tracing = "0.1"
+# Keys and handshake material are wiped when the pairing types drop.
+x25519-dalek = { version = "2.0", features = ["static_secrets"] }
+zeroize = "1.8"
 
 # keyring 3.x ships no platform store unless a backend feature is enabled; without one it silently
 # uses an in-memory mock that loses everything on exit. Each desktop OS therefore names its backend

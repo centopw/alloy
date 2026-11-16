@@ -3,6 +3,9 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::RwLock;
 
+pub mod config_bundle;
+pub mod pairing;
+
 pub use alloy_protocol::{AccountId, RoomId};
 
 #[derive(Debug, Error)]
