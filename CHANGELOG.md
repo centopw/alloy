@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.13 (pre-release)
+
+### Fixed
+- **Signing in again to an account you had already added no longer fails with a database error.** A second Messenger sign-in for the same account tried to create a second account row, which the store's `(network, remote_user_id)` uniqueness held back with "UNIQUE constraint failed"; the login looked broken even though the credentials were fine. The existing account is now refreshed in place — same chats and encryption store, new session, connector restarted — and browser-cookie and username/password sign-ins for one account no longer fight over the row.
+- **A sign-in that Facebook asks you to approve on your phone now waits for that approval.** That screen carries no code, but the app rendered it as a code prompt, so whatever was typed went nowhere and the session check failed afterwards. It is now its own waiting screen with Facebook's own instruction, checks back on its own until the approval lands, and offers Cancel and the browser-cookie route while it waits. A late answer from an attempt you cancelled no longer brings it back.
+
 ## 0.4.12 (pre-release)
 
 ### Added
