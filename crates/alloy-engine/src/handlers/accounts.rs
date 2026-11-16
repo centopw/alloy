@@ -163,7 +163,12 @@ async fn settle_step(
             .await
         }
         LoginStep::Failed { reason } => {
-            // The attempt never became an account, so its directory belongs to nobody.
+            // The attempt never became an account, so its directory belongs to nobody. Its
+            // connector is stopped rather than dropped: a Messenger attempt owns a live sidecar
+            // process, and dropping the handle alone can leave it running beside the next login.
+            if let Err(err) = attempt.connector.stop().await {
+                tracing::debug!(error = %err, "stopping a failed login connector failed");
+            }
             drop_directory(&attempt.dir);
             Ok(EngineResponse::LoginStep {
                 login_id,
@@ -356,6 +361,11 @@ async fn cancel_login(
     login_id: &LoginId,
 ) -> Result<EngineResponse, EngineError> {
     if let Some(attempt) = ctx.logins.take(login_id).await {
+        // The attempt owns a connector (and, for Messenger, a sidecar process); stop it before the
+        // handle is dropped so nothing from the abandoned attempt keeps running.
+        if let Err(err) = attempt.connector.stop().await {
+            tracing::debug!(error = %err, "stopping a cancelled login connector failed");
+        }
         drop_directory(&attempt.dir);
     }
     // A login that already finished is not an error: the account it created stays.
