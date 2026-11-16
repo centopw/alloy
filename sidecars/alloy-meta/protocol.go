@@ -523,6 +523,13 @@ func challengeStep(kind, message string) LoginStep {
 	return LoginStep{Type: "challenge", Kind: kind, Message: message}
 }
 
+// waitStep says the network is waiting for the user to finish the sign-in somewhere else (approve
+// the notification on their phone). The host shows the message and answers with a "continue"
+// input; while the network is still waiting, the answer is this same step.
+func waitStep(message string) LoginStep {
+	return LoginStep{Type: "wait", Message: message}
+}
+
 // LoginInput mirrors alloy_connector::LoginInput.
 type LoginInput struct {
 	Type     string            `json:"type"`

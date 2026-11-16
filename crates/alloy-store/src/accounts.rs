@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::Store;
 use crate::crypto;
 use crate::error::StoreError;
-use crate::model::{AccountRecord, AccountState, NewAccount, now_ms};
+use crate::model::{AccountRecord, AccountState, Network, NewAccount, now_ms};
 use crate::rows;
 
 impl Store {
@@ -58,6 +58,29 @@ impl Store {
         .await
     }
 
+    /// The account an earlier login created for this network identity, when one exists.
+    ///
+    /// A re-login of the same network account must reuse its row: `accounts` is unique on
+    /// `(network, remote_user_id)` so a second `INSERT` would fail, and the row also owns the
+    /// account's local data.
+    pub async fn find_account_by_remote(
+        &self,
+        network: Network,
+        remote_user_id: &str,
+    ) -> Result<Option<AccountRecord>, StoreError> {
+        let remote_user_id = remote_user_id.to_owned();
+        self.with_conn(move |conn| {
+            Ok(conn
+                .query_row(
+                    "SELECT * FROM accounts WHERE network = ?1 AND remote_user_id = ?2",
+                    rusqlite::params![network, remote_user_id],
+                    rows::account,
+                )
+                .optional()?)
+        })
+        .await
+    }
+
     pub async fn list_accounts(&self) -> Result<Vec<AccountRecord>, StoreError> {
         self.with_conn(|conn| {
             let mut stmt =
@@ -78,6 +101,27 @@ impl Store {
             let updated = conn.execute(
                 "UPDATE accounts SET state = ?2, updated_at = ?3 WHERE account_id = ?1",
                 rusqlite::params![account_id, state, now_ms()],
+            )?;
+            if updated == 0 {
+                return Err(StoreError::NotFound("account"));
+            }
+            Ok(())
+        })
+        .await
+    }
+
+    /// Records the display name the network reported at the latest login.
+    pub async fn update_account_display_name(
+        &self,
+        account_id: &str,
+        display_name: Option<&str>,
+    ) -> Result<(), StoreError> {
+        let account_id = account_id.to_owned();
+        let display_name = display_name.map(str::to_owned);
+        self.with_conn(move |conn| {
+            let updated = conn.execute(
+                "UPDATE accounts SET display_name = ?2, updated_at = ?3 WHERE account_id = ?1",
+                rusqlite::params![account_id, display_name, now_ms()],
             )?;
             if updated == 0 {
                 return Err(StoreError::NotFound("account"));

@@ -702,6 +702,8 @@ export type LoginInputDto =
 { type: "credentials"; username: string; password: string } | 
 /**  The user picked one of [`LoginStepDto::Credentials::alternatives`] instead. */
 { type: "switch"; to: LoginAlternativeDto } | 
+/**  Answer to [`LoginStepDto::Wait`]: the user has done what the network asked. */
+{ type: "continue" } | 
 /**
  *  Ask for a fresh [`LoginStepDto::Qr`] payload (the previous one expired, or the user chose QR
  *  login).
@@ -751,6 +753,15 @@ alternatives: LoginAlternativeDto[] } |
  */
 { type: "challenge"; kind: ChallengeKind; 
 /**  The network's own explanation, shown next to the UI's copy. */
+message: string } | 
+/**
+ *  The network is waiting for the user to finish the sign-in outside this app (approve the
+ *  sign-in on a phone, for example). The UI shows `message` and answers with
+ *  [`LoginInputDto::Continue`], which blocks until the network moves on; the answer may be
+ *  this same step again while it is still waiting.
+ */
+{ type: "wait"; 
+/**  The network's own instructions, e.g. where it sent the notification. */
 message: string } | 
 /**  Login finished; the account is stored and the connector starts. */
 { type: "done"; account: Account } | 

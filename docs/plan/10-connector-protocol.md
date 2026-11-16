@@ -162,6 +162,9 @@ itself: it shows the step it is given and submits the user's answer.
   on its own site or app (`kind` is `checkpoint`, `two_factor` or `consent`). The attempt stays open,
   so the user can clear it there and answer with a code (when the kind is `two_factor`), switch
   methods, or cancel — the UI names the challenge and points at the network's site meanwhile.
+- `Wait { message }` is a **step** for a sign-in the user finishes off-device (approve the
+  notification on their phone). Nothing is typed: the host answers with `Continue`, which blocks
+  until the network moves on, and the answer may be the same `Wait` step while it is still waiting.
 - `LoginFailure` distinguishes rejected input (with the offending `field`), expired steps, rate
   limits, transport failures, an unsupported login method, and a network-locked account.
 - `Done { remote_user_id, display_name, session }` — the host persists `session` before calling
@@ -178,6 +181,8 @@ itself: it shows the step it is given and submits the user's answer.
 | `Qr { payload, expires_at }` | `QrRefresh` | refresh when expired, or when the user chooses QR login |
 | `Cookies { fields, help_url }` | `Cookies { values }` | `values` keyed by `CookieField::name`; `required` marks mandatory cookies |
 | `Credentials { username_label }` | `Credentials { username, password }` | networks that log in with a handle |
+| `Challenge { kind, message }` | `Code { code }` for `two_factor` | cleared on the network's own site; the attempt stays open |
+| `Wait { message }` | `Continue` | user finishes the sign-in off-device; the answer may be the same step |
 | `Done { … }` | — | terminal |
 | `Failed { reason }` | — | terminal |
 
@@ -193,6 +198,9 @@ stateDiagram-v2
   Code --> Done: submit_login(Code) accepted
   Password --> Done: submit_login(Password) accepted
   Cookies --> Done: submit_login(Cookies) accepted
+  Code --> Wait: network approves on another device
+  Wait --> Wait: submit_login(Continue) still waiting
+  Wait --> Done: approved
   Code --> Failed: rejected or out of order
   Password --> Failed: rejected
   Cookies --> Failed: missing or invalid cookie

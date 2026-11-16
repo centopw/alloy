@@ -362,6 +362,7 @@ pub fn pending_login_step(step: alloy_connector::LoginStep) -> Option<LoginStepD
             kind: challenge_kind(kind),
             message,
         }),
+        alloy_connector::LoginStep::Wait { message } => Some(LoginStepDto::Wait { message }),
         alloy_connector::LoginStep::Done { .. } | alloy_connector::LoginStep::Failed { .. } => None,
     }
 }
@@ -391,6 +392,7 @@ pub fn login_input(input: LoginInputDto) -> alloy_connector::LoginInput {
             to: connector_login_alternative(to),
         },
         LoginInputDto::QrRefresh => alloy_connector::LoginInput::QrRefresh,
+        LoginInputDto::Continue => alloy_connector::LoginInput::Continue,
     }
 }
 
@@ -410,6 +412,23 @@ mod tests {
         assert_eq!(reconnect_delay_millis(40), 300_000);
         // An attempt count of zero cannot happen on the wire, but it must not shift the base.
         assert_eq!(reconnect_delay_millis(0), 2_000);
+    }
+
+    #[test]
+    fn a_wait_step_keeps_the_networks_instruction_and_continue_answers_it() {
+        let step = pending_login_step(alloy_connector::LoginStep::Wait {
+            message: "We sent a notification to your phone".to_string(),
+        });
+        assert_eq!(
+            step,
+            Some(LoginStepDto::Wait {
+                message: "We sent a notification to your phone".to_string(),
+            })
+        );
+        assert_eq!(
+            login_input(LoginInputDto::Continue),
+            alloy_connector::LoginInput::Continue
+        );
     }
 
     #[test]

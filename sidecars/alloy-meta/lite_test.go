@@ -9,6 +9,7 @@ import (
 	"go.mau.fi/mautrix-meta/pkg/messagix/cookies"
 	"go.mau.fi/mautrix-meta/pkg/messagix/httpclient"
 	"go.mau.fi/mautrix-meta/pkg/messagix/types"
+	"maunium.net/go/mautrix/bridgev2"
 )
 
 // TestClassifyLiteStep pins the mapping from the Bloks steps mautrix-meta produces to the input the
@@ -66,8 +67,7 @@ func TestClassifyLiteStep(t *testing.T) {
 		{
 			name:     "display and wait",
 			step:     liteStep{ID: "fi.mau.meta.messengerlite.afad_wait"},
-			wantKind: liteCode,
-			wantVia:  "app",
+			wantKind: liteWait,
 		},
 		{
 			name:     "captcha",
@@ -178,6 +178,63 @@ func TestLiteFlowDone(t *testing.T) {
 	}
 	if len(*sent) != 1 || (*sent)[0]["username"] != "ada" {
 		t.Fatalf("credentials were not submitted: %v", *sent)
+	}
+}
+
+// TestLiteFlowWaitPollsForApproval covers the approve-on-phone step: it is a wait step, not a code
+// prompt, and a poll window that ends without the approval just returns the same wait step.
+func TestLiteFlowWaitPollsForApproval(t *testing.T) {
+	waiting := liteStep{
+		ID:           "fi.mau.meta.messengerlite.afad_wait",
+		Instructions: "We sent a notification to your phone. Open it to continue.",
+	}
+	calls := 0
+	flow := &liteFlow{poll: func(_ context.Context, _ map[string]string) (litePoll, error) {
+		calls++
+		if calls == 1 {
+			return litePoll{Step: &waiting}, nil
+		}
+		return litePoll{}, context.DeadlineExceeded
+	}}
+
+	out := flow.run(context.Background(), map[string]string{"username": "ada", "password": "hunter2"})
+	if out.Failure != nil || out.Step.Type != "wait" {
+		t.Fatalf("approval step = %+v, want a wait step", out)
+	}
+	if !strings.Contains(out.Step.Message, "notification") {
+		t.Fatalf("the network's instruction was lost: %q", out.Step.Message)
+	}
+	if !flow.awaitingApproval {
+		t.Fatal("the flow must remember it is waiting for an approval")
+	}
+
+	out = flow.run(context.Background(), map[string]string{})
+	if out.Failure != nil || out.Step.Type != "wait" {
+		t.Fatalf("poll window ending = %+v, want the same wait step", out)
+	}
+	if out.Step.Message != waiting.Instructions {
+		t.Fatalf("wait message changed across polls: %q", out.Step.Message)
+	}
+}
+
+// TestLiteFlowWaitFallbackMessage keeps the waiting screen meaningful when Meta sends no text.
+func TestLiteFlowWaitFallbackMessage(t *testing.T) {
+	flow, _ := scriptedFlow(litePoll{Step: &liteStep{ID: "fi.mau.meta.messengerlite.afad_wait"}})
+	out := flow.run(context.Background(), map[string]string{})
+	if out.Failure != nil || out.Step.Type != "wait" || out.Step.Message != waitApprovalFallback {
+		t.Fatalf("wait step = %+v, want the local fallback message", out)
+	}
+}
+
+// TestLiteFailureApprovalDenied keeps Meta's explanation when the approval is denied or expires.
+func TestLiteFailureApprovalDenied(t *testing.T) {
+	denied := bridgev2.RespError{ErrCode: "FI.MAU.META_AFAD_STOPPED", Err: "The approval request expired or was denied, please try logging in again"}
+	failure := liteFailure(denied)
+	if failure.Type != "invalid_input" || failure.Field == nil || *failure.Field != "continue" {
+		t.Fatalf("denied approval classified as %+v", failure)
+	}
+	if !strings.Contains(failure.Message, "expired or was denied") {
+		t.Fatalf("the network's reason was lost: %q", failure.Message)
 	}
 }
 

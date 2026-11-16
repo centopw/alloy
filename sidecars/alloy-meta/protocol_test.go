@@ -174,11 +174,22 @@ func TestChallengeStepKinds(t *testing.T) {
 	}
 }
 
+// TestWaitStepFrame pins the approval step's wire shape: the network's message and nothing else, so
+// the host knows to keep answering with "continue" instead of asking for a code.
+func TestWaitStepFrame(t *testing.T) {
+	got := encodeFrame(t, waitStep(waitApprovalFallback))
+	want := `{"type":"wait","message":"` + waitApprovalFallback + `"}`
+	if got != want {
+		t.Fatalf("wait frame mismatch\n got: %s\nwant: %s", got, want)
+	}
+}
+
 // TestOnlyChallengesCarryAKind keeps every other step decoding into the shape the contract already
 // had: no stray "kind" key.
 func TestOnlyChallengesCarryAKind(t *testing.T) {
 	for name, step := range map[string]LoginStep{
 		"code":       codeStep("sms"),
+		"wait":       waitStep(waitApprovalFallback),
 		"failed":     failedStep(failureAccountLocked(accountSuspendedMessage)),
 		"failedIn":   failedStep(failureInvalidInput("code", "incorrect code")),
 		"credential": credentialsStep(),

@@ -53,6 +53,7 @@ pub(crate) fn field_of(input: &LoginInput) -> &'static str {
         LoginInput::Cookies { .. } => "cookies",
         LoginInput::Credentials { .. } => "credentials",
         LoginInput::Switch { .. } => "alternative",
+        LoginInput::Continue => "continue",
         LoginInput::QrRefresh => "qr",
     }
 }

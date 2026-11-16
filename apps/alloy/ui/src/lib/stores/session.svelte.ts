@@ -237,10 +237,13 @@ class SessionStore {
         }),
         'LoginStep'
       );
+      // An answer can take a poll window (an approval step waits for the phone); the attempt may
+      // have been cancelled or replaced meanwhile, and its result must not resurrect it.
+      if (this.login?.id !== attempt.id) return;
       this.login = { ...attempt, step: res.payload.step };
       this.reachStep(res.payload.step);
     } catch (e) {
-      this.loginError = errorMessage(e);
+      if (this.login?.id === attempt.id) this.loginError = errorMessage(e);
       throw e;
     } finally {
       this.loginBusy = false;

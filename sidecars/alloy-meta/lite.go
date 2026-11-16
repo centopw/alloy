@@ -13,6 +13,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/rs/zerolog"
 
@@ -21,6 +22,7 @@ import (
 	"go.mau.fi/mautrix-meta/pkg/messagix/cookies"
 	"go.mau.fi/mautrix-meta/pkg/messagix/httpclient"
 	"go.mau.fi/mautrix-meta/pkg/messagix/types"
+	"maunium.net/go/mautrix/bridgev2"
 )
 
 // liteUsernameLabel is the label for the username field. Messenger accounts are Facebook accounts,
@@ -70,6 +72,10 @@ const (
 	litePassword
 	// liteCode asks for a one-time code.
 	liteCode
+	// liteWait is a step with no input of its own: the network is waiting for the user to finish
+	// the sign-in elsewhere (approve the notification on their phone). The host shows the network's
+	// instructions and answers with a "continue" input until the flow moves on.
+	liteWait
 	// liteBlocked is a captcha: only a human on Meta's own site can clear it.
 	liteBlocked
 )
@@ -87,6 +93,10 @@ type liteFlow struct {
 	// awaitingCode records that the last returned step asked for a one-time code, which is what
 	// makes a challenge answerable with a code on this device.
 	awaitingCode bool
+	// awaitingApproval records that the last returned step is the network waiting for something
+	// only the user can do elsewhere; waitingMessage is what that step told them.
+	awaitingApproval bool
+	waitingMessage   string
 }
 
 // liteLogin owns the messagix client that runs the flow and the flow state itself. The mutex
@@ -167,6 +177,26 @@ func (l *liteLogin) answerCode(ctx context.Context, code string) liteOutcome {
 	return l.flow.run(ctx, map[string]string{l.flow.codeField(): code})
 }
 
+// afadPollWindow bounds one "continue" answer while the network waits for the user to approve the
+// sign-in elsewhere. The library blocks inside its approval poll, so the window keeps one
+// submit_login from holding the host's request for minutes: the host asks again, and each answer
+// is either the next step or the same wait step.
+const afadPollWindow = 20 * time.Second
+
+// answerContinue polls the flow once for the approval it is waiting on. Anything the user could
+// type is irrelevant to that step, so no field is filled in.
+func (l *liteLogin) answerContinue(ctx context.Context) liteOutcome {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if !l.flow.awaitingApproval {
+		failure := failureInvalidInput("continue", "the login is not waiting for an approval")
+		return liteOutcome{Failure: &failure}
+	}
+	pollCtx, cancel := context.WithTimeout(ctx, afadPollWindow)
+	defer cancel()
+	return l.flow.run(pollCtx, map[string]string{})
+}
+
 // run performs one turn and classifies the result.
 func (f *liteFlow) run(ctx context.Context, input map[string]string) liteOutcome {
 	polled, err := f.poll(ctx, input)
@@ -194,6 +224,10 @@ func (f *liteFlow) mapStep(step liteStep) liteOutcome {
 	// A challenge can only be answered with a code while the flow is waiting for one; every other
 	// turn loses that ability.
 	f.awaitingCode = kind == liteCode
+	if kind != liteWait {
+		f.awaitingApproval = false
+		f.waitingMessage = ""
+	}
 
 	switch kind {
 	case liteCredentials:
@@ -220,6 +254,14 @@ func (f *liteFlow) mapStep(step liteStep) liteOutcome {
 		f.expect = []string{field}
 		f.lastKey = key
 		return liteOutcome{Step: codeStep(via)}
+	case liteWait:
+		// The network is waiting for the user, not for an answer here: the same step coming back is
+		// the normal polling outcome, so it is never treated as a rejected input.
+		f.expect = nil
+		f.lastKey = ""
+		f.awaitingApproval = true
+		f.waitingMessage = waitInstructions(step.Instructions)
+		return liteOutcome{Step: waitStep(f.waitingMessage)}
 	case liteBlocked:
 		// A captcha is a checkpoint: only Meta's own site can render it, so the host points the user
 		// there and the attempt stays open for another answer.
@@ -246,6 +288,8 @@ func kindName(kind liteKind) string {
 		return "password"
 	case liteCode:
 		return "code"
+	case liteWait:
+		return "wait"
 	case liteBlocked:
 		return "blocked"
 	default:
@@ -255,6 +299,19 @@ func kindName(kind liteKind) string {
 
 // liteCaptchaMessage explains why a captcha is terminal for the sidecar.
 const liteCaptchaMessage = "Facebook is asking for a captcha; complete the security check in the official app or on facebook.com, then log in again"
+
+// waitApprovalFallback is shown when Meta sends the approval screen without instructions of its
+// own, which the Bloks step almost always carries.
+const waitApprovalFallback = "Confirm this sign-in in the Facebook app on your phone; this page continues once you do"
+
+// waitInstructions is the network's own instruction for an approval step, with a local fallback so
+// the host never shows an empty waiting screen.
+func waitInstructions(text string) string {
+	if text = strings.TrimSpace(text); text != "" {
+		return text
+	}
+	return waitApprovalFallback
+}
 
 // classifyLiteStep decides what the connector asks for from the field IDs and types the Bloks state
 // machine put in the step. The field ID decides first and the component type second, so a renamed
@@ -289,10 +346,10 @@ func classifyLiteStep(step liteStep) (kind liteKind, field, via string) {
 		}
 	}
 	// A display-and-wait step (approve the login on another device) carries no fields at all. The
-	// network waits for the user to approve in the official app, so the step is offered as an app
-	// code: whatever the host sends is unused and the flow advances once the approval lands.
+	// network waits for the user to approve in the official app; nothing typed here answers it, so
+	// it becomes a wait step the host keeps answering with "continue".
 	if len(step.Fields) == 0 {
-		return liteCode, "", "app"
+		return liteWait, "", ""
 	}
 	return liteUnsupported, "", ""
 }
@@ -359,6 +416,11 @@ func challengeFor(err error, awaitingCode bool) (kind, message string, ok bool) 
 // becomes a step so the attempt stays open — the user can answer a code, switch to cookies, or retry
 // once Meta's site has been visited; everything else ends the attempt with the matching failure.
 func (f *liteFlow) outcome(err error) liteOutcome {
+	// The bounded poll window ended while the network was still waiting for the user: that is not a
+	// failure, it is the same wait step, so the host can ask again.
+	if f.awaitingApproval && (errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)) {
+		return liteOutcome{Step: waitStep(f.waitingMessage)}
+	}
 	if kind, message, ok := challengeFor(err, f.awaitingCode); ok {
 		return liteOutcome{Step: challengeStep(kind, message)}
 	}
@@ -370,6 +432,11 @@ func (f *liteFlow) outcome(err error) liteOutcome {
 // a suspension is an account lock, a 429 a rate limit, a rejection of the submitted pair an invalid
 // input. Challenges are not failures; [`outcome`] turns them into steps before this runs.
 func liteFailure(err error) LoginFailure {
+	var respErr bridgev2.RespError
+	if errors.As(err, &respErr) && respErr.ErrCode == "FI.MAU.META_AFAD_STOPPED" {
+		// The approval this flow was waiting for was denied or expired; Meta's own words say so.
+		return failureInvalidInput("continue", respErr.Err)
+	}
 	switch {
 	case errors.Is(err, httpclient.ErrAccountSuspended):
 		return failureAccountLocked(accountSuspendedMessage)

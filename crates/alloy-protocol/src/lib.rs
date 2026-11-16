@@ -408,6 +408,14 @@ pub enum LoginStepDto {
         /// The network's own explanation, shown next to the UI's copy.
         message: String,
     },
+    /// The network is waiting for the user to finish the sign-in outside this app (approve the
+    /// sign-in on a phone, for example). The UI shows `message` and answers with
+    /// [`LoginInputDto::Continue`], which blocks until the network moves on; the answer may be
+    /// this same step again while it is still waiting.
+    Wait {
+        /// The network's own instructions, e.g. where it sent the notification.
+        message: String,
+    },
     /// Login finished; the account is stored and the connector starts.
     Done { account: Account },
     /// The attempt failed. Terminal for this attempt.
@@ -441,6 +449,8 @@ pub enum LoginInputDto {
     Credentials { username: String, password: String },
     /// The user picked one of [`LoginStepDto::Credentials::alternatives`] instead.
     Switch { to: LoginAlternativeDto },
+    /// Answer to [`LoginStepDto::Wait`]: the user has done what the network asked.
+    Continue,
     /// Ask for a fresh [`LoginStepDto::Qr`] payload (the previous one expired, or the user chose QR
     /// login).
     QrRefresh,
@@ -474,6 +484,7 @@ impl fmt::Debug for LoginInputDto {
                 .field("password", &REDACTED)
                 .finish(),
             Self::Switch { to } => f.debug_struct("Switch").field("to", to).finish(),
+            Self::Continue => f.write_str("Continue"),
             Self::QrRefresh => f.write_str("QrRefresh"),
         }
     }

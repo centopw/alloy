@@ -130,6 +130,15 @@ pub enum LoginStep {
         /// The network's own explanation, shown next to the host's copy.
         message: String,
     },
+    /// The network is waiting for the user to finish the sign-in outside this app: approve the
+    /// sign-in on a phone, for example. The host shows `message` and answers with
+    /// [`LoginInput::Continue`]; that answer blocks until the network moves on (or the connector's
+    /// poll window ends) and returns the next step, which may be this same step while the network
+    /// is still waiting.
+    Wait {
+        /// The network's own instructions, e.g. where it sent the notification.
+        message: String,
+    },
     /// Login finished. The session blob must be persisted before the connector is started.
     Done {
         remote_user_id: String,
@@ -165,6 +174,8 @@ pub enum LoginInput {
     Credentials { username: String, password: String },
     /// One of the [`LoginStep::Credentials::alternatives`] the user picked instead.
     Switch { to: LoginAlternative },
+    /// Answer to [`LoginStep::Wait`]: the user says they have done what the network asked.
+    Continue,
     /// Ask for a fresh [`LoginStep::Qr`] payload (previous one expired, or the user chose QR login).
     QrRefresh,
 }
@@ -205,6 +216,7 @@ impl fmt::Debug for LoginInput {
                 .field("password", &REDACTED)
                 .finish(),
             Self::Switch { to } => f.debug_struct("Switch").field("to", to).finish(),
+            Self::Continue => f.write_str("Continue"),
             Self::QrRefresh => f.write_str("QrRefresh"),
         }
     }

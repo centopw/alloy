@@ -310,6 +310,15 @@
     onsubmit({ type: 'code', code: answer });
   }
 
+  // An approval step advances on its own: the connector holds each answer for its poll window, so
+  // the screen asks again as soon as that window comes back until the network moves on. The small
+  // delay keeps a fast answer from turning into a hot loop.
+  $effect(() => {
+    if (step.type !== 'wait' || busy) return;
+    const timer = setTimeout(() => onsubmit({ type: 'continue' }), 1200);
+    return () => clearTimeout(timer);
+  });
+
   // QR rendering: the payload is an opaque string; only the image crosses into the DOM.
   let qrDataUrl = $state<string | null>(null);
   let qrFailed = $state(false);
@@ -402,6 +411,21 @@
         </Button>
       </div>
     </form>
+  {:else if step.type === 'wait'}
+    <h3>{t('onboarding-wait-title')}</h3>
+    <p class="hint" role="status">{step.message}</p>
+    <p class="hint">{t('onboarding-wait-hint')}</p>
+    <div class="actions">
+      <Button variant="ghost" type="button" onclick={oncancel}>{t('common-cancel')}</Button>
+      <Button type="button" disabled={busy} onclick={() => onsubmit({ type: 'continue' })}>
+        {busy ? t('onboarding-working') : t('onboarding-wait-continue')}
+      </Button>
+    </div>
+    <div class="alternatives">
+      <button type="button" class="link" disabled={busy} onclick={() => chooseAlternative('cookies')}>
+        {t('onboarding-alternative-cookies')}
+      </button>
+    </div>
   {:else if step.type === 'code'}
     <h3>{t('onboarding-code-title')}</h3>
     <p class="hint">{codeHint(step.via)}</p>

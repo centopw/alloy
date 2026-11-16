@@ -55,6 +55,8 @@ func (m *Messenger) submitLogin(ctx context.Context, params json.RawMessage) (an
 		return m.submitLitePassword(ctx, p.Input.Password, fail)
 	case "code":
 		return m.submitLiteCode(ctx, p.Input.Code, fail)
+	case "continue":
+		return m.submitLiteContinue(ctx, fail)
 	case "switch":
 		if p.Input.To != "cookies" {
 			return fail(failureNotSupported())
@@ -101,6 +103,13 @@ func (m *Messenger) submitLiteCode(ctx context.Context, code string, fail loginF
 	}
 	out := m.liteForAttempt().answerCode(ctx, code)
 	return m.settleLite(ctx, out, code, fail)
+}
+
+// submitLiteContinue answers a wait step: the network is polling for an approval only the user can
+// give, so nothing is submitted and the answer is whatever that poll saw (often the same step).
+func (m *Messenger) submitLiteContinue(ctx context.Context, fail loginFail) (any, *WireError) {
+	out := m.liteForAttempt().answerContinue(ctx)
+	return m.settleLite(ctx, out, "", fail)
 }
 
 // liteForAttempt returns the flow for this login attempt, starting one on the first answer.

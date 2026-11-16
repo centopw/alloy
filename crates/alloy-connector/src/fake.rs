@@ -266,7 +266,8 @@ impl Connector for FakeConnector {
             | (_, LoginInput::Switch { .. })
             | (_, LoginInput::Password { .. })
             | (_, LoginInput::Cookies { .. })
-            | (_, LoginInput::Credentials { .. }) => LoginStep::Failed {
+            | (_, LoginInput::Credentials { .. })
+            | (_, LoginInput::Continue) => LoginStep::Failed {
                 reason: LoginFailure::NotSupported,
             },
         }

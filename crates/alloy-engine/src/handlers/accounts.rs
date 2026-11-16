@@ -11,7 +11,7 @@ use alloy_store::AccountState as StoreAccountState;
 use alloy_store::{AccountRecord, NewAccount};
 use uuid::Uuid;
 
-use crate::accounts::{account_dto, accounts_dto, start_with_connector};
+use crate::accounts::{account_dto, accounts_dto, start_stored_account, start_with_connector};
 use crate::context::EngineContext;
 use crate::convert;
 use crate::error::{EngineError, map_connector, map_store};
@@ -192,13 +192,26 @@ async fn complete_login(
     display_name: String,
     session: SessionBlob,
 ) -> Result<EngineResponse, EngineError> {
+    // Signing in again to a network account that is already linked refreshes that account. A
+    // second row would violate `accounts(network, remote_user_id)` and leave the old row (and the
+    // local data hanging off it) orphaned.
+    let network = convert::network_protocol_to_store(attempt.network);
+    if let Some(existing) = ctx
+        .store
+        .find_account_by_remote(network, &remote_user_id)
+        .await
+        .map_err(map_store)?
+    {
+        return relink_account(ctx, login_id, attempt, existing, display_name, session).await;
+    }
+
     // The id and the directory were fixed when the attempt started, so the store row, the
     // connector and the directory agree without any move.
     let record = ctx
         .store
         .insert_account(NewAccount {
             account_id: Some(attempt.account_id),
-            network: convert::network_protocol_to_store(attempt.network),
+            network,
             remote_user_id: Some(remote_user_id.clone()),
             display_name: Some(display_name),
             state: StoreAccountState::Active,
@@ -230,6 +243,91 @@ async fn complete_login(
             account = %record.account_id,
             error = %err.message,
             "account was stored but its connector did not start"
+        );
+        let _ = ctx
+            .store
+            .update_account_state(&record.account_id, StoreAccountState::NeedsRelogin)
+            .await;
+    }
+
+    let record = ctx
+        .store
+        .get_account(&record.account_id)
+        .await
+        .map_err(map_store)?
+        .unwrap_or(record);
+    let account = account_dto(ctx, &record).await?;
+    let accounts = accounts_dto(ctx).await?;
+    ctx.sink.emit(EngineEvent::AccountsChanged { accounts });
+    Ok(EngineResponse::LoginStep {
+        login_id,
+        step: LoginStepDto::Done { account },
+    })
+}
+
+/// Refreshes an account that is already linked: its row and directory stay, its session is
+/// replaced, and the connector is started again with the new session.
+///
+/// The login attempt that discovered the existing identity used a throwaway directory and
+/// connector of its own (allocated before the network answered), so both are discarded here.
+async fn relink_account(
+    ctx: &EngineContext,
+    login_id: LoginId,
+    attempt: PendingLogin,
+    existing: AccountRecord,
+    display_name: String,
+    session: SessionBlob,
+) -> Result<EngineResponse, EngineError> {
+    if let Err(err) = attempt.connector.stop().await {
+        tracing::warn!(error = %err, "stopping the duplicate login connector failed");
+    }
+    drop_directory(&attempt.dir);
+
+    // The running connector still holds the old session; stop it before its secret is replaced so
+    // the restarted one is the only live connection.
+    if let Some(runtime) = ctx.accounts.remove(&existing.account_id).await
+        && let Err(err) = runtime.connector.stop().await
+    {
+        tracing::warn!(
+            account = %existing.account_id,
+            error = %err,
+            "stopping the old connector before a re-login failed"
+        );
+    }
+
+    if let Err(err) = ctx
+        .store
+        .put_secret(&existing.account_id, session.as_bytes())
+        .await
+    {
+        // The old session was stopped, so the account cannot run until the user signs in again.
+        let _ = ctx
+            .store
+            .update_account_state(&existing.account_id, StoreAccountState::NeedsRelogin)
+            .await;
+        return Err(map_store(err));
+    }
+    ctx.store
+        .update_account_display_name(&existing.account_id, Some(&display_name))
+        .await
+        .map_err(map_store)?;
+    ctx.store
+        .update_account_state(&existing.account_id, StoreAccountState::Active)
+        .await
+        .map_err(map_store)?;
+
+    let record = ctx
+        .store
+        .get_account(&existing.account_id)
+        .await
+        .map_err(map_store)?
+        .unwrap_or(existing);
+    // Same contract as a first login: stored credentials trump a connector that cannot start.
+    if let Err(err) = start_stored_account(ctx, record.clone()).await {
+        tracing::warn!(
+            account = %record.account_id,
+            error = %err.message,
+            "account was relinked but its connector did not start"
         );
         let _ = ctx
             .store

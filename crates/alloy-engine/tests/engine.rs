@@ -295,6 +295,35 @@ async fn login_state_machine_creates_an_account() {
 }
 
 #[tokio::test]
+async fn logging_in_again_reuses_the_linked_account() {
+    let harness = Harness::new();
+    let first = login(&harness.engine).await;
+
+    // The same network identity signs in again (a reconnect, or a second login method): the
+    // account row is reused, so the unique `(network, remote_user_id)` row is refreshed instead of
+    // being inserted twice.
+    let second = login(&harness.engine).await;
+    assert_eq!(second.id, first.id);
+    assert_eq!(second.state, AccountState::Active);
+
+    let accounts = list_accounts(&harness.engine).await;
+    assert_eq!(accounts.len(), 1);
+    assert_eq!(accounts[0].id, first.id);
+
+    // The session the second login produced is the one the account now restores from.
+    let store = &harness.engine.context().store;
+    let secret = store
+        .get_secret(&first.id.0)
+        .await
+        .expect("read secret")
+        .expect("the account has a session");
+    assert_eq!(
+        std::str::from_utf8(&secret).expect("session is utf-8"),
+        format!("alloy-fake-session:v1:{FAKE_USER_ID}")
+    );
+}
+
+#[tokio::test]
 async fn login_challenge_keeps_the_attempt_open() {
     let harness = Harness::new();
     let (login_id, step) = begin_login(&harness.engine).await;
