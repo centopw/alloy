@@ -994,6 +994,10 @@ pub struct SyncStatusReport {
     #[specta(type = Option<Number>)]
     pub last_sync_ms: Option<i64>,
     pub last_error: Option<String>,
+    /// A recovery phrase was created before a key rotation and no longer opens the account's
+    /// current data. `CreateRecoveryPhrase` is the remedy; absent means no phrase is on record.
+    #[specta(optional)]
+    pub recovery_stale: Option<bool>,
     pub layers: Vec<SyncLayerStatus>,
     pub devices: Vec<DeviceDto>,
 }

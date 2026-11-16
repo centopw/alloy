@@ -13,6 +13,9 @@ workspace = true
 chacha20poly1305 = "0.11"
 # Device identities and batch signatures (ADR 0020 invariants 4, 11).
 ed25519-dalek = "2.2"
+# Per-device key agreement for rotation wraps (ADR 0020 invariant 14); the same crate
+# alloy-storage already uses for the pairing handshake.
+x25519-dalek = { version = "2.0", features = ["static_secrets", "zeroize"] }
 # Every key in the hierarchy is HKDF-SHA256 output with a version-labelled info string.
 hkdf = "0.12"
 # Master-key generation only; no crate-local RNG.

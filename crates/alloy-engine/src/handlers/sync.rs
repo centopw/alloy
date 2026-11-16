@@ -35,6 +35,7 @@ use alloy_storage::pairing::{
     PairingTicket,
 };
 use alloy_store::ChatFlagsUpdate;
+use alloy_sync::device::DeviceSecretKey;
 use alloy_sync::keys::MasterKey;
 use argon2::{Algorithm, Argon2, Params, Version};
 use base64::Engine as _;
@@ -64,6 +65,9 @@ const SYNC_VERSION: u32 = 1;
 /// Secret-store keys. Both values are 32 random bytes, base64 in the store.
 const MASTER_KEY_SECRET: &str = "alloy.sync.master_key.v1";
 const DEVICE_KEY_SECRET: &str = "alloy.device.ed25519_key.v1";
+/// The private half of this device's X25519 key. Stored exactly like the master key (ADR 0021):
+/// the same secret store, the same wrapping tier, never in `settings.json`.
+const DEVICE_X25519_SECRET: &str = "alloy.device.x25519_key.v1";
 
 /// `settings.json` keys that describe this installation, not the account. They never cross in a
 /// bundle: an import must not move a window size or an updater channel. `sync` is here for a
@@ -104,6 +108,11 @@ struct DeviceEntry {
     label: String,
     enrolled_ms: i64,
     epoch: u32,
+    /// Hex X25519 public key the device publishes at enrolment, so a revocation can wrap the
+    /// rotated master to it. Empty for an entry written before device keys existed: such a device
+    /// cannot adopt a rotation and has to enrol again.
+    #[serde(default)]
+    x25519_pub: String,
 }
 
 /// The recovery verifier plus the wrapped blob it describes. It names the KDF inputs so a later
@@ -463,9 +472,11 @@ fn spawn_offer(
         match handshake.finish(accepted).await {
             Ok(peer) => {
                 let outcome = match verify_peer(&peer) {
-                    Ok((device_id, label)) => enrol_verified_peer(&ctx, device_id, label.clone())
-                        .await
-                        .map(|()| label),
+                    Ok((device_id, label, x25519_pub)) => {
+                        enrol_verified_peer(&ctx, device_id, label.clone(), x25519_pub)
+                            .await
+                            .map(|()| label)
+                    }
                     Err(err) => Err(err),
                 };
                 match outcome {
@@ -567,7 +578,7 @@ fn spawn_accept(
                 // its identity gets nothing imported and no roster entry.
                 let verified = verify_peer(&peer);
                 let outcome = match verified {
-                    Ok((device_id, peer_label)) => {
+                    Ok((device_id, peer_label, x25519_pub)) => {
                         let imported = match bundle.to_json() {
                             Ok(bytes) => import_bundle_value(&ctx, &bundle, true)
                                 .await
@@ -575,9 +586,11 @@ fn spawn_accept(
                             Err(err) => Err(map_bundle(err)),
                         };
                         match imported {
-                            Ok(bytes) => enrol_verified_peer(&ctx, device_id, peer_label)
-                                .await
-                                .map(|()| bytes),
+                            Ok(bytes) => {
+                                enrol_verified_peer(&ctx, device_id, peer_label, x25519_pub)
+                                    .await
+                                    .map(|()| bytes)
+                            }
                             Err(err) => Err(err),
                         }
                     }
@@ -710,10 +723,13 @@ fn map_pairing(err: PairingError) -> EngineError {
     EngineError::pairing_failed(err.to_string())
 }
 
-/// This device's pairing identity: its Ed25519 public key followed by its roster label.
+/// This device's pairing identity: its Ed25519 public key, its X25519 public key, then the roster
+/// label.
 ///
-/// The key is the same one `ensure_this_device` hashes into the roster id, so the id the peer
-/// derives from this identity is exactly the id this device reports for itself.
+/// The Ed25519 key is the same one `ensure_this_device` hashes into the roster id, so the id the
+/// peer derives from this identity is exactly the id this device reports for itself. The X25519
+/// half travels on the same authenticated channel, so each side records the other's wrap target
+/// without a second exchange (ADR 0020 invariant 14).
 struct EngineProver {
     key: SigningKey,
     identity: Vec<u8>,
@@ -722,7 +738,9 @@ struct EngineProver {
 impl EngineProver {
     async fn load(ctx: &EngineContext) -> Result<Self, EngineError> {
         let key = device_key(ctx).await?;
+        let exchange = device_exchange_key(ctx).await?;
         let mut identity = key.verifying_key().as_bytes().to_vec();
+        identity.extend_from_slice(&exchange.public_key());
         identity.extend_from_slice(default_label().as_bytes());
         Ok(Self { key, identity })
     }
@@ -740,13 +758,16 @@ impl DeviceProver for EngineProver {
 
 /// Bytes of the Ed25519 key every pairing identity starts with.
 const IDENTITY_KEY_LEN: usize = 32;
+/// Bytes of the X25519 key that follows it.
+const IDENTITY_X25519_LEN: usize = 32;
 
-/// Checks the peer's proof over the transcript and reads its device id and label.
+/// Checks the peer's proof over the transcript and reads its device id, wrap target and label.
 ///
-/// The identity shape is `Ed25519 public key (32 bytes) || UTF-8 label`, which is what
-/// [`EngineProver`] sends. The returned id is the hex of the key: the same value the peer's own
-/// roster uses for itself. Any failure here is a rejected pairing, never a warning.
-fn verify_peer(peer: &PairedPeer) -> Result<(String, String), EngineError> {
+/// The identity shape is
+/// `Ed25519 public key (32 bytes) || X25519 public key (32 bytes) || UTF-8 label`, which is what
+/// [`EngineProver`] sends. The returned id is the hex of the Ed25519 key: the same value the
+/// peer's own roster uses for itself. Any failure here is a rejected pairing, never a warning.
+fn verify_peer(peer: &PairedPeer) -> Result<(String, String, String), EngineError> {
     let key_bytes: [u8; IDENTITY_KEY_LEN] = peer
         .identity
         .get(..IDENTITY_KEY_LEN)
@@ -766,15 +787,25 @@ fn verify_peer(peer: &PairedPeer) -> Result<(String, String), EngineError> {
                 hex(&peer.transcript)
             ))
         })?;
-    let label = std::str::from_utf8(&peer.identity[IDENTITY_KEY_LEN..]).map_err(|_| {
-        EngineError::pairing_failed("the other device's pairing label is not UTF-8")
-    })?;
+    let x25519: [u8; IDENTITY_X25519_LEN] = peer
+        .identity
+        .get(IDENTITY_KEY_LEN..IDENTITY_KEY_LEN + IDENTITY_X25519_LEN)
+        .and_then(|bytes| bytes.try_into().ok())
+        .ok_or_else(|| {
+            EngineError::pairing_failed(
+                "the other device's identity does not carry an X25519 device key",
+            )
+        })?;
+    let label = std::str::from_utf8(&peer.identity[IDENTITY_KEY_LEN + IDENTITY_X25519_LEN..])
+        .map_err(|_| {
+            EngineError::pairing_failed("the other device's pairing label is not UTF-8")
+        })?;
     let label = if label.trim().is_empty() {
         "Paired device".to_string()
     } else {
         label.to_string()
     };
-    Ok((hex(&key_bytes), label))
+    Ok((hex(&key_bytes), label, hex(&x25519)))
 }
 
 /// Writes an already-verified peer into this device's roster at the current epoch.
@@ -785,6 +816,7 @@ async fn enrol_verified_peer(
     ctx: &EngineContext,
     device_id: String,
     label: String,
+    x25519_pub: String,
 ) -> Result<(), EngineError> {
     ensure_this_device(ctx).await?;
     SettingsHandler::with_settings_lock(ctx, || {
@@ -799,12 +831,14 @@ async fn enrol_verified_peer(
             Some(entry) => {
                 entry.label = label.clone();
                 entry.epoch = epoch;
+                entry.x25519_pub = x25519_pub.clone();
             }
             None => devices.push(DeviceEntry {
                 device_id: device_id.clone(),
                 label: label.clone(),
                 enrolled_ms: now_ms(),
                 epoch,
+                x25519_pub: x25519_pub.clone(),
             }),
         }
         sync["devices"] = serde_json::to_value(&devices).map_err(|err| {
@@ -1461,6 +1495,9 @@ pub(crate) fn enroll_recovered_device(
             label: format!("Device {short}"),
             enrolled_ms: now_ms(),
             epoch,
+            // Recovery follows a signed head, not an enrolment, so this device never received the
+            // signer's X25519 key. The entry stays a chain witness until the two enrol.
+            x25519_pub: String::new(),
         });
         sync["devices"] = serde_json::to_value(&devices).map_err(|err| {
             EngineError::internal_error(format!("cannot encode the device roster: {err}"))
@@ -1585,27 +1622,38 @@ async fn revoke_device(ctx: &EngineContext, device_id: &str) -> Result<u32, Engi
     })
 }
 
-/// Reads this device's roster entry, creating the Ed25519 key and the entry on first use.
+/// Reads this device's roster entry, creating the Ed25519 and X25519 keys and the entry on first
+/// use. An entry written before device keys existed gains its public half here.
 async fn ensure_this_device(ctx: &EngineContext) -> Result<DeviceEntry, EngineError> {
     let key = device_key(ctx).await?;
     let device_id = hex(key.verifying_key().as_bytes());
+    let exchange = device_exchange_key(ctx).await?;
+    let x25519_pub = hex(&exchange.public_key());
     let label = default_label();
     SettingsHandler::with_settings_lock(ctx, || {
         let mut settings = settings_object(ctx)?;
         let mut sync = sync_section(&settings);
         let mut devices = roster(&settings)?;
-        if let Some(device) = devices
+        let position = devices
             .iter()
-            .find(|device| device.device_id == device_id)
-            .cloned()
-        {
-            return Ok(device);
+            .position(|device| device.device_id == device_id);
+        if let Some(position) = position {
+            if devices[position].x25519_pub != x25519_pub {
+                devices[position].x25519_pub = x25519_pub;
+                sync["devices"] = serde_json::to_value(&devices).map_err(|err| {
+                    EngineError::internal_error(format!("cannot encode the device roster: {err}"))
+                })?;
+                settings["sync"] = sync;
+                SettingsHandler::write_settings_file(ctx, settings)?;
+            }
+            return Ok(devices[position].clone());
         }
         let device = DeviceEntry {
             device_id,
             label,
             enrolled_ms: now_ms(),
             epoch: sync_epoch(&sync),
+            x25519_pub,
         };
         devices.push(device.clone());
         sync["devices"] = serde_json::to_value(&devices).map_err(|err| {
@@ -1690,6 +1738,88 @@ pub(crate) async fn device_key(ctx: &EngineContext) -> Result<SigningKey, Engine
         }
         Err(err) => Err(map_secret(err)),
     }
+}
+
+/// This device's X25519 key: created on first use and stored exactly where the master key lives
+/// (ADR 0021's tier), so its private half never appears in `settings.json`. It is only a wrap
+/// target; it derives no sync key on its own.
+pub(crate) async fn device_exchange_key(
+    ctx: &EngineContext,
+) -> Result<DeviceSecretKey, EngineError> {
+    match ctx.secrets.get_secret(DEVICE_X25519_SECRET).await {
+        Ok(text) => Ok(DeviceSecretKey::from_bytes(decode_32(
+            &text,
+            DEVICE_X25519_SECRET,
+        )?)),
+        Err(StorageError::SecretNotFound(_)) => {
+            let key = DeviceSecretKey::generate();
+            ctx.secrets
+                .set_secret(
+                    DEVICE_X25519_SECRET,
+                    &BASE64.encode(key.expose_secret().as_slice()),
+                )
+                .await
+                .map_err(map_secret)?;
+            Ok(key)
+        }
+        Err(err) => Err(map_secret(err)),
+    }
+}
+
+/// Every roster device other than this one, with the X25519 key it published at enrolment. An
+/// empty key marks a legacy entry that has to enrol again before it can follow a rotation.
+pub(crate) async fn key_wrap_targets(
+    ctx: &EngineContext,
+) -> Result<Vec<(String, String)>, EngineError> {
+    let this = ensure_this_device(ctx).await?;
+    let settings = SettingsHandler::get_settings_file(ctx)?;
+    Ok(roster(&settings)?
+        .into_iter()
+        .filter(|device| device.device_id != this.device_id)
+        .map(|device| (device.device_id, device.x25519_pub))
+        .collect())
+}
+
+/// Decodes a hex X25519 public key from a roster entry.
+pub(crate) fn decode_device_key(text: &str) -> Result<[u8; 32], EngineError> {
+    if text.len() != 64 {
+        return Err(EngineError::internal_error(
+            "the roster holds a device key that is not 64 hex characters",
+        ));
+    }
+    let mut bytes = [0u8; 32];
+    for (index, pair) in text.as_bytes().as_chunks::<2>().0.iter().enumerate() {
+        let pair = std::str::from_utf8(pair)
+            .map_err(|_| EngineError::internal_error("a roster device key is not ASCII hex"))?;
+        bytes[index] = u8::from_str_radix(pair, 16)
+            .map_err(|_| EngineError::internal_error("a roster device key is not hex"))?;
+    }
+    Ok(bytes)
+}
+
+/// Records that a recovery phrase created earlier no longer opens the account's current master.
+/// Only a rotation calls this, and only when a phrase record exists: nothing is written otherwise.
+pub(crate) fn mark_recovery_stale(ctx: &EngineContext) -> Result<(), EngineError> {
+    SettingsHandler::with_settings_lock(ctx, || {
+        let mut settings = settings_object(ctx)?;
+        let mut sync = sync_section(&settings);
+        if sync.get("recovery").is_none() {
+            return Ok(());
+        }
+        sync["recovery_stale"] = json!(true);
+        settings["sync"] = sync;
+        SettingsHandler::write_settings_file(ctx, settings)
+    })
+}
+
+/// Whether the stored recovery phrase predates a rotation. False on a device that never created
+/// one; `CreateRecoveryPhrase` is the only way back to a usable phrase.
+pub(crate) fn recovery_stale(settings: &Value) -> bool {
+    settings
+        .get("sync")
+        .and_then(|sync| sync.get("recovery_stale"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
 }
 
 /// The master key, created on first use. It is the root of every sync key (ADR 0020); nothing
@@ -1789,6 +1919,8 @@ async fn create_recovery_phrase(ctx: &EngineContext) -> Result<Vec<String>, Engi
         sync["recovery"] = serde_json::to_value(&record).map_err(|err| {
             EngineError::internal_error(format!("cannot encode the recovery record: {err}"))
         })?;
+        // A phrase created now wraps the current master, so it is never stale.
+        sync["recovery_stale"] = json!(false);
         settings["sync"] = sync;
         SettingsHandler::write_settings_file(ctx, settings)
     })?;

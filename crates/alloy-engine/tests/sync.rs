@@ -123,6 +123,18 @@ fn read_json(path: &Path) -> Value {
     serde_json::from_slice(&std::fs::read(path).expect("read json")).expect("parse json")
 }
 
+/// The X25519 wrap target a roster entry publishes, empty when the entry has none.
+fn roster_pub(settings_path: &Path, device_id: &str) -> String {
+    read_json(settings_path)["sync"]["devices"]
+        .as_array()
+        .expect("roster array")
+        .iter()
+        .find(|device| device["device_id"] == json!(device_id))
+        .and_then(|device| device["x25519_pub"].as_str())
+        .unwrap_or_default()
+        .to_string()
+}
+
 async fn export(
     engine: &AppEngine,
     include_backgrounds: bool,
@@ -783,6 +795,25 @@ async fn pairing_enrols_both_devices_in_each_roster() {
     accept_ids.sort_unstable();
     assert_eq!(offer_ids, accept_ids, "both rosters agree on the ids");
     assert!(offer_devices.iter().all(|device| device.epoch == 0));
+
+    // Enrolment carries both wrap targets: each roster records the other device's X25519 key,
+    // and both sides agree on the value the device publishes for itself.
+    let offer_settings = offer_dir.path().join("settings.json");
+    let accept_settings = accept_dir.path().join("settings.json");
+    let offer_pub = roster_pub(&offer_settings, &offer_this.device_id);
+    let accept_pub = roster_pub(&accept_settings, &accept_this.device_id);
+    assert_eq!(offer_pub.len(), 64, "the offering device publishes a key");
+    assert_eq!(accept_pub.len(), 64, "the accepting device publishes a key");
+    assert_eq!(
+        roster_pub(&accept_settings, &offer_this.device_id),
+        offer_pub,
+        "the accepting roster records the offering device's key"
+    );
+    assert_eq!(
+        roster_pub(&offer_settings, &accept_this.device_id),
+        accept_pub,
+        "the offering roster records the accepting device's key"
+    );
 
     // Revocation works on the enrolled peer, and this device stays current afterwards.
     let epoch = match receiver

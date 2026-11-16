@@ -1332,6 +1332,11 @@ export type SyncStatusReport = {
 	state: SyncState,
 	last_sync_ms: number | null,
 	last_error: string | null,
+	/**
+	 *  A recovery phrase was created before a key rotation and no longer opens the account's
+	 *  current data. `CreateRecoveryPhrase` is the remedy; absent means no phrase is on record.
+	 */
+	recovery_stale?: boolean | null,
 	layers: SyncLayerStatus[],
 	devices: DeviceDto[],
 };

@@ -10,6 +10,8 @@
 //!   and both header versions, so a replay or a relabel fails to decrypt.
 //! - [`chain`] — the signed batch chain and head store. A replayed or forked batch is refused with
 //!   a typed error and leaves local state untouched.
+//! - [`device`] — per-device X25519 keys and the signed sealed box that carries a rotated master
+//!   key from the revoking device to each survivor.
 //! - [`pin`] — endpoint SPKI pinning as a value type.
 //! - [`client_state`] — the versioned, persistent cursor.
 //!
@@ -19,6 +21,7 @@
 pub mod blob;
 pub mod chain;
 pub mod client_state;
+pub mod device;
 pub mod keys;
 pub mod pin;
 
@@ -28,5 +31,8 @@ pub use chain::{
     SignedBatch, verify_batch,
 };
 pub use client_state::{CLIENT_STATE_VERSION, ClientState, ClientStateError, DeviceCursor};
+pub use device::{
+    DEVICE_WRAP_VERSION, DeviceSecretKey, DeviceWrapError, MAX_WRAP_BYTES, open_master, wrap_master,
+};
 pub use keys::{AddrKey, BlobKey, BlobKeyRing, MASTER_KEY_LEN, MasterKey, RecoveryKey, RosterKey};
 pub use pin::{PIN_LEN, Pin, PinError};

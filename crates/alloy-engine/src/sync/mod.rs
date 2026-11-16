@@ -26,6 +26,7 @@ use alloy_storage::SecretStore;
 use alloy_storage::StorageError;
 use alloy_storage::config_bundle::{BUNDLE_SCHEMA, ChatKey, ConfigBundle, TagSet};
 use alloy_sync::chain::{Head, HeadStore};
+use alloy_sync::device::{DeviceWrapError, open_master, wrap_master};
 use alloy_sync::{
     BatchHeader, BlobAddr, BlobKeyRing, ChainError, FileHeadStore, Layer, MasterKey, Pin,
     SignedBatch, open, seal, verify_batch,
@@ -41,8 +42,9 @@ use sha2::{Digest, Sha256};
 use crate::context::EngineContext;
 use crate::handlers::settings::SettingsHandler;
 use crate::handlers::sync::{
-    adopt_epoch, build_bundle, device_key, enroll_recovered_device, has_master_key,
-    import_bundle_value, list_devices, master_key, settings_object, store_master_key, sync_epoch,
+    adopt_epoch, build_bundle, decode_device_key, device_exchange_key, device_key,
+    enroll_recovered_device, has_master_key, import_bundle_value, key_wrap_targets, list_devices,
+    mark_recovery_stale, master_key, recovery_stale, settings_object, store_master_key, sync_epoch,
     sync_layer_statuses, sync_section, unwrap_escrow,
 };
 use crate::support::now_ms;
@@ -67,6 +69,13 @@ const ROOT_DOMAIN: &[u8] = b"alloy-sync-v1/root/1";
 
 /// Domain separator for blob ids derived from [`BlobAddr`].
 const ADDR_DOMAIN: &[u8] = b"alloy-sync-v1/blob/id/1";
+
+/// Domain separator for the ids of rotation key wraps. Distinct from [`ADDR_DOMAIN`] so a wrap id
+/// can never collide with a layer blob id under the same epoch key.
+const WRAP_ID_DOMAIN: &[u8] = b"alloy-sync-v1/device-key/id/1";
+
+/// Layer name the blob index records beside a rotation wrap, for a human reading the file.
+const WRAP_LAYER: &str = "device-key";
 
 /// At most this many head CAS retries before the run reports the server is churning.
 const MAX_REBASE_ATTEMPTS: usize = 4;
@@ -537,6 +546,11 @@ pub async fn status(ctx: &EngineContext) -> Result<SyncStatusReport, EngineError
         state: server.state,
         last_sync_ms: server.last_sync_ms,
         last_error: server.last_error,
+        recovery_stale: settings
+            .get("sync")
+            .and_then(|sync| sync.get("recovery"))
+            .is_some()
+            .then(|| recovery_stale(&settings)),
         layers,
         devices: list_devices(ctx).await?,
     })
@@ -630,6 +644,22 @@ pub(crate) async fn reseal_after_revoke(ctx: &EngineContext, epoch: u32) -> Revo
             return outcome;
         }
     };
+    // The old master is needed for one thing: naming the wraps under the epoch key the survivors
+    // still hold. It is dropped as soon as the wraps are uploaded.
+    let old_master = if had_master {
+        match master_key(ctx).await {
+            Ok(key) => Some(key),
+            Err(error) => {
+                outcome.error = Some(format!(
+                    "the previous master key could not be read, so nothing was rotated: {}",
+                    error.message
+                ));
+                return outcome;
+            }
+        }
+    } else {
+        None
+    };
     let master = MasterKey::generate();
     if let Err(error) = store_master_key(ctx, &master).await {
         outcome.error = Some(format!(
@@ -639,6 +669,15 @@ pub(crate) async fn reseal_after_revoke(ctx: &EngineContext, epoch: u32) -> Revo
         return outcome;
     }
     outcome.recovery_stale = had_master;
+    // The old escrow wraps a master that will never seal new data again. The phrase is not kept,
+    // so the escrow cannot be re-sealed here; it is reported and `CreateRecoveryPhrase` replaces
+    // it. A failure to record the flag is reported, never hidden.
+    if had_master && let Err(error) = mark_recovery_stale(ctx) {
+        outcome.error = Some(format!(
+            "the stale recovery phrase could not be marked as stale: {}",
+            error.message
+        ));
+    }
 
     let settings = match SettingsHandler::get_settings_file(ctx) {
         Ok(settings) => settings,
@@ -713,6 +752,73 @@ pub(crate) async fn reseal_after_revoke(ctx: &EngineContext, epoch: u32) -> Revo
             return outcome;
         }
     };
+
+    // Distribute the rotated key before the head that demands it. Each surviving device gets its
+    // own sealed box, named under the *previous* epoch's address key: a survivor still holding
+    // that master can find its copy, while the revoked device has no copy addressed to it and
+    // cannot derive the new epoch's names without the new master. The old master is dropped after
+    // this point.
+    if let Some(old_master) = old_master {
+        match key_wrap_targets(ctx).await {
+            Ok(targets) => {
+                for (target_id, target_pub) in targets {
+                    let short = target_id.get(..8).unwrap_or(&target_id).to_string();
+                    if target_pub.is_empty() {
+                        outcome.error = Some(format!(
+                            "device {short} published no device key at enrolment, so it cannot \
+                             adopt the rotated key without enrolling again"
+                        ));
+                        continue;
+                    }
+                    let target_key = match decode_device_key(&target_pub) {
+                        Ok(key) => key,
+                        Err(error) => {
+                            outcome.error = Some(format!(
+                                "the roster key for device {short} is unusable: {}",
+                                error.message
+                            ));
+                            continue;
+                        }
+                    };
+                    let wrap = match wrap_master(
+                        &master,
+                        &target_id,
+                        &target_key,
+                        epoch,
+                        &device_id,
+                        &signing,
+                    ) {
+                        Ok(wrap) => wrap,
+                        Err(error) => {
+                            outcome.error = Some(format!(
+                                "the rotated key could not be wrapped for device {short}: {error}"
+                            ));
+                            continue;
+                        }
+                    };
+                    let id = wrap_blob_id(&old_master, epoch.saturating_sub(1), &target_id, epoch);
+                    if let Err(error) = endpoint.put_blob(&id, wrap).await {
+                        outcome.error = Some(format!(
+                            "the rotated key could not be published for device {short}: {}",
+                            error.message
+                        ));
+                        continue;
+                    }
+                    // Booked under the *new* epoch so this rotation's sweep leaves it alone; the
+                    // next rotation deletes it, because the copy is stale by then.
+                    if let Err(error) = index.record(epoch, WRAP_LAYER, u64::from(epoch), &id) {
+                        outcome.error = Some(error.message);
+                    }
+                }
+            }
+            Err(error) => {
+                outcome.error = Some(format!(
+                    "the roster could not be read, so no device received the rotated key: {}",
+                    error.message
+                ));
+            }
+        }
+    }
 
     // Re-publish first. Every enabled layer goes out under the rotated key; only a head that
     // names our new epoch proves the server holds what the revoked device cannot open.
@@ -795,7 +901,7 @@ async fn run_once(ctx: &EngineContext) -> Result<(u64, u64, String, u32), Engine
     let settings = SettingsHandler::get_settings_file(ctx)?;
     let sync = sync_section(&settings);
     let mut epoch = sync_epoch(&sync);
-    let master = master_key(ctx).await?;
+    let mut master = master_key(ctx).await?;
     let signing = device_key(ctx).await?;
     let device_id = hex(signing.verifying_key().as_bytes());
 
@@ -820,8 +926,14 @@ async fn run_once(ctx: &EngineContext) -> Result<(u64, u64, String, u32), Engine
             let before = store.current().map(|record| record.head);
             let (_, batch) = observe_head(&mut store, &bytes)?;
             // A rotation is visible only in the signed batch. Without adopting it, a surviving
-            // device would keep sealing under the old epoch after it got the new key.
+            // device would keep sealing under the old epoch after it got the new key. The wrap
+            // carries the new root; when there is none addressed to this device (it was revoked,
+            // or it missed two rotations), the pull below blocks on content instead.
             if batch.header.epoch > epoch {
+                if let Some(rotated) = adopt_rotation(ctx, &endpoint, &master, &batch).await? {
+                    store_master_key(ctx, &rotated).await?;
+                    master = rotated;
+                }
                 adopt_epoch(ctx, batch.header.epoch)?;
                 epoch = batch.header.epoch;
             }
@@ -1056,6 +1168,68 @@ fn blob_id(master: &MasterKey, addr: &BlobAddr) -> String {
     mac.update(&addr.seq.to_be_bytes());
     mac.update(&addr.epoch.to_be_bytes());
     URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes())
+}
+
+/// `HMAC-SHA256(addr_key(previous_epoch), domain || recipient || new_epoch)`: the name a survivor
+/// can derive with the master it still holds before the rotation reaches it.
+fn wrap_blob_id(
+    master: &MasterKey,
+    previous_epoch: u32,
+    recipient_id: &str,
+    wrap_epoch: u32,
+) -> String {
+    let addr_key = master.addr_key(previous_epoch);
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(addr_key.as_bytes()).expect("HMAC accepts a 32-byte key");
+    mac.update(WRAP_ID_DOMAIN);
+    mac.update(&(recipient_id.len() as u16).to_be_bytes());
+    mac.update(recipient_id.as_bytes());
+    mac.update(&wrap_epoch.to_be_bytes());
+    URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes())
+}
+
+/// Tries to adopt the master a rotation installed, using the wrap the revoker sealed to this
+/// device. Returns `Ok(None)` when the server holds no copy addressed here: the caller then pulls
+/// with the key it has and reports `sync_blocked/content`, which is the honest outcome for a
+/// revoked device.
+///
+/// The wrap must name the exact epoch the verified head demands and must be signed by the device
+/// that signed that head, so a replayed copy from an earlier rotation, or a copy addressed to a
+/// device that is not on this roster, is never installed.
+async fn adopt_rotation(
+    ctx: &EngineContext,
+    endpoint: &Endpoint,
+    master: &MasterKey,
+    batch: &SignedBatch,
+) -> Result<Option<MasterKey>, EngineError> {
+    if batch.header.epoch == 0 {
+        return Ok(None);
+    }
+    let signing = device_key(ctx).await?;
+    let device_id = hex(signing.verifying_key().as_bytes());
+    let secret = device_exchange_key(ctx).await?;
+    let id = wrap_blob_id(
+        master,
+        batch.header.epoch.saturating_sub(1),
+        &device_id,
+        batch.header.epoch,
+    );
+    let Some(bytes) = endpoint.get_blob(&id).await? else {
+        return Ok(None);
+    };
+    let sender = verifying_key(&batch.header.device_id)?;
+    let (rotated, sender_id) =
+        open_master(&secret, &device_id, batch.header.epoch, &sender, &bytes)
+            .map_err(wrap_blocked)?;
+    if sender_id != batch.header.device_id {
+        return Err(EngineError::sync_blocked("content"));
+    }
+    Ok(Some(rotated))
+}
+
+fn wrap_blocked(error: DeviceWrapError) -> EngineError {
+    tracing::debug!(%error, "a rotation key wrap was refused");
+    EngineError::sync_blocked("content")
 }
 
 /// Fetches and imports the layers a verified batch names.

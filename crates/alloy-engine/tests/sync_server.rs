@@ -15,8 +15,10 @@ use alloy_engine::{AppEngine, Engine, EngineContext, EngineError};
 use alloy_protocol::{EngineCommand, EngineResponse, SyncMode, SyncState, SyncStatusReport};
 use alloy_storage::{InMemorySecretStore, SecretStore};
 use alloy_store::{AccountState, ChatFlagsUpdate, ChatKind, ChatUpsert, Network, NewAccount};
+use alloy_sync::device::{DeviceSecretKey, DeviceWrapError, open_master};
 use alloy_sync::{BlobAddr, BlobError, BlobKeyRing, Layer, MasterKey, SignedBatch, open};
 use base64::Engine as _;
+use ed25519_dalek::SigningKey;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -623,6 +625,103 @@ fn add_roster_entry(dir: &Path, device_id: &str) {
             "epoch": 0,
         }));
     write_settings(dir, &settings);
+}
+
+/// Adds a peer through a current enrolment: the entry carries the peer's X25519 public key, so a
+/// revocation can seal the rotated master to it.
+fn add_roster_peer(dir: &Path, device_id: &str, x25519_pub: &str) {
+    let mut settings = read_settings(dir);
+    settings["sync"]["devices"]
+        .as_array_mut()
+        .expect("roster array")
+        .push(json!({
+            "device_id": device_id,
+            "label": "Enrolled peer",
+            "enrolled_ms": 1_700_000_000_000i64,
+            "epoch": 0,
+            "x25519_pub": x25519_pub,
+        }));
+    write_settings(dir, &settings);
+}
+
+fn hex_of(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push_str(&format!("{byte:02x}"));
+    }
+    out
+}
+
+fn decode_b64(text: &str) -> Vec<u8> {
+    base64::engine::general_purpose::STANDARD
+        .decode(text.trim())
+        .expect("the secret is base64")
+}
+
+/// This device's roster id and wrap target, creating both keys on first use exactly as the engine
+/// does. `ListDevices` is the creation point, so call it first.
+async fn device_identity(engine: &AppEngine, secrets: &Arc<dyn SecretStore>) -> (String, String) {
+    let _ = roster_ids(engine).await;
+    let seed: [u8; 32] = decode_b64(
+        &secrets
+            .get_secret("alloy.device.ed25519_key.v1")
+            .await
+            .expect("the device has an Ed25519 key after ListDevices"),
+    )
+    .try_into()
+    .expect("the Ed25519 seed is 32 bytes");
+    let id = hex_of(SigningKey::from_bytes(&seed).verifying_key().as_bytes());
+    let key = device_secret(secrets).await;
+    (id, hex_of(&key.public_key()))
+}
+
+async fn device_secret(secrets: &Arc<dyn SecretStore>) -> DeviceSecretKey {
+    let bytes: [u8; 32] = decode_b64(
+        &secrets
+            .get_secret("alloy.device.x25519_key.v1")
+            .await
+            .expect("the device has an X25519 key after ListDevices"),
+    )
+    .try_into()
+    .expect("the X25519 key is 32 bytes");
+    DeviceSecretKey::from_bytes(bytes)
+}
+
+async fn verifying_key(secrets: &Arc<dyn SecretStore>) -> ed25519_dalek::VerifyingKey {
+    let seed: [u8; 32] = decode_b64(
+        &secrets
+            .get_secret("alloy.device.ed25519_key.v1")
+            .await
+            .expect("the device has an Ed25519 key"),
+    )
+    .try_into()
+    .expect("the Ed25519 seed is 32 bytes");
+    SigningKey::from_bytes(&seed).verifying_key()
+}
+
+/// Writes both sides of an enrolment: each roster names the other device with its wrap target.
+async fn enrol(
+    a: &AppEngine,
+    a_dir: &Path,
+    a_secrets: &Arc<dyn SecretStore>,
+    b: &AppEngine,
+    b_dir: &Path,
+    b_secrets: &Arc<dyn SecretStore>,
+) -> (String, String) {
+    let (a_id, a_pub) = device_identity(a, a_secrets).await;
+    let (b_id, b_pub) = device_identity(b, b_secrets).await;
+    add_roster_peer(a_dir, &b_id, &b_pub);
+    add_roster_peer(b_dir, &a_id, &a_pub);
+    (a_id, b_id)
+}
+
+/// The wrap blobs this device published under `epoch`.
+fn indexed_wraps(dir: &Path, epoch: u32) -> Vec<String> {
+    indexed_blobs(dir, epoch)
+        .into_iter()
+        .filter(|(_, layer, _)| layer == "device-key")
+        .map(|(id, _, _)| id)
+        .collect()
 }
 
 async fn blob_status(base: &str, id: &str) -> reqwest::StatusCode {
@@ -1741,4 +1840,375 @@ async fn a_server_that_refuses_delete_keeps_the_revocation_and_reports_leftovers
         .expect_err("the revoked device cannot read the new epoch");
     assert_eq!(error.code, "sync_blocked");
     assert_eq!(error.reason.as_deref(), Some("content"));
+}
+
+// === Device-key distribution across a rotation ===
+
+/// The hole this slice closes: revocation rotates the master, and every survivor must be able to
+/// follow it without the user doing anything. Three devices enrolled; one revoked; the two
+/// survivors sync once and hold the same master bytes as the revoker.
+#[tokio::test]
+async fn both_survivors_adopt_the_rotated_key_without_user_action() {
+    if !node_available().await {
+        eprintln!("skipping: node is not on PATH, so the real sync server cannot be spawned");
+        return;
+    }
+    let server = start_server().await;
+    let a_dir = TempDir::new().expect("a dir");
+    let b_dir = TempDir::new().expect("b dir");
+    let c_dir = TempDir::new().expect("c dir");
+    let a_vault = vault();
+    let b_vault = vault();
+    let c_vault = vault();
+    let a = open_engine(a_dir.path(), a_vault.clone()).await;
+    let b = open_engine(b_dir.path(), b_vault.clone()).await;
+    let c = open_engine(c_dir.path(), c_vault.clone()).await;
+    let a_chat = seed_chat(&a, Some("work")).await;
+    let b_chat = seed_chat(&b, None).await;
+    seed_chat(&c, None).await;
+    write_settings(a_dir.path(), &json!({"accent": "green"}));
+
+    configure(&a, &server.base(), TOKEN, false)
+        .await
+        .expect("the revoker publishes seq 1");
+    let (a_id, b_id) = enrol(&a, a_dir.path(), &a_vault, &b, b_dir.path(), &b_vault).await;
+    let (_, c_id) = enrol(&a, a_dir.path(), &a_vault, &c, c_dir.path(), &c_vault).await;
+    copy_master(&a_vault, &b_vault).await;
+    copy_master(&a_vault, &c_vault).await;
+    configure(&b, &server.base(), TOKEN, false)
+        .await
+        .expect("b pulls epoch 0");
+    configure(&c, &server.base(), TOKEN, false)
+        .await
+        .expect("c pulls epoch 0");
+    assert_ne!(a_id, b_id);
+
+    let outcome = revoke(&a, &c_id).await;
+    assert_eq!(outcome.epoch, 1);
+    assert_eq!(outcome.re_sealed, Some(true));
+    assert_eq!(outcome.blobs_remaining, Some(0));
+    assert_eq!(outcome.recovery_stale, Some(true));
+    assert!(outcome.error.is_none(), "{:?}", outcome.error);
+
+    // One wrap per surviving device, addressed to it, booked under the new epoch.
+    let wraps = indexed_wraps(a_dir.path(), 1);
+    assert_eq!(wraps.len(), 1, "only b survives: {wraps:?}");
+    for id in &wraps {
+        assert_eq!(
+            blob_status(&server.base(), id).await,
+            reqwest::StatusCode::OK
+        );
+    }
+
+    // B does nothing but sync. It finds its wrap, adopts the rotated master and pulls the layers.
+    let (_, _, head_hex, epoch) = sync(&b).await.expect("b adopts the rotation on its own");
+    assert_eq!(epoch, 1);
+    assert_eq!(head_epoch(&read_head(&server.base()).await.0), epoch);
+    assert!(!head_hex.is_empty());
+    assert_eq!(
+        stored_master(&b_vault).await.expose_secret(),
+        stored_master(&a_vault).await.expose_secret(),
+        "both devices hold the same rotated master bytes"
+    );
+    assert_eq!(
+        read_settings(b_dir.path())["accent"],
+        json!("green"),
+        "the survivor reads the re-sealed settings"
+    );
+
+    // B's local copy of the shared chat carries the revoker's tag after the import.
+    assert_eq!(
+        chat_tags(&b, &b_chat).await,
+        vec!["work".to_string()],
+        "the survivor imported the re-sealed tags"
+    );
+    assert_eq!(chat_tags(&a, &a_chat).await, vec!["work".to_string()]);
+
+    // B publishes on top of the adopted epoch; A follows the head without touching the key.
+    sync(&b).await.expect("b publishes at the new epoch");
+    sync(&a).await.expect("a converges at the new epoch");
+    assert_eq!(
+        stored_master(&a_vault).await.expose_secret(),
+        stored_master(&b_vault).await.expose_secret()
+    );
+    assert_eq!(read_settings(b_dir.path())["sync"]["epoch"], json!(1));
+}
+
+/// The revoked device keeps the pre-rotation master. It finds no wrap addressed to it, so the
+/// next sync is the same content failure as before, and the surviving device's ciphertext does
+/// not open with the revoked device's key.
+#[tokio::test]
+async fn the_revoked_device_cannot_reach_the_rotated_key() {
+    if !node_available().await {
+        eprintln!("skipping: node is not on PATH, so the real sync server cannot be spawned");
+        return;
+    }
+    let server = start_server().await;
+    let a_dir = TempDir::new().expect("a dir");
+    let b_dir = TempDir::new().expect("b dir");
+    let c_dir = TempDir::new().expect("c dir");
+    let a_vault = vault();
+    let b_vault = vault();
+    let c_vault = vault();
+    let a = open_engine(a_dir.path(), a_vault.clone()).await;
+    let b = open_engine(b_dir.path(), b_vault.clone()).await;
+    let c = open_engine(c_dir.path(), c_vault.clone()).await;
+    seed_chat(&a, Some("work")).await;
+    seed_chat(&b, None).await;
+    seed_chat(&c, None).await;
+    write_settings(a_dir.path(), &json!({"accent": "green"}));
+
+    configure(&a, &server.base(), TOKEN, false)
+        .await
+        .expect("configure a");
+    let _ = enrol(&a, a_dir.path(), &a_vault, &b, b_dir.path(), &b_vault).await;
+    let (_, c_id) = enrol(&a, a_dir.path(), &a_vault, &c, c_dir.path(), &c_vault).await;
+    copy_master(&a_vault, &b_vault).await;
+    copy_master(&a_vault, &c_vault).await;
+    configure(&b, &server.base(), TOKEN, false)
+        .await
+        .expect("configure b");
+    configure(&c, &server.base(), TOKEN, false)
+        .await
+        .expect("configure c");
+
+    let revoked = revoke(&a, &c_id).await;
+    assert_eq!(revoked.epoch, 1);
+    assert!(revoked.error.is_none(), "{:?}", revoked.error);
+    assert!(
+        !indexed_wraps(a_dir.path(), 1).is_empty(),
+        "the survivor's wrap exists"
+    );
+
+    let error = sync(&c)
+        .await
+        .expect_err("the revoked device cannot read the new epoch");
+    assert_eq!(error.code, "sync_blocked");
+    assert_eq!(error.reason.as_deref(), Some("content"));
+    assert_ne!(
+        stored_master(&c_vault).await.expose_secret(),
+        stored_master(&a_vault).await.expose_secret(),
+        "the revoked device still holds the old master"
+    );
+
+    // The surviving device's wrap is on the server; it does not open with the revoked device's
+    // key and id, even with the right epoch and the signing device's key.
+    let wrap_id = indexed_wraps(a_dir.path(), 1)
+        .into_iter()
+        .next()
+        .expect("one wrap");
+    let wrap = blob_bytes(&server.base(), &wrap_id).await;
+    let (c_own_id, _) = device_identity(&c, &c_vault).await;
+    let error = open_master(
+        &device_secret(&c_vault).await,
+        &c_own_id,
+        1,
+        &verifying_key(&a_vault).await,
+        &wrap,
+    )
+    .expect_err("a wrap addressed to another device does not open");
+    assert_eq!(error, DeviceWrapError::WrongRecipient);
+}
+
+/// A device that was never enrolled still holds the pre-rotation master (an old pairing). Its id
+/// is not on the revoker's roster, so no wrap is addressed to it; replaying a survivor's wrap
+/// under its own name fails, and its sync stays blocked.
+#[tokio::test]
+async fn a_wrap_replayed_for_a_device_outside_the_roster_is_refused() {
+    if !node_available().await {
+        eprintln!("skipping: node is not on PATH, so the real sync server cannot be spawned");
+        return;
+    }
+    let server = start_server().await;
+    let a_dir = TempDir::new().expect("a dir");
+    let b_dir = TempDir::new().expect("b dir");
+    let outsider_dir = TempDir::new().expect("outsider dir");
+    let a_vault = vault();
+    let b_vault = vault();
+    let outsider_vault = vault();
+    let a = open_engine(a_dir.path(), a_vault.clone()).await;
+    let b = open_engine(b_dir.path(), b_vault.clone()).await;
+    let outsider = open_engine(outsider_dir.path(), outsider_vault.clone()).await;
+    seed_chat(&a, Some("work")).await;
+    seed_chat(&b, None).await;
+    seed_chat(&outsider, None).await;
+
+    configure(&a, &server.base(), TOKEN, false)
+        .await
+        .expect("configure a");
+    let _ = enrol(&a, a_dir.path(), &a_vault, &b, b_dir.path(), &b_vault).await;
+    copy_master(&a_vault, &b_vault).await;
+    copy_master(&a_vault, &outsider_vault).await;
+    configure(&b, &server.base(), TOKEN, false)
+        .await
+        .expect("configure b");
+    configure(&outsider, &server.base(), TOKEN, false)
+        .await
+        .expect("the outsider pulls epoch 0");
+
+    // The outsider is not on the revoker's roster. Enrol a third device and revoke it, so the
+    // only wrap produced is for b.
+    let c_dir = TempDir::new().expect("c dir");
+    let c_vault = vault();
+    let c = open_engine(c_dir.path(), c_vault.clone()).await;
+    seed_chat(&c, None).await;
+    let (_, c_id) = enrol(&a, a_dir.path(), &a_vault, &c, c_dir.path(), &c_vault).await;
+    copy_master(&a_vault, &c_vault).await;
+    configure(&c, &server.base(), TOKEN, false)
+        .await
+        .expect("configure c");
+    let revoked = revoke(&a, &c_id).await;
+    assert_eq!(revoked.epoch, 1, "revocation of c");
+    let wraps = indexed_wraps(a_dir.path(), 1);
+    assert_eq!(wraps.len(), 1, "one wrap, for b");
+    let wrap = blob_bytes(&server.base(), &wraps[0]).await;
+
+    // Replaying that ciphertext against the outsider's key and id does not open it.
+    let (outsider_id, _) = device_identity(&outsider, &outsider_vault).await;
+    let error = open_master(
+        &device_secret(&outsider_vault).await,
+        &outsider_id,
+        1,
+        &verifying_key(&a_vault).await,
+        &wrap,
+    )
+    .expect_err("the ciphertext is bound to the enrolled survivor");
+    assert_eq!(error, DeviceWrapError::WrongRecipient);
+
+    let error = sync(&outsider)
+        .await
+        .expect_err("a device outside the roster cannot follow the rotation");
+    assert_eq!(error.code, "sync_blocked");
+    assert_eq!(error.reason.as_deref(), Some("content"));
+}
+
+/// Two rotations in a row: a survivor that missed the first one never reaches the second, and the
+/// first rotation's wrap is stale by epoch, not merely old.
+#[tokio::test]
+async fn a_second_rotation_makes_the_first_wraps_stale() {
+    if !node_available().await {
+        eprintln!("skipping: node is not on PATH, so the real sync server cannot be spawned");
+        return;
+    }
+    let server = start_server().await;
+    let a_dir = TempDir::new().expect("a dir");
+    let b_dir = TempDir::new().expect("b dir");
+    let c_dir = TempDir::new().expect("c dir");
+    let d_dir = TempDir::new().expect("d dir");
+    let a_vault = vault();
+    let b_vault = vault();
+    let c_vault = vault();
+    let d_vault = vault();
+    let a = open_engine(a_dir.path(), a_vault.clone()).await;
+    let b = open_engine(b_dir.path(), b_vault.clone()).await;
+    let c = open_engine(c_dir.path(), c_vault.clone()).await;
+    let d = open_engine(d_dir.path(), d_vault.clone()).await;
+    seed_chat(&a, Some("work")).await;
+    for engine in [&b, &c, &d] {
+        seed_chat(engine, None).await;
+    }
+
+    configure(&a, &server.base(), TOKEN, false)
+        .await
+        .expect("configure a");
+    let _ = enrol(&a, a_dir.path(), &a_vault, &b, b_dir.path(), &b_vault).await;
+    let (b_id, _) = device_identity(&b, &b_vault).await;
+    let (_, c_id) = enrol(&a, a_dir.path(), &a_vault, &c, c_dir.path(), &c_vault).await;
+    let (_, d_id) = enrol(&a, a_dir.path(), &a_vault, &d, d_dir.path(), &d_vault).await;
+    for (engine, secrets) in [(&b, &b_vault), (&c, &c_vault), (&d, &d_vault)] {
+        copy_master(&a_vault, secrets).await;
+        configure(engine, &server.base(), TOKEN, false)
+            .await
+            .expect("configure a peer");
+    }
+
+    // First rotation: b and d get a copy at epoch 1. b does not sync.
+    let first = revoke(&a, &c_id).await;
+    assert_eq!(first.epoch, 1);
+    assert_eq!(indexed_wraps(a_dir.path(), 1).len(), 2, "b and d");
+    let b_secret = device_secret(&b_vault).await;
+    let a_verifying = verifying_key(&a_vault).await;
+    let mut stale: Option<Vec<u8>> = None;
+    for id in indexed_wraps(a_dir.path(), 1) {
+        let bytes = blob_bytes(&server.base(), &id).await;
+        if open_master(&b_secret, &b_id, 1, &a_verifying, &bytes).is_ok() {
+            stale = Some(bytes);
+        }
+    }
+    let stale = stale.expect("b's epoch-1 wrap was on the server");
+
+    // Second rotation: d is revoked; b is the only survivor.
+    let second = revoke(&a, &d_id).await;
+    assert_eq!(second.epoch, 2);
+    assert_eq!(indexed_wraps(a_dir.path(), 2).len(), 1, "b only");
+
+    // b is still at epoch 0. The second head's parent is a link b never verified, so the chain
+    // refuses it before any key is tried; the epoch-2 wrap is also named under a master b never
+    // received. Either way the run blocks and b keeps no rotated key.
+    let error = sync(&b)
+        .await
+        .expect_err("a device that missed a rotation cannot follow the next one");
+    assert_eq!(error.code, "sync_blocked");
+    assert!(
+        matches!(error.reason.as_deref(), Some("fork") | Some("content")),
+        "unexpected reason: {:?}",
+        error.reason
+    );
+    assert_ne!(
+        stored_master(&b_vault).await.expose_secret(),
+        stored_master(&a_vault).await.expose_secret()
+    );
+
+    // The captured first-rotation copy is stale: it installs epoch 1, and the head demands 2.
+    let error = open_master(&b_secret, &b_id, 2, &a_verifying, &stale)
+        .expect_err("an old rotation's wrap is not accepted");
+    assert_eq!(
+        error,
+        DeviceWrapError::WrongEpoch {
+            found: 1,
+            expected: 2
+        }
+    );
+}
+
+/// The rotation invalidates the recovery phrase, and the engine says so instead of pretending it
+/// re-sealed the escrow. Creating a new phrase is the documented remedy and clears the report.
+#[tokio::test]
+async fn a_rotated_master_reports_the_recovery_phrase_stale_and_a_new_phrase_clears_it() {
+    if !node_available().await {
+        eprintln!("skipping: node is not on PATH, so the real sync server cannot be spawned");
+        return;
+    }
+    let server = start_server().await;
+    let a_dir = TempDir::new().expect("a dir");
+    let b_dir = TempDir::new().expect("b dir");
+    let a_vault = vault();
+    let b_vault = vault();
+    let a = open_engine(a_dir.path(), a_vault.clone()).await;
+    let b = open_engine(b_dir.path(), b_vault.clone()).await;
+    seed_chat(&a, Some("work")).await;
+    seed_chat(&b, None).await;
+    configure(&a, &server.base(), TOKEN, false)
+        .await
+        .expect("configure a");
+    let _ = create_phrase(&a).await;
+    assert_eq!(status(&a).await.recovery_stale, Some(false));
+
+    let (_, b_id) = enrol(&a, a_dir.path(), &a_vault, &b, b_dir.path(), &b_vault).await;
+    copy_master(&a_vault, &b_vault).await;
+    configure(&b, &server.base(), TOKEN, false)
+        .await
+        .expect("configure b");
+
+    let outcome = revoke(&a, &b_id).await;
+    assert_eq!(outcome.epoch, 1);
+    assert_eq!(outcome.recovery_stale, Some(true));
+    assert_eq!(status(&a).await.recovery_stale, Some(true));
+
+    let _ = create_phrase(&a).await;
+    assert_eq!(
+        status(&a).await.recovery_stale,
+        Some(false),
+        "a phrase created after the rotation wraps the current master"
+    );
 }
