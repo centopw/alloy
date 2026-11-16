@@ -59,6 +59,7 @@ impl GroupHandler for AccountsHandler {
             }
             EngineCommand::CancelLogin { login_id } => cancel_login(ctx, &login_id).await,
             EngineCommand::Logout { account_id } => logout(ctx, &account_id).await,
+            EngineCommand::ReconnectAccount { account_id } => reconnect(ctx, &account_id).await,
             EngineCommand::SetTelegramApp { api_id, api_hash } => {
                 set_telegram_app(ctx, api_id, api_hash.expose()).await
             }
@@ -261,6 +262,20 @@ async fn cancel_login(
     }
     // A login that already finished is not an error: the account it created stays.
     Ok(EngineResponse::LoginCancelled)
+}
+
+/// Restarts one account's connector after the user asked for it.
+async fn reconnect(
+    ctx: &EngineContext,
+    account_id: &AccountId,
+) -> Result<EngineResponse, EngineError> {
+    let runtime = ctx
+        .accounts
+        .get(&account_id.0)
+        .await
+        .ok_or_else(|| EngineError::not_found(format!("account '{}'", account_id.0)))?;
+    runtime.reconnect().await.map_err(map_connector)?;
+    Ok(EngineResponse::AccountReconnected)
 }
 
 async fn logout(

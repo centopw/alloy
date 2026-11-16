@@ -30,6 +30,7 @@ impl CommandGroup {
             | EngineCommand::SubmitLogin { .. }
             | EngineCommand::CancelLogin { .. }
             | EngineCommand::Logout { .. }
+            | EngineCommand::ReconnectAccount { .. }
             | EngineCommand::SetTelegramApp { .. }
             | EngineCommand::ClearTelegramApp
             | EngineCommand::GetTelegramApp

@@ -1,6 +1,7 @@
 <script lang="ts">
   import Button from '../common/Button.svelte';
   import { connectivity } from '$lib/stores/connectivity.svelte';
+  import { client } from '$lib/ipc';
   import { networkName, roomsStore } from '$lib/stores/rooms.svelte';
 
   import { t } from '$lib/i18n';
@@ -35,6 +36,29 @@
     })
   );
 
+  /** Accounts whose connector is being restarted right now, so the button can say so. */
+  let restarting = $state<Record<string, boolean>>({});
+  let restartError = $state<string | null>(null);
+
+  /**
+   * Restarts one account's connector.
+   *
+   * "Retry now" only probes whether the engine answers, which it always does when the engine is
+   * local — it cannot revive a connector that gave up on its own. This asks the engine to start
+   * that account's connector again, which is the only thing that brings it back.
+   */
+  async function reconnect(accountId: string) {
+    restarting = { ...restarting, [accountId]: true };
+    restartError = null;
+    try {
+      await client.invoke({ action: 'ReconnectAccount', params: { account_id: accountId } });
+    } catch (err) {
+      restartError = err instanceof Error ? err.message : String(err);
+    } finally {
+      restarting = { ...restarting, [accountId]: false };
+    }
+  }
+
   const text = $derived(
     connectivity.browserOnline
       ? t('chat-connection-unreachable')
@@ -46,14 +70,39 @@
   <div class="banner" role="status" aria-live="polite">
     {#if connectivity.offline}
       <span class="text">{text}</span>
+      <!-- A send made while the network is down is queued, not lost; saying so stops a user
+           retyping a message that is already waiting. -->
+      <span class="text queued">{t('connection-banner-messages-wait')}</span>
     {:else}
       <ul class="accounts">
         {#each trouble as row (row.accountId)}
-          <li class="text">{row.text}</li>
+          <li class="account">
+            <span class="text">{row.text}</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={restarting[row.accountId]}
+              onclick={() => void reconnect(row.accountId)}
+            >
+              {restarting[row.accountId]
+                ? t('connection-banner-trying')
+                : t('connection-banner-reconnect')}
+            </Button>
+          </li>
         {/each}
       </ul>
     {/if}
-    <Button variant="ghost" size="sm" onclick={() => void connectivity.retryNow()}>{t('connection-banner-retry-now')}</Button>
+    {#if restartError}
+      <span class="text error" role="alert">{restartError}</span>
+    {/if}
+    <Button
+      variant="ghost"
+      size="sm"
+      disabled={connectivity.probing}
+      onclick={() => void connectivity.retryNow()}
+    >
+      {connectivity.probing ? t('connection-banner-trying') : t('connection-banner-retry-now')}
+    </Button>
   </div>
 {/if}
 
@@ -77,6 +126,15 @@
   }
   .text {
     min-width: 0;
+  }
+  .account {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--alloy-spacing-scale-2);
+  }
+  .error {
+    color: var(--alloy-color-status-error);
   }
   .accounts {
     display: flex;

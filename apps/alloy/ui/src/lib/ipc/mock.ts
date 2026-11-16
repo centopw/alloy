@@ -807,6 +807,24 @@ export class MockTransport implements Transport {
         return { type: 'LoggedOut', payload: { account_id: accountId } };
       }
 
+      case 'ReconnectAccount': {
+        // A reconnect only rebuilds the network session: the account and its history stay. The
+        // demo engine announces the round trip so the banner can show it happened.
+        const accountId = command.params.account_id;
+        this.accountById(accountId);
+        this.emit({
+          type: 'ConnectionStatus',
+          payload: { account_id: accountId, status: 'Connecting' },
+        });
+        queueMicrotask(() =>
+          this.emit({
+            type: 'ConnectionStatus',
+            payload: { account_id: accountId, status: 'Connected' },
+          }),
+        );
+        return { type: 'AccountReconnected' };
+      }
+
       case 'SubscribeRoomList': {
         const subscriptionId = `sub_rooms_${++this.counter}`;
         this.roomSubscriptions.set(subscriptionId, { filter: command.params.filter, rows: [], ready: false });

@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use alloy_connector::{Capabilities, Connector, ConnectorEvent, SessionBlob};
+use alloy_connector::{Capabilities, Connector, ConnectorError, ConnectorEvent, SessionBlob};
 use alloy_protocol::{Account as AccountDto, AccountId, EngineEvent, MediaSource, UserId};
 use alloy_store::{AccountRecord, AccountState as StoreAccountState, Network as StoreNetwork};
 use tokio::sync::{Notify, RwLock, mpsc};
@@ -32,6 +32,9 @@ pub struct AccountRuntime {
     pub remote_user_id: Option<String>,
     pub connector: Arc<dyn Connector>,
     pub capabilities: Capabilities,
+    /// The connector's event channel. Kept so a reconnect can restart the connector while the actor
+    /// keeps draining the same receiver.
+    events: mpsc::Sender<ConnectorEvent>,
     wake: Arc<Notify>,
     /// Whether the connector's last reported state was `Offline`; see
     /// [`AccountRuntime::mark_connection_lost`].
@@ -52,6 +55,21 @@ impl AccountRuntime {
     /// Records that the connector is live again, so the next outage notifies once more.
     pub fn mark_connection_live(&self) {
         self.offline.store(false, Ordering::SeqCst);
+    }
+
+    /// Restarts the connector after the user asked it to reconnect.
+    ///
+    /// A connector retries transient failures on its own, but a transport that has given up (a
+    /// sidecar that exhausted its restarts, a socket that never came back) only reconnects when it
+    /// is started again. The actor and the outbox keep running: they read the same channel, so the
+    /// new session's events are applied without replaying anything.
+    pub async fn reconnect(&self) -> Result<(), ConnectorError> {
+        // A stop failure must not keep the start from running; the connector is being replaced.
+        if let Err(err) = self.connector.stop().await {
+            tracing::warn!(account = %self.account_id, error = %err, "stopping the connector before a reconnect failed");
+        }
+        self.mark_connection_live();
+        self.connector.start(self.events.clone()).await
     }
 
     /// Wakes the outbox worker; the permit survives until the worker waits again.
@@ -217,18 +235,19 @@ pub async fn start_with_connector(
     connector: Arc<dyn Connector>,
     remote_user_id: Option<String>,
 ) -> Result<Arc<AccountRuntime>, EngineError> {
+    let (sender, receiver) = mpsc::channel::<ConnectorEvent>(512);
     let runtime = Arc::new(AccountRuntime {
         account_id: record.account_id.clone(),
         network: record.network,
         remote_user_id: remote_user_id.or_else(|| record.remote_user_id.clone()),
         capabilities: connector.capabilities(),
         connector: connector.clone(),
+        events: sender.clone(),
         wake: Arc::new(Notify::new()),
         offline: AtomicBool::new(false),
         tasks: Mutex::new(Vec::new()),
     });
 
-    let (sender, receiver) = mpsc::channel::<ConnectorEvent>(512);
     connector.start(sender).await.map_err(map_connector)?;
 
     let actor = tokio::spawn(crate::actor::run(ctx.clone(), runtime.clone(), receiver));

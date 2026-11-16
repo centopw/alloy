@@ -28,6 +28,11 @@ class Connectivity {
   #probe: (() => Promise<unknown>) | null = null;
   #probing = false;
 
+  /** True while a probe is in flight, so the banner can show that "Retry now" is working. */
+  get probing(): boolean {
+    return this.#probing;
+  }
+
   get offline(): boolean {
     return !this.browserOnline || this.unreachable;
   }
