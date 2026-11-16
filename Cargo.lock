@@ -237,6 +237,7 @@ dependencies = [
  "alloy-protocol",
  "async-trait",
  "chacha20poly1305",
+ "ed25519-dalek",
  "hkdf",
  "keyring",
  "rand 0.9.5",

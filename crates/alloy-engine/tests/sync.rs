@@ -15,8 +15,11 @@ use alloy_protocol::{
     ConfigBundleSummary, ConfigImportReport, DeviceDto, EngineCommand, EngineEvent, EngineResponse,
     PairingPhase, PairingRole,
 };
+use alloy_storage::config_bundle::ConfigState;
+use alloy_storage::pairing::{self, DeviceProver, PairingError, PairingOffer, PairingTicket};
 use alloy_storage::{InMemorySecretStore, SecretStore};
 use alloy_store::{AccountState, ChatFlagsUpdate, ChatKind, ChatUpsert, Network, NewAccount};
+use ed25519_dalek::SigningKey;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 use tokio::sync::broadcast;
@@ -679,5 +682,218 @@ async fn a_fresh_device_accepts_an_older_bundle() {
     assert_eq!(
         read_json(&receiver_dir.path().join("settings.json"))["density"],
         json!("compact")
+    );
+}
+
+async fn list_devices(engine: &AppEngine) -> Vec<DeviceDto> {
+    match engine
+        .handle(EngineCommand::ListDevices)
+        .await
+        .expect("list devices")
+    {
+        EngineResponse::DevicesList { devices } => devices,
+        other => panic!("unexpected response: {other:?}"),
+    }
+}
+
+async fn confirm(engine: &AppEngine, pairing_id: &str, accept: bool) {
+    engine
+        .handle(EngineCommand::ConfirmPairing {
+            pairing_id: pairing_id.to_string(),
+            accept,
+        })
+        .await
+        .expect("confirm pairing");
+}
+
+/// Runs one accepted pairing between two engines and waits for both Done events.
+async fn pair_engines(offer: &AppEngine, receiver: &AppEngine) -> (String, String) {
+    let mut offer_events = offer.sink().subscribe();
+    let mut accept_events = receiver.sink().subscribe();
+
+    let (offer_id, ticket, code) = begin_pairing(offer).await;
+    let accept_id = accept(receiver, &ticket, &code).await;
+    assert_eq!(offer_id, accept_id, "both sides name the same pairing");
+
+    let offer_sas = wait_phase(&mut offer_events, &offer_id, PairingPhase::SasReady).await;
+    let accept_sas = wait_phase(&mut accept_events, &accept_id, PairingPhase::SasReady).await;
+    assert_eq!(offer_sas, accept_sas, "both screens show the same digits");
+
+    confirm(offer, &offer_id, true).await;
+    confirm(receiver, &accept_id, true).await;
+
+    wait_phase(&mut offer_events, &offer_id, PairingPhase::Done).await;
+    wait_phase(&mut accept_events, &accept_id, PairingPhase::Done).await;
+    (offer_id, accept_id)
+}
+
+#[tokio::test]
+async fn pairing_enrols_both_devices_in_each_roster() {
+    let offer_dir = TempDir::new().expect("offer dir");
+    let accept_dir = TempDir::new().expect("accept dir");
+    let offer = open_engine(offer_dir.path()).await;
+    let receiver = open_engine(accept_dir.path()).await;
+
+    pair_engines(&offer, &receiver).await;
+
+    let offer_devices = list_devices(&offer).await;
+    let accept_devices = list_devices(&receiver).await;
+    assert_eq!(offer_devices.len(), 2, "the offering roster holds both");
+    assert_eq!(accept_devices.len(), 2, "the accepting roster holds both");
+
+    let offer_this = offer_devices
+        .iter()
+        .find(|device| device.current)
+        .expect("the offering device is marked current");
+    let accept_this = accept_devices
+        .iter()
+        .find(|device| device.current)
+        .expect("the accepting device is marked current");
+    assert_eq!(
+        offer_devices.iter().filter(|device| device.current).count(),
+        1
+    );
+    assert_eq!(
+        accept_devices
+            .iter()
+            .filter(|device| device.current)
+            .count(),
+        1
+    );
+
+    // Each roster names the id the other device reports for itself.
+    assert!(
+        offer_devices
+            .iter()
+            .any(|device| device.device_id == accept_this.device_id),
+        "the offering roster must contain the accepting device's own id"
+    );
+    assert!(
+        accept_devices
+            .iter()
+            .any(|device| device.device_id == offer_this.device_id),
+        "the accepting roster must contain the offering device's own id"
+    );
+    let mut offer_ids: Vec<&str> = offer_devices.iter().map(|d| d.device_id.as_str()).collect();
+    let mut accept_ids: Vec<&str> = accept_devices
+        .iter()
+        .map(|d| d.device_id.as_str())
+        .collect();
+    offer_ids.sort_unstable();
+    accept_ids.sort_unstable();
+    assert_eq!(offer_ids, accept_ids, "both rosters agree on the ids");
+    assert!(offer_devices.iter().all(|device| device.epoch == 0));
+
+    // Revocation works on the enrolled peer, and this device stays current afterwards.
+    let epoch = match receiver
+        .handle(EngineCommand::RevokeDevice {
+            device_id: offer_this.device_id.clone(),
+        })
+        .await
+        .expect("revoke the enrolled peer")
+    {
+        EngineResponse::DeviceRevoked { epoch } => epoch,
+        other => panic!("unexpected response: {other:?}"),
+    };
+    assert_eq!(epoch, 1);
+    let after = list_devices(&receiver).await;
+    assert_eq!(after.len(), 1, "the revoked peer is gone");
+    assert!(after[0].current, "ListDevices still marks this device");
+    assert_eq!(after[0].device_id, accept_this.device_id);
+}
+
+/// A device that completes the handshake but signs a fixed value instead of the transcript: it
+/// cannot prove the identity it claims. The engine must reject it and leave its roster alone.
+struct TamperedProver {
+    identity: Vec<u8>,
+}
+
+impl TamperedProver {
+    fn new(label: &str, seed: u8) -> Self {
+        let key = SigningKey::from_bytes(&[seed; 32]);
+        let mut identity = key.verifying_key().as_bytes().to_vec();
+        identity.extend_from_slice(label.as_bytes());
+        Self { identity }
+    }
+
+    fn shared(label: &str, seed: u8) -> Arc<dyn DeviceProver + Send + Sync> {
+        Arc::new(Self::new(label, seed))
+    }
+}
+
+impl DeviceProver for TamperedProver {
+    fn identity(&self) -> &[u8] {
+        &self.identity
+    }
+
+    fn sign(&self, _transcript: &[u8; 32]) -> [u8; 64] {
+        [0u8; 64]
+    }
+}
+
+#[tokio::test]
+async fn a_tampered_identity_proof_fails_and_leaves_both_rosters_alone() {
+    // Direction 1: the engine offers, the peer cannot prove itself. The offering roster must stay
+    // at one entry and the pairing must report Failed, not Done.
+    let offer_dir = TempDir::new().expect("offer dir");
+    let offer = open_engine(offer_dir.path()).await;
+    let mut offer_events = offer.sink().subscribe();
+    let (offer_id, ticket, code) = begin_pairing(&offer).await;
+
+    let parsed = PairingTicket::parse(&ticket).expect("parse ticket");
+    let imposter = TamperedProver::new("imposter", 41);
+    let pending = pairing::connect(&parsed.endpoint, &parsed, &code, &imposter)
+        .await
+        .expect("the transport handshake completes");
+
+    wait_phase(&mut offer_events, &offer_id, PairingPhase::SasReady).await;
+    confirm(&offer, &offer_id, true).await;
+    pending.finish(true).await.expect("the imposter accepts");
+
+    wait_phase(&mut offer_events, &offer_id, PairingPhase::Failed).await;
+    assert_eq!(
+        list_devices(&offer).await.len(),
+        1,
+        "a failed proof must not add a roster entry on the offering device"
+    );
+
+    // Direction 2: the engine accepts from a peer that cannot prove itself. Its roster must stay
+    // at one entry too, and no config layer may be imported.
+    let accept_dir = TempDir::new().expect("accept dir");
+    let receiver = open_engine(accept_dir.path()).await;
+    let mut accept_events = receiver.sink().subscribe();
+    let malicious = PairingOffer::bind(
+        ConfigState::default().export("imposter", 1),
+        "127.0.0.1:0".parse().expect("loopback"),
+        None,
+        TamperedProver::shared("imposter", 42),
+    )
+    .await
+    .expect("bind the imposter offer");
+    let ticket = malicious.ticket().to_qr_string();
+    let code = malicious.code().to_string();
+    let offer_task = tokio::spawn(async move {
+        let handshake = malicious.wait_for_peer().await?;
+        handshake.finish(true).await?;
+        Ok::<(), PairingError>(())
+    });
+
+    let accept_id = accept(&receiver, &ticket, &code).await;
+    wait_phase(&mut accept_events, &accept_id, PairingPhase::SasReady).await;
+    confirm(&receiver, &accept_id, true).await;
+    offer_task
+        .await
+        .expect("offer task")
+        .expect("imposter offer");
+
+    wait_phase(&mut accept_events, &accept_id, PairingPhase::Failed).await;
+    assert_eq!(
+        list_devices(&receiver).await.len(),
+        1,
+        "a failed proof must not add a roster entry on the accepting device"
+    );
+    assert!(
+        !accept_dir.path().join("tags.json").exists(),
+        "no config layer is imported from a peer that cannot prove itself"
     );
 }

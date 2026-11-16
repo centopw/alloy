@@ -30,7 +30,10 @@ use alloy_storage::config_bundle::{
     BUNDLE_SCHEMA, BackgroundAsset, BundleError, ChatKey, ConfigBundle, ConfigState, TagSet,
     ThemeSelection,
 };
-use alloy_storage::pairing::{self, CODE_TTL, PairingError, PairingOffer, PairingTicket};
+use alloy_storage::pairing::{
+    self, CODE_TTL, DeviceProver, PairedBundle, PairedPeer, PairingError, PairingOffer,
+    PairingTicket,
+};
 use alloy_store::ChatFlagsUpdate;
 use alloy_sync::keys::MasterKey;
 use argon2::{Algorithm, Argon2, Params, Version};
@@ -39,7 +42,7 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use bip39::{Language, Mnemonic};
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
-use ed25519_dalek::SigningKey;
+use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -304,7 +307,8 @@ impl SyncHandler {
         // the theme, and background images would dominate the transfer for no configuration gain.
         let bundle = build_bundle(ctx, false, true).await?;
         let bytes = bundle.to_json().map_err(map_bundle)?.len() as u64;
-        let offer = PairingOffer::bind(bundle, lan_bind_addr(), None)
+        let prover = EngineProver::load(ctx).await?;
+        let offer = PairingOffer::bind(bundle, lan_bind_addr(), None, Arc::new(prover))
             .await
             .map_err(map_pairing)?;
         let ticket = offer.ticket().clone();
@@ -419,9 +423,27 @@ fn spawn_offer(
             set_phase(&pairings, &sink, &pairing_id, PairingPhase::Transferring);
         }
         match handshake.finish(accepted).await {
-            Ok(()) => {
-                set_transferred(&pairings, &pairing_id, bundle_bytes);
-                finish_pairing(&pairings, &sink, &pairing_id, PairingPhase::Done, None);
+            Ok(peer) => {
+                let outcome = match verify_peer(&peer) {
+                    Ok((device_id, label)) => enrol_verified_peer(&ctx, device_id, label.clone())
+                        .await
+                        .map(|()| label),
+                    Err(err) => Err(err),
+                };
+                match outcome {
+                    Ok(label) => {
+                        set_peer_label(&pairings, &pairing_id, label);
+                        set_transferred(&pairings, &pairing_id, bundle_bytes);
+                        finish_pairing(&pairings, &sink, &pairing_id, PairingPhase::Done, None);
+                    }
+                    Err(err) => finish_pairing(
+                        &pairings,
+                        &sink,
+                        &pairing_id,
+                        PairingPhase::Failed,
+                        Some(err.message),
+                    ),
+                }
             }
             Err(err) => finish_pairing(
                 &pairings,
@@ -443,9 +465,24 @@ fn spawn_accept(
 ) {
     tokio::spawn(async move {
         let sink = ctx.sink.clone();
-        let connected =
-            tokio::time::timeout(CODE_TTL, pairing::connect(&ticket.endpoint, &ticket, &code))
-                .await;
+        let prover = match EngineProver::load(&ctx).await {
+            Ok(prover) => prover,
+            Err(err) => {
+                finish_pairing(
+                    &pairings,
+                    &sink,
+                    &pairing_id,
+                    PairingPhase::Failed,
+                    Some(err.message),
+                );
+                return;
+            }
+        };
+        let connected = tokio::time::timeout(
+            CODE_TTL,
+            pairing::connect(&ticket.endpoint, &ticket, &code, &prover),
+        )
+        .await;
         let pending = match connected {
             Err(_) => {
                 finish_pairing(
@@ -485,14 +522,28 @@ fn spawn_accept(
             set_phase(&pairings, &sink, &pairing_id, PairingPhase::Transferring);
         }
         match pending.finish(accepted).await {
-            Ok(bundle) => {
+            Ok(PairedBundle { bundle, peer }) => {
                 let label = bundle.device_label.clone();
                 set_peer_label(&pairings, &pairing_id, label);
-                let outcome = match bundle.to_json() {
-                    Ok(bytes) => import_bundle_value(&ctx, &bundle, true)
-                        .await
-                        .map(|_| bytes.len() as u64),
-                    Err(err) => Err(map_bundle(err)),
+                // The proof is checked before any layer is written: a peer that cannot prove
+                // its identity gets nothing imported and no roster entry.
+                let verified = verify_peer(&peer);
+                let outcome = match verified {
+                    Ok((device_id, peer_label)) => {
+                        let imported = match bundle.to_json() {
+                            Ok(bytes) => import_bundle_value(&ctx, &bundle, true)
+                                .await
+                                .map(|_| bytes.len() as u64),
+                            Err(err) => Err(map_bundle(err)),
+                        };
+                        match imported {
+                            Ok(bytes) => enrol_verified_peer(&ctx, device_id, peer_label)
+                                .await
+                                .map(|()| bytes),
+                            Err(err) => Err(err),
+                        }
+                    }
+                    Err(err) => Err(err),
                 };
                 match outcome {
                     Ok(bytes) => {
@@ -619,6 +670,111 @@ fn phase_for(err: &PairingError) -> PairingPhase {
 
 fn map_pairing(err: PairingError) -> EngineError {
     EngineError::pairing_failed(err.to_string())
+}
+
+/// This device's pairing identity: its Ed25519 public key followed by its roster label.
+///
+/// The key is the same one `ensure_this_device` hashes into the roster id, so the id the peer
+/// derives from this identity is exactly the id this device reports for itself.
+struct EngineProver {
+    key: SigningKey,
+    identity: Vec<u8>,
+}
+
+impl EngineProver {
+    async fn load(ctx: &EngineContext) -> Result<Self, EngineError> {
+        let key = device_key(ctx).await?;
+        let mut identity = key.verifying_key().as_bytes().to_vec();
+        identity.extend_from_slice(default_label().as_bytes());
+        Ok(Self { key, identity })
+    }
+}
+
+impl DeviceProver for EngineProver {
+    fn identity(&self) -> &[u8] {
+        &self.identity
+    }
+
+    fn sign(&self, transcript: &[u8; 32]) -> [u8; 64] {
+        self.key.sign(transcript).to_bytes()
+    }
+}
+
+/// Bytes of the Ed25519 key every pairing identity starts with.
+const IDENTITY_KEY_LEN: usize = 32;
+
+/// Checks the peer's proof over the transcript and reads its device id and label.
+///
+/// The identity shape is `Ed25519 public key (32 bytes) || UTF-8 label`, which is what
+/// [`EngineProver`] sends. The returned id is the hex of the key: the same value the peer's own
+/// roster uses for itself. Any failure here is a rejected pairing, never a warning.
+fn verify_peer(peer: &PairedPeer) -> Result<(String, String), EngineError> {
+    let key_bytes: [u8; IDENTITY_KEY_LEN] = peer
+        .identity
+        .get(..IDENTITY_KEY_LEN)
+        .and_then(|bytes| bytes.try_into().ok())
+        .ok_or_else(|| {
+            EngineError::pairing_failed(
+                "the other device sent an identity too short to hold an Ed25519 key",
+            )
+        })?;
+    let key = VerifyingKey::from_bytes(&key_bytes).map_err(|_| {
+        EngineError::pairing_failed("the other device's identity does not hold a valid Ed25519 key")
+    })?;
+    key.verify_strict(&peer.transcript, &Signature::from_bytes(&peer.proof))
+        .map_err(|_| {
+            EngineError::pairing_failed(format!(
+                "the other device's identity proof over transcript {} did not verify",
+                hex(&peer.transcript)
+            ))
+        })?;
+    let label = std::str::from_utf8(&peer.identity[IDENTITY_KEY_LEN..]).map_err(|_| {
+        EngineError::pairing_failed("the other device's pairing label is not UTF-8")
+    })?;
+    let label = if label.trim().is_empty() {
+        "Paired device".to_string()
+    } else {
+        label.to_string()
+    };
+    Ok((hex(&key_bytes), label))
+}
+
+/// Writes an already-verified peer into this device's roster at the current epoch.
+///
+/// The caller must have checked `peer` with [`verify_peer`] first; nothing here re-checks, and
+/// nothing here runs on a pairing whose proof failed.
+async fn enrol_verified_peer(
+    ctx: &EngineContext,
+    device_id: String,
+    label: String,
+) -> Result<(), EngineError> {
+    ensure_this_device(ctx).await?;
+    SettingsHandler::with_settings_lock(ctx, || {
+        let mut settings = settings_object(ctx)?;
+        let mut sync = sync_section(&settings);
+        let epoch = sync_epoch(&sync);
+        let mut devices = roster(&settings)?;
+        match devices
+            .iter_mut()
+            .find(|device| device.device_id == device_id)
+        {
+            Some(entry) => {
+                entry.label = label.clone();
+                entry.epoch = epoch;
+            }
+            None => devices.push(DeviceEntry {
+                device_id: device_id.clone(),
+                label: label.clone(),
+                enrolled_ms: now_ms(),
+                epoch,
+            }),
+        }
+        sync["devices"] = serde_json::to_value(&devices).map_err(|err| {
+            EngineError::internal_error(format!("cannot encode the device roster: {err}"))
+        })?;
+        settings["sync"] = sync;
+        SettingsHandler::write_settings_file(ctx, settings)
+    })
 }
 
 /// The address the offer binds: this machine's LAN IPv4 when there is a route, loopback when

@@ -13,12 +13,17 @@
 //!    person compares the digits on the two screens. This, not the code, is the MITM defence.
 //! 5. Only when both sides accept is the bundle sealed with ChaCha20-Poly1305 and sent. A rejected
 //!    or mismatched SAS means no bundle byte leaves the offering device.
+//! 6. The accept frame carries each side's device identity and a [`DeviceProver`] proof over the
+//!    transcript, sealed with the session key. This crate only moves those bytes: verifying the
+//!    proof before enrolling the peer is the caller's job, and the identity it returns in
+//!    [`PairedPeer`] is untrusted until then.
 //!
 //! Every sealed message carries its type as AAD and a direction-tagged counter nonce, so a replay,
 //! a reordering or a relabel fails to open. Frames are length-prefixed and bounded before
 //! allocation. The offer accepts exactly one connection: one code, one attempt, 90 seconds.
 
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
@@ -63,6 +68,10 @@ const MSG_CODE_PROOF: u8 = 1;
 const MSG_ACCEPT: u8 = 2;
 const MSG_BUNDLE: u8 = 3;
 
+/// Longest device identity this layer carries in an accept frame. Verification and the identity's
+/// internal shape belong to the caller; only the bound is enforced here, before allocation.
+const MAX_IDENTITY_LEN: usize = 128;
+
 const QR_TAG: &str = "alloy-pairing-v1";
 
 #[derive(Debug, Error)]
@@ -81,6 +90,37 @@ pub enum PairingError {
     Bundle(#[from] BundleError),
     #[error("pairing payload is malformed: {0}")]
     MalformedPayload(String),
+}
+
+/// What the caller brings to a pairing: the bytes that identify this device to the peer, and a
+/// proof over the handshake transcript.
+///
+/// This crate only moves the identity and the proof; it never decides whether either is trusted.
+/// Verifying the proof over [`PairedPeer::transcript`] before enrolling the peer is the caller's
+/// job (in alloy-engine, that is an Ed25519 check against the key inside the identity).
+pub trait DeviceProver {
+    /// Opaque identity bytes. The engine puts the Ed25519 public key first, then a UTF-8 label.
+    fn identity(&self) -> &[u8];
+    /// Signature over the 32-byte transcript both sides derived from the handshake.
+    fn sign(&self, transcript: &[u8; 32]) -> [u8; 64];
+}
+
+/// What the peer sent once both people accepted the SAS: its identity and a proof over the
+/// transcript. Nothing in here is trusted yet; the caller verifies the proof before enrolling.
+#[derive(Debug, Clone)]
+pub struct PairedPeer {
+    pub identity: Vec<u8>,
+    pub proof: [u8; 64],
+    /// The transcript the proof must cover. Both sides derived the same one.
+    pub transcript: [u8; 32],
+    pub sas: String,
+}
+
+/// The accepting side's result: the bundle, plus the identity the offering device proved.
+#[derive(Debug, Clone)]
+pub struct PairedBundle {
+    pub bundle: ConfigBundle,
+    pub peer: PairedPeer,
 }
 
 /// What the UI renders as a QR code. Plain text so this crate needs no QR dependency: pairing id,
@@ -144,6 +184,7 @@ impl PairingTicket {
 pub struct PairingOffer {
     listener: TcpListener,
     bundle: ConfigBundle,
+    prover: Arc<dyn DeviceProver + Send + Sync>,
     secret: StaticSecret,
     public: PublicKey,
     nonce: [u8; 32],
@@ -157,13 +198,14 @@ pub struct PairingOffer {
 impl PairingOffer {
     /// Bind `bind_addr` and return a offer that is valid for [`CODE_TTL`]. `advertise` is the
     /// endpoint a second machine should dial when `bind_addr` is wildcard; it defaults to the
-    /// bound address.
+    /// bound address. `prover` supplies this device's identity and its proof over the transcript.
     pub async fn bind(
         bundle: ConfigBundle,
         bind_addr: SocketAddr,
         advertise: Option<String>,
+        prover: Arc<dyn DeviceProver + Send + Sync>,
     ) -> Result<Self, PairingError> {
-        Self::bind_with_ttl(bundle, bind_addr, advertise, CODE_TTL).await
+        Self::bind_with_ttl(bundle, bind_addr, advertise, CODE_TTL, prover).await
     }
 
     /// Same as [`PairingOffer::bind`] with an explicit TTL, for tests and for a UI that offers a
@@ -173,6 +215,7 @@ impl PairingOffer {
         bind_addr: SocketAddr,
         advertise: Option<String>,
         ttl: Duration,
+        prover: Arc<dyn DeviceProver + Send + Sync>,
     ) -> Result<Self, PairingError> {
         bundle.validate()?;
         let listener = TcpListener::bind(bind_addr).await?;
@@ -191,6 +234,7 @@ impl PairingOffer {
         Ok(Self {
             listener,
             bundle,
+            prover,
             secret,
             public,
             nonce,
@@ -273,6 +317,8 @@ impl PairingOffer {
             sas: sas(&transcript),
             bundle: self.bundle,
             channel,
+            transcript,
+            prover: self.prover,
         })
     }
 }
@@ -282,6 +328,8 @@ pub struct OfferedHandshake {
     sas: String,
     bundle: ConfigBundle,
     channel: Channel,
+    transcript: [u8; 32],
+    prover: Arc<dyn DeviceProver + Send + Sync>,
 }
 
 impl OfferedHandshake {
@@ -289,21 +337,31 @@ impl OfferedHandshake {
         &self.sas
     }
 
-    /// Send the user's decision. The bundle leaves only when both this side and the peer accepted;
-    /// otherwise both sides return [`PairingError::Declined`].
-    pub async fn finish(mut self, accepted: bool) -> Result<(), PairingError> {
-        self.channel.send(MSG_ACCEPT, &[u8::from(accepted)]).await?;
+    /// Send the user's decision and this device's identity, then read the peer's. The bundle
+    /// leaves only when both this side and the peer accepted; otherwise both sides return
+    /// [`PairingError::Declined`].
+    ///
+    /// The returned [`PairedPeer`] is unverified: the caller must check `proof` over `transcript`
+    /// before trusting or enrolling the identity.
+    pub async fn finish(mut self, accepted: bool) -> Result<PairedPeer, PairingError> {
+        let frame = accept_frame(&*self.prover, accepted, &self.transcript)?;
+        self.channel.send(MSG_ACCEPT, &frame).await?;
         let reply = self.channel.recv(MSG_ACCEPT).await?;
-        let peer_accepted = parse_accept(&reply)?;
+        let peer = parse_accept(&reply)?;
         if !accepted {
             return Err(PairingError::Declined("this device rejected the SAS"));
         }
-        if !peer_accepted {
+        let Some(peer) = peer else {
             return Err(PairingError::Declined("the other device rejected the SAS"));
-        }
+        };
         let bytes = self.bundle.to_json()?;
         self.channel.send(MSG_BUNDLE, &bytes).await?;
-        Ok(())
+        Ok(PairedPeer {
+            identity: peer.identity,
+            proof: peer.proof,
+            transcript: self.transcript,
+            sas: self.sas,
+        })
     }
 }
 
@@ -311,6 +369,9 @@ impl OfferedHandshake {
 pub struct PendingPairing {
     sas: String,
     channel: Channel,
+    transcript: [u8; 32],
+    /// The sealed identity this device will send when it accepts; built in [`connect`].
+    accept_frame: Vec<u8>,
 }
 
 impl PendingPairing {
@@ -319,28 +380,46 @@ impl PendingPairing {
     }
 
     /// Send the user's decision and, when both sides accepted, receive and validate the bundle.
-    pub async fn finish(mut self, accepted: bool) -> Result<ConfigBundle, PairingError> {
-        self.channel.send(MSG_ACCEPT, &[u8::from(accepted)]).await?;
+    ///
+    /// The returned [`PairedBundle::peer`] is unverified: the caller must check `proof` over
+    /// `transcript` before trusting or enrolling the identity, and before importing the bundle.
+    pub async fn finish(mut self, accepted: bool) -> Result<PairedBundle, PairingError> {
+        let frame = if accepted {
+            self.accept_frame.as_slice()
+        } else {
+            &[0u8][..]
+        };
+        self.channel.send(MSG_ACCEPT, frame).await?;
         let reply = self.channel.recv(MSG_ACCEPT).await?;
-        let peer_accepted = parse_accept(&reply)?;
+        let peer = parse_accept(&reply)?;
         if !accepted {
             return Err(PairingError::Declined("this device rejected the SAS"));
         }
-        if !peer_accepted {
+        let Some(peer) = peer else {
             return Err(PairingError::Declined("the other device rejected the SAS"));
-        }
+        };
         let bytes = self.channel.recv(MSG_BUNDLE).await?;
-        Ok(ConfigBundle::from_json(&bytes)?)
+        Ok(PairedBundle {
+            bundle: ConfigBundle::from_json(&bytes)?,
+            peer: PairedPeer {
+                identity: peer.identity,
+                proof: peer.proof,
+                transcript: self.transcript,
+                sas: self.sas,
+            },
+        })
     }
 }
 
 /// Connect to an offering device and complete the handshake. The code is the one the offer shows.
 /// A wrong code is not detectable here (the offering side holds the expected value), so it shows
-/// up as a failed [`PendingPairing::finish`] on both ends.
+/// up as a failed [`PendingPairing::finish`] on both ends. `prover` supplies this device's
+/// identity and its proof over the transcript, sent only if the user accepts.
 pub async fn connect(
     endpoint: &str,
     ticket: &PairingTicket,
     code: &str,
+    prover: &(dyn DeviceProver + Send + Sync),
 ) -> Result<PendingPairing, PairingError> {
     let expected_id = from_hex_array::<PAIRING_ID_BYTES>(&ticket.pairing_id)?;
     let mut stream = TcpStream::connect(endpoint).await?;
@@ -396,6 +475,8 @@ pub async fn connect(
     Ok(PendingPairing {
         sas: sas(&transcript),
         channel,
+        transcript,
+        accept_frame: accept_frame(prover, true, &transcript)?,
     })
 }
 
@@ -506,12 +587,60 @@ fn parse_accept_hello(hello: &[u8]) -> Result<AcceptHello, PairingError> {
     })
 }
 
-fn parse_accept(reply: &[u8]) -> Result<bool, PairingError> {
+/// The peer's identity and proof, as carried in an accept frame.
+struct SealedPeer {
+    identity: Vec<u8>,
+    proof: [u8; 64],
+}
+
+/// Builds the accept frame: one flag, and when accepting, the identity length, the identity and
+/// the proof over `transcript`. A decline carries no identity at all.
+fn accept_frame(
+    prover: &dyn DeviceProver,
+    accepted: bool,
+    transcript: &[u8; 32],
+) -> Result<Vec<u8>, PairingError> {
+    if !accepted {
+        return Ok(vec![0]);
+    }
+    let identity = prover.identity();
+    if identity.len() > MAX_IDENTITY_LEN {
+        return Err(PairingError::Protocol(format!(
+            "identity is {} bytes, above the {MAX_IDENTITY_LEN}-byte frame bound",
+            identity.len()
+        )));
+    }
+    let proof = prover.sign(transcript);
+    let mut frame = Vec::with_capacity(3 + identity.len() + 64);
+    frame.push(1);
+    frame.extend_from_slice(&(identity.len() as u16).to_be_bytes());
+    frame.extend_from_slice(identity);
+    frame.extend_from_slice(&proof);
+    Ok(frame)
+}
+
+/// `None` is a decline; `Some` carries the peer's identity and proof, still unverified.
+fn parse_accept(reply: &[u8]) -> Result<Option<SealedPeer>, PairingError> {
     match reply {
-        [0] => Ok(false),
-        [1] => Ok(true),
+        [0] => Ok(None),
+        [1, rest @ ..] if rest.len() >= 2 + 64 => {
+            let len = u16::from_be_bytes([rest[0], rest[1]]) as usize;
+            let body = &rest[2..];
+            if len > MAX_IDENTITY_LEN || body.len() != len + 64 {
+                return Err(PairingError::Protocol(format!(
+                    "accept frame claims {len} identity bytes in {} body bytes",
+                    body.len()
+                )));
+            }
+            let mut proof = [0u8; 64];
+            proof.copy_from_slice(&body[len..]);
+            Ok(Some(SealedPeer {
+                identity: body[..len].to_vec(),
+                proof,
+            }))
+        }
         other => Err(PairingError::Protocol(format!(
-            "accept reply is {} bytes, expected one flag",
+            "accept frame is {} bytes, expected a flag or a sealed identity",
             other.len()
         ))),
     }

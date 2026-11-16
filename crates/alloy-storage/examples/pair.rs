@@ -16,13 +16,42 @@
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use alloy_storage::config_bundle::{
     BackgroundAsset, ChatKey, ConfigBundle, ConfigState, ImportReport, TagSet, ThemeSelection,
 };
-use alloy_storage::pairing::{self, PairingOffer, PairingTicket};
+use alloy_storage::pairing::{self, DeviceProver, PairingOffer, PairingTicket};
+use ed25519_dalek::{Signer, SigningKey};
 use serde_json::json;
+
+/// What the engine supplies in the app: this device's Ed25519 key and a label. The handshake only
+/// carries the bytes; whether the peer's proof verifies is the caller's decision, which this demo
+/// deliberately skips so it can run without a roster.
+struct DemoProver {
+    key: SigningKey,
+    identity: Vec<u8>,
+}
+
+impl DemoProver {
+    fn new(label: &str, seed: u8) -> Self {
+        let key = SigningKey::from_bytes(&[seed; 32]);
+        let mut identity = key.verifying_key().as_bytes().to_vec();
+        identity.extend_from_slice(label.as_bytes());
+        Self { key, identity }
+    }
+}
+
+impl DeviceProver for DemoProver {
+    fn identity(&self) -> &[u8] {
+        &self.identity
+    }
+
+    fn sign(&self, transcript: &[u8; 32]) -> [u8; 64] {
+        self.key.sign(transcript).to_bytes()
+    }
+}
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
@@ -65,8 +94,13 @@ async fn offer(options: &Options) -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or("127.0.0.1:0")
         .parse()
         .map_err(|e| format!("--bind is not an address: {e}"))?;
-    let offer =
-        PairingOffer::bind(bundle, bind, options.get("advertise").map(str::to_string)).await?;
+    let offer = PairingOffer::bind(
+        bundle,
+        bind,
+        options.get("advertise").map(str::to_string),
+        Arc::new(DemoProver::new(label, 1)),
+    )
+    .await?;
     let local = offer.local_addr()?;
     let advertised = advertised_endpoint(local, options.get("advertise"));
 
@@ -82,7 +116,11 @@ async fn offer(options: &Options) -> Result<(), Box<dyn std::error::Error>> {
     println!("compare those six digits with the other screen");
     let accepted = confirm(options.yes, "send the bundle?")?;
     match handshake.finish(accepted).await {
-        Ok(()) => println!("bundle sent; nothing was uploaded anywhere."),
+        Ok(peer) => println!(
+            "bundle sent; the peer proved identity {} ({} bytes). Nothing was uploaded anywhere.",
+            hex_prefix(&peer.identity),
+            peer.identity.len()
+        ),
         Err(pairing::PairingError::Declined(_)) if !accepted => {
             println!("declined locally; the bundle stayed on this device.")
         }
@@ -98,11 +136,17 @@ async fn accept(options: &Options) -> Result<(), Box<dyn std::error::Error>> {
     let code = options.get("code").ok_or("accept needs --code")?;
     let ticket = PairingTicket::parse(qr)?;
 
-    let pending = pairing::connect(&ticket.endpoint, &ticket, code).await?;
+    let prover = DemoProver::new("accept", 2);
+    let pending = pairing::connect(&ticket.endpoint, &ticket, code, &prover).await?;
     println!("short authentication string: {}", pending.sas());
     println!("compare those six digits with the other screen");
     let accepted = confirm(options.yes, "accept the bundle?")?;
-    let bundle = pending.finish(accepted).await?;
+    let paired = pending.finish(accepted).await?;
+    println!(
+        "peer proved identity {} over the transcript",
+        hex_prefix(&paired.peer.identity)
+    );
+    let bundle = paired.bundle;
 
     let path = options.get("state").map(PathBuf::from);
     let mut state = match &path {
@@ -118,6 +162,15 @@ async fn accept(options: &Options) -> Result<(), Box<dyn std::error::Error>> {
         println!("wrote state:  {}", path.display());
     }
     Ok(())
+}
+
+/// The first eight bytes of an identity as hex, enough for the demo to show it moved.
+fn hex_prefix(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .take(8)
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 fn load_state(path: &Path) -> Result<ConfigState, Box<dyn std::error::Error>> {
