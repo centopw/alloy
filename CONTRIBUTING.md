@@ -78,8 +78,9 @@ config. They are a runtime setting, not a build input: no credential is compiled
 an installed binary cannot be mined for one, and the pair can be replaced without shipping a new
 version.
 
-- **In the app:** Settings -> Networks -> Telegram application. The pair is sealed in the OS
-  keyring under `alloy.telegram.app.v1` and reused from then on; the `api_hash` is never returned
+- **In the app:** Settings -> Networks -> Telegram application. The pair is sealed in the platform
+  secret store under `alloy.telegram.app.v1` (an owner-only file by default; the OS keychain with
+  `ALLOY_SECRET_BACKEND=keychain`) and reused from then on; the `api_hash` is never returned
   or logged, and `GetTelegramApp` reports only the `api_id` and where the pair came from.
 - **Registering one yourself:** <https://my.telegram.org/apps>. Telegram's API terms ask any client
   that is not the official app to carry a name prefixed "Unofficial", so the registered entry is
@@ -106,8 +107,8 @@ examples.
   caller to update. Adding a network means adding its declaration; a setting the declaration does
   not list is refused by the engine.
 - **Storage:** non-secret values live in `<data_dir>/network_settings.json`, written atomically
-  (temporary file, fsync, rename). A `secret` setting is sealed in the OS keyring and never
-  written to that file or returned by `ListNetworks`.
+  (temporary file, fsync, rename). A `secret` setting is sealed in the platform secret store and
+  never written to that file or returned by `ListNetworks`.
 - **Delivery:** the value in effect is read when the next connector is created, so a Messenger
   sidecar is launched with `ALLOY_META_PROXY` (omitted when unset) and `ALLOY_META_PLATFORM`. A
   running account keeps the settings it started with; changing one does not restart it.

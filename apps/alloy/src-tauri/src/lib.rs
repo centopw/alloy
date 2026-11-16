@@ -23,29 +23,79 @@ pub struct AppState {
     pub engine: Arc<AppEngine>,
 }
 
-/// Picks where account secrets live. Desktop uses the OS keyring, probed at startup so a keyring
-/// without a working backend fails instead of holding secrets only in memory. Linux without a
-/// running Secret Service falls back to the owner-only file, with a warning. Android and iOS have
-/// no keyring backend and always use the owner-only file.
+/// Environment variable that puts the OS keychain first. Any other value, or none, keeps the
+/// owner-only secret file.
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+const SECRET_BACKEND_ENV: &str = "ALLOY_SECRET_BACKEND";
+
+/// Picks where account secrets live.
+///
+/// The default is an owner-only file inside the app data directory, on every platform. The OS
+/// keychain is opt-in ([`SECRET_BACKEND_ENV`]`=keychain`) because macOS ties a keychain item to the
+/// code signature of the binary that created it: every unsigned development build and every release
+/// is a new identity, so the system asks for the login password on each launch for no security the
+/// app can rely on. The file is created 0600 inside a directory the OS keeps private to the user,
+/// and a database key that never leaves this machine is what the keychain was protecting anyway.
+///
+/// Secrets a previous build sealed in the keychain are copied into the file once, so an existing
+/// database keeps opening; after that the keychain is never read again.
 fn open_secret_store(
     data_dir: &Path,
 ) -> Result<Arc<dyn alloy_storage::SecretStore>, alloy_storage::StorageError> {
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     {
-        match alloy_storage::KeyringSecretStore::new("chat.alloy") {
-            Ok(store) => return Ok(Arc::new(store)),
-            Err(e) if cfg!(target_os = "linux") => {
-                tracing::warn!(
-                    error = %e,
-                    "OS keyring unavailable; storing secrets in an owner-only file"
-                );
+        if std::env::var(SECRET_BACKEND_ENV).as_deref() == Ok("keychain") {
+            match alloy_storage::KeyringSecretStore::new(KEYRING_SERVICE) {
+                Ok(store) => return Ok(Arc::new(store)),
+                Err(err) => tracing::warn!(
+                    error = %err,
+                    "the OS keychain was requested but is unusable; using the owner-only file"
+                ),
             }
-            Err(e) => return Err(e),
         }
     }
-    Ok(Arc::new(alloy_storage::FileSecretStore::new(
-        data_dir.join("secrets.json"),
-    )))
+
+    let file = alloy_storage::FileSecretStore::new(data_dir.join("secrets.json"));
+    adopt_keychain_secrets(data_dir, &file)?;
+    Ok(Arc::new(file))
+}
+
+/// Service name every build has used for its keychain items.
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+const KEYRING_SERVICE: &str = "chat.alloy";
+
+/// Copies the secrets older builds kept in the keychain into the file backend, once.
+///
+/// A single read per key, only while the file lacks it. If the keychain refuses (the user denied
+/// the prompt, the login keychain is locked), a database that never opened would need a fresh key we
+/// must not mint: the file's key is the only way to decrypt it. That case is an error, not a silent
+/// fallback, so the user sees why Alloy cannot start instead of losing access to their messages.
+fn adopt_keychain_secrets(
+    data_dir: &Path,
+    file: &alloy_storage::FileSecretStore,
+) -> Result<(), alloy_storage::StorageError> {
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    {
+        let keys = [
+            alloy_engine::context::STORE_KEY_SECRET,
+            alloy_engine::factory::TELEGRAM_APP_SECRET,
+        ];
+        if let Err(err) = alloy_storage::import_missing_from_keyring(KEYRING_SERVICE, &keys, file) {
+            if data_dir.join("alloy.db").exists() {
+                return Err(err);
+            }
+            tracing::warn!(
+                error = %err,
+                "the keychain could not be read; starting without its secrets"
+            );
+        }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        // Android and iOS have no keychain backend: the file is already the only store.
+        let _ = (data_dir, file);
+    }
+    Ok(())
 }
 
 /// The Messenger sidecar executable, when this build has one.

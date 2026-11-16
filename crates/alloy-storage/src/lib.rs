@@ -149,6 +149,32 @@ impl FileSecretStore {
         }
         Ok(result?)
     }
+
+    /// Adds the secrets this file does not hold yet, in one atomic write, and never overwrites one
+    /// it already has.
+    ///
+    /// Used to move keys out of the OS keychain once: the file is authoritative afterwards, and a
+    /// second import is a no-op.
+    pub fn import(&self, entries: &[(&str, String)]) -> Result<(), StorageError> {
+        let mut map = self.load()?;
+        let mut changed = false;
+        for (key, value) in entries {
+            if !map.contains_key(*key) {
+                map.insert((*key).to_string(), value.clone());
+                changed = true;
+            }
+        }
+        if changed {
+            self.save(&map)?;
+        }
+        Ok(())
+    }
+
+    /// Whether every `key` is already in the file, without touching any other backend.
+    pub fn contains_all(&self, keys: &[&str]) -> Result<bool, StorageError> {
+        let map = self.load()?;
+        Ok(keys.iter().all(|key| map.contains_key(*key)))
+    }
 }
 
 /// Creates `path` exclusively with owner-only permissions (0600 on unix), writes `bytes`, and fsyncs.
@@ -200,14 +226,22 @@ impl SecretStore for FileSecretStore {
 /// OS keychain-backed secret store using the `keyring` crate.
 ///
 /// Only compiled on desktop targets whose keyring backend is enabled in `Cargo.toml`. Constructing
-/// it verifies that the platform keychain really persists data, so a missing backend fails closed
-/// instead of silently falling back to keyring's in-memory mock.
+/// it verifies that the platform keychain answers, so a missing backend fails closed instead of
+/// silently falling back to keyring's in-memory mock.
+///
+/// Every secret is read from the platform keychain at most once per process: on macOS the keychain
+/// asks the user for the login password whenever the reading binary is not the one that created the
+/// item (each unsigned development build and each release has a new signature), so a second read of
+/// the same item would prompt again for no benefit. Writes and deletions through this instance
+/// update the cache; a second instance reads the keychain itself, so use one store per process.
 #[cfg(all(
     feature = "keyring",
     any(target_os = "linux", target_os = "macos", target_os = "windows")
 ))]
 pub struct KeyringSecretStore {
     service: String,
+    /// Resolved secrets: `Some` is a value the keychain holds, `None` an entry it does not.
+    cache: tokio::sync::RwLock<HashMap<String, Option<String>>>,
 }
 
 #[cfg(all(
@@ -215,50 +249,52 @@ pub struct KeyringSecretStore {
     any(target_os = "linux", target_os = "macos", target_os = "windows")
 ))]
 const KEYCHAIN_PROBE_KEY: &str = "__alloy_keychain_probe__";
-#[cfg(all(
-    feature = "keyring",
-    any(target_os = "linux", target_os = "macos", target_os = "windows")
-))]
-const KEYCHAIN_PROBE_VALUE: &str = "probe";
 
 #[cfg(all(
     feature = "keyring",
     any(target_os = "linux", target_os = "macos", target_os = "windows")
 ))]
 impl KeyringSecretStore {
-    /// Opens the keychain for `service`, failing if it cannot persist secrets.
+    /// Opens the keychain for `service`, failing if the platform backend cannot answer.
     ///
-    /// The probe writes through one `Entry` and reads through a fresh one. Keyring's mock backend
-    /// keeps credentials only inside a single `Entry`, so a mock is rejected here.
+    /// The probe is a single read of an entry this app never writes: a missing entry proves the
+    /// backend is live, and it cannot prompt (macOS asks about existing items, not absent ones).
+    /// Nothing is written, so opening the store never leaves a stray keychain item behind.
     pub fn new(service: &str) -> Result<Self, StorageError> {
         let store = Self {
             service: service.to_string(),
+            cache: tokio::sync::RwLock::new(HashMap::new()),
         };
         store.probe()?;
         Ok(store)
     }
 
     fn probe(&self) -> Result<(), StorageError> {
-        self.get_entry(KEYCHAIN_PROBE_KEY)?
-            .set_password(KEYCHAIN_PROBE_VALUE)
-            .map_err(keyring_error)?;
-        let read = self
-            .get_entry(KEYCHAIN_PROBE_KEY)?
-            .get_password()
-            .map_err(keyring_error)?;
-        self.get_entry(KEYCHAIN_PROBE_KEY)?
-            .delete_credential()
-            .map_err(keyring_error)?;
-        if read != KEYCHAIN_PROBE_VALUE {
-            return Err(StorageError::KeyringError(
-                "keychain did not persist a probe secret".to_string(),
-            ));
+        match self.get_entry(KEYCHAIN_PROBE_KEY)?.get_password() {
+            Ok(_) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(keyring_error(e)),
         }
-        Ok(())
     }
 
     fn get_entry(&self, key: &str) -> Result<keyring::Entry, StorageError> {
         keyring::Entry::new(&self.service, key).map_err(keyring_error)
+    }
+
+    /// Reads one secret through the cache, touching the platform keychain at most once per key.
+    async fn resolve(&self, key: &str) -> Result<Option<String>, StorageError> {
+        if let Some(hit) = self.cache.read().await.get(key) {
+            return Ok(hit.clone());
+        }
+        let value = match self.get_entry(key)?.get_password() {
+            Ok(value) => Some(value),
+            Err(keyring::Error::NoEntry) => None,
+            Err(e) => return Err(keyring_error(e)),
+        };
+        self.cache
+            .write()
+            .await
+            .insert(key.to_string(), value.clone());
+        Ok(value)
     }
 }
 
@@ -279,32 +315,69 @@ impl SecretStore for KeyringSecretStore {
     async fn set_secret(&self, key: &str, value: &str) -> Result<(), StorageError> {
         self.get_entry(key)?
             .set_password(value)
-            .map_err(keyring_error)
+            .map_err(keyring_error)?;
+        self.cache
+            .write()
+            .await
+            .insert(key.to_string(), Some(value.to_string()));
+        Ok(())
     }
 
     async fn get_secret(&self, key: &str) -> Result<String, StorageError> {
-        match self.get_entry(key)?.get_password() {
-            Ok(value) => Ok(value),
-            Err(keyring::Error::NoEntry) => Err(StorageError::SecretNotFound(key.to_string())),
-            Err(e) => Err(keyring_error(e)),
-        }
+        self.resolve(key)
+            .await?
+            .ok_or_else(|| StorageError::SecretNotFound(key.to_string()))
     }
 
-    /// Deleting an absent secret succeeds, so account cleanup can run unconditionally.
     async fn delete_secret(&self, key: &str) -> Result<(), StorageError> {
-        match self.get_entry(key)?.delete_credential() {
+        let result = match self.get_entry(key)?.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(e) => Err(keyring_error(e)),
+        };
+        if result.is_ok() {
+            self.cache.write().await.insert(key.to_string(), None);
         }
+        result
     }
 
     async fn has_secret(&self, key: &str) -> Result<bool, StorageError> {
-        match self.get_entry(key)?.get_password() {
-            Ok(_) => Ok(true),
-            Err(keyring::Error::NoEntry) => Ok(false),
-            Err(e) => Err(keyring_error(e)),
+        Ok(self.resolve(key).await?.is_some())
+    }
+}
+
+/// Moves secrets that only the OS keychain holds into an owner-only secret file, once.
+///
+/// The file is authoritative afterwards: keys it already holds are skipped without touching the
+/// keychain, so a second start reads nothing from the platform store and cannot prompt. An error
+/// means the keychain refused a read (locked, access denied, no backend) and the caller must not
+/// mint a replacement secret, because a database sealed with the missing key would become
+/// unreadable.
+#[cfg(all(
+    feature = "keyring",
+    any(target_os = "linux", target_os = "macos", target_os = "windows")
+))]
+pub fn import_missing_from_keyring(
+    service: &str,
+    keys: &[&str],
+    file: &FileSecretStore,
+) -> Result<(), StorageError> {
+    if file.contains_all(keys)? {
+        return Ok(());
+    }
+    let mut imported: Vec<(&str, String)> = Vec::new();
+    for key in keys {
+        if file.contains_all(&[*key])? {
+            continue;
+        }
+        let entry = keyring::Entry::new(service, key).map_err(keyring_error)?;
+        match entry.get_password() {
+            Ok(value) => imported.push((*key, value)),
+            // The keychain never had it: nothing to migrate, and no prompt was shown.
+            Err(keyring::Error::NoEntry) => {}
+            Err(e) => return Err(keyring_error(e)),
         }
     }
+    file.import(&imported)
 }
 
 #[cfg(test)]
@@ -347,12 +420,40 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    /// The file is authoritative after a migration: importing again never overwrites a key it
+    /// already holds, and `contains_all` answers without a write.
+    #[tokio::test]
+    async fn file_store_import_keeps_the_existing_values() {
+        let dir = std::env::temp_dir().join(format!("alloy-secrets-import-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("secrets.json");
+        let store = FileSecretStore::new(&path);
+        assert!(!store.contains_all(&["a"]).unwrap());
+        store.import(&[("a", "1".to_string())]).unwrap();
+        assert!(store.contains_all(&["a"]).unwrap());
+        assert!(!store.contains_all(&["a", "b"]).unwrap());
+        store
+            .import(&[("a", "2".to_string()), ("b", "3".to_string())])
+            .unwrap();
+        assert_eq!(store.get_secret("a").await.unwrap(), "1");
+        assert_eq!(store.get_secret("b").await.unwrap(), "3");
+        assert!(store.contains_all(&["a", "b"]).unwrap());
+        assert!(
+            !dir.join("secrets.tmp").exists(),
+            "temp file must not outlive an import"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The store answers from the platform keychain and keeps the answer: one platform read per key
+    /// per process, which is what stops macOS from asking for the login password more than once.
+    /// A separate instance still reads the keychain, so a value written before it opened is visible.
     #[cfg(all(
         feature = "keyring",
         any(target_os = "linux", target_os = "macos", target_os = "windows")
     ))]
     #[tokio::test]
-    async fn keyring_round_trips_across_instances() {
+    async fn keyring_round_trips_and_reads_each_key_once() {
         let service = format!("chat.alloy.test.{}", std::process::id());
         let store = match KeyringSecretStore::new(&service) {
             Ok(store) => store,
@@ -361,15 +462,20 @@ mod tests {
                 return;
             }
         };
+        assert!(!store.has_secret("round-trip").await.unwrap());
         store.set_secret("round-trip", "v1").await.unwrap();
+        assert_eq!(store.get_secret("round-trip").await.unwrap(), "v1");
+
         let reopened = KeyringSecretStore::new(&service).unwrap();
         assert_eq!(reopened.get_secret("round-trip").await.unwrap(), "v1");
-        reopened.delete_secret("round-trip").await.unwrap();
-        reopened.delete_secret("round-trip").await.unwrap();
+
+        // A deletion through the instance that cached the value is visible to it immediately.
+        store.delete_secret("round-trip").await.unwrap();
         assert!(matches!(
             store.get_secret("round-trip").await,
             Err(StorageError::SecretNotFound(_))
         ));
+        reopened.delete_secret("round-trip").await.unwrap();
     }
 
     #[tokio::test]

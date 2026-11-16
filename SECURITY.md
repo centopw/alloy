@@ -44,8 +44,9 @@ intermediate homeserver or bridge:
 - **Local data.** Accounts, chats and messages live in a local SQLite database (`alloy-store`) in
   the app data directory. Connector secrets (session bytes, tokens, cookies) are sealed with
   XChaCha20-Poly1305, bound to the account id, under a key held by `alloy-storage`'s `SecretStore`
-  (the OS keyring on desktop, an owner-only file on Android). The message database itself is not
-  yet encrypted; full-database encryption is the M5 hardening decision (#134).
+  (an owner-only file in the app data directory; the OS keychain when `ALLOY_SECRET_BACKEND=keychain`,
+  see ADR 0019). The message database itself is not yet encrypted; full-database encryption is the
+  M5 hardening decision (#134).
 - **End-to-end encryption.** Alloy adds no E2EE layer of its own. Messenger's end-to-end
   encrypted chats are handled by the sidecar; Telegram cloud chats are not end-to-end encrypted by
   the network.
@@ -81,8 +82,8 @@ Alloy enforces the following architectural constraints per [docs/plan/04-securit
    - SBOM generated per release
 4. **No downloading unsigned code** (plugins require Minisign/Ed25519 signature;
    marketplace enforces signed-only delivery).
-5. **Platform keychains** for secrets at rest (macOS Keychain, Windows Credential Manager, Linux
-   Secret Service; an owner-only file on Android).
+5. **Owner-only secret file** for secrets at rest, with the platform keychain available on request
+   (macOS Keychain, Windows Credential Manager, Linux Secret Service — ADR 0019).
 6. **Memory-safe secret handling** (zeroize + secrecy crates for crypto material).
 
 ## Plugin Sandbox
