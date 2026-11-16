@@ -32,9 +32,12 @@
 //! # Framing limits
 //!
 //! A line longer than 16 MiB is a protocol violation: the host fails the pending calls with
-//! [`ConnectorError::Protocol`] and replaces the process. Requests time out after
-//! [`SidecarConfig::request_timeout`]; the timeout is reported as a [`ConnectorError::Network`]
-//! failure and the process is left running, so a sidecar that is merely slow is not killed.
+//! [`ConnectorError::Protocol`] and replaces the process. A line that is not a decodable frame is
+//! logged with its escaped, truncated bytes and skipped, so one stray diagnostic on the protocol
+//! pipe does not cost the session; an unanswered request still fails on its own timeout. Requests
+//! time out after [`SidecarConfig::request_timeout`]; the timeout is reported as a
+//! [`ConnectorError::Network`] failure and the process is left running, so a sidecar that is
+//! merely slow is not killed.
 
 use std::path::Path;
 use std::sync::Arc;

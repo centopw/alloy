@@ -387,6 +387,76 @@ async fn crash_mid_session_fails_pending_and_resumes_after_respawn() {
 }
 
 #[tokio::test]
+async fn a_stray_line_between_frames_does_not_close_the_transport() {
+    let directory = tempfile::tempdir().expect("temp dir");
+    // `begin_login` and both `submit_login` calls are requests 1 to 3, so the sidecar writes one
+    // undecodable line immediately before answering request 4: between two valid response frames,
+    // where a frame belongs.
+    let connector = SidecarConnector::spawn(config(
+        directory.path(),
+        &[("ALLOY_FAKE_SIDECAR_GARBAGE_BEFORE", "4")],
+    ))
+    .await
+    .expect("spawn");
+    login(&connector).await;
+
+    let page = connector
+        .list_chats(None, 10)
+        .await
+        .expect("the response written after the stray line still arrives");
+    assert_eq!(page.items.len(), 6);
+
+    // The same process is still serving: skipping the line did not fail the call, tear the
+    // transport down, or start a restart.
+    let (sender, mut events) = channel(32);
+    connector.start(sender).await.expect("start");
+    wait_for_online(&mut events).await;
+
+    connector.stop().await.expect("stop");
+}
+
+#[tokio::test]
+async fn concurrent_starts_launch_one_process() {
+    let directory = tempfile::tempdir().expect("temp dir");
+    let pid_log = directory.path().join("pids.log");
+    let pid_log_path = pid_log.to_str().expect("a UTF-8 temp path").to_string();
+
+    let connector = SidecarConnector::spawn(config(
+        directory.path(),
+        &[("ALLOY_FAKE_SIDECAR_PID_LOG", pid_log_path.as_str())],
+    ))
+    .await
+    .expect("spawn");
+    login(&connector).await;
+    connector.stop().await.expect("stop");
+
+    // A reconnect and the supervisor can both want a transport at once. Two sidecars for one
+    // account would fight over the same session and the same E2EE store, so the second launch
+    // waits for the first and adopts the process it installed.
+    let (first, _first_events) = channel(32);
+    let (second, _second_events) = channel(32);
+    let (first_started, second_started) =
+        tokio::join!(connector.start(first), connector.start(second));
+    first_started.expect("the first start");
+    second_started.expect("the second start");
+
+    let pids = std::fs::read_to_string(&pid_log).expect("the sidecars logged their process ids");
+    assert_eq!(
+        pids.lines().count(),
+        2,
+        "spawn launched one process and the concurrent starts exactly one more, got: {pids}"
+    );
+
+    let page = connector
+        .list_chats(None, 10)
+        .await
+        .expect("the one live process answers");
+    assert_eq!(page.items.len(), 6);
+
+    connector.stop().await.expect("stop");
+}
+
+#[tokio::test]
 async fn offline_frames_carry_the_connector_attempt_and_retry_delay() {
     let directory = tempfile::tempdir().expect("temp dir");
     let connector = SidecarConnector::spawn(config(

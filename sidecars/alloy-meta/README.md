@@ -54,6 +54,7 @@ them.
 |---|---|
 | `ALLOY_META_PLATFORM` | The Messenger Lite variant the login presents: `android` (default) or `ios`, case-insensitive. It selects `types.MessengerLiteAndroid` or `types.MessengerLiteIOS` for the login and for every client built from its cookies. An unknown value stops the sidecar at startup with the accepted values in the error. |
 | `ALLOY_META_PROXY` | Optional proxy for every connection the sidecar makes: `http://`, `https://`, `socks5://` or `socks5h://`, with a host — for example `socks5://127.0.0.1:1080` or `http://user:pass@proxy.local:3128`. Unset means a direct connection. Another scheme, or a URL without a host, stops the sidecar at startup. |
+| `ALLOY_META_LOG_LEVEL` | What the sidecar writes to stderr: `trace`, `debug`, `info`, `warn` (default), `error` or `disabled`, lowercase. messagix and whatsmeow log through the same logger, so the default keeps their trace and debug payload dumps out of the host's log; `info` adds connection progress, and `debug` or `trace` is for diagnosing. An unrecognised value is logged and treated as `warn`. |
 | `ALLOY_SIDECAR_DATA_DIR` | Where the E2EE device store lives; see [E2EE](#e2ee). |
 
 The proxy is applied the way mautrix-meta applies it — a provider returning the parsed URL plus
@@ -63,9 +64,9 @@ applying it only afterwards would leave the socket direct. One builder
 (`settings.newMessagixClient`) constructs every messagix client — the Lite login, the inbox load
 after login, restore, the socket and media — so no path can be left direct by accident.
 
-Startup logs one line to stderr naming the platform and either `direct` or the proxy, with any
-credentials replaced by `***`. An invalid value is the only thing that stops the sidecar before it
-writes its `hello` frame.
+Startup logs one line at `info` to stderr naming the platform and either `direct` or the proxy, with
+any credentials replaced by `***`. An invalid value is the only thing that stops the sidecar before
+it writes its `hello` frame.
 
 ## Login
 

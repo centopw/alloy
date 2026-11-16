@@ -35,8 +35,22 @@ func (w *writer) write(frame any) error {
 	return w.enc.Encode(frame)
 }
 
+// logLevelEnv names the variable that sets how much the sidecar writes to stderr.
+const logLevelEnv = "ALLOY_META_LOG_LEVEL"
+
+// logLevelFallback is what an unset or unrecognised ALLOY_META_LOG_LEVEL selects. messagix and
+// whatsmeow log through the same logger, and their trace and debug levels dump whole protocol
+// payloads, which the host would otherwise copy across the pipe thousands of times a minute.
+const logLevelFallback = zerolog.WarnLevel
+
 func main() {
-	logger := zerolog.New(os.Stderr).With().Timestamp().Logger()
+	level, unknownLevel := configuredLogLevel(os.Getenv)
+	logger := zerolog.New(os.Stderr).Level(level).With().Timestamp().Logger()
+	if unknownLevel != "" {
+		logger.Warn().
+			Str("value", unknownLevel).
+			Msg("ALLOY_META_LOG_LEVEL is not a known level, logging at warn")
+	}
 	cfg, err := loadSettings(os.Getenv)
 	if err != nil {
 		// stdout is reserved for protocol frames, so the host reads this on stderr and surfaces it
@@ -84,4 +98,19 @@ func main() {
 		logger.Err(err).Msg("Reading stdin failed")
 	}
 	_ = messenger.stop()
+}
+
+// configuredLogLevel maps ALLOY_META_LOG_LEVEL to a zerolog level: trace, debug, info, warn,
+// error or disabled, case-insensitive. An unset value selects warn, and an unrecognised one does
+// too, but is also returned so the caller can report the typo instead of swallowing it.
+func configuredLogLevel(getenv func(string) string) (zerolog.Level, string) {
+	value := strings.TrimSpace(getenv(logLevelEnv))
+	if value == "" {
+		return logLevelFallback, ""
+	}
+	level, err := zerolog.ParseLevel(strings.ToLower(value))
+	if err != nil {
+		return logLevelFallback, value
+	}
+	return level, ""
 }

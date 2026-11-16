@@ -11,12 +11,18 @@
 //! - `ALLOY_FAKE_SIDECAR_CRASH_AFTER=<n>` — exit without answering the `n + 1`th request, which
 //!   simulates a crash with a call in flight.
 //! - `ALLOY_FAKE_SIDECAR_PID_FILE=<path>` — write the process id there at startup.
+//! - `ALLOY_FAKE_SIDECAR_PID_LOG=<path>` — append the process id there at startup, so a test can
+//!   count how many processes the host spawned.
+//! - `ALLOY_FAKE_SIDECAR_GARBAGE_BEFORE=<n>` — write one undecodable line to stdout just before
+//!   answering the `n`th request, so the host's tolerance of a stray line can be tested between
+//!   two frames.
 //! - `ALLOY_FAKE_SIDECAR_OFFLINE_ATTEMPT=<n>` and `ALLOY_FAKE_SIDECAR_OFFLINE_RETRY_MS=<ms>` —
 //!   after `start`, emit an offline report carrying attempt `n` and a next-retry delay of `ms`, so
 //!   the host's decoding of a counted retry and of the connector's own delay can be tested. Setting
 //!   either one injects the report; the unset one stays `null` on the wire.
 
 use std::env;
+use std::io::Write as _;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -36,6 +42,8 @@ use tokio::sync::{
 const BAD_VERSION_ENV: &str = "ALLOY_FAKE_SIDECAR_BAD_VERSION";
 const CRASH_AFTER_ENV: &str = "ALLOY_FAKE_SIDECAR_CRASH_AFTER";
 const PID_FILE_ENV: &str = "ALLOY_FAKE_SIDECAR_PID_FILE";
+const PID_LOG_ENV: &str = "ALLOY_FAKE_SIDECAR_PID_LOG";
+const GARBAGE_BEFORE_ENV: &str = "ALLOY_FAKE_SIDECAR_GARBAGE_BEFORE";
 const OFFLINE_ATTEMPT_ENV: &str = "ALLOY_FAKE_SIDECAR_OFFLINE_ATTEMPT";
 const OFFLINE_RETRY_ENV: &str = "ALLOY_FAKE_SIDECAR_OFFLINE_RETRY_MS";
 
@@ -63,6 +71,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     if let Ok(path) = env::var(PID_FILE_ENV) {
         std::fs::write(path, std::process::id().to_string())?;
     }
+    if let Ok(path) = env::var(PID_LOG_ENV) {
+        let mut log = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)?;
+        writeln!(log, "{}", std::process::id())?;
+    }
 
     let connector = Arc::new(FakeConnector::new());
     let protocol_version = match env::var(BAD_VERSION_ENV).as_deref() {
@@ -76,6 +91,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .ok()
         .and_then(|value| value.trim().parse().ok());
     let offline_retry_millis: Option<u64> = env::var(OFFLINE_RETRY_ENV)
+        .ok()
+        .and_then(|value| value.trim().parse().ok());
+    let garbage_before: Option<u64> = env::var(GARBAGE_BEFORE_ENV)
         .ok()
         .and_then(|value| value.trim().parse().ok());
 
@@ -148,6 +166,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     error: Some(error),
                 },
             };
+            // One line the host cannot decode, written where a frame belongs: the response after
+            // it must still arrive on the same transport.
+            if garbage_before == Some(requests)
+                && let Err(error) = write_raw(&writer, "fake-sidecar: not a frame").await
+            {
+                eprintln!("fake-sidecar: cannot write a stray line: {error}");
+            }
             if let Err(error) = write_frame(&writer, &response).await {
                 eprintln!("fake-sidecar: cannot write a response: {error}");
             }
@@ -162,6 +187,14 @@ async fn write_frame(writer: &Writer, frame: &Frame) -> std::io::Result<()> {
     let line = encode_frame(frame);
     let mut writer = writer.lock().await;
     writer.write_all(line.as_bytes()).await?;
+    writer.flush().await
+}
+
+/// Writes one raw line under the shared writer lock, for bytes that are not a frame.
+async fn write_raw(writer: &Writer, line: &str) -> std::io::Result<()> {
+    let mut writer = writer.lock().await;
+    writer.write_all(line.as_bytes()).await?;
+    writer.write_all(b"\n").await?;
     writer.flush().await
 }
 

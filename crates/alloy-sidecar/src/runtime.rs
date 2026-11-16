@@ -42,6 +42,9 @@ const EXIT_STATUS_TIMEOUT: Duration = Duration::from_secs(2);
 /// Reported once automatic restarts are exhausted.
 const CRASHED_REPEATEDLY: &str = "sidecar crashed repeatedly";
 
+/// The error pending calls get when `stop`, or a replaced generation, takes the transport away.
+const STOPPED: &str = "the sidecar was stopped";
+
 /// What the sidecar announces about itself in `hello`. Immutable for the life of the connector:
 /// protocol version and network must stay the same, and a restart announcing anything else is a
 /// protocol violation.
@@ -67,6 +70,10 @@ enum Failure {
 pub(crate) struct Runtime {
     pub(crate) config: SidecarConfig,
     pub(crate) identity: Identity,
+    /// Serialises process launches. `start` and the supervisor can both want a process at the same
+    /// time, and two sidecars for one account fight over the same session and E2EE store, so the
+    /// second caller waits here and then adopts the process the first one installed.
+    launches: Mutex<()>,
     state: Mutex<State>,
 }
 
@@ -116,6 +123,7 @@ impl Runtime {
         let runtime = Arc::new(Self {
             config,
             identity,
+            launches: Mutex::new(()),
             state: Mutex::new(State::default()),
         });
         runtime.install(launched).await;
@@ -123,13 +131,22 @@ impl Runtime {
     }
 
     /// Starts a fresh process and makes it the current transport.
+    ///
+    /// Single-flight: when both `start` and the supervisor want a process, the second caller waits
+    /// here and adopts the one the first installed. Two sidecars for one account would race over
+    /// the same session and the same E2EE store, so a duplicate launch is never an option.
     async fn bring_up(self: &Arc<Self>) -> Result<(), ConnectorError> {
+        let _launching = self.launches.lock().await;
+        if self.state.lock().await.writer.is_some() {
+            return Ok(());
+        }
         let launched = process::launch(&self.config, Some(self.identity.network)).await?;
         self.install(launched).await;
         Ok(())
     }
 
-    /// Stores the process and starts its reader and stderr tasks.
+    /// Stores the process, starts its reader and stderr tasks, and terminates the process it
+    /// replaces.
     async fn install(self: &Arc<Self>, launched: Launched) {
         let Launched {
             child,
@@ -139,13 +156,30 @@ impl Runtime {
             ..
         } = launched;
 
-        let generation = {
+        let (generation, replaced_child, replaced_writer) = {
             let mut state = self.state.lock().await;
             state.generation += 1;
-            state.child = Some(child);
-            state.writer = Some(Arc::new(Mutex::new(stdin)));
-            state.generation
+            let replaced_child = state.child.replace(child);
+            let replaced_writer = state.writer.replace(Arc::new(Mutex::new(stdin)));
+            (state.generation, replaced_child, replaced_writer)
         };
+
+        // The replaced process serves the same account against the same E2EE store, so it must not
+        // outlive its handle: its read loop stops at the generation check, so nothing else would
+        // end it, and `kill_on_drop` only fires when the handle is finally dropped. Closing its
+        // stdin first lets a well-behaved sidecar exit on EOF; the kill covers one that would not,
+        // and reaps it now instead of whenever the runtime gets around to it.
+        drop(replaced_writer);
+        if let Some(mut replaced) = replaced_child
+            && let Err(error) = replaced.kill().await
+        {
+            // A kill that fails because the child already exited is the common case; the handle's
+            // `kill_on_drop` covers a child that somehow outlives it.
+            tracing::debug!(
+                target: "alloy_sidecar",
+                "the replaced sidecar had already exited: {error}"
+            );
+        }
 
         process::forward_stderr(stderr);
 
@@ -156,6 +190,11 @@ impl Runtime {
     }
 
     /// Reads frames until the pipe closes, then hands control to the supervisor.
+    ///
+    /// Only a broken framing contract — a line over the limit, a line that is not UTF-8, or a
+    /// decodable frame that breaks the protocol rules — replaces the process. A line that simply
+    /// does not decode is skipped, because the sidecar may be emitting its own diagnostics on the
+    /// protocol pipe and one stray line must not cost the whole session.
     async fn read_loop(self: Arc<Self>, generation: u64, mut stdout: BufReader<ChildStdout>) {
         loop {
             let bytes = match process::read_line_limited(&mut stdout, MAX_LINE_BYTES).await {
@@ -194,7 +233,10 @@ impl Runtime {
                 Err(_) => {
                     self.disconnect(
                         generation,
-                        Failure::Protocol("the sidecar sent a frame that is not UTF-8".to_string()),
+                        Failure::Protocol(format!(
+                            "the sidecar sent a frame that is not UTF-8: {line}",
+                            line = process::describe_line(&bytes)
+                        )),
                     )
                     .await;
                     return;
@@ -203,10 +245,17 @@ impl Runtime {
 
             let frame = match decode_frame(text) {
                 Ok(frame) => frame,
+                // A line that is not a frame is not worth the session: a sidecar that lets its
+                // own diagnostic output reach stdout would otherwise drop every pending call and
+                // restart the process. The escaped, truncated line names the writer, and a
+                // genuinely lost response still fails on its own request timeout.
                 Err(error) => {
-                    self.disconnect(generation, Failure::Protocol(error.to_string()))
-                        .await;
-                    return;
+                    let line = process::describe_line(&bytes);
+                    tracing::warn!(
+                        target: "alloy_sidecar",
+                        "discarding an undecodable sidecar line: {error}; line: {line}"
+                    );
+                    continue;
                 }
             };
 
@@ -342,11 +391,29 @@ impl Runtime {
 
                 match self.bring_up().await {
                     Ok(()) => {
-                        if let Err(error) = self.replay().await {
-                            tracing::warn!(
-                                target: "alloy_sidecar",
-                                "the sidecar restarted but the session could not be resumed: {error}"
-                            );
+                        // `install` bumps the generation, so a `stop` or another disconnect landing
+                        // between it and the replay fails the pending request with the stop
+                        // sentinel even though the process is healthy. One retry recovers from
+                        // that race; a sidecar that is running with no session is reported.
+                        match self.replay().await {
+                            Ok(()) => {}
+                            Err(error) if is_stopped_transport(&error) => {
+                                if let Err(error) = self.replay().await {
+                                    let network = self.identity.network;
+                                    tracing::error!(
+                                        target: "alloy_sidecar",
+                                        "the sidecar restarted but the {network} account is \
+                                         still offline: the session could not be resumed twice: \
+                                         {error}"
+                                    );
+                                }
+                            }
+                            Err(error) => {
+                                tracing::warn!(
+                                    target: "alloy_sidecar",
+                                    "the sidecar restarted but the session could not be resumed: {error}"
+                                );
+                            }
                         }
                         return;
                     }
@@ -452,7 +519,7 @@ impl Runtime {
         };
         for (_, sender) in pending {
             let _ = sender.send(Err(ConnectorError::Network {
-                message: "the sidecar was stopped".to_string(),
+                message: STOPPED.to_string(),
             }));
         }
         drop(writer);
@@ -608,6 +675,13 @@ impl Runtime {
     }
 }
 
+/// Whether `error` is the message pending calls get when `stop`, or a replaced generation, takes
+/// the transport away. Only a replay that failed this way is worth one immediate retry: the
+/// process itself is untouched.
+fn is_stopped_transport(error: &ConnectorError) -> bool {
+    matches!(error, ConnectorError::Network { message } if message.as_str() == STOPPED)
+}
+
 /// Writes one frame, serialised with every other writer through the stdin mutex.
 async fn write_frame(writer: &Mutex<ChildStdin>, frame: &Frame) -> std::io::Result<()> {
     let line = encode_frame(frame);
@@ -634,5 +708,110 @@ async fn describe_exit(child: Option<Child>) -> String {
             let _ = child.kill().await;
             "killed after the pipe closed".to_string()
         }
+    }
+}
+
+#[cfg(all(test, feature = "fake-sidecar"))]
+mod tests {
+    use std::path::{Path, PathBuf};
+    use std::time::Duration;
+
+    use super::*;
+
+    /// Cargo exports `CARGO_BIN_EXE_*` to integration tests only, so the unit test finds the fake
+    /// sidecar next to its own executable: `target/<profile>/deps/<test>` → `target/<profile>`.
+    fn fake_sidecar() -> PathBuf {
+        if let Ok(path) = std::env::var("CARGO_BIN_EXE_fake-sidecar") {
+            return PathBuf::from(path);
+        }
+        let exe = std::env::current_exe().expect("the test executable path");
+        let profile = exe
+            .parent()
+            .and_then(Path::parent)
+            .expect("the target profile directory");
+        let path = profile.join(if cfg!(windows) {
+            "fake-sidecar.exe"
+        } else {
+            "fake-sidecar"
+        });
+        assert!(
+            path.exists(),
+            "the fake sidecar binary is missing; run cargo test -p alloy-sidecar --features fake-sidecar"
+        );
+        path
+    }
+
+    fn config(directory: &Path, pid_file: &Path) -> SidecarConfig {
+        let mut config = SidecarConfig::new(fake_sidecar(), directory);
+        config.env = vec![(
+            "ALLOY_FAKE_SIDECAR_PID_FILE".to_string(),
+            pid_file.to_str().expect("a UTF-8 temp path").to_string(),
+        )];
+        config.request_timeout = Duration::from_secs(10);
+        config.hello_timeout = Duration::from_secs(10);
+        config
+    }
+
+    #[tokio::test]
+    async fn installing_a_process_terminates_the_one_it_replaces() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let first_pid = directory.path().join("first.pid");
+        let second_pid = directory.path().join("second.pid");
+
+        let runtime = Runtime::spawn(config(directory.path(), &first_pid))
+            .await
+            .expect("the first process completes the handshake");
+
+        let launched = process::launch(&config(directory.path(), &second_pid), Some(Network::Fake))
+            .await
+            .expect("the second process completes the handshake");
+        runtime.install(launched).await;
+
+        // The replaced process served the same account and the same E2EE store, so it must be
+        // gone rather than orphaned behind a dropped handle and a stalled read loop.
+        #[cfg(unix)]
+        {
+            wait_until_gone(recorded_pid(&first_pid)).await;
+            assert!(
+                process_alive(recorded_pid(&second_pid)),
+                "the replacement is the live process"
+            );
+        }
+
+        runtime.stop().await.expect("stop");
+    }
+
+    #[cfg(unix)]
+    fn recorded_pid(pid_file: &Path) -> u32 {
+        std::fs::read_to_string(pid_file)
+            .expect("the sidecar recorded its process id")
+            .trim()
+            .parse()
+            .expect("a numeric process id")
+    }
+
+    /// Waits until the process is reaped. A killed child lingers as a zombie until the runtime's
+    /// reaper collects it, which is not the same instant as the kill.
+    #[cfg(unix)]
+    async fn wait_until_gone(pid: u32) {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while process_alive(pid) {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the replaced sidecar kept running"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    #[cfg(unix)]
+    fn process_alive(pid: u32) -> bool {
+        std::process::Command::new("ps")
+            .arg("-p")
+            .arg(pid.to_string())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
     }
 }

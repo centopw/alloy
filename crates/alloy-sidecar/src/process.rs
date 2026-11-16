@@ -7,6 +7,7 @@ use std::process::Stdio;
 use alloy_connector::{
     Capabilities, ConnectorError, Frame, Network, PROTOCOL_VERSION, decode_frame,
 };
+use serde_json::Value;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, BufReader};
 use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
 use tokio::time::timeout;
@@ -20,10 +21,29 @@ pub(crate) const DATA_DIR_ENV: &str = "ALLOY_SIDECAR_DATA_DIR";
 /// host drops the process instead of buffering unbounded input.
 pub(crate) const MAX_LINE_BYTES: usize = 16 * 1024 * 1024;
 
+/// Largest part of an offending line echoed in a diagnostic.
+const ECHO_BYTES: usize = 200;
+
 /// One `ConnectorError::Protocol` with a formatted message.
 pub(crate) fn protocol_error(message: impl Into<String>) -> ConnectorError {
     ConnectorError::Protocol {
         message: message.into(),
+    }
+}
+
+/// Renders bytes for a diagnostic: escaped, so a payload cannot forge log lines or feed control
+/// sequences into the terminal, and truncated, so one oversized frame cannot flood the log.
+pub(crate) fn describe_line(bytes: &[u8]) -> String {
+    let text = String::from_utf8_lossy(bytes);
+    let mut end = text.len().min(ECHO_BYTES);
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    let escaped = text[..end].escape_debug().to_string();
+    if end < text.len() {
+        format!("{escaped}...")
+    } else {
+        escaped
     }
 }
 
@@ -151,7 +171,12 @@ async fn read_hello(reader: &mut BufReader<ChildStdout>) -> Result<Frame, Connec
         Ok(LineRead::Line(bytes)) => {
             let text = std::str::from_utf8(&bytes)
                 .map_err(|_| protocol_error("the sidecar `hello` frame is not valid UTF-8"))?;
-            decode_frame(text)
+            decode_frame(text).map_err(|error| {
+                protocol_error(format!(
+                    "the sidecar `hello` frame is invalid: {error}; line: {line}",
+                    line = describe_line(&bytes)
+                ))
+            })
         }
         Ok(LineRead::TooLong) => Err(protocol_error(format!(
             "the sidecar `hello` frame exceeds {limit} bytes",
@@ -200,12 +225,15 @@ where
 }
 
 /// Copies the child's stderr into `tracing` so sidecar diagnostics reach the same log as the host.
+///
+/// The sidecar logs zerolog JSON, which carries its own severity in `level`; forwarding every
+/// line at `info` would hide its warnings and bury the host's log under its trace payload dumps.
 pub(crate) fn forward_stderr(stderr: ChildStderr) {
     tokio::spawn(async move {
         let mut lines = BufReader::new(stderr).lines();
         loop {
             match lines.next_line().await {
-                Ok(Some(line)) => tracing::info!(target: "alloy_sidecar::stderr", "{line}"),
+                Ok(Some(line)) => forward_stderr_line(&line),
                 Ok(None) => break,
                 Err(error) => {
                     tracing::warn!(
@@ -217,4 +245,88 @@ pub(crate) fn forward_stderr(stderr: ChildStderr) {
             }
         }
     });
+}
+
+/// Forwards one sidecar diagnostic at the level its `level` field names. A line that is not a
+/// zerolog object is forwarded at `info`, because the sidecar wrote it deliberately.
+fn forward_stderr_line(line: &str) {
+    match stderr_level(line) {
+        Some(StderrLevel::Trace) => tracing::trace!(target: "alloy_sidecar::stderr", "{line}"),
+        Some(StderrLevel::Debug) => tracing::debug!(target: "alloy_sidecar::stderr", "{line}"),
+        Some(StderrLevel::Info) | None => {
+            tracing::info!(target: "alloy_sidecar::stderr", "{line}")
+        }
+        Some(StderrLevel::Warn) => tracing::warn!(target: "alloy_sidecar::stderr", "{line}"),
+        Some(StderrLevel::Error) => tracing::error!(target: "alloy_sidecar::stderr", "{line}"),
+    }
+}
+
+/// The severity a sidecar diagnostic announces in its leading zerolog JSON object.
+#[derive(Clone, Copy)]
+enum StderrLevel {
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+/// Reads `level` from the JSON object on a diagnostic line. `None` means the line is not a zerolog
+/// object or names a level this host does not know, and it is forwarded at `info`.
+fn stderr_level(line: &str) -> Option<StderrLevel> {
+    if !line.starts_with('{') {
+        return None;
+    }
+    let object: Value = serde_json::from_str(line).ok()?;
+    match object.get("level")?.as_str()? {
+        "trace" => Some(StderrLevel::Trace),
+        "debug" => Some(StderrLevel::Debug),
+        "info" => Some(StderrLevel::Info),
+        "warn" => Some(StderrLevel::Warn),
+        "error" => Some(StderrLevel::Error),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stderr_level_follows_the_level_field() {
+        assert!(matches!(
+            stderr_level(r#"{"level":"trace","message":"x"}"#),
+            Some(StderrLevel::Trace)
+        ));
+        assert!(matches!(
+            stderr_level(r#"{"level":"debug","message":"x"}"#),
+            Some(StderrLevel::Debug)
+        ));
+        assert!(matches!(
+            stderr_level(r#"{"level":"error","message":"x"}"#),
+            Some(StderrLevel::Error)
+        ));
+        assert!(
+            stderr_level("sidecar: plain text").is_none(),
+            "a line without a `level` is unstructured output"
+        );
+        assert!(
+            stderr_level(r#"{"level":"nonsense"}"#).is_none(),
+            "an unknown level is not guessed at"
+        );
+        assert!(stderr_level(r#"{"message":"no level field"}"#).is_none());
+    }
+
+    #[test]
+    fn describe_line_escapes_and_truncates() {
+        assert_eq!(describe_line(b"first\nsecond"), r"first\nsecond");
+
+        let long = describe_line(&[b'x'; 500]);
+        assert!(long.ends_with("..."), "the echo is cut short: {long}");
+        assert!(
+            long.len() < 300,
+            "the echoed line stays near the limit: {} bytes",
+            long.len()
+        );
+    }
 }
