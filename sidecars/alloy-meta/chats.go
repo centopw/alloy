@@ -11,7 +11,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
+	"go.mau.fi/mautrix-meta/pkg/messagix"
+	"go.mau.fi/mautrix-meta/pkg/messagix/dgw"
 	"go.mau.fi/mautrix-meta/pkg/messagix/methods"
 	"go.mau.fi/mautrix-meta/pkg/messagix/socket"
 	"go.mau.fi/mautrix-meta/pkg/messagix/table"
@@ -115,8 +118,68 @@ func chatSortKey(chat RemoteChat) (int64, int64) {
 	return chat.LastActivityAt, folded
 }
 
-// ensureThreads asks the network for one more thread page when the local index is short.
-// mu is not held across the call.
+// threadFetchWait bounds how long paging waits for the DGW socket to come up before the chat list
+// is reported incomplete. start returns as soon as Connect accepts the attempt, so the first
+// list_chats after launch arrives while the socket is still dialing.
+const (
+	threadFetchWait = 10 * time.Second
+	threadFetchPoll = 250 * time.Millisecond
+)
+
+// socketNotReady reports whether err says the DGW socket has not come up yet rather than that the
+// page request failed. messagix returns dgw.ErrSocketNotOpen from every stream attempt while the
+// socket is down; wrapped forms spell the same thing out instead of wrapping the sentinel.
+func socketNotReady(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, dgw.ErrSocketNotOpen) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "socket is not open") || strings.Contains(msg, "not connected")
+}
+
+// waitThreadSocket polls until the client's DGW socket is open, the bound runs out, or ctx ends,
+// and reports whether the socket came up. A cancelled ctx returns false at once, with no wait.
+func waitThreadSocket(ctx context.Context, cli *messagix.Client) bool {
+	if cli.IsConnected() {
+		return true
+	}
+	deadline := time.NewTimer(threadFetchWait)
+	defer deadline.Stop()
+	poll := time.NewTicker(threadFetchPoll)
+	defer poll.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-deadline.C:
+			return cli.IsConnected()
+		case <-poll.C:
+			if cli.IsConnected() {
+				return true
+			}
+		}
+	}
+}
+
+// threadPagingError renders a paging failure for the host. The list is short, so list_chats fails
+// instead of answering with what it has; the cause's type survives so rate limits and logins still
+// reach the host as themselves. A socket that never came up is transport, not a protocol fault.
+func threadPagingError(err error) *WireError {
+	if socketNotReady(err) {
+		return errNetwork("chat list incomplete: fetch more threads: " + err.Error())
+	}
+	werr := mapMetaError(err)
+	if werr.Type == "network" || werr.Type == "protocol" {
+		werr.Message = "chat list incomplete: fetch more threads: " + werr.Message
+	}
+	return werr
+}
+
+// ensureThreads asks the network for one more thread page when the local index is short and
+// returns an error when the list cannot be completed. mu is not held across the call.
 func (m *Messenger) ensureThreads(ctx context.Context, want int) *WireError {
 	m.mu.Lock()
 	if m.cli == nil || m.loggedOut {
@@ -131,11 +194,29 @@ func (m *Messenger) ensureThreads(ctx context.Context, want int) *WireError {
 		return nil
 	}
 
+	waited := false
 	for count < want {
+		if err := ctx.Err(); err != nil {
+			return mapMetaError(err)
+		}
 		keyStore, tbl, err := cli.FetchMoreThreads(ctx, 1)
 		if err != nil {
-			m.log.Warn().Err(err).Msg("Failed to fetch more threads")
-			return nil
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return mapMetaError(ctxErr)
+			}
+			if socketNotReady(err) && !waited {
+				// The socket was still dialing, not the page failing: one bounded wait per call.
+				waited = true
+				if waitThreadSocket(ctx, cli) {
+					continue
+				}
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return mapMetaError(ctxErr)
+				}
+			}
+			m.log.Warn().Err(err).Bool("socket_open", cli.IsConnected()).
+				Msg("Failed to fetch more threads; the chat list is incomplete")
+			return threadPagingError(err)
 		}
 		if tbl == nil || keyStore == nil {
 			m.mu.Lock()
