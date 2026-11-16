@@ -112,6 +112,27 @@ impl Default for State {
     }
 }
 
+/// Ends the process `install` replaced, so two sidecars never serve one account.
+///
+/// The replaced process serves the same account against the same E2EE store, so it must not outlive
+/// its handle: its read loop stops at the generation check, so nothing else would end it, and
+/// `kill_on_drop` only fires when the handle is finally dropped. Closing its stdin first lets a
+/// well-behaved sidecar exit on EOF; the kill covers one that would not, and reaps it now instead
+/// of whenever the runtime gets around to it.
+async fn retire_replaced(child: Option<Child>, writer: Option<Arc<Mutex<ChildStdin>>>) {
+    drop(writer);
+    if let Some(mut replaced) = child
+        && let Err(error) = replaced.kill().await
+    {
+        // A kill that fails because the child already exited is the common case; the handle's
+        // `kill_on_drop` covers a child that somehow outlives it.
+        tracing::debug!(
+            target: "alloy_sidecar",
+            "the replaced sidecar had already exited: {error}"
+        );
+    }
+}
+
 impl Runtime {
     /// Launches the sidecar and performs the handshake.
     pub(crate) async fn spawn(config: SidecarConfig) -> Result<Arc<Self>, ConnectorError> {
@@ -166,20 +187,8 @@ impl Runtime {
 
         // The replaced process serves the same account against the same E2EE store, so it must not
         // outlive its handle: its read loop stops at the generation check, so nothing else would
-        // end it, and `kill_on_drop` only fires when the handle is finally dropped. Closing its
-        // stdin first lets a well-behaved sidecar exit on EOF; the kill covers one that would not,
-        // and reaps it now instead of whenever the runtime gets around to it.
-        drop(replaced_writer);
-        if let Some(mut replaced) = replaced_child
-            && let Err(error) = replaced.kill().await
-        {
-            // A kill that fails because the child already exited is the common case; the handle's
-            // `kill_on_drop` covers a child that somehow outlives it.
-            tracing::debug!(
-                target: "alloy_sidecar",
-                "the replaced sidecar had already exited: {error}"
-            );
-        }
+        // end it, and `kill_on_drop` only fires when the handle is finally dropped.
+        retire_replaced(replaced_child, replaced_writer).await;
 
         process::forward_stderr(stderr);
 
@@ -711,88 +720,60 @@ async fn describe_exit(child: Option<Child>) -> String {
     }
 }
 
-#[cfg(all(test, feature = "fake-sidecar"))]
+/// Process expiry is asserted through `ps`, so these tests are unix-only.
+///
+/// They do not launch the fake sidecar binary: `cargo test --lib` builds no `[[bin]]` target, so a
+/// unit test that needed that binary failed on every clean target directory (CI included). A plain
+/// `sh` child stands in for the sidecar; `retire_replaced` never speaks to it.
+#[cfg(all(test, unix))]
 mod tests {
-    use std::path::{Path, PathBuf};
+    use std::process::Stdio;
     use std::time::Duration;
 
     use super::*;
 
-    /// Cargo exports `CARGO_BIN_EXE_*` to integration tests only, so the unit test finds the fake
-    /// sidecar next to its own executable: `target/<profile>/deps/<test>` → `target/<profile>`.
-    fn fake_sidecar() -> PathBuf {
-        if let Ok(path) = std::env::var("CARGO_BIN_EXE_fake-sidecar") {
-            return PathBuf::from(path);
-        }
-        let exe = std::env::current_exe().expect("the test executable path");
-        let profile = exe
-            .parent()
-            .and_then(Path::parent)
-            .expect("the target profile directory");
-        let path = profile.join(if cfg!(windows) {
-            "fake-sidecar.exe"
-        } else {
-            "fake-sidecar"
-        });
-        assert!(
-            path.exists(),
-            "the fake sidecar binary is missing; run cargo test -p alloy-sidecar --features fake-sidecar"
-        );
-        path
-    }
-
-    fn config(directory: &Path, pid_file: &Path) -> SidecarConfig {
-        let mut config = SidecarConfig::new(fake_sidecar(), directory);
-        config.env = vec![(
-            "ALLOY_FAKE_SIDECAR_PID_FILE".to_string(),
-            pid_file.to_str().expect("a UTF-8 temp path").to_string(),
-        )];
-        config.request_timeout = Duration::from_secs(10);
-        config.hello_timeout = Duration::from_secs(10);
-        config
+    /// A stand-in sidecar process, with the pipes the runtime would hold.
+    fn stand_in(script: &str) -> (Child, ChildStdin) {
+        let mut child = tokio::process::Command::new("sh")
+            .arg("-c")
+            .arg(script)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn a stand-in process");
+        let stdin = child.stdin.take().expect("stdin");
+        (child, stdin)
     }
 
     #[tokio::test]
-    async fn installing_a_process_terminates_the_one_it_replaces() {
-        let directory = tempfile::tempdir().expect("temp dir");
-        let first_pid = directory.path().join("first.pid");
-        let second_pid = directory.path().join("second.pid");
+    async fn the_replaced_process_is_killed_and_the_replacement_is_not() {
+        // It ignores the EOF a closed stdin sends, so only the kill can end it.
+        let (first, first_stdin) = stand_in("exec sleep 30");
+        let first_pid = first.id().expect("a live process has a pid");
 
-        let runtime = Runtime::spawn(config(directory.path(), &first_pid))
-            .await
-            .expect("the first process completes the handshake");
+        let (second, second_stdin) = stand_in("exec sleep 30");
+        let second_pid = second.id().expect("a live process has a pid");
 
-        let launched = process::launch(&config(directory.path(), &second_pid), Some(Network::Fake))
-            .await
-            .expect("the second process completes the handshake");
-        runtime.install(launched).await;
+        retire_replaced(Some(first), Some(Arc::new(Mutex::new(first_stdin)))).await;
 
-        // The replaced process served the same account and the same E2EE store, so it must be
-        // gone rather than orphaned behind a dropped handle and a stalled read loop.
-        #[cfg(unix)]
-        {
-            wait_until_gone(recorded_pid(&first_pid)).await;
-            assert!(
-                process_alive(recorded_pid(&second_pid)),
-                "the replacement is the live process"
-            );
-        }
+        // Two sidecars on one account fight over the same session and the same E2EE store, so the
+        // replaced process must be gone rather than orphaned behind a dropped handle.
+        wait_until_gone(first_pid).await;
+        assert!(
+            process_alive(second_pid),
+            "the replacement is the live process"
+        );
 
-        runtime.stop().await.expect("stop");
-    }
-
-    #[cfg(unix)]
-    fn recorded_pid(pid_file: &Path) -> u32 {
-        std::fs::read_to_string(pid_file)
-            .expect("the sidecar recorded its process id")
-            .trim()
-            .parse()
-            .expect("a numeric process id")
+        // Closing the replacement's stdin is not what ends it, so the assertion above holds for a
+        // sidecar that ignores EOF as much as for one that does; dropping it kills it here.
+        drop(second_stdin);
+        drop(second);
     }
 
     /// Waits until the process is reaped. A killed child lingers as a zombie until the runtime's
     /// reaper collects it, which is not the same instant as the kill.
-    #[cfg(unix)]
     async fn wait_until_gone(pid: u32) {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
         while process_alive(pid) {
@@ -804,7 +785,6 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
     fn process_alive(pid: u32) -> bool {
         std::process::Command::new("ps")
             .arg("-p")
