@@ -71,6 +71,24 @@ export interface DeviceView {
   epoch: number | null;
 }
 
+/** One store layer as `SyncStatus` and `Recovered` report it. */
+export interface LayerView {
+  /** `settings | tags | catalogue | backgrounds | theme | messages`, as the engine names it. */
+  key: string;
+  enabled: boolean;
+  /** Epoch milliseconds of the last local write to the layer; 0 when it never arrived. */
+  updatedAtMs: number;
+}
+
+/** What a successful `RecoverFromPhrase` rebuilt, and the roster it followed. */
+export interface RecoveredView {
+  layers: LayerView[];
+  /** Every device in the roster the recovery returned, this one included. */
+  roster: DeviceView[];
+  /** Pin adopted on the first `https` connection, once `SyncStatus` reports it. */
+  pin: string | null;
+}
+
 export interface RecoveryView {
   hasPhrase: boolean;
   /** Present only in the response that created the phrase; never read back afterwards. */
@@ -78,6 +96,18 @@ export interface RecoveryView {
   verified: boolean;
   /** Latest rejection or failure, already localized by the container. */
   error?: string | null;
+  /** A phrase recovery is on the wire: the server is being opened and pulled. */
+  recovering?: boolean;
+  /** Set by a successful recovery; cleared when a new attempt starts. */
+  recovered?: RecoveredView | null;
+}
+
+/** What the fresh-device branch of the recovery panel submits. */
+export interface RecoverFromPhraseInput {
+  words: string[];
+  url: string;
+  /** Write-only: handed to the engine and dropped, never read back. */
+  token: string;
 }
 
 /** What an exported bundle carries, as the engine's `ConfigBundleSummary` reports it. */

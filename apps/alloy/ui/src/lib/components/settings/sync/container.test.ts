@@ -377,3 +377,190 @@ describe('DevicesSyncLive configuration bundle', () => {
     expect(target.textContent).toContain(t('sync-import-applied'));
   });
 });
+
+describe('DevicesSyncLive fresh-device recovery', () => {
+  const PIN = 'c0ffee11'.repeat(8);
+  const RECOVERED_AT = Date.UTC(2026, 10, 17, 9, 30);
+  const WORDS = Array.from({ length: 24 }, () => 'abandon');
+  const THIS_DEVICE = {
+    device_id: 'demo-this',
+    label: 'Fresh laptop',
+    enrolled_ms: 1,
+    epoch: 0,
+    current: true,
+  };
+
+  function typeInto(field: HTMLInputElement | HTMLTextAreaElement, value: string) {
+    field.value = value;
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+  }
+
+  function recoveryForm(target: HTMLElement) {
+    const form = target.querySelector('form.recover') as HTMLFormElement | null;
+    expect(form, 'the fresh device offers the phrase recovery form').toBeTruthy();
+    return form!;
+  }
+
+  it('recovers from the phrase, re-reads the roster and status, and renders the layers', async () => {
+    let recovered = false;
+    engine.invoke.mockImplementation(async (command: EngineCommand) => {
+      switch (command.action) {
+        case 'ListDevices':
+          return {
+            type: 'DevicesList',
+            payload: {
+              devices: recovered
+                ? [
+                    { ...THIS_DEVICE, label: 'Restored laptop' },
+                    {
+                      device_id: 'demo-peer',
+                      label: 'Old phone',
+                      enrolled_ms: 1,
+                      epoch: 1,
+                      current: false,
+                    },
+                  ]
+                : [THIS_DEVICE],
+            },
+          };
+        case 'SyncStatus':
+          return {
+            type: 'SyncStatus',
+            payload: {
+              status: status(
+                recovered
+                  ? {
+                      mode: 'prefs',
+                      url: 'https://sync.example',
+                      pin: PIN,
+                      token_configured: true,
+                    }
+                  : {}
+              ),
+            },
+          };
+        case 'RecoverFromPhrase':
+          recovered = true;
+          return {
+            type: 'Recovered',
+            payload: {
+              layers: [
+                { key: 'settings', enabled: true, updated_at_ms: RECOVERED_AT },
+                { key: 'tags', enabled: true, updated_at_ms: RECOVERED_AT },
+                { key: 'messages', enabled: false, updated_at_ms: 0 },
+              ],
+              devices: [
+                { ...THIS_DEVICE, label: 'Restored laptop' },
+                {
+                  device_id: 'demo-peer',
+                  label: 'Old phone',
+                  enrolled_ms: 1,
+                  epoch: 1,
+                  current: false,
+                },
+              ],
+            },
+          };
+        default:
+          throw new Error(`unexpected command ${command.action}`);
+      }
+    });
+
+    const target = render();
+    await settle();
+
+    expect(target.textContent).toContain(t('sync-recovery-recover-title'));
+    expect(target.textContent).toContain(t('sync-recovery-pin-honesty'));
+
+    const form = recoveryForm(target);
+    typeInto(form.querySelector('textarea')!, WORDS.join(' '));
+    typeInto(form.querySelector('input[type="url"]')!, 'https://sync.example');
+    typeInto(form.querySelector('input[type="password"]')!, 'secret-token');
+
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+
+    const calls = (action: EngineCommand['action']) =>
+      engine.invoke.mock.calls.filter(([command]) => command.action === action);
+    expect(calls('RecoverFromPhrase')).toHaveLength(1);
+    expect(calls('RecoverFromPhrase')[0][0]).toMatchObject({
+      action: 'RecoverFromPhrase',
+      params: {
+        words: WORDS,
+        url: 'https://sync.example',
+        token: 'secret-token',
+        accept_new_pin: false,
+      },
+    });
+    expect(calls('ListDevices'), 'the roster is re-read').toHaveLength(2);
+    expect(calls('SyncStatus'), 'the status is re-read').toHaveLength(2);
+
+    // The recovered view is written once `load()` has answered, one turn after the status lands.
+    await settle();
+
+    const rendered = target.textContent ?? '';
+    expect(rendered).toContain(t('sync-recovery-recovered-title'));
+    expect(rendered).toContain(
+      t('sync-recovery-roster', { devices: 'Restored laptop · Old phone' })
+    );
+    expect(rendered).toContain(
+      t('sync-recovery-pin-recorded', { pin: 'C0FF EE11 C0FF EE11 C0FF EE11 C0FF EE11 C0FF EE11 C0FF EE11 C0FF EE11 C0FF EE11' })
+    );
+
+    const layers = [...target.querySelectorAll('.layer')].map((entry) => entry.textContent ?? '');
+    expect(layers).toHaveLength(3);
+    expect(layers[0]).toContain(t('sync-layer-settings'));
+    expect(layers[0]).toContain(t('sync-layer-enabled'));
+    expect(layers[0]).toContain(
+      new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short' }).format(
+        new Date(RECOVERED_AT)
+      )
+    );
+    expect(layers[2]).toContain(t('sync-layer-disabled'));
+    expect(layers[2]).toContain(t('sync-layer-never'));
+  });
+
+  it('keeps the typed words on recovery_rejected, writes nothing, and clears the token', async () => {
+    engine.invoke.mockImplementation(async (command: EngineCommand) => {
+      switch (command.action) {
+        case 'ListDevices':
+          return { type: 'DevicesList', payload: { devices: [THIS_DEVICE] } };
+        case 'SyncStatus':
+          return { type: 'SyncStatus', payload: { status: status() } };
+        case 'RecoverFromPhrase':
+          throw {
+            code: 'recovery_rejected',
+            message: 'the phrase does not open the escrow',
+            reason: 'recovery_rejected',
+          };
+        default:
+          throw new Error(`unexpected command ${command.action}`);
+      }
+    });
+
+    const target = render();
+    await settle();
+
+    const form = recoveryForm(target);
+    const words = form.querySelector('textarea') as HTMLTextAreaElement;
+    const token = form.querySelector('input[type="password"]') as HTMLInputElement;
+    typeInto(words, WORDS.join(' '));
+    typeInto(form.querySelector('input[type="url"]')!, 'https://sync.example');
+    typeInto(token, 'secret-token');
+
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+
+    expect(target.textContent).toContain(t('sync-error-recovery-rejected'));
+    expect(words.value, 'the typed phrase is kept so it can be fixed').toBe(WORDS.join(' '));
+    expect(token.value, 'the token is write-only and never kept').toBe('');
+
+    const calls = (action: EngineCommand['action']) =>
+      engine.invoke.mock.calls.filter(([command]) => command.action === action);
+    expect(calls('RecoverFromPhrase')).toHaveLength(1);
+    expect(calls('ListDevices'), 'a rejected phrase writes nothing').toHaveLength(1);
+    expect(calls('SyncStatus'), 'a rejected phrase writes nothing').toHaveLength(1);
+    expect(target.textContent).not.toContain(t('sync-recovery-recovered-title'));
+  });
+});

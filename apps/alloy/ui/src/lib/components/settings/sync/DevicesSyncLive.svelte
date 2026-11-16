@@ -4,7 +4,7 @@
   import { errorCode, errorMessage, expect } from '$lib/stores/errors';
   import { copyText } from '$lib/platform/clipboard';
   import { t } from '$lib/i18n';
-  import type { DeviceDto, EngineEvent, SyncStatusReport } from '$lib/generated';
+  import type { DeviceDto, EngineEvent, SyncLayerStatus, SyncStatusReport } from '$lib/generated';
   import DevicesSync from './DevicesSync.svelte';
   import { parsePinMismatch, syncErrorMessage } from './errors';
   import type {
@@ -12,10 +12,12 @@
     DeviceView,
     ExportView,
     ImportView,
+    LayerView,
     PairingRole,
     PairingState,
     PairingView,
     PinMismatchView,
+    RecoverFromPhraseInput,
     RecoveryView,
     ServerView,
     SyncResultView,
@@ -89,6 +91,14 @@
       lastSyncMs: null,
       epoch: dto.epoch,
     };
+  }
+
+  function mapLayers(layers: SyncLayerStatus[]): LayerView[] {
+    return layers.map((layer) => ({
+      key: layer.key,
+      enabled: layer.enabled,
+      updatedAtMs: layer.updated_at_ms,
+    }));
   }
 
   async function loadDevices() {
@@ -412,6 +422,50 @@
     }
   }
 
+  /**
+   * The phrase is the only way back for a device with no configuration: no sibling to pair with,
+   * no server endpoint yet, no master key. The pin is captured on the first `https` connection.
+   */
+  const fresh = $derived(
+    server.mode === 'off' && devices.length === 0 && !recovery.hasPhrase
+  );
+
+  async function recoverFromPhrase(input: RecoverFromPhraseInput) {
+    recovery = { ...recovery, recovering: true, error: null, recovered: null };
+    try {
+      const res = expect(
+        await client.invoke({
+          action: 'RecoverFromPhrase',
+          params: {
+            words: input.words,
+            url: input.url,
+            token: input.token,
+            accept_new_pin: false,
+          },
+        }),
+        'Recovered'
+      );
+      // The page must reflect the device the engine now is, not only what the response carried.
+      await load();
+      recovery = {
+        hasPhrase: true,
+        // The phrase opened the escrow; the engine now holds the wrapped blob.
+        words: null,
+        verified: false,
+        recovering: false,
+        error: null,
+        recovered: {
+          layers: mapLayers(res.payload.layers),
+          roster: res.payload.devices.map(mapDevice),
+          pin: server.pin,
+        },
+      };
+    } catch (e) {
+      // A rejected phrase writes nothing; keep the typed words and say only that it was wrong.
+      recovery = { ...recovery, recovering: false, error: syncErrorMessage(e) };
+    }
+  }
+
   async function exportConfig() {
     exportState = null;
     try {
@@ -496,6 +550,7 @@
   {pairing}
   {devices}
   {recovery}
+  {fresh}
   {role}
   {exportState}
   {importState}
@@ -513,6 +568,7 @@
   oncreaterecovery={() => void createRecovery()}
   onverifyrecovery={(words) => void verifyRecovery(words)}
   onrecoverywritten={recoveryWritten}
+  onrecover={(input) => void recoverFromPhrase(input)}
   onexport={() => void exportConfig()}
   onimport={(bundle, apply) => void importConfig(bundle, apply)}
   ontrustnewpin={() => void trustNewPin()}

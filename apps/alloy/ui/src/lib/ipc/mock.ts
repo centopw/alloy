@@ -65,6 +65,12 @@ import {
 /** The only login code the demo accepts, matching the fake connector's `FAKE_CODE`. */
 export const MOCK_LOGIN_CODE = '12345';
 
+/**
+ * A stable demonstration pin, derived from nothing real: the dev walk only needs a fingerprint
+ * to display, compare and carry through a phrase recovery.
+ */
+const DEMO_SYNC_PIN = 'a1b2c3d4e5f60718293a4b5c6d7e8f90123456789abcdef0123456789abcdef0';
+
 /** Messenger cookies the demo asks for; `datr` is optional, the other two are not. */
 const MESSENGER_COOKIES: CookieFieldDto[] = [
   { name: 'c_user', label: 'c_user (the numeric id in your Facebook profile URL)', required: true },
@@ -1774,6 +1780,17 @@ export class MockTransport implements Transport {
         if (command.params.words.some((word) => word.trim() === '')) {
           throw new MockEngineError('recovery_rejected', 'the phrase does not open the escrow', null);
         }
+        const url = command.params.url.trim();
+        // The pin is captured on this first connection, exactly as `ConfigureSync` would.
+        const pin = /^https:\/\//i.test(url) ? DEMO_SYNC_PIN : null;
+        this.sync = {
+          ...this.sync,
+          mode: 'prefs',
+          url,
+          pin,
+          tokenConfigured: command.params.token.trim() !== '',
+          lastError: null,
+        };
         return {
           type: 'Recovered',
           payload: {
@@ -1813,7 +1830,7 @@ export class MockTransport implements Transport {
         }
         // A stable demonstration pin, derived from nothing real: the dev walk only needs a
         // fingerprint to display and compare.
-        const pin = mode === 'prefs' ? 'a1b2c3d4e5f60718293a4b5c6d7e8f90123456789abcdef0123456789abcdef0' : null;
+        const pin = mode === 'prefs' ? DEMO_SYNC_PIN : null;
         if (
           mode === 'prefs' &&
           this.sync.pin !== null &&

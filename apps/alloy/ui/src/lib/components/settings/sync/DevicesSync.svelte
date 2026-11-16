@@ -18,6 +18,7 @@
     PairingState,
     PairingView,
     PinMismatchView,
+    RecoverFromPhraseInput,
     RecoveryView,
     ServerView,
     SyncResultView,
@@ -45,6 +46,9 @@
     oncreaterecovery?: () => void;
     onverifyrecovery?: (words: string[]) => void;
     onrecoverywritten?: () => void;
+    /** A fresh device that has nothing but its phrase: offer the recovery branch. */
+    fresh?: boolean;
+    onrecover?: (input: RecoverFromPhraseInput) => void;
     /** Export result and import form, both rendered under This device. */
     exportState?: ExportView | null;
     importState?: ImportView | null;
@@ -87,6 +91,8 @@
     oncreaterecovery = () => {},
     onverifyrecovery = () => {},
     onrecoverywritten = () => {},
+    fresh = false,
+    onrecover = () => {},
     exportState = null,
     importState = null,
     onexport = () => {},
@@ -387,9 +393,11 @@
   <SettingGroup title={t('sync-recovery')} description={t('sync-recovery-description')}>
     <RecoveryPanel
       {recovery}
+      {fresh}
       oncreate={oncreaterecovery}
       onverify={onverifyrecovery}
       onwritten={onrecoverywritten}
+      onrecover={onrecover}
     />
   </SettingGroup>
 </section>
