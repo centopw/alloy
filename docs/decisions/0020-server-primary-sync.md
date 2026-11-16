@@ -1,7 +1,7 @@
 ---
 id: adr-0020-server-primary-sync
 type: architecture-design
-status: proposed
+status: accepted
 title: "ADR 0020: Optional zero-knowledge sync server as primary store"
 parent: alloy-architecture
 depends-on:
@@ -12,8 +12,8 @@ tags: [adr, architecture, sync, security, crypto, hosting]
 
 # 0020: Optional zero-knowledge sync server as primary store
 
-- Status: proposed (2026-11-16)
-- Issue: none yet (file one with `type:decision` when the board is updated)
+- Status: accepted (2026-11-16)
+- Issue: pending (`type:decision`, filed by the orchestrator; references this record)
 - Date: 2026-11-16
 - Amends: ADR 0016's "no homeserver" — the server below is optional *storage*, never an identity
   provider; there is still no Matrix, no OIDC, and no server-side login to the account.
