@@ -1,0 +1,15 @@
+{
+  "name": "@alloy/sync-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Zero-knowledge blob store for Alloy sync (ADR 0020): opaque bytes, head CAS, escrow and roster.",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/main.js",
+    "test": "node --test"
+  }
+}
