@@ -1767,6 +1767,29 @@ export class MockTransport implements Transport {
         return { type: 'RecoveryVerified' };
       }
 
+      case 'RecoverFromPhrase': {
+        if (command.params.words.length !== 24) {
+          throw new MockEngineError('recovery_rejected', 'the phrase has 24 words', 'word-count');
+        }
+        if (command.params.words.some((word) => word.trim() === '')) {
+          throw new MockEngineError('recovery_rejected', 'the phrase does not open the escrow', null);
+        }
+        return {
+          type: 'Recovered',
+          payload: {
+            layers: [
+              { key: 'settings', enabled: true, updated_at_ms: Date.now() },
+              { key: 'tags', enabled: true, updated_at_ms: Date.now() },
+              { key: 'catalogue', enabled: true, updated_at_ms: Date.now() },
+              { key: 'backgrounds', enabled: false, updated_at_ms: 0 },
+              { key: 'theme', enabled: true, updated_at_ms: Date.now() },
+              { key: 'messages', enabled: false, updated_at_ms: 0 },
+            ],
+            devices: this.devices,
+          },
+        };
+      }
+
       case 'ListDevices':
         return { type: 'DevicesList', payload: { devices: this.devices } };
 

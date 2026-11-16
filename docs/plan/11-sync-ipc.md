@@ -57,7 +57,12 @@ derives the pin from the TLS leaf's SPKI, and returns it; a pin change on a late
 |---|---|
 | `CreateRecoveryPhrase` | `RecoveryPhraseCreated { words }` |
 | `VerifyRecoveryPhrase { words }` | `RecoveryVerified` |
-| `RecoverFromPhrase { words, url, token }` | `Recovered { layers, devices }` |
+| `RecoverFromPhrase { words, url, token, accept_new_pin }` | `Recovered { layers, devices }` |
+
+A fresh device has no pin yet, so the first https connection captures it unless `accept_new_pin`
+is false; loopback `http` is the only unpinned transport. The master key is stored only after the
+phrase opens the escrow **and** the verified head and layers arrive, so a failure leaves a
+retryable device rather than a half-adopted account.
 
 The phrase exists only in this response; it is never stored, and the engine keeps only the wrapped
 escrow blob it produces.
