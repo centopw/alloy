@@ -1,3 +1,4 @@
+export { default as ChatBackground } from './ChatBackground.svelte';
 export { default as SettingButtonRow } from './SettingButtonRow.svelte';
 export { default as SettingGroup } from './SettingGroup.svelte';
 export { default as SettingQuickReactions } from './SettingQuickReactions.svelte';

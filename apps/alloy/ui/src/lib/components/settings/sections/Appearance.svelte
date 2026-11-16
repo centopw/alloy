@@ -2,18 +2,28 @@
   import { SegmentedControl } from '$lib/components/common';
   import type { Snippet } from 'svelte';
   import {
+    ChatBackground,
     SettingGroup,
     SettingRadioCards,
     SettingSelect,
     SettingToggle,
   } from '$lib/components/settings/controls';
   import { prefs, type FontScale, type MessageLayout, type TimeFormat } from '$lib/stores/prefs.svelte';
+  import { roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
   import { themeStore } from '$lib/theme/theme.svelte';
   import type { Density } from '$lib/theme/theme.svelte';
 
   import { t } from '$lib/i18n';
   const dark = $derived(themeStore.activeTheme !== 'alloy-light');
   const amoled = $derived(themeStore.activeTheme === 'alloy-amoled');
+
+  /** Chats carrying a picture of their own, named the way the room list names them. */
+  const backgroundRooms = $derived(
+    prefs.backgroundRoomIds.map((id) => {
+      const room = roomsStore.rooms.find((r) => r.id === id);
+      return { id, title: room ? roomTitle(room) : id };
+    }),
+  );
 
   function setDark(on: boolean) {
     themeStore.setTheme(on ? (amoled ? 'alloy-amoled' : 'alloy-dark') : 'alloy-light');
@@ -108,6 +118,23 @@
     </div>
   </SettingGroup>
 
+  <SettingGroup
+    title={t('chat-background-title')}
+    description={t('chat-background-description')}
+  >
+    <ChatBackground roomId={null} />
+    {#if backgroundRooms.length > 0}
+      <div class="own-rooms">
+        <p class="own-rooms-title">{t('chat-background-chats-with-own')}</p>
+        <ul class="own-rooms-list">
+          {#each backgroundRooms as room (room.id)}
+            <li class="own-room">{room.title}</li>
+          {/each}
+        </ul>
+      </div>
+    {/if}
+  </SettingGroup>
+
   <SettingGroup title={t('appearance-messages')}>
     <div class="padded">
       <SettingRadioCards
@@ -177,6 +204,39 @@
 
   .padded {
     padding: var(--alloy-spacing-scale-2) 0;
+  }
+
+  /* The chats that carry a picture of their own: a read-only list, because each one is changed
+     from its own picker (the room menu) where its picture is previewed. */
+  .own-rooms {
+    display: flex;
+    flex-direction: column;
+    gap: var(--alloy-spacing-scale-1);
+    padding-top: var(--alloy-spacing-scale-3);
+    border-top: 1px solid var(--alloy-color-border-subtle);
+  }
+
+  .own-rooms-title {
+    margin: 0;
+    font-size: var(--alloy-font-size-meta);
+    font-weight: var(--alloy-typography-weight-semibold);
+    letter-spacing: var(--alloy-letter-spacing-caps);
+    text-transform: uppercase;
+    color: var(--alloy-color-text-muted);
+  }
+
+  .own-rooms-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: var(--alloy-spacing-scale-1);
+  }
+
+  .own-room {
+    font-size: var(--alloy-font-size-row);
+    color: var(--alloy-color-text-primary);
   }
 
   /* Previews fill the tile the parent control provides; they paint no background of their own,

@@ -102,6 +102,7 @@ export type SettingsSectionId =
   | 'sidebar'
   | 'tags'
   | 'security-privacy'
+  | 'debug'
   | 'help-about';
 
 export interface RawSettingsItem<TIcon = unknown> {
@@ -152,7 +153,10 @@ export const SETTINGS_GROUPS_DEF: RawSettingsGroup[] = [
   },
   {
     label: 'Info',
-    items: [{ id: 'help-about', label: 'Help & About' }],
+    items: [
+      { id: 'debug', label: 'Debug' },
+      { id: 'help-about', label: 'Help & About' },
+    ],
   },
 ];
 

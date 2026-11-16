@@ -1,6 +1,8 @@
 //! Alloy desktop and mobile application shell.
 
+mod background;
 pub mod commands;
+mod logs;
 mod notify;
 mod pick;
 mod save;
@@ -100,6 +102,8 @@ fn engine_error(err: alloy_engine::EngineError) -> std::io::Error {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Installed first so every startup log, including the setup hook's, is captured.
+    logs::init();
     let builder = tauri::Builder::default();
     #[cfg(desktop)]
     let builder = builder
@@ -190,6 +194,11 @@ pub fn run() {
             pick::attachment_size,
             save::save_media,
             save::write_temp_file,
+            background::save_background,
+            background::delete_background,
+            logs::debug_logs,
+            logs::debug_clear_logs,
+            logs::debug_save_logs,
             update::check_update,
             update::download_update,
             update::apply_update,

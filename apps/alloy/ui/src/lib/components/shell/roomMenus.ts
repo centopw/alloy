@@ -5,6 +5,11 @@ import { contextMenu, type MenuItem } from '$lib/stores/contextmenu.svelte';
 import { isRoomMuted, roomsStore } from '$lib/stores/rooms.svelte';
 import { muteRoom, unmuteRoom } from '$lib/stores/muteTimer.svelte';
 import { MUTE_DURATIONS } from '$lib/content/mute';
+import { prefs } from '$lib/stores/prefs.svelte';
+import {
+  openChatBackgroundPicker,
+  removeChatBackground,
+} from '../settings/controls/ChatBackground.svelte';
 
 import { t } from '$lib/i18n';
 
@@ -41,6 +46,28 @@ export function copyItems(room: RoomSummary): MenuItem[] {
       onselect: () => void copyText(room.id).catch(() => undefined),
     },
   ];
+}
+
+/**
+ * The chat's background: open its picker, and drop the picture it carries of its own. Without one
+ * the entry only offers the picker, because a chat that shows the default has nothing to remove.
+ */
+export function backgroundItems(roomId: string): MenuItem[] {
+  const items: MenuItem[] = [
+    {
+      id: 'set-chat-background',
+      label: t('room-menu-set-chat-background'),
+      onselect: () => openChatBackgroundPicker(roomId),
+    },
+  ];
+  if (prefs.hasOwnBackground(roomId)) {
+    items.push({
+      id: 'remove-chat-background',
+      label: t('room-menu-remove-chat-background'),
+      onselect: () => removeChatBackground(roomId),
+    });
+  }
+  return items;
 }
 
 /** Opens `items` as a menu under the element the user pressed (`from`, usually `e.currentTarget`). */

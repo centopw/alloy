@@ -26,7 +26,7 @@
   import { viewport } from '$lib/stores/viewport.svelte';
   import { formatListTime } from '$lib/content/format';
   import { highlightRuns } from '$lib/content/searchHighlight';
-  import { copyItems, notifyItems, openMenuFrom } from './roomMenus';
+  import { backgroundItems, copyItems, notifyItems, openMenuFrom } from './roomMenus';
   import { movePinned, orderChanged } from './pinOrder';
   import RoomSwipe from './RoomSwipe.svelte';
   import { draftsStore } from '$lib/stores/drafts.svelte';
@@ -145,6 +145,7 @@
           items: [
             { id: 'details', label: t('common-room-details'), icon: Info, onselect: () => showRoomInfo(r.id) },
             { id: 'note', label: t('sidebar-edit-note'), icon: StickyNote, onselect: () => showRoomInfo(r.id) },
+            ...backgroundItems(r.id),
           ],
         },
       },

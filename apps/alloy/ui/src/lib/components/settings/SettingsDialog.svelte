@@ -16,6 +16,7 @@
     Info,
     Tag,
     Link,
+    Code,
     ShieldCheck as PermissionsIcon
   } from '$lib/icons';
   import { pushBack } from '$lib/platform/backstack';
@@ -39,6 +40,7 @@ import SecurityPrivacy from './sections/SecurityPrivacy.svelte';
 import HelpAbout from './sections/HelpAbout.svelte';
 import Tags from './sections/Tags.svelte';
 import Permissions from './sections/Permissions.svelte';
+import Debug from './sections/Debug.svelte';
 
   import { t } from '$lib/i18n';
   interface Props {
@@ -64,12 +66,18 @@ import Permissions from './sections/Permissions.svelte';
     keyboard: { icon: KeyboardIcon },
     sidebar: { icon: PanelLeft, phoneIcon: MessageSquare },
     tags: { icon: Tag },
+    debug: { icon: Code },
     'help-about': { icon: Info },
   };
 
   const GROUPS: RawSettingsGroup<NavIcon>[] = SETTINGS_GROUPS_DEF.map((group) => ({
     ...group,
-    items: group.items.map((item) => ({ ...item, icon: NAV_ICONS[item.id].icon, phoneIcon: NAV_ICONS[item.id].phoneIcon })),
+    items: group.items.map((item) => ({
+      ...item,
+      label: item.id === 'debug' ? t('debug-title') : item.label,
+      icon: NAV_ICONS[item.id].icon,
+      phoneIcon: NAV_ICONS[item.id].phoneIcon,
+    })),
   }));
 
   const caps = $derived(capabilities(currentEnv(viewport.isPhone)));
@@ -244,6 +252,8 @@ import Permissions from './sections/Permissions.svelte';
               <Tags />
             {:else if section === 'security-privacy'}
               <SecurityPrivacy />
+            {:else if section === 'debug'}
+              <Debug />
             {:else}
               <HelpAbout />
             {/if}

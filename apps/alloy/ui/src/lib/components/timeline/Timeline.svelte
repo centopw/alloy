@@ -7,7 +7,7 @@
   import { timelineStore, findRowIndexByEventId } from '$lib/stores/timeline.svelte';
   import { membersStore } from '$lib/stores/members.svelte';
   import { roomsStore } from '$lib/stores/rooms.svelte';
-  import { prefs } from '$lib/stores/prefs.svelte';
+  import { prefs, backgroundUrl } from '$lib/stores/prefs.svelte';
   import TypingIndicator from './TypingIndicator.svelte';
   import PinnedBar from './PinnedBar.svelte';
   import Icon from '$lib/icons/Icon.svelte';
@@ -64,6 +64,32 @@
   const rows = $derived(timelineStore.items);
   /** Runs of captionless pictures fold into one grid row. */
   const albums = $derived(groupAlbums(rows));
+
+  /** The chat's own background picture, or the default one, as a stored file name. */
+  const backgroundFile = $derived(prefs.backgroundFor(roomId));
+  /** The asset URL of that picture; null when there is none or this runtime cannot load it. */
+  let backgroundSrc = $state<string | null>(null);
+  $effect(() => {
+    const file = backgroundFile;
+    if (!file) {
+      backgroundSrc = null;
+      return;
+    }
+    let live = true;
+    void backgroundUrl(file)
+      .then((url) => {
+        if (live) backgroundSrc = url;
+      })
+      .catch((err) => {
+        console.warn('[timeline] could not resolve the chat background', err);
+        if (live) backgroundSrc = null;
+      });
+    return () => {
+      live = false;
+    };
+  });
+  /** A picture is only drawn over a conversation that has messages; an empty state stays plain. */
+  const showBackground = $derived(backgroundSrc !== null && rows.length > 0);
 
   /**
    * Rows the message cursor can land on (A11Y-04). These are indices into `rows`, because the
@@ -529,7 +555,17 @@
 <section class="timeline" aria-label={t('chat-timeline-label', { title, kind: isDirect ? t('chat-kind-direct') : t('chat-kind-group') })}>
   <PinnedBar {roomId} {kindLabel} />
   <!-- A layout and scroll-input wrapper only: the accessible structure lives on the `feed` inside. -->
-  <div class="viewport" role="presentation" bind:this={viewportEl} bind:clientHeight={viewportHeight} onpointerdown={onViewportPointerDown} onwheel={onUserScroll} ontouchstart={onUserScroll} onfocusin={onViewportFocus} use:contextmenu={backgroundItems}>
+  <div class="viewport" class:with-background={showBackground} role="presentation" bind:this={viewportEl} bind:clientHeight={viewportHeight} onpointerdown={onViewportPointerDown} onwheel={onUserScroll} ontouchstart={onUserScroll} onfocusin={onViewportFocus} use:contextmenu={backgroundItems}>
+    {#if showBackground}
+      <!-- Only the message area carries the picture: the pinned bar, the typing indicator, the
+           composer and the empty state keep the plain pane. The scrim under the rows is what keeps
+           every text readable over an arbitrary photograph (see the style block). -->
+      <div
+        class="chat-background"
+        aria-hidden="true"
+        style:background-image={backgroundSrc ? `url("${backgroundSrc}")` : null}
+      ></div>
+    {/if}
     {#if timelineStore.loading && rows.length === 0}
       <p class="status" aria-busy="true">{t('timeline-loading-messages')}</p>
     {:else if rows.length === 0}
@@ -550,7 +586,7 @@
         aria-busy={timelineStore.loading || timelineStore.paginating}
         onkeydown={onFeedKeyDown}
         data-conversation-feed
-        style="height: 100%; width: 100%; overscroll-behavior: contain;"
+        style="position: relative; z-index: 1; height: 100%; width: 100%; overscroll-behavior: contain;"
       >
         {#snippet children(item: TimelineItemDto, index: number)}
           <div class="cell">
@@ -628,6 +664,50 @@
     position: relative;
     flex: 1;
     min-height: 0;
+  }
+  /* The chat's own picture, drawn with `cover` behind the messages only. It never takes a press:
+     the context menu and the row hover belong to the conversation, not the photograph. */
+  .chat-background {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    pointer-events: none;
+  }
+  /* The legibility layer. Every picture is scrimmed with the pane's own canvas colour, which is the
+     one layer whose contrast pairs ADR 0015 already measures. At 85% the worst case (a photograph
+     that is black where the light theme draws muted text, or white in a dark theme) measures 4.25:1
+     in light and 3.85:1 in dark, so the two texts that sit straight on the picture — a day divider
+     and a system line — take the canvas plate below, and the modern/IRC layouts, which draw every
+     word on the pane, raise the scrim to 90%. */
+  .chat-background::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: color-mix(in srgb, var(--alloy-color-surface-canvas) 85%, transparent);
+  }
+  /* Modern and IRC put sender names, bodies and times directly on the pane, so the picture is
+     scrimmed to the point where muted text clears AA over any photograph: 4.82:1 light, 4.59:1
+     dark, 6.02:1 AMOLED, measured against a fully black or fully white picture. */
+  :global(:root[data-message-layout='modern']) .chat-background::after,
+  :global(:root[data-message-layout='irc']) .chat-background::after {
+    background: color-mix(in srgb, var(--alloy-color-surface-canvas) 90%, transparent);
+  }
+  /* The day divider and a system line are the only muted texts the bubble layout leaves on the
+     picture; a canvas plate restores their measured 6.01:1 (light) / 6.08:1 (dark). */
+  .viewport.with-background :global(.divider span) {
+    padding: 0 var(--alloy-spacing-scale-2);
+    border-radius: var(--alloy-radii-full);
+    background: var(--alloy-color-surface-canvas);
+  }
+  .viewport.with-background :global(.system) {
+    width: fit-content;
+    margin-inline: auto;
+    padding: 0 var(--alloy-spacing-scale-3);
+    border-radius: var(--alloy-radii-full);
+    background: var(--alloy-color-surface-canvas);
   }
   /* Rows sit on the shared gutter: the row highlight is inset, so the cell pads by the difference. */
   .cell {

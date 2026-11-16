@@ -8,13 +8,22 @@
  * settings file, so a webview that lost its storage still shows the user's choices. Every change is
  * written to localStorage immediately and to the engine after a short debounce.
  */
+import { convertFileSrc } from '@tauri-apps/api/core';
+import { appDataDir } from '@tauri-apps/api/path';
 import { client } from '../ipc/index.js';
+import { isTauriRuntime } from '../platform/files.js';
 import { ROOM_SORTS, type RoomSort } from './roomSort.js';
 import { DEFAULT_QUICK_REACTIONS, isQuickReactions } from '../content/quickReactions.js';
 
 export const PREFS_STORAGE_KEY = 'alloy.prefs.v1';
 export const PREFS_ENGINE_KEY = 'prefs';
 export const PREFS_ENGINE_DEBOUNCE_MS = 300;
+
+/** Key of the background that applies to every chat without one of its own. */
+export const BACKGROUND_DEFAULT_KEY = '__default';
+
+/** Directory under the app data dir holding chat background pictures (asset scope `$APPDATA/media/**`). */
+export const BACKGROUND_DIR = 'media/backgrounds';
 
 export type MessageLayout = 'modern' | 'bubbles' | 'irc';
 export type FontScale = 90 | 100 | 110 | 120 | 130;
@@ -52,6 +61,12 @@ export interface Prefs {
   /** Emoji shown in the quick-reaction bar, in order. */
   quickReactions: readonly string[];
   voiceSpeed: VoiceSpeed;
+  /**
+   * Chat background picture per room id, plus `BACKGROUND_DEFAULT_KEY` for the chats that have none
+   * of their own. The value is a bare file name under `<appData>/media/backgrounds/`; an absent key
+   * means no picture. Files are copied there by the shell so the pref never holds a path.
+   */
+  chatBackgrounds: Readonly<Record<string, string>>;
   /** The first-run permissions prompt was dismissed on this device. */
   permissionsPromptDismissed: boolean;
 }
@@ -83,6 +98,7 @@ export const DEFAULT_PREFS: Readonly<Prefs> = Object.freeze({
   roomSort: 'activity',
   quickReactions: DEFAULT_QUICK_REACTIONS,
   voiceSpeed: '1',
+  chatBackgrounds: {},
   permissionsPromptDismissed: false,
 });
 
@@ -90,6 +106,34 @@ export const DEFAULT_PREFS: Readonly<Prefs> = Object.freeze({
 function sameValue(a: unknown, b: unknown): boolean {
   if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((v, i) => v === b[i]);
   return a === b;
+}
+
+/** Longest room id or file name kept: a room id is short and a stored name is a bare uuid. */
+const MAX_BACKGROUND_KEY = 128;
+const MAX_BACKGROUND_NAME = 128;
+
+/**
+ * A stored background is a bare file name: one path segment, no traversal. The shell builds the
+ * path, so anything with a separator can only be a corrupt or hostile pref.
+ */
+function isBackgroundName(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= MAX_BACKGROUND_NAME &&
+    !value.includes('/') &&
+    !value.includes('\\') &&
+    value !== '.' &&
+    value !== '..'
+  );
+}
+
+/** Whether `value` is a room id → file name map, as `chatBackgrounds` stores it. */
+export function isChatBackgrounds(value: unknown): value is Readonly<Record<string, string>> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  return Object.entries(value).every(
+    ([key, name]) => key.length > 0 && key.length <= MAX_BACKGROUND_KEY && isBackgroundName(name),
+  );
 }
 
 const PREF_KEYS = Object.keys(DEFAULT_PREFS) as PrefKey[];
@@ -108,9 +152,10 @@ function isEnumKey(key: PrefKey): key is EnumKey {
   return key in ENUM_VALUES;
 }
 
-/** Whether `value` is an allowed value for `key`. Booleans and the enum sets are the only accepted types. */
+/** Whether `value` is an allowed value for `key`. Booleans, the enum sets and the background map are the only accepted types. */
 export function isValidPref(key: PrefKey, value: unknown): boolean {
   if (key === 'quickReactions') return isQuickReactions(value);
+  if (key === 'chatBackgrounds') return isChatBackgrounds(value);
   if (typeof DEFAULT_PREFS[key] === 'boolean') return typeof value === 'boolean';
   if (isEnumKey(key)) return (ENUM_VALUES[key] as readonly unknown[]).includes(value);
   return false;
@@ -264,6 +309,55 @@ export class PrefsStore {
     return this.#values.permissionsPromptDismissed;
   }
 
+  /** Room id → background file name, including the `__default` entry. */
+  get chatBackgrounds(): Readonly<Record<string, string>> {
+    return this.#values.chatBackgrounds;
+  }
+
+  /**
+   * The background picture of `roomId`: the chat's own, then the default, then nothing. A chat that
+   * was given the default still reports it, so the conversation always shows what the user set.
+   */
+  backgroundFor(roomId: string | null): string | null {
+    const map = this.#values.chatBackgrounds;
+    if (roomId) {
+      const own = map[roomId];
+      if (own) return own;
+    }
+    return map[BACKGROUND_DEFAULT_KEY] ?? null;
+  }
+
+  /** Whether `roomId` carries a picture of its own rather than the default one. */
+  hasOwnBackground(roomId: string): boolean {
+    return Boolean(this.#values.chatBackgrounds[roomId]);
+  }
+
+  /** Chats with a picture of their own, in insertion order, for the settings summary. */
+  get backgroundRoomIds(): string[] {
+    return Object.keys(this.#values.chatBackgrounds).filter((key) => key !== BACKGROUND_DEFAULT_KEY);
+  }
+
+  /** Whether any chat, or the default, still points at `fileName`. Used to clean up replaced files. */
+  backgroundInUse(fileName: string): boolean {
+    return Object.values(this.#values.chatBackgrounds).includes(fileName);
+  }
+
+  /**
+   * Sets, or clears with `null`, the picture of `roomId` (`null` targets the default that every
+   * other chat inherits). Only a bare file name is accepted: the path is always the app's own.
+   */
+  setBackground(roomId: string | null, fileName: string | null): void {
+    if (fileName !== null && !isBackgroundName(fileName)) return;
+    const key = roomId ?? BACKGROUND_DEFAULT_KEY;
+    const map = this.#values.chatBackgrounds;
+    if ((map[key] ?? null) === fileName) return;
+    const next: Record<string, string> = { ...map };
+    if (fileName === null) delete next[key];
+    else next[key] = fileName;
+    this.#values.chatBackgrounds = next;
+    this.#changed();
+  }
+
   get<K extends PrefKey>(key: K): Prefs[K] {
     return this.#values[key];
   }
@@ -404,6 +498,26 @@ export class PrefsStore {
 }
 
 export const prefs = new PrefsStore();
+
+const backgroundUrls = new Map<string, Promise<string | null>>();
+
+/**
+ * A URL the webview may load for a stored background file, or `null` when the runtime has no asset
+ * protocol (a plain browser). The picture lives in the app's own data dir, which the asset scope
+ * already covers, so the window only ever receives an asset URL, never a filesystem path.
+ */
+export function backgroundUrl(fileName: string): Promise<string | null> {
+  const cached = backgroundUrls.get(fileName);
+  if (cached) return cached;
+  const url = (async () => {
+    if (!isTauriRuntime()) return null;
+    const dir = await appDataDir();
+    const base = dir.endsWith('/') || dir.endsWith('\\') ? dir : `${dir}/`;
+    return convertFileSrc(`${base}${BACKGROUND_DIR}/${fileName}`);
+  })();
+  backgroundUrls.set(fileName, url);
+  return url;
+}
 
 /** Applies the font scale as the root font size. No-op without a DOM. */
 export function applyFontScale(scale: FontScale): void {

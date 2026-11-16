@@ -34,6 +34,7 @@ async-trait = "0.1"
 uuid = { version = "1", features = ["v4"] }
 base64 = "0.22"
 tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-updater = "2"

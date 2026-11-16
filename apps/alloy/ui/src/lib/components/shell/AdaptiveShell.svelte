@@ -16,6 +16,11 @@
   import { timelineStore } from '$lib/stores/timeline.svelte';
   import { startMuteTimer } from '$lib/stores/muteTimer.svelte';
   import ResizeHandle from '../common/ResizeHandle.svelte';
+  import Modal from '../common/Modal.svelte';
+  import ChatBackground, {
+    chatBackgroundPickerRoom,
+    closeChatBackgroundPicker,
+  } from '../settings/controls/ChatBackground.svelte';
   import SettingsDialog from '../settings/SettingsDialog.svelte';
   import Hud from '../dev/Hud.svelte';
   import ConnectionBanner from './ConnectionBanner.svelte';
@@ -114,6 +119,18 @@
   // desktop conversation pane is always mounted (it carries the empty state when no room is open).
   const roomListVisible = $derived(!phone ? !layout.sidebarCollapsed : pane === 'list');
   const conversationVisible = $derived(phone ? pane === 'chat' : true);
+
+  // The room menu opens one chat's background picker at a time; the dialog lives in the shell so it
+  // sits above the panes and keeps the phone sheet behaviour of every other dialog.
+  const backgroundPickerId = $derived(chatBackgroundPickerRoom());
+  const backgroundPickerTitle = $derived.by(() => {
+    const room = backgroundPickerId
+      ? roomsStore.rooms.find((r) => r.id === backgroundPickerId)
+      : undefined;
+    return room
+      ? t('chat-background-for-chat', { room: roomTitle(room) })
+      : t('chat-background-title');
+  });
 
   // The window/task-switcher title names the open room and shows the unread chat count only while
   // the app is in the background (a focused window already shows its badges).
@@ -328,6 +345,17 @@
 <ChangelogDialog />
 <ForwardDialog />
 <DeleteConfirm />
+<Modal
+  open={backgroundPickerId !== null}
+  title={backgroundPickerTitle}
+  onclose={closeChatBackgroundPicker}
+>
+  {#if backgroundPickerId !== null}
+    <!-- Stays open after a choice so the preview, the "use for new chats" row and any inline
+         failure stay on screen; the picker is closed from its header, Escape or Back. -->
+    <ChatBackground roomId={backgroundPickerId} />
+  {/if}
+</Modal>
 <div
   class="shell"
   data-layout={breakpoint}
