@@ -108,7 +108,14 @@ export type ChallengeKind =
 /**  The network wants a two-factor code the challenge step asks for. */
 "two_factor" | 
 /**  The network wants a consent screen accepted first. */
-"consent";
+"consent" | 
+/**
+ *  The account's sign-in can only be completed with a method this client cannot drive: a
+ *  passkey, Google OAuth, or an MFA method Meta refuses to route here. Nothing local can clear
+ *  it; the user adds a supported method (SMS, authenticator app, password) on Meta's own site,
+ *  or imports browser cookies instead.
+ */
+"unsupported_mfa";
 
 /**  Kind of a chat, in network-neutral terms. */
 export type ChatKind = "direct" | "group" | "channel";

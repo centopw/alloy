@@ -436,6 +436,10 @@ const (
 	challengeCheckpoint = "checkpoint"
 	challengeTwoFactor  = "two_factor"
 	challengeConsent    = "consent"
+	// challengeUnsupportedMfa is an account whose remaining sign-in methods are ones this client
+	// cannot drive (a passkey, Google sign-in, or an MFA method Meta refuses to route here). Adding
+	// a supported method on Meta's own site is the only way through, so the attempt stays open.
+	challengeUnsupportedMfa = "unsupported_mfa"
 )
 
 func failureInvalidInput(field, message string) LoginFailure {

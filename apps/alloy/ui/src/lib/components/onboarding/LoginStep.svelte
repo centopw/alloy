@@ -232,6 +232,8 @@
         return t('onboarding-challenge-two-factor-title');
       case 'consent':
         return t('onboarding-challenge-consent-title');
+      case 'unsupported_mfa':
+        return t('onboarding-challenge-unsupported-mfa-title');
     }
   }
 
@@ -243,14 +245,30 @@
         return t('onboarding-challenge-two-factor-body');
       case 'consent':
         return t('onboarding-challenge-consent-body');
+      case 'unsupported_mfa':
+        return t('onboarding-challenge-unsupported-mfa-body');
     }
   }
 
   /** The page the challenge has to be cleared on. */
   const CHALLENGE_SITE_URL = 'https://www.facebook.com/';
+  /** A challenge only a method this app cannot drive will clear: the fix is a security setting. */
+  const CHALLENGE_SECURITY_SETTINGS_URL = 'https://www.facebook.com/settings?tab=security';
+
+  function challengeSiteUrl(kind: ChallengeKind): string {
+    switch (kind) {
+      case 'checkpoint':
+      case 'two_factor':
+      case 'consent':
+        return CHALLENGE_SITE_URL;
+      case 'unsupported_mfa':
+        return CHALLENGE_SECURITY_SETTINGS_URL;
+    }
+  }
 
   function openChallengeSite() {
-    void openExternal(CHALLENGE_SITE_URL);
+    if (step.type !== 'challenge') return;
+    void openExternal(challengeSiteUrl(step.kind));
   }
 
   /**

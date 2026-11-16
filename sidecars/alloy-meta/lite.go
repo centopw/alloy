@@ -332,7 +332,13 @@ const (
 // challengeFor reports whether err is one of Meta's own challenges, and which. Only a flow that is
 // waiting for a code can turn ErrChallengeRequired into a two-factor challenge: otherwise there is no
 // code field to answer with, so it stays the checkpoint form.
+//
+// The unsupported-MFA dead-ends are checked first: they are the library's own RespError codes, and
+// no other answer exists — the user has to add a supported method on Meta's site.
 func challengeFor(err error, awaitingCode bool) (kind, message string, ok bool) {
+	if message, isUnsupportedMfa := unsupportedMfaChallenge(err); isUnsupportedMfa {
+		return challengeUnsupportedMfa, message, true
+	}
 	var checkpoint bloks.CheckpointError
 	switch {
 	case errors.As(err, &checkpoint),

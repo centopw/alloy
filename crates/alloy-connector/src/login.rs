@@ -52,6 +52,11 @@ pub enum ChallengeKind {
     TwoFactor,
     /// Meta wants the account holder to accept a consent screen (new terms, data policy) first.
     Consent,
+    /// The account's sign-in can only be completed with a method this client cannot drive: a
+    /// passkey, Google OAuth, or an MFA method Meta refuses to route here. Nothing local can clear
+    /// it; the user adds a supported method (SMS, authenticator app, password) on Meta's own site,
+    /// or imports browser cookies instead.
+    UnsupportedMfa,
 }
 
 /// Why a login attempt ended. A `Failed` step ends the attempt; the host restarts with

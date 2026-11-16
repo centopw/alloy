@@ -324,6 +324,7 @@ fn challenge_kind(kind: ConnectorChallengeKind) -> ProtocolChallengeKind {
         ConnectorChallengeKind::Checkpoint => ProtocolChallengeKind::Checkpoint,
         ConnectorChallengeKind::TwoFactor => ProtocolChallengeKind::TwoFactor,
         ConnectorChallengeKind::Consent => ProtocolChallengeKind::Consent,
+        ConnectorChallengeKind::UnsupportedMfa => ProtocolChallengeKind::UnsupportedMfa,
     }
 }
 

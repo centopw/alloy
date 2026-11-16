@@ -100,9 +100,13 @@ on field `code` or `password` with the network's own reason instead of prompting
 Rate limits produce `rate_limited`. A checkpoint, a consent screen or a challenge the flow cannot
 answer with a code produces a `challenge` step with `kind` = `checkpoint`, `consent` or
 `two_factor`: the host names it and points the user at `facebook.com`, and the attempt stays open,
-so a code answer, the cookie fallback or a retry all still work. Only a suspension is
-`account_locked`; a two-factor method picker or Meta's Google sign-in (which the connector cannot
-render) ends with `not_supported`.
+so a code answer, the cookie fallback or a retry all still work. An account whose remaining methods
+are ones the connector cannot drive — a passkey, Meta's Google sign-in, or none it supports at all —
+produces `kind` = `unsupported_mfa` with the library's own explanation, recognised by its error
+code (`FI.MAU.META_PASSKEY_MANDATORY`, `FI.MAU.META_OAUTH_MANDATORY`,
+`FI.MAU.META_NO_SUPPORTED_MFA`); the attempt stays open so the user can add a supported method on
+Meta's site and resubmit, or switch to cookies. Only a suspension is `account_locked`; any other
+step the connector cannot render ends with `not_supported`.
 
 Cookie import stays available as the fallback: `submit_login` with
 `{"type":"switch","to":"cookies"}` returns the `cookies` step asking for `datr`, `c_user`, `xs`
@@ -130,8 +134,8 @@ risk of the messagix approach, documented upstream:
 importing cookies — both produce the same kind of session — but the network may answer either
 with a checkpoint, and only the user can clear that on Facebook's own site or in the official
 app. The sidecar never creates accounts and never bypasses a checkpoint; it reports `challenge`
-with `kind: checkpoint` (or `two_factor`/`consent`) and stops. Only a suspended account is
-reported as `account_locked`.
+with `kind: checkpoint` (or `two_factor`/`consent`/`unsupported_mfa`) and stops. Only a suspended
+account is reported as `account_locked`.
 
 ## Licence
 

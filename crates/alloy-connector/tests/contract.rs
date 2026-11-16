@@ -380,6 +380,7 @@ fn challenge_step_frame_decodes() {
         ("checkpoint", ChallengeKind::Checkpoint),
         ("two_factor", ChallengeKind::TwoFactor),
         ("consent", ChallengeKind::Consent),
+        ("unsupported_mfa", ChallengeKind::UnsupportedMfa),
     ] {
         let frame =
             format!(r#"{{"type":"challenge","kind":"{wire_kind}","message":"confirm it"}}"#);

@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -17,8 +18,10 @@ import (
 
 	"go.mau.fi/mautrix-meta/pkg/messagix/cookies"
 	"go.mau.fi/mautrix-meta/pkg/messagix/httpclient"
+	"go.mau.fi/mautrix-meta/pkg/messagix/loginerrors"
 	"go.mau.fi/mautrix-meta/pkg/messagix/table"
 	"go.mau.fi/mautrix-meta/pkg/messagix/types"
+	"maunium.net/go/mautrix/bridgev2"
 )
 
 // encodeFrame renders one frame the way the sidecar writes it, without the trailing newline.
@@ -208,6 +211,102 @@ func TestChallengeKindClassification(t *testing.T) {
 	}
 	if got := liteFailure(httpclient.ErrAccountSuspended); got.Type != "account_locked" {
 		t.Fatalf("suspension classified as %+v", got)
+	}
+}
+
+// TestUnsupportedMfaChallengeIsAnOpenChallenge pins the passkey / Google-sign-in dead-ends: the
+// library's error code decides, not its (per-platform rewritten) text, Meta's own explanation
+// travels to the host, and the result is a challenge step so the attempt stays open for the user to
+// add a supported method on Meta's site or switch to cookies.
+func TestUnsupportedMfaChallengeIsAnOpenChallenge(t *testing.T) {
+	cases := []struct {
+		name    string
+		respErr bridgev2.RespError
+	}{
+		{"no supported method", loginerrors.NoSupportedMFA},
+		{"passkey only", loginerrors.MandatoryPasskey},
+		{"google only", loginerrors.MandatoryOAuth},
+	}
+	for _, c := range cases {
+		// The library's code survives wrapping; a struct comparison or the text would not.
+		for _, err := range []error{c.respErr, fmt.Errorf("login turn: %w", c.respErr)} {
+			kind, message, ok := challengeFor(err, false)
+			if !ok || kind != challengeUnsupportedMfa {
+				t.Fatalf("%s: %v classified as %q/%v", c.name, err, kind, ok)
+			}
+			if message != c.respErr.Err {
+				t.Fatalf("%s: message %q, want the library's own %q", c.name, message, c.respErr.Err)
+			}
+		}
+
+		// The Bloks flow path: the error comes back from the poll, so the login stays open.
+		flow := &liteFlow{poll: func(_ context.Context, _ map[string]string) (litePoll, error) {
+			return litePoll{}, c.respErr
+		}}
+		out := flow.run(context.Background(), map[string]string{})
+		if out.Failure != nil || out.Step.Type != "challenge" || out.Step.Kind != challengeUnsupportedMfa || out.Step.Message != c.respErr.Err {
+			t.Fatalf("%s: flow outcome %+v, want the unsupported_mfa challenge step", c.name, out)
+		}
+
+		// The cookie path shares the classification: a step, not a failed login.
+		fail := func(reason LoginFailure) (any, *WireError) {
+			t.Fatalf("%s: cookie path ended the attempt with %+v", c.name, reason)
+			return nil, nil
+		}
+		cookieOut, wireErr := settleCookieError(c.respErr, "cookies", fail)
+		step, isStep := cookieOut.(LoginStep)
+		if wireErr != nil || !isStep || step.Type != "challenge" || step.Kind != challengeUnsupportedMfa || step.Message != c.respErr.Err {
+			t.Fatalf("%s: cookie path produced %#v / %+v", c.name, cookieOut, wireErr)
+		}
+	}
+}
+
+// TestOnlyUnsupportedMfaIsAChallenge keeps every other library error on the path it already had:
+// terminal failures keep their type, and none of them turn into the new challenge kind.
+func TestOnlyUnsupportedMfaIsAChallenge(t *testing.T) {
+	cases := []struct {
+		name       string
+		err        bridgev2.RespError
+		liteWant   string
+		cookieWant string
+	}{
+		// The Bloks flow recognises the library's rate-limit text; the cookie path already did not.
+		{"rate limited", loginerrors.RateLimited, "rate_limited", "invalid_input"},
+		{"reCAPTCHA", loginerrors.ReCaptcha, "invalid_input", "invalid_input"},
+		{"missing cookies", loginerrors.MissingCookies, "invalid_input", "invalid_input"},
+		{"token exchange", loginerrors.TokenExchange, "invalid_input", "invalid_input"},
+	}
+	for _, c := range cases {
+		if kind, _, ok := challengeFor(c.err, true); ok {
+			t.Fatalf("%s: classified as the %q challenge", c.name, kind)
+		}
+		if got := liteFailure(c.err); got.Type != c.liteWant {
+			t.Fatalf("%s: lite failure %+v, want type %q", c.name, got, c.liteWant)
+		}
+		out, wireErr := settleCookieError(c.err, "cookies", func(reason LoginFailure) (any, *WireError) {
+			return failedStep(reason), nil
+		})
+		step, isStep := out.(LoginStep)
+		if wireErr != nil || !isStep || step.Type != "failed" || step.Reason == nil || step.Reason.Type != c.cookieWant {
+			t.Fatalf("%s: cookie path produced %#v / %+v, want the terminal %q failure", c.name, out, wireErr, c.cookieWant)
+		}
+	}
+}
+
+// TestUnsupportedMfaKeepsASuspensionALock proves the new code does not shadow the mappings that
+// already existed: the suspension is still a lock, and it is not a challenge.
+func TestUnsupportedMfaKeepsASuspensionALock(t *testing.T) {
+	if kind, _, ok := challengeFor(httpclient.ErrAccountSuspended, false); ok {
+		t.Fatalf("suspension classified as the %q challenge", kind)
+	}
+	if got := liteFailure(httpclient.ErrAccountSuspended); got.Type != "account_locked" {
+		t.Fatalf("suspension classified as %+v", got)
+	}
+	if got := liteFailure(httpclient.ErrRateLimited); got.Type != "rate_limited" {
+		t.Fatalf("rate limit classified as %+v", got)
+	}
+	if message, ok := unsupportedMfaChallenge(errors.New("some other failure")); ok || message != "" {
+		t.Fatalf("an ordinary error produced the unsupported-MFA message %q", message)
 	}
 }
 

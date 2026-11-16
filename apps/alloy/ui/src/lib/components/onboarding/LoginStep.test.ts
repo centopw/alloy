@@ -82,6 +82,27 @@ describe('LoginStep browser sign-in', () => {
     expect(onsubmit).toHaveBeenCalledWith({ type: 'code', code: '123456' });
   });
 
+  it('points an unsupported-MFA challenge at the security settings and keeps the step open', () => {
+    const opened = vi.spyOn(window, 'open').mockImplementation(() => null);
+    render({ type: 'challenge', kind: 'unsupported_mfa', message: '' });
+    const text = document.body.textContent ?? '';
+    expect(text).toContain('This sign-in needs a method this app cannot use');
+
+    const buttons = [...document.querySelectorAll('button')];
+    const settings = buttons.find((b) => b.textContent?.trim() === 'Open Facebook')!;
+    settings.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(opened).toHaveBeenCalledWith(
+      'https://www.facebook.com/settings?tab=security',
+      '_blank',
+      'noopener,noreferrer'
+    );
+
+    // No local answer clears it, so the step stays open on its own alternatives.
+    expect(buttons.map((b) => b.textContent?.trim())).toContain('Sign in with your browser instead');
+    expect(document.querySelector('input[autocomplete="one-time-code"]')).toBeNull();
+    opened.mockRestore();
+  });
+
   it('names the required cookies a paste lacks and keeps the form closed', () => {
     const { onsubmit, submit, type } = render();
     type("curl 'https://www.messenger.com/' -H 'cookie: datr=D1'");

@@ -361,6 +361,10 @@ async fn login_challenge_keeps_the_attempt_open() {
             alloy_connector::ChallengeKind::Consent,
             alloy_protocol::ChallengeKind::Consent,
         ),
+        (
+            alloy_connector::ChallengeKind::UnsupportedMfa,
+            alloy_protocol::ChallengeKind::UnsupportedMfa,
+        ),
     ] {
         assert_eq!(
             alloy_engine::convert::pending_login_step(alloy_connector::LoginStep::Challenge {

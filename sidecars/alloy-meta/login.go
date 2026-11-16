@@ -11,6 +11,7 @@ import (
 	"go.mau.fi/mautrix-meta/pkg/messagix/cookies"
 	"go.mau.fi/mautrix-meta/pkg/messagix/httpclient"
 	"go.mau.fi/mautrix-meta/pkg/messagix/types"
+	"maunium.net/go/mautrix/bridgev2"
 )
 
 // loginFail ends the attempt with a Failed step.
@@ -214,7 +215,8 @@ func (m *Messenger) endLogin() {
 
 // loginFailure classifies a login error into the cases the contract distinguishes: rejected input,
 // a locked account, a rate limit, and everything transport-level. field names the input the user
-// should correct. Challenges never reach it: [`settleCookieError`] returns them as steps.
+// should correct. Challenges never reach it: [`settleCookieError`] returns them as steps, and the
+// unsupported sign-in methods are caught earlier still by [`unsupportedMfaChallenge`].
 func loginFailure(err error, field string) LoginFailure {
 	switch {
 	case errors.Is(err, httpclient.ErrAccountSuspended):
@@ -237,13 +239,51 @@ func loginFailure(err error, field string) LoginFailure {
 	return failureInvalidInput(field, message)
 }
 
+// unsupportedMfaFallbackMessage stands in only if the library supplies no text, which its own
+// dead-ends never do: they always carry an explanation of the method Meta is demanding.
+const unsupportedMfaFallbackMessage = "Meta's sign-in is asking for a method this client cannot use; add a supported method on facebook.com or in the Facebook app, or import your browser cookies instead"
+
+// unsupportedMfaChallenge reports whether err is one of the library's sign-in dead-ends, and
+// carries Meta's own explanation of the method it is demanding. The library defines these as
+// RespError values, so the error code is the signal:
+//
+//   - FI.MAU.META_NO_SUPPORTED_MFA: none of the account's methods are ones this client can drive
+//   - FI.MAU.META_PASSKEY_MANDATORY: Meta only offers a passkey
+//   - FI.MAU.META_OAUTH_MANDATORY: Meta only offers Google sign-in
+//
+// The error text cannot be the signal: the library rewrites Err per platform with
+// loginerrors.WithMessage, so both the message and the struct differ while the code stays put.
+// Nothing local clears any of them, so the caller answers with a challenge step and the attempt
+// stays open for the user to add a supported method on Meta's own site.
+func unsupportedMfaChallenge(err error) (string, bool) {
+	var respErr bridgev2.RespError
+	if !errors.As(err, &respErr) {
+		return "", false
+	}
+	switch respErr.ErrCode {
+	case "FI.MAU.META_NO_SUPPORTED_MFA",
+		"FI.MAU.META_PASSKEY_MANDATORY",
+		"FI.MAU.META_OAUTH_MANDATORY":
+	default:
+		return "", false
+	}
+	if respErr.Err == "" {
+		return unsupportedMfaFallbackMessage, true
+	}
+	return respErr.Err, true
+}
+
 // settleCookieError maps an error from the cookie path onto the protocol. A challenge becomes a step
 // and the attempt stays open, so the user can clear it on Meta's own site and submit the cookies (or
 // a code) again; everything else ends the attempt.
 //
 // The cookie path never drives the Bloks state machine, so there is no code field waiting here: a
-// challenge is always the checkpoint form.
+// challenge is always the checkpoint form, except for the unsupported-MFA dead-ends, where only
+// adding a method on Meta's site helps.
 func settleCookieError(err error, field string, fail loginFail) (any, *WireError) {
+	if mfaMessage, isUnsupportedMfa := unsupportedMfaChallenge(err); isUnsupportedMfa {
+		return challengeStep(challengeUnsupportedMfa, mfaMessage), nil
+	}
 	if kind, message, ok := challengeFor(err, false); ok {
 		return challengeStep(kind, message), nil
 	}
