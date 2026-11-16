@@ -1,0 +1,66 @@
+{
+  "$schema": "https://alloy.chat/schemas/v1/theme.json",
+  "schema_version": 1,
+  "id": "tokyo-sunset",
+  "name": "Tokyo Sunset",
+  "author": "Alloy Team",
+  "version": "1.0.0",
+  "mode": "dark",
+  "extends": "alloy-dark",
+  "tokens": {
+    "color": {
+      "surface": {
+        "canvas": "#13131f",
+        "subtle": "#1f2033",
+        "panel": "#181928",
+        "elevated": "#24263b",
+        "hover": "#2a2c45",
+        "active": "#363959"
+      },
+      "background": "#13131f",
+      "text": {
+        "primary": "#f8fafc",
+        "secondary": "#cbd5e1",
+        "muted": "#9ca3b8",
+        "link": "#fb923c",
+        "on_accent": "#ffffff"
+      },
+      "accent": {
+        "primary": "#ea580c",
+        "secondary": "#fb923c",
+        "subtle": "#431407",
+        "hover": "#c2410c",
+        "fill": "#c2410c"
+      },
+      "status": {
+        "online": "#4ade80",
+        "away": "#fbbf24",
+        "busy": "#f87171",
+        "offline": "#94a3b8",
+        "error": "#f87171",
+        "warning": "#fbbf24",
+        "info": "#38bdf8",
+        "success": "#4ade80",
+        "mention": "#c2410c"
+      },
+      "bubble": {
+        "own": {
+          "background": "#9a3412",
+          "text": "#ffffff"
+        },
+        "other": {
+          "background": "#1f2033",
+          "text": "#f8fafc"
+        }
+      },
+      "border": {
+        "subtle": "#24263b",
+        "prominent": "#3b3e5e"
+      }
+    },
+    "layout": {
+      "message_style": "bubble",
+      "avatar_shape": "circle"
+    }
+  }
+}

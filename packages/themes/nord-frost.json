@@ -1,0 +1,66 @@
+{
+  "$schema": "https://alloy.chat/schemas/v1/theme.json",
+  "schema_version": 1,
+  "id": "nord-frost",
+  "name": "Nord Frost",
+  "author": "Alloy Team",
+  "version": "1.0.0",
+  "mode": "dark",
+  "extends": "alloy-dark",
+  "tokens": {
+    "color": {
+      "surface": {
+        "canvas": "#141923",
+        "subtle": "#1e2636",
+        "panel": "#181f2c",
+        "elevated": "#232c3d",
+        "hover": "#283246",
+        "active": "#323e56"
+      },
+      "background": "#141923",
+      "text": {
+        "primary": "#eceff4",
+        "secondary": "#cbd5e1",
+        "muted": "#94a3b8",
+        "link": "#38bdf8",
+        "on_accent": "#ffffff"
+      },
+      "accent": {
+        "primary": "#0284c7",
+        "secondary": "#38bdf8",
+        "subtle": "#0c4a6e",
+        "hover": "#0369a1",
+        "fill": "#0369a1"
+      },
+      "status": {
+        "online": "#34d399",
+        "away": "#fbbf24",
+        "busy": "#f87171",
+        "offline": "#64748b",
+        "error": "#f87171",
+        "warning": "#fbbf24",
+        "info": "#38bdf8",
+        "success": "#34d399",
+        "mention": "#0369a1"
+      },
+      "bubble": {
+        "own": {
+          "background": "#075985",
+          "text": "#ffffff"
+        },
+        "other": {
+          "background": "#1e2636",
+          "text": "#eceff4"
+        }
+      },
+      "border": {
+        "subtle": "#232c3d",
+        "prominent": "#334155"
+      }
+    },
+    "layout": {
+      "message_style": "bubble",
+      "avatar_shape": "circle"
+    }
+  }
+}

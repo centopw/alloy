@@ -16,8 +16,12 @@
   import type { Density, Theme } from '$lib/theme/theme.svelte';
 
   import { t } from '$lib/i18n';
-  const dark = $derived(themeStore.activeTheme !== 'alloy-light');
-  const amoled = $derived(themeStore.activeTheme === 'alloy-amoled');
+  const dark = $derived(
+    themeStore.activeTheme !== 'alloy-light' && themeStore.activeTheme !== 'solarized-sand',
+  );
+  const amoled = $derived(
+    themeStore.activeTheme === 'alloy-amoled' || themeStore.activeTheme === 'cyber-amoled',
+  );
 
   /** Chats carrying a picture of their own, named the way the room list names them. */
   const backgroundRooms = $derived(
@@ -42,9 +46,17 @@
 
   const THEME_ORDER: Record<string, number> = {
     'alloy-light': 0,
-    'alloy-dark': 1,
-    'alloy-amoled': 2,
+    'solarized-sand': 1,
+    'alloy-dark': 2,
     'midnight-ocean': 3,
+    'nord-frost': 4,
+    'dracula-night': 5,
+    'catppuccin-mocha': 6,
+    'rose-pine': 7,
+    'emerald-forest': 8,
+    'tokyo-sunset': 9,
+    'alloy-amoled': 10,
+    'cyber-amoled': 11,
   };
 
   const themeOptions = [...themesManifest]
@@ -125,6 +137,33 @@
         options={themeOptions}
         onchange={(v) => themeStore.setTheme(v as Theme)}
       />
+      <div class="theme-grid" role="radiogroup" aria-label={t('appearance-theme')}>
+        {#each themeOptions as opt (opt.value)}
+          {@const selected = themeStore.activeTheme === opt.value}
+          <button
+            type="button"
+            class="theme-card"
+            class:selected
+            role="radio"
+            aria-checked={selected}
+            onclick={() => themeStore.setTheme(opt.value as Theme)}
+          >
+            <span class="theme-swatch" data-theme={opt.value} aria-hidden="true">
+              <span class="swatch-panel"></span>
+              <span class="swatch-canvas">
+                <span class="swatch-bubble"></span>
+                <span class="swatch-accent"></span>
+              </span>
+            </span>
+            <span class="theme-card-footer">
+              <span class="theme-name">{opt.label}</span>
+              {#if selected}
+                <span class="theme-dot" aria-hidden="true"></span>
+              {/if}
+            </span>
+          </button>
+        {/each}
+      </div>
     </div>
     <SettingRow label={t('appearance-density')}>
       <SegmentedControl
@@ -197,6 +236,127 @@
     margin-left: var(--alloy-spacing-scale-4);
     padding-left: var(--alloy-spacing-scale-3);
     border-left: 2px solid var(--alloy-color-border-subtle);
+  }
+
+  .theme-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
+    gap: var(--alloy-spacing-scale-2);
+    padding: var(--alloy-spacing-scale-2) 0 var(--alloy-spacing-scale-3);
+  }
+
+  .theme-card {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--alloy-spacing-scale-2);
+    min-width: 0;
+    padding: var(--alloy-spacing-scale-2);
+    border: 1px solid var(--alloy-color-border-subtle);
+    border-radius: var(--alloy-radii-lg);
+    background: var(--alloy-color-surface-subtle);
+    color: var(--alloy-color-text-primary);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition:
+      border-color var(--alloy-motion-duration-fast) var(--alloy-motion-easing-ease),
+      background-color var(--alloy-motion-duration-fast) var(--alloy-motion-easing-ease),
+      box-shadow var(--alloy-motion-duration-fast) var(--alloy-motion-easing-ease);
+  }
+
+  @media (hover: hover) {
+    .theme-card:hover {
+      background: var(--alloy-color-surface-hover);
+      border-color: var(--alloy-color-border-prominent);
+    }
+  }
+
+  .theme-card.selected {
+    border-color: var(--alloy-color-accent-primary);
+    box-shadow: inset 0 0 0 1px var(--alloy-color-accent-primary);
+    background: color-mix(
+      in srgb,
+      var(--alloy-color-accent-subtle) 45%,
+      var(--alloy-color-surface-subtle)
+    );
+  }
+
+  .theme-card:focus-visible {
+    outline: 2px solid var(--alloy-color-accent-primary);
+    outline-offset: 2px;
+  }
+
+  /* Mini preview inherits --alloy-color-* directly from [data-theme="..."] in themes.css. */
+  .theme-swatch {
+    display: grid;
+    grid-template-columns: 28% 1fr;
+    height: 2.5rem;
+    overflow: hidden;
+    border: 1px solid var(--alloy-color-border-subtle);
+    border-radius: var(--alloy-radii-md);
+    background: var(--alloy-color-surface-canvas);
+  }
+
+  .swatch-panel {
+    background: var(--alloy-color-surface-panel);
+    border-right: 1px solid var(--alloy-color-border-subtle);
+  }
+
+  .swatch-canvas {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+    padding: var(--alloy-spacing-scale-1);
+    background: var(--alloy-color-surface-canvas);
+  }
+
+  .swatch-bubble {
+    align-self: flex-start;
+    width: 58%;
+    height: 7px;
+    border-radius: var(--alloy-radii-sm);
+    background: var(--alloy-color-bubble-other-background);
+  }
+
+  .swatch-accent {
+    align-self: flex-end;
+    width: 52%;
+    height: 7px;
+    border-radius: var(--alloy-radii-sm);
+    background: var(--alloy-color-accent-primary);
+  }
+
+  .theme-card-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--alloy-spacing-scale-1);
+    min-width: 0;
+  }
+
+  .theme-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--alloy-font-size-preview);
+    font-weight: var(--alloy-typography-weight-medium);
+    line-height: var(--alloy-typography-line-height-tight);
+    color: var(--alloy-color-text-primary);
+  }
+
+  .theme-card.selected .theme-name {
+    font-weight: var(--alloy-typography-weight-semibold);
+  }
+
+  .theme-dot {
+    flex: none;
+    width: 7px;
+    height: 7px;
+    border-radius: var(--alloy-radii-full);
+    background: var(--alloy-color-accent-primary);
   }
 
   .padded {

@@ -21,15 +21,35 @@
  *   </script>
  */
 
-export type Theme = "alloy-light" | "alloy-dark" | "alloy-amoled" | "midnight-ocean";
+export type Theme =
+  | "alloy-light"
+  | "solarized-sand"
+  | "alloy-dark"
+  | "midnight-ocean"
+  | "nord-frost"
+  | "dracula-night"
+  | "catppuccin-mocha"
+  | "rose-pine"
+  | "emerald-forest"
+  | "tokyo-sunset"
+  | "alloy-amoled"
+  | "cyber-amoled";
 export type Density = "compact" | "normal" | "cozy";
 export type MessageStyle = "bubble" | "gutter";
 
 const VALID_THEMES: readonly Theme[] = [
   "alloy-light",
+  "solarized-sand",
   "alloy-dark",
-  "alloy-amoled",
   "midnight-ocean",
+  "nord-frost",
+  "dracula-night",
+  "catppuccin-mocha",
+  "rose-pine",
+  "emerald-forest",
+  "tokyo-sunset",
+  "alloy-amoled",
+  "cyber-amoled",
 ];
 const VALID_DENSITIES: readonly Density[] = ["compact", "normal", "cozy"];
 const VALID_MESSAGE_STYLES: readonly MessageStyle[] = ["bubble", "gutter"];

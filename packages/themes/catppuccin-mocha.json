@@ -1,0 +1,66 @@
+{
+  "$schema": "https://alloy.chat/schemas/v1/theme.json",
+  "schema_version": 1,
+  "id": "catppuccin-mocha",
+  "name": "Catppuccin Mocha",
+  "author": "Alloy Team",
+  "version": "1.0.0",
+  "mode": "dark",
+  "extends": "alloy-dark",
+  "tokens": {
+    "color": {
+      "surface": {
+        "canvas": "#11111b",
+        "subtle": "#1e1e2e",
+        "panel": "#181825",
+        "elevated": "#242438",
+        "hover": "#2a2b3d",
+        "active": "#363850"
+      },
+      "background": "#11111b",
+      "text": {
+        "primary": "#cdd6f4",
+        "secondary": "#bac2de",
+        "muted": "#9ea6c2",
+        "link": "#89b4fa",
+        "on_accent": "#ffffff"
+      },
+      "accent": {
+        "primary": "#7c3aed",
+        "secondary": "#a78bfa",
+        "subtle": "#2e1065",
+        "hover": "#6d28d9",
+        "fill": "#6d28d9"
+      },
+      "status": {
+        "online": "#4ade80",
+        "away": "#fbbf24",
+        "busy": "#f87171",
+        "offline": "#94a3b8",
+        "error": "#f87171",
+        "warning": "#fbbf24",
+        "info": "#89b4fa",
+        "success": "#4ade80",
+        "mention": "#6d28d9"
+      },
+      "bubble": {
+        "own": {
+          "background": "#4c1d95",
+          "text": "#ffffff"
+        },
+        "other": {
+          "background": "#1e1e2e",
+          "text": "#cdd6f4"
+        }
+      },
+      "border": {
+        "subtle": "#26273b",
+        "prominent": "#3b3d57"
+      }
+    },
+    "layout": {
+      "message_style": "bubble",
+      "avatar_shape": "circle"
+    }
+  }
+}

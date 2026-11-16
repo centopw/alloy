@@ -1,0 +1,74 @@
+{
+  "$schema": "https://alloy.chat/schemas/v1/theme.json",
+  "schema_version": 1,
+  "id": "solarized-sand",
+  "name": "Solarized Sand",
+  "author": "Alloy Team",
+  "version": "1.0.0",
+  "mode": "light",
+  "extends": "alloy-light",
+  "tokens": {
+    "color": {
+      "surface": {
+        "canvas": "#f5f0e6",
+        "subtle": "#ebe4d6",
+        "panel": "#fbf8f2",
+        "elevated": "#ffffff",
+        "hover": "#e4dccb",
+        "active": "#d8ceb8"
+      },
+      "background": "#f5f0e6",
+      "text": {
+        "primary": "#1c1917",
+        "secondary": "#44403c",
+        "muted": "#57534e",
+        "link": "#1e40af",
+        "on_accent": "#ffffff"
+      },
+      "accent": {
+        "primary": "#4f46e5",
+        "secondary": "#6366f1",
+        "subtle": "#e0e7ff",
+        "hover": "#4338ca",
+        "fill": "#4338ca"
+      },
+      "status": {
+        "online": "#15803d",
+        "away": "#b45309",
+        "busy": "#b91c1c",
+        "offline": "#57534e",
+        "error": "#991b1b",
+        "warning": "#b45309",
+        "info": "#1d4ed8",
+        "success": "#15803d",
+        "mention": "#9a3412"
+      },
+      "bubble": {
+        "own": {
+          "background": "#4338ca",
+          "text": "#ffffff"
+        },
+        "other": {
+          "background": "#ede7da",
+          "text": "#1c1917"
+        }
+      },
+      "border": {
+        "subtle": "#e2d9c8",
+        "prominent": "#cfc3ae",
+        "floating": "#cfc3ae"
+      },
+      "user": {
+        "2": "#9a3412",
+        "3": "#92400e",
+        "4": "#166534",
+        "5": "#115e59",
+        "12": "#155e75"
+      }
+    },
+    "layout": {
+      "message_style": "bubble",
+      "avatar_shape": "circle"
+    }
+  }
+}

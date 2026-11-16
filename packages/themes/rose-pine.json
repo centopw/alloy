@@ -1,0 +1,66 @@
+{
+  "$schema": "https://alloy.chat/schemas/v1/theme.json",
+  "schema_version": 1,
+  "id": "rose-pine",
+  "name": "Rosé Pine",
+  "author": "Alloy Team",
+  "version": "1.0.0",
+  "mode": "dark",
+  "extends": "alloy-dark",
+  "tokens": {
+    "color": {
+      "surface": {
+        "canvas": "#12101b",
+        "subtle": "#1f1d2e",
+        "panel": "#191724",
+        "elevated": "#26233a",
+        "hover": "#2c2844",
+        "active": "#393456"
+      },
+      "background": "#12101b",
+      "text": {
+        "primary": "#e0def4",
+        "secondary": "#c4c1e0",
+        "muted": "#9d98bd",
+        "link": "#f472b6",
+        "on_accent": "#ffffff"
+      },
+      "accent": {
+        "primary": "#db2777",
+        "secondary": "#f472b6",
+        "subtle": "#500724",
+        "hover": "#be185d",
+        "fill": "#be185d"
+      },
+      "status": {
+        "online": "#34d399",
+        "away": "#fbbf24",
+        "busy": "#f87171",
+        "offline": "#94a3b8",
+        "error": "#f87171",
+        "warning": "#fbbf24",
+        "info": "#38bdf8",
+        "success": "#34d399",
+        "mention": "#be185d"
+      },
+      "bubble": {
+        "own": {
+          "background": "#9d174d",
+          "text": "#ffffff"
+        },
+        "other": {
+          "background": "#1f1d2e",
+          "text": "#e0def4"
+        }
+      },
+      "border": {
+        "subtle": "#26233a",
+        "prominent": "#403d52"
+      }
+    },
+    "layout": {
+      "message_style": "bubble",
+      "avatar_shape": "circle"
+    }
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "$schema": "https://alloy.chat/schemas/v1/theme.json",
+  "schema_version": 1,
+  "id": "cyber-amoled",
+  "name": "Cyber AMOLED",
+  "author": "Alloy Team",
+  "version": "1.0.0",
+  "mode": "amoled",
+  "extends": "alloy-amoled",
+  "tokens": {
+    "color": {
+      "surface": {
+        "canvas": "#000000",
+        "subtle": "#0c1218",
+        "panel": "#070b0f",
+        "elevated": "#111922",
+        "hover": "#16202b",
+        "active": "#1e2c3a"
+      },
+      "background": "#000000",
+      "text": {
+        "primary": "#f0fdfa",
+        "secondary": "#99f6e4",
+        "muted": "#82a6b0",
+        "link": "#22d3ee",
+        "on_accent": "#ffffff"
+      },
+      "accent": {
+        "primary": "#0891b2",
+        "secondary": "#22d3ee",
+        "subtle": "#083344",
+        "hover": "#0e7490",
+        "fill": "#0e7490"
+      },
+      "status": {
+        "online": "#34d399",
+        "away": "#fbbf24",
+        "busy": "#f87171",
+        "offline": "#64748b",
+        "error": "#f87171",
+        "warning": "#fbbf24",
+        "info": "#22d3ee",
+        "success": "#34d399",
+        "mention": "#0e7490"
+      },
+      "bubble": {
+        "own": {
+          "background": "#155e75",
+          "text": "#ffffff"
+        },
+        "other": {
+          "background": "#0c1218",
+          "text": "#f0fdfa"
+        }
+      },
+      "border": {
+        "subtle": "#111922",
+        "prominent": "#1e2c3a"
+      }
+    },
+    "layout": {
+      "message_style": "bubble",
+      "avatar_shape": "circle"
+    }
+  }
+}

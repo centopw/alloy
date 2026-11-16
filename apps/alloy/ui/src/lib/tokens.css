@@ -311,7 +311,7 @@ html, body {
    leaves a black rectangle where the aurora cannot be seen. Dark themes expose a little more of the
    wash so the rail, list and conversation stay readable as three layers; bubbles and the composer
    keep their own opaque surfaces, and primary/secondary text stays far above 4.5:1 on the tint. */
-:root:not([data-theme='alloy-light']) {
+:root:not([data-theme='alloy-light']):not([data-theme='solarized-sand']) {
   --alloy-chat-surface: color-mix(in srgb, var(--alloy-color-surface-canvas) 84%, transparent);
   --alloy-chrome-surface: color-mix(in srgb, var(--alloy-color-surface-panel) 80%, transparent);
   --alloy-chrome-surface-strong: color-mix(
@@ -341,7 +341,7 @@ html, body {
 }
 
 /* AMOLED keeps a true pure-black canvas without glowing aurora gradients. */
-:root[data-theme='alloy-amoled'] {
+:root[data-theme='alloy-amoled'], :root[data-theme='cyber-amoled'] {
   --alloy-canvas-art: var(--alloy-color-surface-canvas);
 }
 
@@ -350,7 +350,7 @@ html, body {
    that, a dark theme would keep its translucency even when the user asks for none. */
 @media (prefers-reduced-transparency: reduce) {
   :root,
-  :root:not([data-theme='alloy-light']) {
+  :root:not([data-theme='alloy-light']):not([data-theme='solarized-sand']) {
     --alloy-glass-filter: none;
     --alloy-glass-filter-strong: none;
     --alloy-glass-fill: var(--alloy-color-surface-panel);
@@ -369,7 +369,7 @@ html, body {
 }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   :root,
-  :root:not([data-theme='alloy-light']) {
+  :root:not([data-theme='alloy-light']):not([data-theme='solarized-sand']) {
     --alloy-glass-filter: none;
     --alloy-glass-filter-strong: none;
     --alloy-glass-fill: var(--alloy-color-surface-panel);

@@ -2,6 +2,21 @@ use alloy_theme::{ThemeLoader, ThemeResolver};
 use std::fs;
 use std::path::Path;
 
+const SHIPPED_THEME_FILES: [&str; 12] = [
+    "packages/themes/alloy-light.json",
+    "packages/themes/solarized-sand.json",
+    "packages/themes/alloy-dark.json",
+    "packages/themes/midnight-ocean.json",
+    "packages/themes/nord-frost.json",
+    "packages/themes/dracula-night.json",
+    "packages/themes/catppuccin-mocha.json",
+    "packages/themes/rose-pine.json",
+    "packages/themes/emerald-forest.json",
+    "packages/themes/tokyo-sunset.json",
+    "packages/themes/alloy-amoled.json",
+    "packages/themes/cyber-amoled.json",
+];
+
 #[test]
 fn test_shipped_example_themes_against_json_schema() {
     let schema_str = fs::read_to_string("../../schemas/theme.schema.json")
@@ -13,12 +28,7 @@ fn test_shipped_example_themes_against_json_schema() {
 
     let validator = jsonschema::validator_for(&schema_json).expect("Compile JSON schema validator");
 
-    let theme_files = [
-        "packages/themes/alloy-light.json",
-        "packages/themes/alloy-dark.json",
-        "packages/themes/alloy-amoled.json",
-        "packages/themes/midnight-ocean.json",
-    ];
+    let theme_files = SHIPPED_THEME_FILES;
 
     for file_path in theme_files {
         let path = if Path::new(file_path).exists() {
@@ -94,12 +104,7 @@ fn test_keybindings_against_json_schema() {
 
 #[test]
 fn test_shipped_themes_load_resolve_and_pass_aa() {
-    let theme_files = [
-        "packages/themes/alloy-light.json",
-        "packages/themes/alloy-dark.json",
-        "packages/themes/alloy-amoled.json",
-        "packages/themes/midnight-ocean.json",
-    ];
+    let theme_files = SHIPPED_THEME_FILES;
 
     let mut resolver = ThemeResolver::new();
 

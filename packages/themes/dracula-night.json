@@ -1,0 +1,66 @@
+{
+  "$schema": "https://alloy.chat/schemas/v1/theme.json",
+  "schema_version": 1,
+  "id": "dracula-night",
+  "name": "Dracula Night",
+  "author": "Alloy Team",
+  "version": "1.0.0",
+  "mode": "dark",
+  "extends": "alloy-dark",
+  "tokens": {
+    "color": {
+      "surface": {
+        "canvas": "#141521",
+        "subtle": "#202235",
+        "panel": "#191a2a",
+        "elevated": "#23253a",
+        "hover": "#292b44",
+        "active": "#343756"
+      },
+      "background": "#141521",
+      "text": {
+        "primary": "#f8f8f2",
+        "secondary": "#cbd5e1",
+        "muted": "#9ca3af",
+        "link": "#c084fc",
+        "on_accent": "#ffffff"
+      },
+      "accent": {
+        "primary": "#9333ea",
+        "secondary": "#c084fc",
+        "subtle": "#3b0764",
+        "hover": "#7e22ce",
+        "fill": "#7e22ce"
+      },
+      "status": {
+        "online": "#4ade80",
+        "away": "#fbbf24",
+        "busy": "#f87171",
+        "offline": "#94a3b8",
+        "error": "#f87171",
+        "warning": "#fbbf24",
+        "info": "#c084fc",
+        "success": "#4ade80",
+        "mention": "#7e22ce"
+      },
+      "bubble": {
+        "own": {
+          "background": "#5b21b6",
+          "text": "#ffffff"
+        },
+        "other": {
+          "background": "#202235",
+          "text": "#f8f8f2"
+        }
+      },
+      "border": {
+        "subtle": "#262940",
+        "prominent": "#3b3f61"
+      }
+    },
+    "layout": {
+      "message_style": "bubble",
+      "avatar_shape": "circle"
+    }
+  }
+}

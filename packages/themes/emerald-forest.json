@@ -1,0 +1,66 @@
+{
+  "$schema": "https://alloy.chat/schemas/v1/theme.json",
+  "schema_version": 1,
+  "id": "emerald-forest",
+  "name": "Emerald Forest",
+  "author": "Alloy Team",
+  "version": "1.0.0",
+  "mode": "dark",
+  "extends": "alloy-dark",
+  "tokens": {
+    "color": {
+      "surface": {
+        "canvas": "#0b1612",
+        "subtle": "#152620",
+        "panel": "#101e19",
+        "elevated": "#1a2f27",
+        "hover": "#1f372e",
+        "active": "#28473b"
+      },
+      "background": "#0b1612",
+      "text": {
+        "primary": "#ecfdf5",
+        "secondary": "#a7f3d0",
+        "muted": "#86b8a3",
+        "link": "#34d399",
+        "on_accent": "#ffffff"
+      },
+      "accent": {
+        "primary": "#059669",
+        "secondary": "#34d399",
+        "subtle": "#064e3b",
+        "hover": "#047857",
+        "fill": "#047857"
+      },
+      "status": {
+        "online": "#34d399",
+        "away": "#fbbf24",
+        "busy": "#f87171",
+        "offline": "#64748b",
+        "error": "#f87171",
+        "warning": "#fbbf24",
+        "info": "#38bdf8",
+        "success": "#34d399",
+        "mention": "#047857"
+      },
+      "bubble": {
+        "own": {
+          "background": "#065f46",
+          "text": "#ffffff"
+        },
+        "other": {
+          "background": "#152620",
+          "text": "#ecfdf5"
+        }
+      },
+      "border": {
+        "subtle": "#1a2f27",
+        "prominent": "#2d4f42"
+      }
+    },
+    "layout": {
+      "message_style": "bubble",
+      "avatar_shape": "circle"
+    }
+  }
+}

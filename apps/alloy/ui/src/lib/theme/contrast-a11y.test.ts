@@ -91,8 +91,21 @@ function expectAllPass(failures: string[]): void {
 }
 
 describe('theme palettes are present', () => {
-  it('measures all four compiled themes', () => {
-    expect(THEME_IDS).toEqual(['alloy-amoled', 'alloy-dark', 'alloy-light', 'midnight-ocean']);
+  it('measures all twelve compiled themes', () => {
+    expect(THEME_IDS).toEqual([
+      'alloy-amoled',
+      'alloy-dark',
+      'alloy-light',
+      'catppuccin-mocha',
+      'cyber-amoled',
+      'dracula-night',
+      'emerald-forest',
+      'midnight-ocean',
+      'nord-frost',
+      'rose-pine',
+      'solarized-sand',
+      'tokyo-sunset'
+    ]);
     for (const theme of THEME_IDS) {
       for (let index = 1; index <= 12; index += 1) {
         expect(parseCssColor(token(theme, `user-${index}`))).not.toBeNull();
@@ -111,7 +124,7 @@ describe('A11Y-01: avatar initials clear 4.5:1 on every user palette entry', () 
     }
   });
 
-  it('passes for all 12 palette entries in all four themes', () => {
+  it('passes for all 12 palette entries in all twelve themes', () => {
     const failures: string[] = [];
     for (const theme of THEME_IDS) {
       for (let index = 1; index <= 12; index += 1) {
@@ -128,7 +141,7 @@ describe('A11Y-01: avatar initials clear 4.5:1 on every user palette entry', () 
     for (const theme of THEME_IDS) {
       const picks = new Set<string>();
       for (let index = 1; index <= 12; index += 1) picks.add(pickAvatarOnColor(token(theme, `user-${index}`)));
-      if (theme === 'alloy-light') {
+      if (MODES.get(theme) === 'light') {
         expect([...picks]).toEqual([AVATAR_WHITE]);
       } else {
         expect([...picks]).toEqual([AVATAR_INK]);
