@@ -881,6 +881,12 @@ pub async fn paginate_backwards(
                         .await
                         .map_err(map_store)?;
                 }
+                // A connector that cannot page history (Messenger's encrypted groups) answers
+                // NotSupported every time the user scrolls up. That is the end of the reachable
+                // conversation, not a failure worth a warning.
+                Err(alloy_connector::ConnectorError::NotSupported { .. }) => {
+                    tracing::debug!(chat = %chat.chat_id, "this chat has no history to backfill");
+                }
                 Err(err) => {
                     tracing::warn!(chat = %chat.chat_id, error = %err, "history backfill failed");
                 }

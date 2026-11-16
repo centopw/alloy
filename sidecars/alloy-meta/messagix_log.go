@@ -15,6 +15,7 @@ var messagixNoisePrefixes = []string{
 	"Skipping dependency",
 	"Unknown dependency in sp",
 	"Failed to set ",
+	"Syncing initial data",
 }
 
 // messagixNoiseHook drops those warnings from the client's own logger. It runs only for the logger

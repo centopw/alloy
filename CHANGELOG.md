@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.17 (pre-release)
+
+### Fixed
+- **Scrolling up in a chat the network keeps encrypted no longer logs a warning.** Messenger's encrypted groups have no history the socket can page, so every scroll up asked for older messages, was refused with `unsupported feature: backfill`, and logged `history backfill failed`. The timeline already stopped there; the refusal is the end of the reachable conversation, so it is now a debug line. A real backfill failure is still a warning.
+- **One more library status line is out of the log.** "Syncing initial data via graphql" is the Messenger library narrating its own sync at warning level; it is now filtered with the other library-internal sync messages.
+
 ## 0.4.16 (pre-release)
 
 ### Fixed
