@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.10 (pre-release)
+
+### Fixed
+- **The Messenger connection no longer drops over a stray line.** The sidecar's output is read line by line, and one line that was not a frame used to close the transport, fail every request in flight and restart the process; a whole session could be lost that way. Such a line is now logged (with the line itself, so the writer is identifiable) and skipped, and only a genuinely broken stream replaces the process.
+- **An account no longer ends up with two sidecars.** Nothing stopped a restart and a manual reconnect from both launching a process, and the replaced one was left running: two clients on one account and one encryption store, which is how the prekey counts drifted apart and messages stopped decrypting. Launches are serialised and the process being replaced is terminated.
+- **A message sent while the transport restarts is no longer failed for good.** A transport error ("socket is not open", "not connected", a stopped sidecar) came back as a contract error and the local message was marked failed; it now retries with the existing backoff and only permanent errors stop a row.
+- **A forum topic lists its members again.** The member list asked the network for the topic's own id, which names no chat, so every topic's members were missing. A topic now asks for its forum, and the Telegram connector strips a topic suffix so no caller can trip over it.
+- **Messenger chats stop losing messages to missing encryption sessions.** The sidecar keeps the device's prekey stock matched to the server (it only refilled below five, and everything under fifty was ignored), persists the plaintext a retry request needs, and logs a message it cannot decrypt instead of dropping the sync batch.
+- **The chat list waits for the connection instead of answering with half of it.** Asking for chats before the socket was up was reported as "no more threads", so the list looked complete when it was not; it now waits briefly and reports an incomplete list as an error.
+
+### Changed
+- **The debug log is quiet unless asked.** The sidecar's diagnostics are forwarded at their own level instead of all as info, and the Messenger sidecar now logs at `warn` by default; `ALLOY_META_LOG_LEVEL=trace` turns the payload dumps back on when a report needs them.
+
 ## 0.4.9 (pre-release)
 
 ### Added
