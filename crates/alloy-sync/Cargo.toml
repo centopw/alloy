@@ -1,0 +1,30 @@
+[package]
+name = "alloy-sync"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+[lints]
+workspace = true
+
+[dependencies]
+# Blob bodies are sealed with the same AEAD alloy-store and alloy-storage already use.
+chacha20poly1305 = "0.11"
+# Device identities and batch signatures (ADR 0020 invariants 4, 11).
+ed25519-dalek = "2.2"
+# Every key in the hierarchy is HKDF-SHA256 output with a version-labelled info string.
+hkdf = "0.12"
+# Master-key generation only; no crate-local RNG.
+rand = "0.9"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+thiserror = "1.0"
+# Master and derived keys are wiped on drop.
+zeroize = "1.8"
+
+[dev-dependencies]
+# The end-to-end test seals a real ConfigBundle, so the sync crate depends on the
+# slice-A types only from tests. No keyring backend is needed to parse a bundle.
+alloy-storage = { path = "../alloy-storage", default-features = false }
