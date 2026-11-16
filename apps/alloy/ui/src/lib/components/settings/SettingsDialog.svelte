@@ -37,7 +37,7 @@ import HelpAbout from './sections/HelpAbout.svelte';
 import Tags from './sections/Tags.svelte';
 import Permissions from './sections/Permissions.svelte';
 import Debug from './sections/Debug.svelte';
-import DevicesSync from './sync/DevicesSync.svelte';
+import DevicesSyncLive from './sync/DevicesSyncLive.svelte';
 
   import { t } from '$lib/i18n';
   interface Props {
@@ -269,7 +269,7 @@ import DevicesSync from './sync/DevicesSync.svelte';
             {:else if section === 'security-privacy'}
               <SecurityPrivacy />
             {:else if section === 'devices-sync'}
-              <DevicesSync />
+              <DevicesSyncLive />
             {:else if section === 'appearance'}
               <Appearance />
               <SidebarPrefs />

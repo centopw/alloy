@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button, SegmentedControl } from '$lib/components/common';
+  import { Button, SegmentedControl, TextArea } from '$lib/components/common';
   import { SettingGroup, SettingRow } from '$lib/components/settings/controls';
   import DeviceList from './DeviceList.svelte';
   import PairingAccept from './PairingAccept.svelte';
@@ -7,15 +7,20 @@
   import RecoveryPanel from './RecoveryPanel.svelte';
   import SasConfirm from './SasConfirm.svelte';
   import ServerPanel from './ServerPanel.svelte';
-  import { formatSyncTime } from './format';
+  import { formatSyncTime, groupPin } from './format';
   import type {
     ConfigureSyncInput,
     DeviceView,
+    ExportView,
+    ImportReportView,
+    ImportView,
     PairingRole,
     PairingState,
     PairingView,
+    PinMismatchView,
     RecoveryView,
     ServerView,
+    SyncResultView,
     ThisDeviceView,
   } from './types';
 
@@ -40,6 +45,18 @@
     oncreaterecovery?: () => void;
     onverifyrecovery?: (words: string[]) => void;
     onrecoverywritten?: () => void;
+    /** Export result and import form, both rendered under This device. */
+    exportState?: ExportView | null;
+    importState?: ImportView | null;
+    onexport?: () => void;
+    onimport?: (bundleJson: string, apply: boolean) => void;
+    /** The last `SyncNow` answer, rendered under the server panel. */
+    syncResult?: SyncResultView | null;
+    /** Set when a configured endpoint presented a different certificate. */
+    pinMismatch?: PinMismatchView | null;
+    ontrustnewpin?: () => void;
+    /** Failure that is not tied to one panel (roster load, revoke). */
+    error?: string | null;
   }
 
   let {
@@ -70,6 +87,14 @@
     oncreaterecovery = () => {},
     onverifyrecovery = () => {},
     onrecoverywritten = () => {},
+    exportState = null,
+    importState = null,
+    onexport = () => {},
+    onimport = () => {},
+    syncResult = null,
+    pinMismatch = null,
+    ontrustnewpin = () => {},
+    error = null,
   }: Props = $props();
 
   // Held locally because the segmented control writes it before the engine has a pairing; the
@@ -115,9 +140,52 @@
   );
 
   const enrolled = $derived(formatSyncTime(device.enrolledAtMs));
+
+  // The import field keeps its text locally; the dry-run result comes from the container. Apply is
+  // offered only for the exact bundle that was checked, so editing the field hides it again.
+  let bundleText = $state('');
+  let checkedBundle = $state<string | null>(null);
+
+  const importChanges = $derived.by(() => {
+    const report: ImportReportView | null = importState?.report ?? null;
+    if (!report) return '';
+    const parts: string[] = [];
+    if (report.settings) parts.push(t('sync-import-part-settings'));
+    if (report.catalogue) parts.push(t('sync-import-part-catalogue'));
+    if (report.tags > 0) parts.push(t('sync-import-part-tags', { count: report.tags }));
+    if (report.backgrounds > 0) {
+      parts.push(t('sync-import-part-backgrounds', { count: report.backgrounds }));
+    }
+    if (report.theme) parts.push(t('sync-import-part-theme'));
+    return parts.join(', ');
+  });
+
+  const canApplyImport = $derived(
+    importState?.report !== null &&
+      importState?.report !== undefined &&
+      checkedBundle === bundleText.trim() &&
+      !importState.applied &&
+      !importState.busy
+  );
+
+  function checkBundle() {
+    const value = bundleText.trim();
+    if (!value) return;
+    checkedBundle = value;
+    onimport(value, false);
+  }
+
+  function applyBundle() {
+    const value = bundleText.trim();
+    if (!value) return;
+    onimport(value, true);
+  }
 </script>
 
 <section class="devices-sync">
+  {#if error}
+    <p class="error section-error" role="alert">{error}</p>
+  {/if}
   <SettingGroup title={t('sync-this-device')} description={t('sync-this-device-description')}>
     <SettingRow label={t('sync-this-device-label')}>
       <span class="value">{device.label || t('sync-unknown')}</span>
@@ -128,6 +196,81 @@
     <SettingRow label={t('sync-this-device-epoch')}>
       <span class="value">{device.epoch ?? t('sync-unknown')}</span>
     </SettingRow>
+
+    <div class="bundle">
+      <p class="hint">{t('sync-export-description')}</p>
+      <div class="bundle-actions">
+        <Button variant="secondary" size="sm" onclick={onexport}>{t('sync-export')}</Button>
+      </div>
+      {#if exportState}
+        {#if exportState.error}
+          <p class="error" role="alert">{exportState.error}</p>
+        {:else}
+          <p class="status" role="status">
+            {exportState.copied
+              ? t('sync-export-ready', { bytes: exportState.bytes })
+              : t('sync-export-copy-failed')}
+          </p>
+          <ul class="summary">
+            {#if exportState.summary.settings}
+              <li>{t('sync-export-summary-settings')}</li>
+            {/if}
+            {#if exportState.summary.catalogue}
+              <li>{t('sync-export-summary-catalogue')}</li>
+            {/if}
+            <li>{t('sync-export-summary-tags', { count: exportState.summary.tags })}</li>
+            {#if exportState.summary.backgrounds > 0}
+              <li>
+                {t('sync-export-summary-backgrounds', { count: exportState.summary.backgrounds })}
+              </li>
+            {/if}
+            <li>
+              {exportState.summary.theme
+                ? t('sync-export-summary-theme', { id: exportState.summary.theme })
+                : t('sync-export-summary-theme-none')}
+            </li>
+          </ul>
+        {/if}
+      {/if}
+    </div>
+
+    <div class="bundle">
+      <p class="hint">{t('sync-import-description')}</p>
+      <TextArea
+        bind:value={bundleText}
+        rows={3}
+        placeholder={t('sync-import-placeholder')}
+        aria-label={t('sync-import')}
+      />
+      <div class="bundle-actions">
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={importState?.busy || bundleText.trim() === ''}
+          onclick={checkBundle}
+        >
+          {importState?.busy ? t('sync-import-checking') : t('sync-import-check')}
+        </Button>
+        {#if canApplyImport}
+          <Button variant="primary" size="sm" disabled={importState?.busy} onclick={applyBundle}>
+            {t('sync-import-apply')}
+          </Button>
+        {/if}
+      </div>
+      {#if importState?.error}
+        <p class="error" role="alert">{importState.error}</p>
+      {/if}
+      {#if importState?.report}
+        <p class="status" role="status">
+          {importChanges
+            ? t('sync-import-report', { changes: importChanges })
+            : t('sync-import-no-changes')}
+        </p>
+      {/if}
+      {#if importState?.applied}
+        <p class="status" role="status">{t('sync-import-applied')}</p>
+      {/if}
+    </div>
   </SettingGroup>
 
   <SettingGroup title={t('sync-pair-a-device')} description={t('sync-pair-description')}>
@@ -200,6 +343,41 @@
       ontestconnection={ontestconnection}
       onsyncnow={onsyncnow}
     />
+    {#if syncResult}
+      <p class="status" role="status">
+        {t('sync-server-sync-result', {
+          uploaded: syncResult.uploaded,
+          downloaded: syncResult.downloaded,
+          head: syncResult.headHex,
+        })}
+      </p>
+    {/if}
+    {#if pinMismatch}
+      <div class="pin-mismatch" role="alert">
+        <h4 class="pin-mismatch-title">{t('sync-pin-mismatch-title')}</h4>
+        <p class="hint">{t('sync-pin-mismatch-description')}</p>
+        <div class="fingerprints">
+          <div class="fingerprint">
+            <span class="fingerprint-label">{t('sync-pin-mismatch-stored')}</span>
+            <code>{groupPin(pinMismatch.stored) || t('sync-pin-mismatch-unknown')}</code>
+          </div>
+          <div class="fingerprint">
+            <span class="fingerprint-label">{t('sync-pin-mismatch-presented')}</span>
+            <code>{groupPin(pinMismatch.presented) || t('sync-pin-mismatch-unknown')}</code>
+          </div>
+        </div>
+        <Button
+          variant="danger"
+          size="sm"
+          disabled={pinMismatch.trusting}
+          onclick={ontrustnewpin}
+        >
+          {pinMismatch.trusting
+            ? t('sync-pin-mismatch-trusting')
+            : t('sync-pin-mismatch-trust')}
+        </Button>
+      </div>
+    {/if}
   </SettingGroup>
 
   <SettingGroup title={t('sync-devices')} description={t('sync-devices-description')}>
@@ -270,5 +448,87 @@
   .value {
     font-size: var(--alloy-font-size-preview);
     color: var(--alloy-color-text-secondary);
+  }
+
+  .section-error {
+    padding: 0;
+  }
+
+  .bundle {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--alloy-spacing-scale-2);
+    padding: var(--alloy-spacing-scale-3) 0;
+    width: 100%;
+  }
+
+  .bundle-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--alloy-spacing-scale-2);
+  }
+
+  .status {
+    margin: 0;
+    font-size: var(--alloy-font-size-preview);
+    color: var(--alloy-color-text-secondary);
+  }
+
+  .summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-4);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: var(--alloy-font-size-meta);
+    color: var(--alloy-color-text-muted);
+  }
+
+  .pin-mismatch {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--alloy-spacing-scale-3);
+    margin-top: var(--alloy-spacing-scale-3);
+    padding: var(--alloy-spacing-scale-4);
+    border: 1px solid var(--alloy-color-status-error);
+    border-radius: var(--alloy-radii-md);
+    background: var(--alloy-color-surface-subtle);
+  }
+
+  .pin-mismatch-title {
+    margin: 0;
+    font-size: var(--alloy-font-size-title);
+    font-weight: var(--alloy-typography-weight-semibold);
+    color: var(--alloy-color-status-error);
+  }
+
+  .fingerprints {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--alloy-spacing-scale-5);
+    width: 100%;
+  }
+
+  .fingerprint {
+    display: flex;
+    flex-direction: column;
+    gap: var(--alloy-spacing-scale-1);
+    min-width: 0;
+  }
+
+  .fingerprint-label {
+    font-size: var(--alloy-font-size-meta);
+    color: var(--alloy-color-text-muted);
+  }
+
+  .fingerprint code {
+    font-family: var(--alloy-typography-font-family-mono);
+    font-size: var(--alloy-font-size-preview);
+    color: var(--alloy-color-text-primary);
+    overflow-wrap: anywhere;
+    user-select: all;
   }
 </style>

@@ -1,4 +1,5 @@
 export { default as DevicesSync } from './DevicesSync.svelte';
+export { default as DevicesSyncLive } from './DevicesSyncLive.svelte';
 export { default as PairingOffer } from './PairingOffer.svelte';
 export { default as PairingAccept } from './PairingAccept.svelte';
 export { default as SasConfirm } from './SasConfirm.svelte';

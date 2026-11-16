@@ -43,6 +43,8 @@ import type {
   RoomSearchHit,
   RoomSummary,
   RoomTagDef,
+  SyncState,
+  SyncStatusReport,
   TimelineItemDto,
   UserId,
   VectorDiffDto,
@@ -230,7 +232,10 @@ export class MockTransport implements Transport {
   /** Messenger's stored runtime settings; a key that was cleared falls back to its default. */
   private messengerSettings = new Map<string, string>();
   /** Live pairings seeded by `BeginPairing`/`AcceptPairingTicket`, so the dev UI can walk the states. */
-  private pairings = new Map<string, { state: PairingPhase; sas: string | null }>();
+  private pairings = new Map<
+    string,
+    { state: PairingPhase; sas: string | null; polls: number }
+  >();
   /** The local device roster: this device only, until a revoke runs. */
   private devices: DeviceDto[] = [
     {
@@ -242,6 +247,24 @@ export class MockTransport implements Transport {
     },
   ];
   private epoch = 0;
+  /** The optional sync server, as configured through the dev walk. */
+  private sync: {
+    mode: 'off' | 'prefs';
+    url: string | null;
+    pin: string | null;
+    tokenConfigured: boolean;
+    state: SyncState;
+    lastSyncMs: number | null;
+    lastError: string | null;
+  } = {
+    mode: 'off',
+    url: null,
+    pin: null,
+    tokenConfigured: false,
+    state: 'idle',
+    lastSyncMs: null,
+    lastError: null,
+  };
   private counter = 0;
   private txnCounter = 0;
   private announced = false;
@@ -332,6 +355,28 @@ export class MockTransport implements Transport {
     this.rooms[index] = { ...this.rooms[index], ...patch };
     sortRoomList(this.rooms);
     this.syncRoomSubscriptions();
+  }
+
+  /** The body `SyncStatus` and `SyncConfigured` answer with, from the mock's own state. */
+  private syncReport(): SyncStatusReport {
+    const enabled = this.sync.mode === 'prefs';
+    const updated = this.sync.lastSyncMs ?? 0;
+    return {
+      mode: this.sync.mode,
+      url: this.sync.url,
+      pin: this.sync.pin,
+      token_configured: this.sync.tokenConfigured,
+      state: this.sync.state,
+      last_sync_ms: this.sync.lastSyncMs,
+      last_error: this.sync.lastError,
+      layers: ['settings', 'tags', 'catalogue', 'backgrounds', 'theme', 'messages'].map((key) => ({
+        key,
+        // The message mirror is opt-in and not part of this slice, so it stays off.
+        enabled: enabled && key !== 'messages',
+        updated_at_ms: updated,
+      })),
+      devices: this.devices,
+    };
   }
 
   private roomProjection(filter: string | null): RoomSummary[] {
@@ -1607,7 +1652,11 @@ export class MockTransport implements Transport {
           throw invalidArgument('the accepting side starts with AcceptPairingTicket');
         }
         const id = `pair-${++this.counter}`;
-        this.pairings.set(id, { state: 'waiting', sas: null });
+        this.pairings.set(id, { state: 'waiting', sas: null, polls: 0 });
+        this.emit({
+          type: 'PairingChanged',
+          payload: { pairing_id: id, state: 'waiting', sas: null },
+        });
         return {
           type: 'PairingStarted',
           payload: {
@@ -1622,7 +1671,11 @@ export class MockTransport implements Transport {
 
       case 'AcceptPairingTicket': {
         const id = `pair-${++this.counter}`;
-        this.pairings.set(id, { state: 'peer_found', sas: null });
+        this.pairings.set(id, { state: 'peer_found', sas: null, polls: 0 });
+        this.emit({
+          type: 'PairingChanged',
+          payload: { pairing_id: id, state: 'peer_found', sas: null },
+        });
         return {
           type: 'PairingStarted',
           payload: {
@@ -1638,6 +1691,21 @@ export class MockTransport implements Transport {
       case 'PairingStatus': {
         const live = this.pairings.get(command.params.pairing_id);
         if (!live) throw notFound(`no pairing ${command.params.pairing_id}`);
+        // There is no second device in the dev walk: after a few polls the handshake is reported
+        // as complete so the SAS comparison is reachable. The event carries the same transition.
+        live.polls += 1;
+        if ((live.state === 'waiting' || live.state === 'peer_found') && live.polls >= 3) {
+          live.state = 'sas_ready';
+          live.sas = '497092';
+          this.emit({
+            type: 'PairingChanged',
+            payload: {
+              pairing_id: command.params.pairing_id,
+              state: 'sas_ready',
+              sas: live.sas,
+            },
+          });
+        }
         return {
           type: 'PairingState',
           payload: {
@@ -1657,6 +1725,14 @@ export class MockTransport implements Transport {
         // digits immediately so the comparison step is reachable without a second device.
         live.state = command.params.accept ? 'done' : 'declined';
         live.sas = command.params.accept ? live.sas ?? '497092' : live.sas;
+        this.emit({
+          type: 'PairingChanged',
+          payload: {
+            pairing_id: command.params.pairing_id,
+            state: live.state,
+            sas: live.sas,
+          },
+        });
         return {
           type: 'PairingState',
           payload: {
@@ -1701,6 +1777,72 @@ export class MockTransport implements Transport {
         this.devices = this.devices.filter((device) => device !== target);
         this.epoch += 1;
         return { type: 'DeviceRevoked', payload: { epoch: this.epoch } };
+      }
+
+      case 'ConfigureSync': {
+        const url = command.params.url.trim();
+        const mode = command.params.mode;
+        if (mode === 'prefs' && url === '') {
+          throw invalidArgument('a sync mode of prefs needs a server URL');
+        }
+        if (mode === 'prefs' && !/^https:\/\//i.test(url)) {
+          throw invalidArgument('the sync URL must start with https://');
+        }
+        // A stable demonstration pin, derived from nothing real: the dev walk only needs a
+        // fingerprint to display and compare.
+        const pin = mode === 'prefs' ? 'a1b2c3d4e5f60718293a4b5c6d7e8f90123456789abcdef0123456789abcdef0' : null;
+        if (
+          mode === 'prefs' &&
+          this.sync.pin !== null &&
+          pin !== this.sync.pin &&
+          !command.params.accept_new_pin
+        ) {
+          throw new MockEngineError(
+            'pin_mismatch',
+            `the sync endpoint certificate changed: pinned ${this.sync.pin}, presented ${pin}`,
+            'pin_mismatch'
+          );
+        }
+        this.sync = {
+          ...this.sync,
+          mode,
+          url: url === '' ? null : url,
+          pin,
+          tokenConfigured: this.sync.tokenConfigured || command.params.token.trim() !== '',
+          lastError: null,
+        };
+        return {
+          type: 'SyncConfigured',
+          payload: { pin, status: this.syncReport() },
+        };
+      }
+
+      case 'SyncStatus':
+        return { type: 'SyncStatus', payload: { status: this.syncReport() } };
+
+      case 'SyncNow': {
+        if (this.sync.mode === 'off') {
+          return {
+            type: 'SyncCompleted',
+            payload: {
+              uploaded: 0,
+              downloaded: 0,
+              head_hex: '0'.repeat(64),
+              epoch: this.epoch,
+            },
+          };
+        }
+        this.sync = { ...this.sync, state: 'running', lastError: null };
+        this.emit({ type: 'SyncStateChanged', payload: { state: 'running', detail: null } });
+        const uploaded = 2048;
+        const downloaded = 1024;
+        const head = 'ab'.repeat(32);
+        this.sync = { ...this.sync, state: 'done', lastSyncMs: Date.now() };
+        this.emit({ type: 'SyncStateChanged', payload: { state: 'done', detail: null } });
+        return {
+          type: 'SyncCompleted',
+          payload: { uploaded, downloaded, head_hex: head, epoch: this.epoch },
+        };
       }
 
       default: {

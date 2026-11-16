@@ -50,6 +50,9 @@
 
 <div class="recovery">
   <p class="warning">{t('sync-recovery-warning')}</p>
+  {#if recovery.error}
+    <p class="error" role="alert">{recovery.error}</p>
+  {/if}
 
   {#if recovery.words}
     <div class="reveal">

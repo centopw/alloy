@@ -76,4 +76,54 @@ export interface RecoveryView {
   /** Present only in the response that created the phrase; never read back afterwards. */
   words: string[] | null;
   verified: boolean;
+  /** Latest rejection or failure, already localized by the container. */
+  error?: string | null;
+}
+
+/** What an exported bundle carries, as the engine's `ConfigBundleSummary` reports it. */
+export interface BundleSummaryView {
+  settings: boolean;
+  catalogue: boolean;
+  tags: number;
+  backgrounds: number;
+  theme: string | null;
+}
+
+/** The last export: the bundle was copied when `copied` is true. */
+export interface ExportView {
+  bytes: number;
+  summary: BundleSummaryView;
+  copied: boolean;
+  error: string | null;
+}
+
+/** What applying a bundle would change; all-false means local state already covers it. */
+export interface ImportReportView {
+  settings: boolean;
+  catalogue: boolean;
+  tags: number;
+  backgrounds: number;
+  theme: boolean;
+}
+
+/** The import field's answer: a dry-run report, then the applied result on confirm. */
+export interface ImportView {
+  report: ImportReportView | null;
+  applied: boolean;
+  busy: boolean;
+  error: string | null;
+}
+
+/** One completed `SyncNow`. */
+export interface SyncResultView {
+  uploaded: number;
+  downloaded: number;
+  headHex: string;
+}
+
+/** A configured endpoint presented a different TLS leaf; both pins are public. */
+export interface PinMismatchView {
+  stored: string;
+  presented: string;
+  trusting: boolean;
 }
