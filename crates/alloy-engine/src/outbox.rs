@@ -510,26 +510,54 @@ async fn typing(
     Ok(())
 }
 
+/// Phrases that mark a `Protocol` error as a transport state rather than a contract violation.
+///
+/// A sidecar whose transport is restarting reports the state through its own protocol, so
+/// "dgw: socket is not open" arrives as `ConnectorError::Protocol`. The call is retryable: it
+/// says the transport is absent right now, not that the caller asked for something impossible.
+/// Anything else under `Protocol` (malformed frame, unknown field) stays permanent.
+const CONNECTIVITY_HINTS: [&str; 6] = [
+    "socket is not open",
+    "not connected",
+    "was stopped",
+    "connection closed",
+    "transport closed",
+    "sidecar",
+];
+
+/// Whether a protocol message names the connectivity state of the transport.
+fn names_connectivity_state(message: &str) -> bool {
+    let lowered = message.to_ascii_lowercase();
+    CONNECTIVITY_HINTS.iter().any(|hint| lowered.contains(hint))
+}
+
+/// A retry at the backoff delay of `attempts` failed tries.
+fn retry_in(err: &ConnectorError, attempts: i64) -> PerformError {
+    PerformError::Retry {
+        message: err.to_string(),
+        next_attempt_at: now_ms()
+            .saturating_add(i64::try_from(retry_delay(attempts).as_millis()).unwrap_or(i64::MAX)),
+    }
+}
+
 fn classify(err: ConnectorError, attempts: i64) -> PerformError {
-    match err {
+    match &err {
         ConnectorError::RateLimited { retry_after_ms } => PerformError::Retry {
             message: format!("rate limited: retry after {retry_after_ms} ms"),
             next_attempt_at: now_ms().saturating_add(
-                i64::try_from(retry_after_ms)
+                i64::try_from(*retry_after_ms)
                     .unwrap_or(MAX_RETRY_DELAY_MS)
                     .min(MAX_RETRY_DELAY_MS),
-            ),
-        },
-        other if other.is_retryable() => PerformError::Retry {
-            message: other.to_string(),
-            next_attempt_at: now_ms().saturating_add(
-                i64::try_from(retry_delay(attempts).as_millis()).unwrap_or(i64::MAX),
             ),
         },
         ConnectorError::Unauthorized => PerformError::Fatal {
             message: "the stored session is no longer valid".to_string(),
             unauthorized: true,
         },
+        ConnectorError::Protocol { message } if names_connectivity_state(message) => {
+            retry_in(&err, attempts)
+        }
+        other if other.is_retryable() => retry_in(other, attempts),
         other => PerformError::Fatal {
             message: other.to_string(),
             unauthorized: false,
@@ -647,5 +675,101 @@ mod tests {
             reply_target(&parent(None, Some(SendState::Failed))),
             ReplyTarget::Lost
         );
+    }
+
+    #[test]
+    fn a_restarting_transport_retries_instead_of_failing_the_message() {
+        // The live failure: while the Messenger transport restarts, the sidecar answers with
+        // "dgw: socket is not open" as a protocol error. `run` sends `Retry` to `fail_outbox`
+        // and never to `record_failure`, so the message the user sent stays pending for another
+        // attempt instead of being marked failed.
+        match classify(
+            ConnectorError::Protocol {
+                message: "dgw: socket is not open".to_string(),
+            },
+            1,
+        ) {
+            PerformError::Retry {
+                next_attempt_at, ..
+            } => {
+                let now = now_ms();
+                assert!(
+                    next_attempt_at > now,
+                    "retry scheduled at {next_attempt_at}, now {now}"
+                );
+                assert!(next_attempt_at - now <= MAX_RETRY_DELAY_MS);
+            }
+            PerformError::Fatal { .. } => panic!("a restarting transport must retry"),
+        }
+    }
+
+    #[test]
+    fn every_connectivity_phrase_retries_whatever_its_case() {
+        for message in [
+            "DGW: Socket Is Not Open",
+            "not connected to the gateway",
+            "the transport was stopped",
+            "connection closed",
+            "transport closed",
+            "the Sidecar exited",
+        ] {
+            match classify(
+                ConnectorError::Protocol {
+                    message: message.to_string(),
+                },
+                3,
+            ) {
+                PerformError::Retry {
+                    next_attempt_at, ..
+                } => assert!(next_attempt_at > now_ms(), "{message}"),
+                PerformError::Fatal { .. } => panic!("{message} must retry"),
+            }
+        }
+    }
+
+    #[test]
+    fn network_failures_retry() {
+        match classify(
+            ConnectorError::Network {
+                message: "connection reset by peer".to_string(),
+            },
+            1,
+        ) {
+            PerformError::Retry {
+                next_attempt_at, ..
+            } => assert!(next_attempt_at > now_ms()),
+            PerformError::Fatal { .. } => panic!("a network failure must retry"),
+        }
+    }
+
+    #[test]
+    fn caller_and_contract_errors_stay_permanent() {
+        for err in [
+            ConnectorError::InvalidInput {
+                message: "empty body and no attachment".to_string(),
+            },
+            ConnectorError::NotSupported {
+                feature: "polls".to_string(),
+            },
+            ConnectorError::Protocol {
+                message: "malformed frame: unknown field".to_string(),
+            },
+        ] {
+            match classify(err.clone(), 1) {
+                PerformError::Fatal { unauthorized, .. } => assert!(!unauthorized, "{err:?}"),
+                PerformError::Retry { .. } => panic!("{err:?} must stay permanent"),
+            }
+        }
+    }
+
+    #[test]
+    fn an_expired_session_stays_permanent_and_asks_for_a_relogin() {
+        match classify(ConnectorError::Unauthorized, 1) {
+            PerformError::Fatal {
+                unauthorized: true, ..
+            } => {}
+            PerformError::Fatal { .. } => panic!("an expired session must request a re-login"),
+            PerformError::Retry { .. } => panic!("an expired session must not retry"),
+        }
     }
 }
