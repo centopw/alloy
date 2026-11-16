@@ -37,6 +37,7 @@ import HelpAbout from './sections/HelpAbout.svelte';
 import Tags from './sections/Tags.svelte';
 import Permissions from './sections/Permissions.svelte';
 import Debug from './sections/Debug.svelte';
+import DevicesSync from './sync/DevicesSync.svelte';
 
   import { t } from '$lib/i18n';
   interface Props {
@@ -47,7 +48,13 @@ import Debug from './sections/Debug.svelte';
   }
   let { open, onclose, initialSection }: Props = $props();
 
-  type Section = SettingsSectionId;
+  /**
+   * Devices & Sync is a section of its own, contributed here rather than through
+   * `SETTINGS_GROUPS_DEF` so this slice does not have to widen the shared section-id union. It sits
+   * under Security & Privacy in the user-settings group.
+   */
+  const DEVICES_SYNC = 'devices-sync' as const;
+  type Section = SettingsSectionId | typeof DEVICES_SYNC;
 
   type NavIcon = Component<{ size?: number; strokeWidth?: number; class?: string }>;
 
@@ -70,7 +77,7 @@ import Debug from './sections/Debug.svelte';
   };
 
   /** Maps legacy section IDs to their consolidated parent so deep links continue to work. */
-  function normalizeSection(id: SettingsSectionId): SettingsSectionId {
+  function normalizeSection(id: Section): Section {
     switch (id) {
       case 'networks':
         return 'account';
@@ -101,19 +108,45 @@ import Debug from './sections/Debug.svelte';
 
   const caps = $derived(capabilities(currentEnv(viewport.isPhone)));
   const visibleGroups = $derived(filterSettingsGroups(GROUPS, caps));
-  const visibleSections = $derived(visibleGroups.flatMap((group) => group.items));
+
+  // Nav groups are the platform-filtered ones plus the locally contributed Devices & Sync page.
+  const navGroups = $derived.by(() => {
+    const groups: { label: string; items: { id: Section; label: string; icon?: NavIcon }[] }[] =
+      visibleGroups.map((group) => ({
+        label: group.label,
+        items: group.items.map((item) => ({ id: item.id, label: item.label, icon: item.icon })),
+      }));
+    const devices = {
+      id: DEVICES_SYNC,
+      label: t('settings-devices-sync'),
+      icon: ShieldCheck,
+    };
+    const user = groups.find((group) =>
+      group.items.some((entry) => entry.id === 'security-privacy')
+    );
+    if (user) {
+      const at = user.items.findIndex((entry) => entry.id === 'security-privacy');
+      user.items.splice(at + 1, 0, devices);
+    } else if (groups.length > 0) {
+      groups[0].items.push(devices);
+    } else {
+      groups.push({ label: '', items: [devices] });
+    }
+    return groups;
+  });
+  const allSections = $derived(navGroups.flatMap((group) => group.items));
 
   let section = $state<Section>('account');
 
   // If the stored section is no longer available after a viewport change, fall back to the first available section.
   $effect(() => {
-    if (visibleSections.length > 0 && !visibleSections.some((item) => item.id === section)) {
-      section = visibleSections[0].id;
+    if (allSections.length > 0 && !allSections.some((item) => item.id === section)) {
+      section = allSections[0].id;
     }
   });
 
   // Shared header band: the content column title matches the nav title for the selected section.
-  const sectionLabel = $derived(visibleSections.find((item) => item.id === section)?.label ?? '');
+  const sectionLabel = $derived(allSections.find((item) => item.id === section)?.label ?? '');
   let mobileView = $state<'nav' | 'content'>('nav');
 
   function openSection(id: Section) {
@@ -127,7 +160,7 @@ import Debug from './sections/Debug.svelte';
     // Opening on a specific page goes straight to it (on phones too); otherwise start at the list.
     const rawTarget = untrack(() => initialSection);
     const target = rawTarget ? normalizeSection(rawTarget) : undefined;
-    if (target && untrack(() => visibleSections).some((item) => item.id === target)) {
+    if (target && untrack(() => allSections).some((item) => item.id === target)) {
       section = target;
       mobileView = 'content';
     } else {
@@ -196,7 +229,7 @@ import Debug from './sections/Debug.svelte';
           </button>
         </header>
 
-        {#each visibleGroups as group (group.label)}
+        {#each navGroups as group (group.label)}
           <div class="group">
             <h3 class="group-label">{group.label}</h3>
             {#each group.items as item (item.id)}
@@ -235,6 +268,8 @@ import Debug from './sections/Debug.svelte';
               <Networks />
             {:else if section === 'security-privacy'}
               <SecurityPrivacy />
+            {:else if section === 'devices-sync'}
+              <DevicesSync />
             {:else if section === 'appearance'}
               <Appearance />
               <SidebarPrefs />

@@ -22,6 +22,7 @@ import type {
   Account,
   AccountId,
   CookieFieldDto,
+  DeviceDto,
   EngineCommand,
   EngineEvent,
   EngineResponse,
@@ -34,6 +35,7 @@ import type {
   NetworkInfoDto,
   NetworkSettingDto,
   NetworkSettingKind,
+  PairingPhase,
   RoomId,
   RoomMediaItem,
   RoomMediaKind,
@@ -227,6 +229,19 @@ export class MockTransport implements Transport {
   private telegramApp: { api_id: number; api_hash: string } | null = { ...DEMO_TELEGRAM_APP };
   /** Messenger's stored runtime settings; a key that was cleared falls back to its default. */
   private messengerSettings = new Map<string, string>();
+  /** Live pairings seeded by `BeginPairing`/`AcceptPairingTicket`, so the dev UI can walk the states. */
+  private pairings = new Map<string, { state: PairingPhase; sas: string | null }>();
+  /** The local device roster: this device only, until a revoke runs. */
+  private devices: DeviceDto[] = [
+    {
+      device_id: 'demo-device-this-one',
+      label: 'This device',
+      enrolled_ms: Date.now(),
+      epoch: 0,
+      current: true,
+    },
+  ];
+  private epoch = 0;
   private counter = 0;
   private txnCounter = 0;
   private announced = false;
@@ -1533,6 +1548,159 @@ export class MockTransport implements Transport {
         }
         this.settings.set(command.params.key, command.params.value_json);
         return { type: 'SettingSet', payload: { key: command.params.key } };
+      }
+
+      case 'ExportConfigBundle': {
+        const bundle = JSON.stringify({
+          schema: 1,
+          exported_at_ms: Date.now(),
+          device_label: 'This device',
+          settings: Object.fromEntries(
+            [...this.settings].map(([key, json]) => [key, JSON.parse(json) as unknown]),
+          ),
+          tags: [],
+          catalogue: this.tags,
+          backgrounds: [],
+          theme: null,
+        });
+        return {
+          type: 'ConfigBundleExported',
+          payload: {
+            bundle_json: bundle,
+            bytes: bundle.length,
+            summary: {
+              settings: true,
+              catalogue: this.tags.length > 0,
+              tags: 0,
+              backgrounds: command.params.include_backgrounds ? 0 : 0,
+              theme: null,
+            },
+          },
+        };
+      }
+
+      case 'ImportConfigBundle': {
+        let parsed: { schema?: unknown };
+        try {
+          parsed = JSON.parse(command.params.bundle_json) as { schema?: unknown };
+        } catch {
+          throw invalidArgument('bundle_json must be valid JSON');
+        }
+        if (parsed.schema !== 1) {
+          throw new MockEngineError(
+            'bundle_rejected',
+            `bundle schema ${String(parsed.schema)} is not supported by this build (1)`,
+            `schema:${String(parsed.schema)}`,
+          );
+        }
+        return {
+          type: 'ConfigBundleImported',
+          payload: {
+            report: { settings: false, catalogue: false, tags: 0, backgrounds: 0, theme: false },
+            applied: command.params.apply,
+          },
+        };
+      }
+
+      case 'BeginPairing': {
+        if (command.params.role === 'accept') {
+          throw invalidArgument('the accepting side starts with AcceptPairingTicket');
+        }
+        const id = `pair-${++this.counter}`;
+        this.pairings.set(id, { state: 'waiting', sas: null });
+        return {
+          type: 'PairingStarted',
+          payload: {
+            pairing_id: id,
+            ticket: `alloy-pairing-v1|${id}|127.0.0.1:54100|00|`,
+            code: 'AB34CD56',
+            endpoint: '127.0.0.1:54100',
+            expires_at_ms: Date.now() + 90_000,
+          },
+        };
+      }
+
+      case 'AcceptPairingTicket': {
+        const id = `pair-${++this.counter}`;
+        this.pairings.set(id, { state: 'peer_found', sas: null });
+        return {
+          type: 'PairingStarted',
+          payload: {
+            pairing_id: id,
+            ticket: command.params.ticket,
+            code: command.params.code,
+            endpoint: '127.0.0.1:0',
+            expires_at_ms: Date.now() + 90_000,
+          },
+        };
+      }
+
+      case 'PairingStatus': {
+        const live = this.pairings.get(command.params.pairing_id);
+        if (!live) throw notFound(`no pairing ${command.params.pairing_id}`);
+        return {
+          type: 'PairingState',
+          payload: {
+            state: live.state,
+            sas: live.sas,
+            peer_label: null,
+            transferred: 0,
+            error: null,
+          },
+        };
+      }
+
+      case 'ConfirmPairing': {
+        const live = this.pairings.get(command.params.pairing_id);
+        if (!live) throw notFound(`no pairing ${command.params.pairing_id}`);
+        // The real engine only reaches sas_ready after the handshake; the dev walk shows the
+        // digits immediately so the comparison step is reachable without a second device.
+        live.state = command.params.accept ? 'done' : 'declined';
+        live.sas = command.params.accept ? live.sas ?? '497092' : live.sas;
+        return {
+          type: 'PairingState',
+          payload: {
+            state: live.state,
+            sas: live.sas,
+            peer_label: null,
+            transferred: command.params.accept ? 1024 : 0,
+            error: null,
+          },
+        };
+      }
+
+      case 'CreateRecoveryPhrase':
+        return {
+          type: 'RecoveryPhraseCreated',
+          payload: {
+            words: Array.from({ length: 24 }, () => 'abandon'),
+          },
+        };
+
+      case 'VerifyRecoveryPhrase': {
+        if (command.params.words.length !== 24) {
+          throw new MockEngineError(
+            'recovery_rejected',
+            'the phrase has 24 words',
+            'word-count',
+          );
+        }
+        if (command.params.words.some((word) => word.trim() === '')) {
+          throw new MockEngineError('recovery_rejected', 'the phrase is not this device', null);
+        }
+        return { type: 'RecoveryVerified' };
+      }
+
+      case 'ListDevices':
+        return { type: 'DevicesList', payload: { devices: this.devices } };
+
+      case 'RevokeDevice': {
+        const target = this.devices.find((device) => device.device_id === command.params.device_id);
+        if (!target) throw notFound(`no device ${command.params.device_id}`);
+        if (target.current) throw invalidArgument('this device cannot revoke itself');
+        this.devices = this.devices.filter((device) => device !== target);
+        this.epoch += 1;
+        return { type: 'DeviceRevoked', payload: { epoch: this.epoch } };
       }
 
       default: {
