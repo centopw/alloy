@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Button, TextArea, TextField } from '$lib/components/common';
   import { copyText } from '$lib/platform/clipboard';
-  import { formatSyncTime, groupPin } from './format';
+  import { formatSyncTime, groupPin, layerLabel } from './format';
   import { parseRecoveryWords } from './pairing';
   import type { RecoverFromPhraseInput, RecoveryView } from './types';
 
@@ -78,26 +78,6 @@
     // Write-only: the value never survives the call, whether the phrase was accepted or not.
     recoverToken = '';
     recoverSubmitted = false;
-  }
-
-  /** One user-facing name per store layer; an unknown key is shown as the engine names it. */
-  function layerLabel(key: string): string {
-    switch (key) {
-      case 'settings':
-        return t('sync-layer-settings');
-      case 'tags':
-        return t('sync-layer-tags');
-      case 'catalogue':
-        return t('sync-layer-catalogue');
-      case 'backgrounds':
-        return t('sync-layer-backgrounds');
-      case 'theme':
-        return t('sync-layer-theme');
-      case 'messages':
-        return t('sync-layer-messages');
-      default:
-        return key;
-    }
   }
 
   function layerTime(ms: number): string {
@@ -246,7 +226,11 @@
             <li class="layer" class:layer-off={!layer.enabled}>
               <span class="layer-key">{layerLabel(layer.key)}</span>
               <span class="layer-state">
-                {layer.enabled ? t('sync-layer-enabled') : t('sync-layer-disabled')}
+                {layer.key === 'messages' && layer.windowed
+                  ? t('sync-layer-windowed')
+                  : layer.enabled
+                    ? t('sync-layer-enabled')
+                    : t('sync-layer-disabled')}
               </span>
               <span class="layer-time">{layerTime(layer.updatedAtMs)}</span>
             </li>

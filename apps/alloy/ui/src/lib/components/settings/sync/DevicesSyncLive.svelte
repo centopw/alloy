@@ -35,6 +35,7 @@
     lastSyncMs: null,
     lastError: null,
     syncing: false,
+    layers: [],
   };
 
   const EMPTY_EXPORT_SUMMARY = {
@@ -83,6 +84,7 @@
       lastSyncMs: report.last_sync_ms,
       lastError: report.last_error ? syncErrorMessage({ code: report.last_error }) : null,
       syncing: report.state === 'running',
+      layers: mapLayers(report.layers),
     };
   }
 
@@ -101,6 +103,7 @@
       key: layer.key,
       enabled: layer.enabled,
       updatedAtMs: layer.updated_at_ms,
+      windowed: layer.windowed === true,
     }));
   }
 

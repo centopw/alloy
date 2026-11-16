@@ -255,7 +255,7 @@ export class MockTransport implements Transport {
   private epoch = 0;
   /** The optional sync server, as configured through the dev walk. */
   private sync: {
-    mode: 'off' | 'prefs';
+    mode: 'off' | 'prefs' | 'full';
     url: string | null;
     pin: string | null;
     tokenConfigured: boolean;
@@ -368,7 +368,8 @@ export class MockTransport implements Transport {
 
   /** The body `SyncStatus` and `SyncConfigured` answer with, from the mock's own state. */
   private syncReport(): SyncStatusReport {
-    const enabled = this.sync.mode === 'prefs';
+    const enabled = this.sync.mode !== 'off';
+    const mirrored = this.sync.mode === 'full';
     const updated = this.sync.lastSyncMs ?? 0;
     return {
       mode: this.sync.mode,
@@ -381,9 +382,11 @@ export class MockTransport implements Transport {
       recovery_stale: this.sync.recoveryStale,
       layers: ['settings', 'tags', 'catalogue', 'backgrounds', 'theme', 'messages'].map((key) => ({
         key,
-        // The message mirror is opt-in and not part of this slice, so it stays off.
-        enabled: enabled && key !== 'messages',
-        updated_at_ms: updated,
+        // The message mirror is opt-in: only `full` turns it on.
+        enabled: key === 'messages' ? mirrored : enabled,
+        updated_at_ms: key === 'messages' && !mirrored ? 0 : updated,
+        // The dev walk shows the honest worst case: the published window omits older rows.
+        windowed: key === 'messages' && mirrored ? true : undefined,
       })),
       devices: this.devices,
     };
@@ -1857,17 +1860,17 @@ export class MockTransport implements Transport {
       case 'ConfigureSync': {
         const url = command.params.url.trim();
         const mode = command.params.mode;
-        if (mode === 'prefs' && url === '') {
-          throw invalidArgument('a sync mode of prefs needs a server URL');
+        if (mode !== 'off' && url === '') {
+          throw invalidArgument(`a sync mode of ${mode} needs a server URL`);
         }
-        if (mode === 'prefs' && !/^https:\/\//i.test(url)) {
+        if (mode !== 'off' && !/^https:\/\//i.test(url)) {
           throw invalidArgument('the sync URL must start with https://');
         }
         // A stable demonstration pin, derived from nothing real: the dev walk only needs a
         // fingerprint to display and compare.
-        const pin = mode === 'prefs' ? DEMO_SYNC_PIN : null;
+        const pin = mode !== 'off' ? DEMO_SYNC_PIN : null;
         if (
-          mode === 'prefs' &&
+          mode !== 'off' &&
           this.sync.pin !== null &&
           pin !== this.sync.pin &&
           !command.params.accept_new_pin

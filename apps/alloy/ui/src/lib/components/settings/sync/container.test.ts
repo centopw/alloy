@@ -23,6 +23,7 @@ vi.mock('$lib/ipc', () => ({
 }));
 
 import DevicesSyncLive from './DevicesSyncLive.svelte';
+import ContextMenu from '$lib/components/common/ContextMenu.svelte';
 
 const teardown: Array<() => void> = [];
 
@@ -775,5 +776,171 @@ describe('DevicesSyncLive stale recovery phrase', () => {
     expect(calls('SyncStatus'), 'the status is re-read after creating').toHaveLength(2);
     expect(target.textContent).toContain(t('sync-recovery-created-title'));
     expect(target.textContent, 'the stale flag is gone').not.toContain(t('sync-recovery-stale'));
+  });
+});
+
+describe('DevicesSyncLive message mirror', () => {
+  const MIRRORED_AT = 1_700_000_000_000;
+  const LAYERS: SyncStatusReport['layers'] = [
+    { key: 'settings', enabled: true, updated_at_ms: MIRRORED_AT },
+    { key: 'messages', enabled: true, updated_at_ms: MIRRORED_AT, windowed: true },
+  ];
+
+  /** The mode control is the shared Select: a trigger button plus a portal-backed menu. */
+  function renderWithMenu(): HTMLElement {
+    const menuTarget = document.createElement('div');
+    document.body.appendChild(menuTarget);
+    const menu = mount(ContextMenu, { target: menuTarget });
+    teardown.push(() => unmount(menu));
+    return render();
+  }
+
+  function chooseMode(target: HTMLElement, label: string) {
+    const trigger = target.querySelector('.select-trigger') as HTMLButtonElement | null;
+    expect(trigger, 'the mode control is a select trigger').toBeTruthy();
+    trigger!.click();
+    flushSync();
+    const option = [...document.querySelectorAll<HTMLElement>('[role^="menuitem"]')].find(
+      (entry) => entry.textContent?.trim() === label
+    );
+    if (!option) throw new Error(`no mode option “${label}”`);
+    option.click();
+    flushSync();
+  }
+
+  function typeIntoField(target: HTMLElement, selector: string, value: string) {
+    const field = target.querySelector(selector) as HTMLInputElement | null;
+    expect(field, `field ${selector}`).toBeTruthy();
+    field!.value = value;
+    field!.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+  }
+
+  it('confirms Full before it applies and reports the windowed mirror', async () => {
+    engine.invoke.mockImplementation(async (command: EngineCommand) => {
+      switch (command.action) {
+        case 'ListDevices':
+          return { type: 'DevicesList', payload: { devices: [] } };
+        case 'SyncStatus':
+          return {
+            type: 'SyncStatus',
+            payload: {
+              status: status({
+                mode: 'prefs',
+                url: 'https://sync.example',
+                layers: [
+                  { key: 'settings', enabled: true, updated_at_ms: MIRRORED_AT },
+                  { key: 'messages', enabled: false, updated_at_ms: 0 },
+                ],
+              }),
+            },
+          };
+        case 'ConfigureSync':
+          return {
+            type: 'SyncConfigured',
+            payload: {
+              pin: null,
+              status: status({ mode: 'full', url: 'https://sync.example', layers: LAYERS }),
+            },
+          };
+        default:
+          throw new Error(`unexpected command ${command.action}`);
+      }
+    });
+
+    const target = renderWithMenu();
+    await settle();
+
+    const calls = (action: EngineCommand['action']) =>
+      engine.invoke.mock.calls.filter(([command]) => command.action === action);
+    const trigger = target.querySelector('.select-trigger') as HTMLButtonElement;
+    expect(trigger.textContent, 'Full is not the default').toContain(
+      t('sync-server-mode-prefs')
+    );
+    expect(target.textContent, 'Prefs shows no mirror row').not.toContain(
+      t('sync-layer-messages')
+    );
+
+    chooseMode(target, t('sync-server-mode-full'));
+    expect(target.textContent).toContain(t('sync-server-full-confirm-title'));
+    expect(target.textContent).toContain(t('sync-server-full-confirm-ciphertext'));
+    expect(target.textContent).toContain(t('sync-server-full-confirm-loss'));
+    expect(target.textContent).toContain(t('sync-server-full-confirm-revoke'));
+    expect(target.textContent).toContain(t('sync-server-full-confirm-media'));
+    expect(calls('ConfigureSync'), 'nothing is sent before the confirm').toHaveLength(0);
+
+    typeIntoField(target, 'input[type="url"]', 'https://sync.example');
+    button(target, t('sync-server-full-confirm-apply')).click();
+    await settle();
+
+    expect(calls('ConfigureSync')).toHaveLength(1);
+    expect(calls('ConfigureSync')[0][0]).toMatchObject({
+      action: 'ConfigureSync',
+      params: { mode: 'full', url: 'https://sync.example' },
+    });
+    expect(target.textContent).toContain(t('sync-layer-messages'));
+    expect(target.textContent).toContain(t('sync-layer-windowed'));
+  });
+
+  it('cancelling Full keeps the applied mode and sends nothing', async () => {
+    engine.invoke.mockImplementation(async (command: EngineCommand) => {
+      switch (command.action) {
+        case 'ListDevices':
+          return { type: 'DevicesList', payload: { devices: [] } };
+        case 'SyncStatus':
+          return {
+            type: 'SyncStatus',
+            payload: { status: status({ mode: 'prefs', url: 'https://sync.example' }) },
+          };
+        default:
+          throw new Error(`unexpected command ${command.action}`);
+      }
+    });
+
+    const target = renderWithMenu();
+    await settle();
+
+    chooseMode(target, t('sync-server-mode-full'));
+    button(target, t('sync-server-full-confirm-cancel')).click();
+    await settle();
+
+    const calls = engine.invoke.mock.calls.filter(
+      ([command]) => command.action === 'ConfigureSync'
+    );
+    expect(calls).toHaveLength(0);
+    expect(
+      (target.querySelector('.select-trigger') as HTMLButtonElement).textContent
+    ).toContain(t('sync-server-mode-prefs'));
+    expect(target.textContent).not.toContain(t('sync-server-full-confirm-title'));
+  });
+
+  it('Off renders no mirror row', async () => {
+    engine.invoke.mockImplementation(async (command: EngineCommand) => {
+      switch (command.action) {
+        case 'ListDevices':
+          return { type: 'DevicesList', payload: { devices: [] } };
+        case 'SyncStatus':
+          return {
+            type: 'SyncStatus',
+            payload: {
+              status: status({
+                mode: 'off',
+                layers: [
+                  { key: 'settings', enabled: false, updated_at_ms: 0 },
+                  { key: 'messages', enabled: false, updated_at_ms: 0 },
+                ],
+              }),
+            },
+          };
+        default:
+          throw new Error(`unexpected command ${command.action}`);
+      }
+    });
+
+    const target = render();
+    await settle();
+
+    expect(target.textContent).not.toContain(t('sync-layer-messages'));
+    expect(target.querySelector('.server .layer')).toBeNull();
   });
 });

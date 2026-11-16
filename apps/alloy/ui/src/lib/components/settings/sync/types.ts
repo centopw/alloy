@@ -38,7 +38,7 @@ export interface ThisDeviceView {
   epoch: number | null;
 }
 
-export type SyncMode = 'off' | 'prefs';
+export type SyncMode = 'off' | 'prefs' | 'full';
 
 export type ConnectionTestState = 'idle' | 'running' | 'ok' | 'failed';
 
@@ -54,6 +54,8 @@ export interface ServerView {
   lastSyncMs: number | null;
   lastError: string | null;
   syncing: boolean;
+  /** Layers the last `SyncStatus` reported, so the mirror row can say what it actually holds. */
+  layers: LayerView[];
 }
 
 export interface ConfigureSyncInput {
@@ -78,6 +80,11 @@ export interface LayerView {
   enabled: boolean;
   /** Epoch milliseconds of the last local write to the layer; 0 when it never arrived. */
   updatedAtMs: number;
+  /**
+   * Only the `messages` layer can set this: the published window omits older rows. Absence is not
+   * proof of completeness, so the UI must not claim it.
+   */
+  windowed: boolean;
 }
 
 /** What a successful `RecoverFromPhrase` rebuilt, and the roster it followed. */
