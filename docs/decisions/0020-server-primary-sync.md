@@ -188,7 +188,42 @@ long-lived secrets.
 
 Follow-up this ADR does not cover: hardening local secret storage itself (Android Keystore wrapping,
 issue #74, and a desktop passphrase gate) is a prerequisite for the "stolen locked device" row above
-on platforms without hardware-backed storage. It should be its own ADR.
+on platforms without hardware-backed storage. It is [ADR 0021](0021-tiered-local-secret-storage.md),
+which keeps tier 0 (no prompt) as the default and prices each stronger tier.
+
+## Security posture: strength is negotiable, shape is not
+
+Product rule (maintainer, 2026-11-16): a control that costs too much UX may be relaxed to a weaker
+setting — but relaxing may only reduce **strength**, never change **shape**. Strength is how hard the
+control is to bypass (a passphrase, a phrase length, a pin). Shape is what the adversary can reach at
+all: what the server can read, and who can enrol a device. Shape is fixed by this ADR.
+
+Precedent already in the tree: ADR 0019 dropped the OS keychain as the desktop default because macOS
+re-prompted on every launch and the prompt could not be suppressed; the owner-only file is weaker on
+paper and identical against the threat that mattered (other users, offline disk).
+
+| Control | Default | Relaxed option | What relaxing costs |
+|---|---|---|---|
+| Master key at rest | owner-only file or keychain, hardware wrap where the platform gives it free | no passphrase gate; OS lock alone | a stolen disk image yields already-synced config until revoke + rotate |
+| Recovery | 24-word phrase, opt-in | none — enrol from a surviving device | losing every device loses the config; said once, at setup |
+| Endpoint pin | pin on first connect | warn-and-confirm when the pin changes | a MITM server gains ciphertext and metadata, never plaintext |
+| Device roster | list with last-seen and last-sync | collapsed under Advanced | a forgotten device stays enrolled longer |
+| Remote wipe | best-effort flag | absent | nothing; the device simply keeps its local state |
+| Message mirror | off | opt-in per account | more ciphertext toward the epoch key, so device loss matters more |
+
+Never relaxable, because relaxing them is indistinguishable from deleting the control:
+
+1. the server never holds a decrypting key or plaintext;
+2. connector session material is never uploaded;
+3. enrolment needs an existing device plus a SAS confirmation;
+4. AEAD is bound to `(layer, id, seq, epoch)` — no replay, no relabel;
+5. server-supplied input is bounded before use;
+6. local-only mode keeps working and keeps passing the suite;
+7. revocation rotates the epoch.
+
+Every relaxation is a visible setting whose tradeoff is named in one line beside it, and never a
+silent default. "Less secure" is not a description; *"a stolen disk image can read your saved tags
+and groups until you revoke this device"* is.
 
 ## Alternatives considered
 
