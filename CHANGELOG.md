@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.12 (pre-release)
+
+### Added
+- **Twelve themes with a visual swatch picker.** Settings → Appearance grows from four themes to twelve WCAG-AA verified palettes — adding Nord Frost, Dracula, Catppuccin Mocha, Rosé Pine, Solarized Light, Catppuccin Latte, OLED Abyss, and Tokyo Night alongside Obsidian Dark, Midnight Blue, Warm Paper, and High Contrast — presented as a live colour-swatch grid instead of a plain dropdown.
+- **A network switcher at the top of the sidebar and a four-tab room inspector.** Switch between All, Telegram, Messenger, or individual accounts directly from the sidebar pill bar (with a one-tap `+` button to add an account), and browse room details through dedicated Info, Members, Media, and Files tabs.
+
+### Changed
+- **Settings consolidated from twelve sections into six, with rem-scaled typography and motion tokens.** Related settings are grouped into Account, Appearance, Chat & Composer, Notifications, Privacy & Data, and System & Debug, backed by unified `--alloy-motion-*` easing curves, semantic status tokens, and `rem`-based typography that scales cleanly with user font preferences.
+
+### Fixed
+- **Adding an account on a phone or tablet scrolls cleanly end to end.** The onboarding and add-account sheet previously clipped tall login steps inside a fixed grid cell and a nested settings container, leaving touch users unable to scroll down to submit buttons. The overlay now mounts at the shell root over a flex scroll column with `100dvh` mobile sizing, sticky close controls, safe-area bottom clearance, `touch-action` axis locks, `@media (hover: hover)` guards, and 44px coarse-pointer targets across modals, settings, and panels.
+
 ## 0.4.11 (pre-release)
 
 ### Added
