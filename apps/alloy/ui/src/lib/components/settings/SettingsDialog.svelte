@@ -10,16 +10,10 @@
     Palette,
     Bell,
     SlidersHorizontal,
-    Keyboard as KeyboardIcon,
-    PanelLeft,
-    MessageSquare,
     Info,
-    Tag,
-    Link,
-    Code,
-    ShieldCheck as PermissionsIcon
   } from '$lib/icons';
   import { pushBack } from '$lib/platform/backstack';
+  import { handleModalTabKey } from '$lib/platform/focusTrap';
   import { viewport } from '$lib/stores/viewport.svelte';
   import {
     capabilities,
@@ -29,6 +23,7 @@
     type RawSettingsGroup,
     type SettingsSectionId,
   } from '$lib/platform/capabilities';
+  import { SettingGroup } from './controls';
 import Account from './sections/Account.svelte';
 import Networks from './sections/Networks.svelte';
 import Appearance from './sections/Appearance.svelte';
@@ -55,30 +50,53 @@ import Debug from './sections/Debug.svelte';
 
   type NavIcon = Component<{ size?: number; strokeWidth?: number; class?: string }>;
 
-  const NAV_ICONS: Record<SettingsSectionId, { icon: NavIcon; phoneIcon?: NavIcon }> = {
+  const CANONICAL_SECTIONS: ReadonlySet<SettingsSectionId> = new Set([
+    'account',
+    'security-privacy',
+    'appearance',
+    'notifications',
+    'preferences',
+    'help-about',
+  ]);
+
+  const NAV_ICONS: Partial<Record<SettingsSectionId, { icon: NavIcon; phoneIcon?: NavIcon }>> = {
     account: { icon: User },
-    networks: { icon: Link },
     'security-privacy': { icon: ShieldCheck },
     appearance: { icon: Palette },
     notifications: { icon: Bell },
-    permissions: { icon: PermissionsIcon },
     preferences: { icon: SlidersHorizontal },
-    keyboard: { icon: KeyboardIcon },
-    sidebar: { icon: PanelLeft, phoneIcon: MessageSquare },
-    tags: { icon: Tag },
-    debug: { icon: Code },
     'help-about': { icon: Info },
   };
 
+  /** Maps legacy section IDs to their consolidated parent so deep links continue to work. */
+  function normalizeSection(id: SettingsSectionId): SettingsSectionId {
+    switch (id) {
+      case 'networks':
+        return 'account';
+      case 'sidebar':
+        return 'appearance';
+      case 'permissions':
+        return 'notifications';
+      case 'tags':
+        return 'preferences';
+      case 'keyboard':
+      case 'debug':
+        return 'help-about';
+      default:
+        return id;
+    }
+  }
+
   const GROUPS: RawSettingsGroup<NavIcon>[] = SETTINGS_GROUPS_DEF.map((group) => ({
     ...group,
-    items: group.items.map((item) => ({
-      ...item,
-      label: item.id === 'debug' ? t('debug-title') : item.label,
-      icon: NAV_ICONS[item.id].icon,
-      phoneIcon: NAV_ICONS[item.id].phoneIcon,
-    })),
-  }));
+    items: group.items
+      .filter((item) => CANONICAL_SECTIONS.has(item.id))
+      .map((item) => ({
+        ...item,
+        icon: NAV_ICONS[item.id]?.icon,
+        phoneIcon: NAV_ICONS[item.id]?.phoneIcon,
+      })),
+  })).filter((group) => group.items.length > 0);
 
   const caps = $derived(capabilities(currentEnv(viewport.isPhone)));
   const visibleGroups = $derived(filterSettingsGroups(GROUPS, caps));
@@ -98,7 +116,7 @@ import Debug from './sections/Debug.svelte';
   let mobileView = $state<'nav' | 'content'>('nav');
 
   function openSection(id: Section) {
-    section = id;
+    section = normalizeSection(id);
     mobileView = 'content';
   }
 
@@ -106,7 +124,8 @@ import Debug from './sections/Debug.svelte';
   $effect(() => {
     if (!open) return;
     // Opening on a specific page goes straight to it (on phones too); otherwise start at the list.
-    const target = untrack(() => initialSection);
+    const rawTarget = untrack(() => initialSection);
+    const target = rawTarget ? normalizeSection(rawTarget) : undefined;
     if (target && untrack(() => visibleSections).some((item) => item.id === target)) {
       section = target;
       mobileView = 'content';
@@ -120,9 +139,6 @@ import Debug from './sections/Debug.svelte';
     return pushBack(() => (mobileView = 'nav'));
   });
   let panel: HTMLElement | undefined = $state();
-
-  const FOCUSABLE =
-    'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
   // Move focus into the dialog on open and return it to the opener on close.
   $effect(() => {
@@ -142,33 +158,13 @@ import Debug from './sections/Debug.svelte';
         onclose();
         return;
       }
-      if (e.key === 'Tab') trapFocus(e);
+      if (e.key === 'Tab' && handleModalTabKey(e, panel, document.activeElement)) {
+        e.preventDefault();
+      }
     }
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   });
-
-  function trapFocus(e: KeyboardEvent) {
-    if (!panel) return;
-    const items = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE));
-    if (items.length === 0) {
-      e.preventDefault();
-      return;
-    }
-    const first = items[0];
-    const last = items[items.length - 1];
-    const active = document.activeElement;
-    const outside = !panel.contains(active);
-    if (e.shiftKey) {
-      if (outside || active === first) {
-        e.preventDefault();
-        last.focus();
-      }
-    } else if (outside || active === last) {
-      e.preventDefault();
-      first.focus();
-    }
-  }
 </script>
 
 {#if open}
@@ -234,28 +230,26 @@ import Debug from './sections/Debug.svelte';
           <div class="column">
             {#if section === 'account'}
               <Account {onclose} />
-            {:else if section === 'networks'}
               <Networks />
+            {:else if section === 'security-privacy'}
+              <SecurityPrivacy />
             {:else if section === 'appearance'}
               <Appearance />
+              <SidebarPrefs />
             {:else if section === 'notifications'}
-              <Notifications onOpenPermissions={() => openSection('permissions')} />
-            {:else if section === 'permissions'}
+              <Notifications onOpenPermissions={() => openSection('notifications')} />
               <Permissions />
             {:else if section === 'preferences'}
               <Preferences />
-            {:else if section === 'keyboard'}
-              <Keyboard />
-            {:else if section === 'sidebar'}
-              <SidebarPrefs />
-            {:else if section === 'tags'}
-              <Tags />
-            {:else if section === 'security-privacy'}
-              <SecurityPrivacy />
-            {:else if section === 'debug'}
-              <Debug />
+              <SettingGroup title={t('sidebar-tags')}>
+                <Tags />
+              </SettingGroup>
             {:else}
+              {#if caps.keyboardShortcuts}
+                <Keyboard />
+              {/if}
               <HelpAbout />
+              <Debug />
             {/if}
           </div>
         </div>
@@ -562,6 +556,9 @@ import Debug from './sections/Debug.svelte';
      width is 720px and the header band's 24px gutter starts every title, heading and row on the
      same line. */
   .column {
+    display: flex;
+    flex-direction: column;
+    gap: var(--alloy-spacing-scale-6);
     max-width: 768px;
     margin: 0;
     padding: var(--alloy-spacing-scale-6);

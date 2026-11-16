@@ -8,8 +8,9 @@
     removeQuickReaction,
   } from '$lib/content/quickReactions';
   import { emojiPicker } from '$lib/stores/emojiPicker.svelte';
-
   import { t } from '$lib/i18n';
+  import SettingRow from './SettingRow.svelte';
+
   interface Props {
     value: readonly string[];
     onchange: (value: readonly string[]) => void;
@@ -27,13 +28,11 @@
   }
 </script>
 
-<div class="setting-row">
-  <div class="text">
-    <span class="label">{t('setting-quick-reactions-quick-reactions')}</span>
-    <span class="description">
-      {t('setting-quick-reactions-shown-when-you-hover-over-a-message-or-press-and')} {MAX_QUICK_REACTIONS}.
-    </span>
-  </div>
+<SettingRow
+  label={t('setting-quick-reactions-quick-reactions')}
+  description={`${t('setting-quick-reactions-shown-when-you-hover-over-a-message-or-press-and')} ${MAX_QUICK_REACTIONS}.`}
+  stacked
+>
   <div class="chips" role="group" aria-label={t('setting-quick-reactions-quick-reactions')}>
     {#each value as emoji (emoji)}
       <button
@@ -63,36 +62,9 @@
       <button type="button" class="reset" onclick={() => onchange(DEFAULT_QUICK_REACTIONS)}>{t('setting-quick-reactions-reset')}</button>
     {/if}
   </div>
-</div>
+</SettingRow>
 
 <style>
-  .setting-row {
-    display: flex;
-    flex-direction: column;
-    gap: var(--alloy-spacing-scale-2);
-    min-height: var(--alloy-layout-control-height);
-    padding: var(--alloy-spacing-scale-2) 0;
-    border-top: 1px solid var(--alloy-color-border-subtle);
-  }
-
-  .text {
-    display: flex;
-    flex-direction: column;
-    gap: var(--alloy-spacing-scale-1);
-    min-width: 0;
-  }
-
-  .label {
-    font-size: var(--alloy-font-size-row);
-    font-weight: var(--alloy-typography-weight-medium);
-    color: var(--alloy-color-text-primary);
-  }
-
-  .description {
-    font-size: var(--alloy-font-size-preview);
-    color: var(--alloy-color-text-muted);
-  }
-
   .chips {
     display: flex;
     flex-wrap: wrap;

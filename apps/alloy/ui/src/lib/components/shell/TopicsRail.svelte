@@ -1,9 +1,14 @@
 <script lang="ts">
   import type { RoomSummary } from '$lib/generated/protocol';
+  import { Bell, BellOff, CheckCheck, Copy, Mail } from '$lib/icons';
+  import { contextmenu } from '$lib/platform/contextmenu';
+  import type { MenuItem } from '$lib/stores/contextmenu.svelte';
+  import { muteRoom, unmuteRoom } from '$lib/stores/muteTimer.svelte';
   import { Avatar, Badge } from '../common';
   import { isRoomMuted, roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
   import { topicsOf } from './forumTopics';
+  import { copyItems, notifyItems } from './roomMenus';
 
   import { t } from '$lib/i18n';
   interface Props {
@@ -79,6 +84,50 @@
     e.preventDefault();
     rows[to]?.focus();
   }
+
+  /** Context and long-press actions for a forum topic: read state, mute, notifications and ID copy. */
+  function topicItems(topic: RoomSummary): MenuItem[] {
+    const unread = roomsStore.unreadOf(topic);
+    const muted = isRoomMuted(topic);
+    return [
+      {
+        id: 'mark-unread',
+        label: unread > 0 || topic.marked_unread ? t('common-mark-as-read') : t('sidebar-mark-as-unread'),
+        icon: unread > 0 || topic.marked_unread ? CheckCheck : Mail,
+        onselect: () => {
+          if (unread > 0) {
+            roomsStore.markRead(topic.id);
+            if (topic.marked_unread) void roomsStore.setMarkedUnread(topic.id, false);
+          } else {
+            void roomsStore.setMarkedUnread(topic.id, !topic.marked_unread);
+          }
+        },
+      },
+      {
+        id: 'mute',
+        label: muted ? t('room-swipe-unmute') : t('room-swipe-mute'),
+        icon: muted ? Bell : BellOff,
+        onselect: () => void (muted ? unmuteRoom(topic.id) : muteRoom(topic.id, null)),
+      },
+      { separator: true },
+      {
+        id: 'notifications',
+        label: t('sidebar-notifications'),
+        icon: Bell,
+        submenu: {
+          items: () => notifyItems(topic.id),
+        },
+      },
+      {
+        id: 'copy',
+        label: t('common-copy'),
+        icon: Copy,
+        submenu: {
+          items: copyItems(topic),
+        },
+      },
+    ];
+  }
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
@@ -107,8 +156,13 @@
             class:unread={unread > 0 && !muted}
             aria-current={current ? 'true' : undefined}
             aria-label={labelOf(topic, unread)}
+            aria-keyshortcuts="Shift+F10"
             title={name}
             data-topic-id={topic.id}
+            use:contextmenu={{
+              items: () => topicItems(topic),
+              options: () => ({ ariaLabel: t('sidebar-room-actions', { room: name }) }),
+            }}
             onclick={() => onpick(topic.id)}
           >
             <Avatar userId={topic.id} displayName={name} size={phone ? 24 : 32} />
@@ -176,7 +230,7 @@
     min-height: 72px;
     padding: var(--alloy-spacing-scale-1);
     border: 0;
-    border-radius: calc(var(--alloy-radii-2xl) + var(--alloy-spacing-scale-1)); /* 20px */
+    border-radius: var(--alloy-bubble-radius);
     background: transparent;
     color: var(--alloy-color-text-secondary);
     font: inherit;

@@ -271,4 +271,10 @@
       opacity: 0.4;
     }
   }
+
+  :global(:root[data-reduced-motion='true']) .bar.indeterminate .bar-fill {
+    width: 100% !important;
+    animation: none;
+    opacity: 0.4;
+  }
 </style>

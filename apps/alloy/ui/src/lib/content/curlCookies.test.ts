@@ -37,6 +37,48 @@ describe('cookiesFromPaste', () => {
     expect(cookiesFromPaste('sb=a=b==; fr=1')).toEqual({ sb: 'a=b==', fr: '1' });
   });
 
+  it('reads a Cookie-Editor / EditThisCookie JSON array export', () => {
+    const paste = JSON.stringify([
+      {
+        domain: '.messenger.com',
+        expirationDate: 1735689600,
+        hostOnly: false,
+        httpOnly: true,
+        name: 'datr',
+        path: '/',
+        sameSite: 'no_restriction',
+        secure: true,
+        value: 'abc-DEF_1',
+      },
+      { name: 'c_user', value: '100001234' },
+      { name: 'xs', value: '12%3Atoken%3A2%3A1700000000' },
+      null,
+      { name: 'empty', value: '' },
+      { name: 123, value: 'ignored' },
+    ]);
+    expect(cookiesFromPaste(`  \n${paste}\n  `)).toEqual(expected);
+  });
+
+  it('reads a plain JSON object of cookie name to value', () => {
+    const paste = JSON.stringify({
+      datr: 'abc-DEF_1',
+      c_user: '100001234',
+      xs: '12%3Atoken%3A2%3A1700000000',
+      ignoredNumber: 42,
+      empty: '',
+    });
+    expect(cookiesFromPaste(paste)).toEqual(expected);
+  });
+
+  it('falls back when text starting with [ or { is not valid JSON', () => {
+    expect(cookiesFromPaste('{not json; datr=abc-DEF_1; c_user=100001234; xs=12%3Atoken%3A2%3A1700000000')).toEqual(
+      expected,
+    );
+    expect(cookiesFromPaste('[not valid json')).toEqual({});
+    expect(cookiesFromPaste('[]')).toEqual({});
+    expect(cookiesFromPaste('{}')).toEqual({});
+  });
+
   it('finds nothing in a request without cookies or in prose', () => {
     expect(cookiesFromPaste("curl 'https://example.com/?a=b;c=d' -H 'accept: */*'")).toEqual({});
     expect(cookiesFromPaste('hello there')).toEqual({});

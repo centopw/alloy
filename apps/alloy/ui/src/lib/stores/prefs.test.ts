@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const invoke = vi.fn();
@@ -15,9 +17,11 @@ import {
   PREFS_ENGINE_KEY,
   PREFS_STORAGE_KEY,
   PrefsStore,
+  applyFontScale,
   isValidPref,
   registerFlushHandler,
   sanitizePrefs,
+  type FontScale,
   type PrefsStorage,
 } from './prefs.svelte.js';
 
@@ -398,5 +402,50 @@ describe('quickReactions', () => {
     expect(storage.data.has(PREFS_STORAGE_KEY)).toBe(false);
     store.set('quickReactions', ['\u{1F525}']);
     expect(store.quickReactions).toEqual(['\u{1F525}']);
+  });
+});
+
+describe('fontScale and rem typography tokens', () => {
+  afterEach(() => {
+    document.documentElement.style.fontSize = '';
+    document.documentElement.style.removeProperty('--alloy-font-scale');
+  });
+
+  it('updates root font-size and --alloy-font-scale in applyFontScale', () => {
+    const cases: Array<[FontScale, string, string]> = [
+      [90, '90%', '0.9'],
+      [100, '100%', '1'],
+      [110, '110%', '1.1'],
+      [120, '120%', '1.2'],
+      [130, '130%', '1.3'],
+    ];
+    for (const [scale, expectedSize, expectedFactor] of cases) {
+      applyFontScale(scale);
+      expect(document.documentElement.style.fontSize).toBe(expectedSize);
+      expect(document.documentElement.style.getPropertyValue('--alloy-font-scale')).toBe(expectedFactor);
+    }
+  });
+
+  it('defines typography size tokens in rem in tokens.css so fontScale scales themed UI', () => {
+    const tokensCss = readFileSync(resolve(process.cwd(), 'src/lib/tokens.css'), 'utf8');
+    const themeImportIndex = tokensCss.indexOf('@import "./theme/generated/themes.css";');
+    expect(themeImportIndex).toBeGreaterThanOrEqual(0);
+
+    const unthemedBlockMatch = /:root:not\(\[data-theme\]\)\s*\{([\s\S]*?)\n\}/.exec(tokensCss);
+    expect(unthemedBlockMatch).not.toBeNull();
+
+    const themedOverrideMatch = /:root,\s*:root\[data-theme\]\s*\{([\s\S]*?)\n\}/.exec(tokensCss);
+    expect(themedOverrideMatch).not.toBeNull();
+    expect(themedOverrideMatch!.index).toBeGreaterThan(themeImportIndex);
+
+    expect(unthemedBlockMatch![1]).toMatch(/--alloy-typography-size-base:\s*0\.875rem;/);
+    expect(themedOverrideMatch![1]).toMatch(/--alloy-typography-size-base:\s*0\.875rem;/);
+    expect(themedOverrideMatch![1]).toMatch(/--alloy-font-size-row:\s*0\.8125rem;/);
+
+    const typographyDeclarations = tokensCss.match(/--alloy-(?:typography-size|font-size)-[a-z-]+:\s*[^;]+;/g) ?? [];
+    expect(typographyDeclarations.length).toBeGreaterThanOrEqual(16);
+    for (const declaration of typographyDeclarations) {
+      expect(declaration).toMatch(/:\s*\d+(?:\.\d+)?rem;$/);
+    }
   });
 });

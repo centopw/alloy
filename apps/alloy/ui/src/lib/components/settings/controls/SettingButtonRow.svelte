@@ -1,5 +1,6 @@
 <script lang="ts">
   import Button from '../../common/Button.svelte';
+  import SettingRow from './SettingRow.svelte';
 
   interface Props {
     label: string;
@@ -13,53 +14,14 @@
   let { label, description, buttonLabel, onclick, danger = false, busy = false }: Props = $props();
 </script>
 
-<div class="setting-row" aria-busy={busy || undefined}>
-  <div class="text">
-    <span class="label">{label}</span>
-    {#if description}
-      <span class="description">{description}</span>
-    {/if}
-  </div>
-  <Button variant={danger ? 'danger' : 'ghost'} disabled={busy} {onclick}>
+<SettingRow {label} {description} {busy}>
+  <Button variant={danger ? 'danger' : 'ghost'} disabled={busy} {onclick} class="setting-button">
     {buttonLabel}
   </Button>
-</div>
+</SettingRow>
 
 <style>
-  .setting-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--alloy-spacing-scale-4);
-    min-height: var(--alloy-layout-control-height);
-    padding: var(--alloy-spacing-scale-2) 0;
-    border-top: 1px solid var(--alloy-color-border-subtle);
-  }
-
-  .setting-row:first-child {
-    border-top: none;
-  }
-
-  .text {
-    display: flex;
-    flex: 1;
-    flex-direction: column;
-    gap: var(--alloy-spacing-scale-1);
-    min-width: 0;
-  }
-
-  .label {
-    font-size: var(--alloy-font-size-row);
-    font-weight: var(--alloy-typography-weight-medium);
-    color: var(--alloy-color-text-primary);
-  }
-
-  .description {
-    font-size: var(--alloy-font-size-preview);
-    color: var(--alloy-color-text-muted);
-  }
-
-  .setting-row :global(.alloy-button) {
+  :global(.setting-button) {
     flex-shrink: 0;
   }
 </style>

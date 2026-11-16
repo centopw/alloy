@@ -16,16 +16,15 @@
     items: StagedPicture[];
     /** Sends what is staged. An empty caption means the files go out on their own. */
     onsend: (caption: string) => void;
-    /** The composer draft, which becomes the caption so the two never disagree about it. */
-    initialCaption?: string;
+    /** Shared caption bound to the composer draft so edits stay in sync across open/close. */
+    caption?: string;
     /** Back to the composer: the files stay staged, nothing is sent. */
     onclose: () => void;
     /** Takes one file out of the batch. */
     onremove: (path: string) => void;
   }
-  let { open, items, onsend, onclose, onremove, initialCaption = '' }: Props = $props();
+  let { open, items, onsend, onclose, onremove, caption = $bindable('') }: Props = $props();
 
-  let caption = $state('');
   let requested = $state(0);
   let area: HTMLTextAreaElement | undefined = $state();
   let emojiButton: HTMLButtonElement | undefined = $state();
@@ -35,14 +34,11 @@
   const current = $derived(items[shown]);
   const multiple = $derived(items.length > 1);
 
-  // A fresh batch starts on the first file with the composer draft as its caption — there is one
-  // caption for a send, not two that disagree — and the keyboard lands on it so a person who dropped
-  // a picture can type over it without reaching for the mouse.
+  // Opening the preview starts on the first file and moves focus into the shared caption field.
   let wasOpen = false;
   $effect(() => {
     if (open && !wasOpen) {
       requested = 0;
-      caption = initialCaption;
       void tick().then(() => area?.focus());
     }
     wasOpen = open;

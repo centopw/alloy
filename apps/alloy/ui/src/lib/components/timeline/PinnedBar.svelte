@@ -3,10 +3,12 @@
   import { timelineStore } from '$lib/stores/timeline.svelte';
   import { membersStore } from '$lib/stores/members.svelte';
   import { displayNameFor } from '$lib/platform/names';
+  import { contextmenu } from '$lib/platform/contextmenu';
   import { getUserColorValue } from '$lib/identity/userColor';
+  import type { MenuItem } from '$lib/stores/contextmenu.svelte';
   import { messagePreview } from './a11y';
   import Icon from '$lib/icons/Icon.svelte';
-  import { Pin, X } from '$lib/icons';
+  import { Pin, PinOff, X } from '$lib/icons';
   import { t } from '$lib/i18n';
 
   interface Props {
@@ -20,6 +22,9 @@
   const pinned = $derived(timelineStore.pinned);
   /** Which pinned message the bar shows: 0 is the newest, each click moves one older and wraps. */
   let cursor = $state(0);
+  /** Local-only dismissal for the active room so X hides the bar without unpinning remotely. */
+  let dismissedForRoom = $state<string | null>(null);
+  const activeRoom = $derived(timelineStore.roomId ?? roomId);
   // A new room, or a pin added or removed, starts over at the newest pin instead of pointing past the end.
   $effect(() => {
     void roomId;
@@ -46,14 +51,25 @@
     void timelineStore.jumpToEvent(eventId);
   }
 
+  function dismiss() {
+    dismissedForRoom = timelineStore.roomId ?? roomId;
+  }
+
   function unpin() {
     if (!current) return;
     void timelineStore.setPinned(current, false);
   }
+
+  function menuItems(): MenuItem[] {
+    if (!current) return [];
+    return [
+      { id: 'unpin', label: t('pinned-bar-unpin'), icon: PinOff, onselect: unpin },
+    ];
+  }
 </script>
 
-{#if current}
-  <div class="pinned-bar" style="--pin-color: {userColor};" role="group" aria-label={t('pinned-bar-pinned-messages')}>
+{#if current && dismissedForRoom !== activeRoom}
+  <div class="pinned-bar" style="--pin-color: {userColor};" role="group" aria-label={t('pinned-bar-pinned-messages')} use:contextmenu={menuItems}>
     <span class="pin-glyph" aria-hidden="true"><Icon icon={Pin} size={16} /></span>
     <button
       type="button"
@@ -67,7 +83,7 @@
     {#if pinned.length > 1}
       <span class="counter" aria-hidden="true">{t('pinned-bar-position', { position, count: pinned.length })}</span>
     {/if}
-    <button type="button" class="unpin" onclick={unpin} aria-label={t('pinned-bar-unpin')} data-tooltip={t('pinned-bar-unpin')}>
+    <button type="button" class="unpin" onclick={dismiss} aria-label={t('common-close')} data-tooltip={t('common-close')}>
       <Icon icon={X} size={16} />
     </button>
   </div>

@@ -141,6 +141,13 @@
     appearance: none;
     -webkit-appearance: none;
     outline: none;
+    transition: border-color var(--alloy-motion-duration-fast) ease;
+  }
+
+  @media (hover: hover) {
+    .select-trigger:not(:disabled):not(:focus):hover {
+      border-color: var(--alloy-color-accent-primary);
+    }
   }
 
   .select-trigger:focus-visible {

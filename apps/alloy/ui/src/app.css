@@ -49,7 +49,7 @@
   --muted-foreground: var(--alloy-color-text-secondary);
   --accent: var(--alloy-color-surface-hover);
   --accent-foreground: var(--alloy-color-text-primary);
-  --destructive: var(--alloy-color-status-error);
+  --destructive: var(--alloy-danger-fill);
   --destructive-foreground: var(--alloy-color-text-on-accent);
 
   --border: var(--alloy-color-border-subtle);
@@ -79,10 +79,10 @@
   --radius-sm: var(--alloy-radii-sm);
   --radius-md: var(--alloy-radii-md);
   --radius-lg: var(--alloy-radii-lg);
-  --radius-xl: var(--alloy-radii-lg);
-  --radius-2xl: var(--alloy-radii-lg);
-  --radius-3xl: var(--alloy-radii-lg);
-  --radius-4xl: var(--alloy-radii-lg);
+  --radius-xl: var(--alloy-radii-xl);
+  --radius-2xl: var(--alloy-radii-2xl);
+  --radius-3xl: var(--alloy-radii-2xl);
+  --radius-4xl: var(--alloy-radii-2xl);
 
   --font-sans: var(--alloy-typography-font-family-sans);
   --font-mono: var(--alloy-typography-font-family-mono);

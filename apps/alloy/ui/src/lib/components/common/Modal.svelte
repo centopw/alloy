@@ -4,6 +4,7 @@
   import Icon from '$lib/icons/Icon.svelte';
   import { X } from '$lib/icons';
   import { pushBack } from '$lib/platform/backstack';
+  import { handleModalTabKey } from '$lib/platform/focusTrap';
   import { portal } from '$lib/platform/portal';
 
   import { t } from '$lib/i18n';
@@ -86,21 +87,8 @@
     if (e.key === 'Escape') {
       e.stopPropagation();
       onclose();
-    } else if (e.key === 'Tab' && dialog) {
-      // Keep focus inside the dialog.
-      const f = dialog.querySelectorAll<HTMLElement>(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-      );
-      if (f.length === 0) return;
-      const first = f[0];
-      const last = f[f.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
+    } else if (handleModalTabKey(e, dialog, document.activeElement)) {
+      e.preventDefault();
     }
   }
 </script>
@@ -121,6 +109,7 @@
       tabindex="-1"
       style="--alloy-modal-width: min({width}, 94vw);"
       style:transform={dragY ? `translateY(${dragY}px)` : undefined}
+      style:transition={dragY === 0 ? 'transform var(--alloy-motion-duration-normal) ease-out' : 'none'}
       bind:this={dialog}
       onclick={(e) => e.stopPropagation()}
       onkeydown={onKey}
@@ -166,6 +155,7 @@
     place-items: center;
     /* Above Settings (60) so a dialog opened from it is visible at once; below the media viewer (70). */
     z-index: 65;
+    animation: alloy-fade-in var(--alloy-motion-duration-normal) ease-out backwards;
   }
   .dialog {
     width: var(--alloy-modal-width);
@@ -180,6 +170,7 @@
     border-radius: var(--alloy-glass-radius-shell);
     box-shadow: var(--alloy-glass-shadow), var(--alloy-glass-highlight);
     outline: 0;
+    animation: alloy-dialog-in var(--alloy-motion-duration-normal) var(--alloy-motion-easing-enter, cubic-bezier(0.16, 1, 0.3, 1)) backwards;
   }
   header {
     display: flex;
@@ -204,8 +195,10 @@
     display: grid;
     place-items: center;
   }
-  header button:hover {
-    background: var(--alloy-glass-control);
+  @media (hover: hover) {
+    header button:hover {
+      background: var(--alloy-glass-control);
+    }
   }
   /* Controls a dialog adds to its own header; they inherit the round button styling above. */
   .header-side {
@@ -234,7 +227,6 @@
   @media (max-width: 899px) {
     .backdrop {
       place-items: end stretch;
-      animation: alloy-fade-in var(--alloy-motion-duration-normal) ease-out backwards;
     }
     .dialog {
       width: 100%;
@@ -272,6 +264,17 @@
     }
     to {
       opacity: 1;
+    }
+  }
+
+  @keyframes alloy-dialog-in {
+    from {
+      opacity: 0;
+      transform: scale(0.96) translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
     }
   }
 

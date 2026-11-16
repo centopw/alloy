@@ -138,7 +138,7 @@
 <style>
   .host {
     position: fixed;
-    z-index: 1000;
+    z-index: var(--alloy-z-popover, 100);
     box-sizing: border-box;
     max-height: calc(100vh - 2 * var(--alloy-space-2));
     overflow: auto;
@@ -180,7 +180,7 @@
   .scrim {
     position: fixed;
     inset: 0;
-    z-index: 999;
+    z-index: var(--alloy-z-popover, 100);
     padding: 0;
     border: none;
     background: var(--alloy-color-scrim);

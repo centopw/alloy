@@ -21,16 +21,17 @@
 
   let dragOffset = $state(0);
   let dragStartY = 0;
-  let dragging = false;
+  let dragging = $state(false);
   let searchFocused = $state(false);
   let searching = $state(false);
 
   let returnFocus: HTMLElement | null = null;
   let sheetEl: HTMLElement | null = $state(null);
 
-  /** The phone sheet declares aria-modal, so Tab must stay inside it (A11Y-16). */
+  /** Keep Tab inside the open picker dialog (both phone sheet and desktop popover) (A11Y-16). */
   function onSheetKey(e: KeyboardEvent) {
-    if (handleModalTabKey(e, sheetEl, document.activeElement)) e.preventDefault();
+    const root = (e.currentTarget as HTMLElement | null) ?? sheetEl;
+    if (handleModalTabKey(e, root, document.activeElement)) e.preventDefault();
   }
 
   const popoverPos = $derived.by(() => {
@@ -68,6 +69,7 @@
       // Escape belongs to an open skin-tone menu first; ContextMenu handles it.
       if (e.key === 'Escape' && !contextMenu.isOpen) {
         e.preventDefault();
+        e.stopPropagation();
         emojiPicker.close();
       }
     };
@@ -87,6 +89,8 @@
     if (!emojiPicker.isOpen) {
       searchFocused = false;
       searching = false;
+      dragging = false;
+      dragOffset = 0;
     }
   });
 
@@ -139,6 +143,7 @@
     <div
       class="sheet"
       class:expanded={isExpanded}
+      class:dragging={dragging}
       role="dialog"
       aria-modal="true"
       aria-label={t('emoji-picker-host-emoji-picker')}
@@ -173,7 +178,10 @@
       class="popover"
       role="dialog"
       aria-label={t('emoji-picker-host-emoji-picker')}
+      tabindex="-1"
       use:portal
+      bind:this={sheetEl}
+      onkeydown={onSheetKey}
       style:left="{popoverPos.x}px"
       style:top="{popoverPos.y}px"
     >
@@ -238,6 +246,10 @@
     overflow: hidden;
     transition: transform var(--alloy-motion-duration-fast) var(--alloy-motion-easing-ease),
       height var(--alloy-motion-duration-fast) var(--alloy-motion-easing-ease);
+  }
+
+  .sheet.dragging {
+    transition: none;
   }
 
   .sheet.expanded {

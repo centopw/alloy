@@ -57,6 +57,10 @@
     color: var(--alloy-color-text-secondary);
     font: inherit;
     cursor: pointer;
+    transition:
+      background-color var(--alloy-motion-duration-fast) ease,
+      color var(--alloy-motion-duration-fast) ease,
+      transform var(--alloy-motion-duration-instant, 75ms) ease;
   }
 
   .emoji {
@@ -68,9 +72,15 @@
     background: var(--alloy-color-accent-subtle);
   }
 
-  button:hover {
-    background: var(--alloy-color-surface-hover);
-    color: var(--alloy-color-text-primary);
+  @media (hover: hover) {
+    button:hover {
+      background: var(--alloy-color-surface-hover);
+      color: var(--alloy-color-text-primary);
+    }
+  }
+
+  button:active:not(:disabled) {
+    transform: scale(0.95);
   }
 
   button:focus-visible {

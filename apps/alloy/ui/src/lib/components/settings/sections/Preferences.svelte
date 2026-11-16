@@ -59,12 +59,6 @@
 
   <SettingGroup title={t('preferences-timeline')}>
     <SettingToggle
-      label={t('preferences-show-typing-notifications')}
-      description="Let others see when you are typing, and show when they are typing."
-      checked={prefs.showTyping}
-      onchange={(v) => prefs.set('showTyping', v)}
-    />
-    <SettingToggle
       label={t('preferences-show-a-placeholder-for-removed-messages')}
       checked={prefs.showRemovedPlaceholder}
       onchange={(v) => prefs.set('showRemovedPlaceholder', v)}

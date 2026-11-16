@@ -2,6 +2,7 @@
   import { Avatar, Button, Modal, TextField } from '../common';
   import { Search } from '$lib/icons';
   import { forwardStore } from '$lib/stores/forward.svelte';
+  import { contextMenu } from '$lib/stores/contextmenu.svelte';
   import { resolveAvatar } from '$lib/stores/avatars.svelte';
   import { roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
 
@@ -34,7 +35,7 @@
 </script>
 
 <!-- A pressed Send button turns disabled and drops focus, so Escape is also read at the window. -->
-<svelte:window onkeydown={(e) => forwardStore.open && e.key === 'Escape' && forwardStore.close()} />
+<svelte:window onkeydown={(e) => forwardStore.open && !contextMenu.isOpen && e.key === 'Escape' && forwardStore.close()} />
 
 <Modal
   open={forwardStore.open}

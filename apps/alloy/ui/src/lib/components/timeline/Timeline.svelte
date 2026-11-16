@@ -208,6 +208,7 @@
       unseen = 0;
       mentionIds = [];
       cancelAnnouncements();
+      clearArrivals();
       // One Timeline serves every room: forget the previous room's rows so the next rows count as an opening.
       anchors = null;
       sticky = false;
@@ -217,6 +218,7 @@
     return () =>
       untrack(() => {
         cancelAnnouncements();
+        clearArrivals();
         void timelineStore.close();
       });
   });
@@ -240,6 +242,16 @@
   // opened keeps the view on the newest message. A scroll-to-bottom aimed at an index goes stale when rows are
   // inserted above it, so it is re-aimed at the current last row on every change while this is set.
   let sticky = false;
+  /** Newly arrived row ids highlighted briefly on entry, cleared after their entrance animation. */
+  let arrivedIds = $state<Set<string>>(new Set());
+  const arrivedTimers = new Set<ReturnType<typeof setTimeout>>();
+
+  function clearArrivals(): void {
+    for (const timer of arrivedTimers) clearTimeout(timer);
+    arrivedTimers.clear();
+    if (arrivedIds.size > 0) arrivedIds = new Set();
+  }
+
   /** Any wheel, touch or pointer press on the list: the user is in charge of the scroll position from here. */
   function onUserScroll() {
     sticky = false;
@@ -253,6 +265,22 @@
       // A new message from the signed-in user jumps to the bottom when that preference is on, even if the user had scrolled up.
       const appended = change.arrived.length > 0;
       const ownSend = appended && change.arrived[change.arrived.length - 1]?.is_own === true && prefs.jumpToBottomOnSend;
+      if (!opening && change.arrived.length > 0 && change.arrived.length <= 5 && (atBottom || ownSend)) {
+        const added = change.arrived.map((item) => item.internal_id);
+        const next = new Set(arrivedIds);
+        for (const id of added) next.add(id);
+        arrivedIds = next;
+        const timer = setTimeout(() => {
+          arrivedTimers.delete(timer);
+          const remaining = new Set(arrivedIds);
+          let changed = false;
+          for (const id of added) {
+            if (remaining.delete(id)) changed = true;
+          }
+          if (changed) arrivedIds = remaining;
+        }, 220);
+        arrivedTimers.add(timer);
+      }
       if (change.prepended) {
         shift = true;
         void tick().then(() => requestAnimationFrame(() => (shift = false)));
@@ -595,6 +623,7 @@
               prev={index > 0 ? rows[index - 1] : null}
               album={albums.leads.get(item.internal_id) ?? null}
               albumHidden={albums.hidden.has(item.internal_id)}
+              arrived={arrivedIds.has(item.internal_id)}
               cursorable
               cursorIndex={index}
               cursorPosition={cursorPositions.get(index) ?? null}
@@ -755,6 +784,25 @@
     place-items: center;
     cursor: pointer;
     box-shadow: var(--alloy-glass-shadow-soft), var(--alloy-glass-highlight);
+    animation: alloy-fab-in var(--alloy-motion-duration-fast) var(--alloy-motion-easing-spring, ease-out) backwards;
+  }
+  @keyframes alloy-fab-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px) scale(0.9);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .fab {
+      animation: none;
+    }
+  }
+  :global(:root[data-reduced-motion='true']) .fab {
+    animation: none;
   }
   .badge {
     position: absolute;

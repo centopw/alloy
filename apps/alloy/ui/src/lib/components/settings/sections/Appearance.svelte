@@ -5,13 +5,15 @@
     ChatBackground,
     SettingGroup,
     SettingRadioCards,
+    SettingRow,
     SettingSelect,
     SettingToggle,
   } from '$lib/components/settings/controls';
   import { prefs, type FontScale, type MessageLayout, type TimeFormat } from '$lib/stores/prefs.svelte';
   import { roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
+  import themesManifest from '$lib/theme/generated/themes.json';
   import { themeStore } from '$lib/theme/theme.svelte';
-  import type { Density } from '$lib/theme/theme.svelte';
+  import type { Density, Theme } from '$lib/theme/theme.svelte';
 
   import { t } from '$lib/i18n';
   const dark = $derived(themeStore.activeTheme !== 'alloy-light');
@@ -37,6 +39,17 @@
     { value: 'normal', label: t('appearance-normal') },
     { value: 'cozy', label: t('appearance-cozy') },
   ];
+
+  const THEME_ORDER: Record<string, number> = {
+    'alloy-light': 0,
+    'alloy-dark': 1,
+    'alloy-amoled': 2,
+    'midnight-ocean': 3,
+  };
+
+  const themeOptions = [...themesManifest]
+    .sort((a, b) => (THEME_ORDER[a.id] ?? 99) - (THEME_ORDER[b.id] ?? 99))
+    .map((entry) => ({ value: entry.id, label: entry.name }));
 
   const fontScaleOptions = [90, 100, 110, 120, 130].map((scale) => ({
     value: String(scale),
@@ -83,7 +96,7 @@
 {#snippet ircPreview()}
   <span class="pv pv-irc" aria-hidden="true">
     <span class="pv-time">10:42</span>
-    <span class="pv-nick">{t('appearance-lt-alex-gt')}</span>
+    <span class="pv-nick">{'<'}{t('appearance-alex')}{'>'}</span>
     <span class="pv-text">{t('appearance-hey-you-youre-the-best')}</span>
   </span>
 {/snippet}
@@ -106,16 +119,21 @@
         disabledReason={amoledReason}
         onchange={setAmoled}
       />
+      <SettingSelect
+        label={t('appearance-theme')}
+        value={themeStore.activeTheme}
+        options={themeOptions}
+        onchange={(v) => themeStore.setTheme(v as Theme)}
+      />
     </div>
-    <div class="row">
-      <span class="row-label">{t('appearance-density')}</span>
+    <SettingRow label={t('appearance-density')}>
       <SegmentedControl
         label={t('appearance-density')}
         options={densityOptions}
         value={themeStore.density}
         onchange={(v) => themeStore.setDensity(v as Density)}
       />
-    </div>
+    </SettingRow>
   </SettingGroup>
 
   <SettingGroup
@@ -149,11 +167,6 @@
       checked={prefs.bigEmoji}
       onchange={(v) => prefs.set('bigEmoji', v)}
     />
-    <SettingToggle
-      label={t('appearance-send-and-show-read-receipts')}
-      checked={prefs.showReadReceipts}
-      onchange={(v) => prefs.set('showReadReceipts', v)}
-    />
   </SettingGroup>
 
   <SettingGroup title={t('appearance-text-and-time')}>
@@ -184,22 +197,6 @@
     margin-left: var(--alloy-spacing-scale-4);
     padding-left: var(--alloy-spacing-scale-3);
     border-left: 2px solid var(--alloy-color-border-subtle);
-  }
-
-  .row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--alloy-spacing-scale-4);
-    min-height: var(--alloy-layout-control-height);
-    padding: var(--alloy-spacing-scale-2) 0;
-    border-top: 1px solid var(--alloy-color-border-subtle);
-  }
-
-  .row-label {
-    font-size: var(--alloy-font-size-row);
-    font-weight: var(--alloy-typography-weight-medium);
-    color: var(--alloy-color-text-primary);
   }
 
   .padded {
@@ -303,8 +300,8 @@
   .pv-bubble {
     max-width: 100%;
     padding: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-3);
-    border-radius: var(--alloy-radii-xl);
-    border-bottom-left-radius: var(--alloy-radii-sm);
+    border-radius: var(--alloy-bubble-radius);
+    border-bottom-left-radius: var(--alloy-bubble-radius-tail);
     background: var(--alloy-color-bubble-other-background);
     color: var(--alloy-color-bubble-other-text);
   }

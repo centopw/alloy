@@ -49,6 +49,8 @@
     album?: readonly TimelineItemDto[] | null;
     /** The row is folded into the album of an earlier row and renders nothing. */
     albumHidden?: boolean;
+    /** Newly arrived message at the bottom of the feed; plays a brief entrance animation. */
+    arrived?: boolean;
     /**
      * A11Y-04 message cursor: the row becomes a focusable `article` inside the conversation feed.
      * The timeline keeps it out of the tab order (`tabindex="-1"`) and moves focus between rows.
@@ -70,6 +72,7 @@
     prev,
     album = null,
     albumHidden = false,
+    arrived = false,
     cursorable = false,
     cursorIndex = null,
     cursorPosition = null,
@@ -482,6 +485,10 @@
     if (!action) return;
     event.preventDefault();
     if (action === 'open-actions') {
+      if (timelineStore.selecting && (event.key === 'Enter' || event.key === ' ')) {
+        if (canAct && item.event_id) timelineStore.toggleSelect(item.event_id);
+        return;
+      }
       // Shift+F10 reaches the context-menu action; open here so Enter and Space behave the same.
       if (event.key !== 'F10') openRowMenu();
       return;
@@ -602,7 +609,11 @@
     if (!viewport.isPhone || !canReact || !canAct || !emoji) return;
     const removing = myReactions.includes(emoji);
     reactWith(emoji);
-    if (removing || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    if (
+      removing ||
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches ||
+      document.documentElement.getAttribute('data-reduced-motion') === 'true'
+    ) return;
     const id = ++burstSeq;
     burst = { ...point, emoji, id };
     window.setTimeout(() => {
@@ -647,7 +658,15 @@
 
     const phoneBar: MenuItem[] = [];
     if (canReply) {
-      phoneBar.push({ id: 'reply', label: t('message-row-reply'), icon: Reply, onselect: () => timelineStore.startReply(item) });
+      phoneBar.push({
+        id: 'reply',
+        label: t('message-row-reply'),
+        icon: Reply,
+        onselect: () => {
+          timelineStore.startReply(item);
+          focusComposer();
+        },
+      });
     }
     if (canCopy) {
       phoneBar.push({ id: 'copy', label: t('common-copy'), icon: Copy, onselect: () => void navigator.clipboard.writeText(quote(item)) });
@@ -739,7 +758,15 @@
     const actions: MenuItem[] = [];
 
     if (canAct && canReply) {
-      actions.push({ id: 'reply', label: t('message-row-reply'), icon: Reply, onselect: () => timelineStore.startReply(item) });
+      actions.push({
+        id: 'reply',
+        label: t('message-row-reply'),
+        icon: Reply,
+        onselect: () => {
+          timelineStore.startReply(item);
+          focusComposer();
+        },
+      });
     }
 
     if (canEdit) {
@@ -811,6 +838,7 @@
 {:else}
   <div
     class="row"
+    class:arrived={arrived}
     class:grouped
     class:own={item.is_own}
     class:replied={stackedReply}
@@ -1003,7 +1031,15 @@
       {#if canAct}
         <div class="toolbar" class:hidden={contextMenu.isOpen} role="toolbar" aria-label={t('message-row-message-actions')}>
           {#if canReply}
-            <button type="button" aria-label={t('message-row-reply')} title={t('message-row-reply')} onclick={() => timelineStore.startReply(item)}>
+            <button
+              type="button"
+              aria-label={t('message-row-reply')}
+              title={t('message-row-reply')}
+              onclick={() => {
+                timelineStore.startReply(item);
+                focusComposer();
+              }}
+            >
               <Icon icon={Reply} size={16} />
             </button>
           {/if}
@@ -1088,6 +1124,9 @@
   }
   .row.highlighted {
     background: var(--alloy-color-accent-subtle);
+    transition:
+      background-color var(--alloy-motion-duration-normal) ease-out,
+      box-shadow var(--alloy-motion-duration-normal) ease-out;
   }
   /* A message that mentions you carries an accent edge. */
   /* Multi-select: a round check sits at the left edge and a tap anywhere on the message toggles it. */
@@ -1240,6 +1279,7 @@
   }
   .body {
     min-width: 0;
+    font-size: var(--alloy-typography-size-base);
     color: var(--alloy-color-text-primary);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
@@ -1444,7 +1484,7 @@
     -webkit-backdrop-filter: var(--alloy-glass-filter);
     backdrop-filter: var(--alloy-glass-filter);
     border: 1px solid var(--alloy-glass-rim);
-    border-radius: var(--alloy-glass-radius-control);
+    border-radius: var(--alloy-radii-full);
     box-shadow: var(--alloy-glass-shadow-soft), var(--alloy-glass-highlight);
     z-index: 2;
   }
@@ -1487,6 +1527,27 @@
     display: block;
     width: fit-content;
     max-width: 100%;
+  }
+  .row.arrived .message-anchor {
+    animation: alloy-msg-arrive var(--alloy-motion-duration-normal) var(--alloy-motion-easing-enter, ease-out) backwards;
+  }
+  @keyframes alloy-msg-arrive {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .row.arrived .message-anchor {
+      animation: none;
+    }
+  }
+  :global(:root[data-reduced-motion='true']) .row.arrived .message-anchor {
+    animation: none;
   }
   .row:not([data-layout='bubbles']) .toolbar {
     top: 0;
@@ -1590,6 +1651,10 @@
     opacity: 1;
     visibility: visible;
     translate: 0 0;
+    transition:
+      opacity 120ms cubic-bezier(0.2, 0, 0, 1),
+      translate 120ms cubic-bezier(0.2, 0, 0, 1),
+      visibility 0s;
   }
   /* Touch: no hover to reveal it, and the long-press menu already offers the same bar. */
   @media (pointer: coarse) {
@@ -1600,7 +1665,8 @@
   @media (prefers-reduced-motion: reduce) {
     .quick-float,
     .row:hover .quick-float,
-    .row:has(:focus-visible) .quick-float {
+    .row:has(:focus-visible) .quick-float,
+    .row:focus-visible .quick-float {
       translate: none;
       transition:
         opacity 1ms linear,
@@ -1618,10 +1684,19 @@
     background: transparent;
     color: var(--alloy-color-text-secondary);
     cursor: pointer;
+    transition:
+      background-color var(--alloy-motion-duration-fast) ease,
+      color var(--alloy-motion-duration-fast) ease,
+      transform var(--alloy-motion-duration-instant, 75ms) ease;
   }
-  .toolbar > button:hover {
-    background: var(--alloy-color-surface-hover);
-    color: var(--alloy-color-text-primary);
+  @media (hover: hover) {
+    .toolbar > button:hover {
+      background: var(--alloy-color-surface-hover);
+      color: var(--alloy-color-text-primary);
+    }
+  }
+  .toolbar > button:active:not(:disabled) {
+    transform: scale(0.95);
   }
   .toolbar button:focus-visible,
   .failed-actions button:focus-visible {
@@ -1849,12 +1924,9 @@
   .row.own.replied[data-layout='bubbles'] .message-stack {
     margin-left: auto;
   }
-  .row[data-layout='bubbles'] .bubble .body,
   .row[data-layout='bubbles'] .bubble .edited,
   .row[data-layout='bubbles'] .bubble .muted,
-  .row[data-layout='bubbles'] .bubble .state,
-  .row[data-layout='bubbles'] .bubble .edited,
-  .row[data-layout='bubbles'] .bubble .muted {
+  .row[data-layout='bubbles'] .bubble .state {
     opacity: 0.82;
   }
   .row.own[data-layout='bubbles'] .body.html :global(a:not(.alloy-pill)) {
@@ -2006,6 +2078,7 @@
   }
   .row.highlighted[data-layout='bubbles'] .bubble {
     box-shadow: 0 0 0 2px var(--alloy-color-accent-primary);
+    transition: box-shadow var(--alloy-motion-duration-normal) ease-out;
   }
   /* A file tile needs room for its name, and neither the anchor nor the bubble grows for a child's
      minimum width, so the message box carries it: 240px for the tile plus the bubble's own inset. */

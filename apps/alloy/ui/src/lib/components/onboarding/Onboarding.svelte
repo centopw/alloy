@@ -1,10 +1,13 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
   import { Button } from '../common';
   import LoginStep from './LoginStep.svelte';
   import TelegramAppForm from '../settings/sections/TelegramAppForm.svelte';
   import { session, networkLabel } from '$lib/stores/session.svelte';
   import { errorMessage } from '$lib/stores/errors';
+  import { contextMenu } from '$lib/stores/contextmenu.svelte';
+  import { pushBack } from '$lib/platform/backstack';
+  import { handleModalTabKey } from '$lib/platform/focusTrap';
   import { openExternal } from '$lib/platform/links';
   import type { LoginInputDto, Network, NetworkInfoDto } from '$lib/generated/index.js';
 
@@ -21,7 +24,54 @@
   let networksError = $state<string | null>(null);
   /** The network whose setup form replaced the list: an unready network is not a dead end. */
   let setupFor = $state<NetworkInfoDto | null>(null);
+  let panelEl: HTMLElement | undefined = $state();
   let live = true;
+
+  function onOverlayKey(e: KeyboardEvent) {
+    if (!overlay || contextMenu.isOpen) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      void session.closeAddAccount();
+      return;
+    }
+    if (e.key === 'Tab' && handleModalTabKey(e, panelEl, document.activeElement)) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }
+
+  $effect(() => {
+    if (!overlay) return;
+    return pushBack(() => void session.closeAddAccount());
+  });
+
+  $effect(() => {
+    if (!overlay || !panelEl) return;
+    const el = panelEl;
+    const returnTo = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const outerDialog = el.parentElement?.parentElement?.closest('[role="dialog"]') ?? null;
+    el.tabIndex = -1;
+    void tick().then(() => {
+      if (el.isConnected && !el.contains(document.activeElement)) {
+        el.focus();
+      }
+    });
+    return () => {
+      el.removeAttribute('tabindex');
+      if (returnTo?.isConnected && (!outerDialog || outerDialog.contains(returnTo))) {
+        returnTo.focus();
+      } else if (outerDialog instanceof HTMLElement && outerDialog.isConnected) {
+        outerDialog.focus();
+      }
+    };
+  });
+
+  $effect(() => {
+    if (!overlay) return;
+    window.addEventListener('keydown', onOverlayKey, true);
+    return () => window.removeEventListener('keydown', onOverlayKey, true);
+  });
 
   onMount(() => {
     void start();
@@ -97,23 +147,30 @@
   aria-modal={overlay ? 'true' : undefined}
   aria-label={overlay ? t('onboarding-connect-account') : undefined}
 >
-  <section class="panel" data-step={attempt ? 'login' : 'network'}>
-    <div class="story">
-      <div class="lockup">
-        <span class="brand-mark" aria-hidden="true">A</span>
-        <span class="wordmark">{t('brand-name')}</span>
+  <section
+    class="panel"
+    data-step={attempt ? 'login' : 'network'}
+    data-overlay={overlay ? 'true' : undefined}
+    bind:this={panelEl}
+  >
+    {#if !overlay}
+      <div class="story">
+        <div class="lockup">
+          <span class="brand-mark" aria-hidden="true">A</span>
+          <span class="wordmark">{t('brand-name')}</span>
+        </div>
+        <div class="pitch">
+          <h1>{t('onboarding-connect-to-your-accounts')}</h1>
+          <p class="lede">{t('onboarding-on-device-lede')}</p>
+        </div>
+        <ul class="points">
+          <li><strong>{t('onboarding-point-direct-title')}</strong> {t('onboarding-point-direct')}</li>
+          <li><strong>{t('onboarding-point-local-title')}</strong> {t('onboarding-point-local')}</li>
+          <li><strong>{t('onboarding-point-leave-title')}</strong> {t('onboarding-point-leave')}</li>
+        </ul>
+        <p class="footnote">{t('onboarding-open-source-apache-2-0')}</p>
       </div>
-      <div class="pitch">
-        <h1>{t('onboarding-connect-to-your-accounts')}</h1>
-        <p class="lede">{t('onboarding-on-device-lede')}</p>
-      </div>
-      <ul class="points">
-        <li><strong>{t('onboarding-point-direct-title')}</strong> {t('onboarding-point-direct')}</li>
-        <li><strong>{t('onboarding-point-local-title')}</strong> {t('onboarding-point-local')}</li>
-        <li><strong>{t('onboarding-point-leave-title')}</strong> {t('onboarding-point-leave')}</li>
-      </ul>
-      <p class="footnote">{t('onboarding-open-source-apache-2-0')}</p>
-    </div>
+    {/if}
 
     <div class="step">
       {#if overlay}
@@ -235,6 +292,11 @@
     backdrop-filter: var(--alloy-glass-filter-strong);
     box-shadow: var(--alloy-glass-shadow);
     overflow: hidden;
+    outline: none;
+  }
+  .panel[data-overlay='true'] {
+    width: min(480px, 100%);
+    grid-template-columns: 1fr;
   }
 
   .story {
@@ -334,9 +396,11 @@
     font-size: var(--alloy-font-size-preview);
     cursor: pointer;
   }
-  .panel-close:hover {
-    background: var(--alloy-color-surface-hover);
-    color: var(--alloy-color-text-primary);
+  @media (hover: hover) {
+    .panel-close:hover {
+      background: var(--alloy-color-surface-hover);
+      color: var(--alloy-color-text-primary);
+    }
   }
   .panel-close:focus-visible {
     outline: 2px solid var(--alloy-color-accent-primary);
@@ -393,8 +457,10 @@
     text-decoration: underline;
     cursor: pointer;
   }
-  .link:hover {
-    color: var(--alloy-color-text-link);
+  @media (hover: hover) {
+    .link:hover {
+      color: var(--alloy-color-text-link);
+    }
   }
   .link:focus-visible {
     outline: 2px solid var(--alloy-color-accent-primary);
@@ -424,9 +490,11 @@
     text-align: start;
     cursor: pointer;
   }
-  .network:not(:disabled):hover {
-    border-color: var(--alloy-color-border-prominent);
-    background: var(--alloy-color-surface-hover);
+  @media (hover: hover) {
+    .network:not(:disabled):hover {
+      border-color: var(--alloy-color-border-prominent);
+      background: var(--alloy-color-surface-hover);
+    }
   }
   .network:disabled {
     cursor: not-allowed;
@@ -461,7 +529,8 @@
       padding: 0;
       place-items: stretch;
     }
-    .panel {
+    .panel,
+    .panel[data-overlay='true'] {
       width: 100%;
       min-height: 100dvh;
       display: flex;
@@ -487,10 +556,10 @@
       background: none;
     }
     .step h2 {
-      font-size: 1.5rem;
+      font-size: var(--alloy-typography-size-xxl);
     }
     h1 {
-      font-size: 1.6rem;
+      font-size: var(--alloy-typography-size-xxl);
     }
     .footnote {
       display: none;

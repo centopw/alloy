@@ -75,12 +75,12 @@ html, body {
   --alloy-typography-font-family-sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --alloy-typography-font-family-mono: "JetBrains Mono", "Fira Code", monospace;
   --alloy-typography-font-family-display: Inter, -apple-system, BlinkMacSystemFont, sans-serif;
-  --alloy-typography-size-xs: 11px;
-  --alloy-typography-size-sm: 12px;
-  --alloy-typography-size-base: 14px;
-  --alloy-typography-size-lg: 16px;
-  --alloy-typography-size-xl: 18px;
-  --alloy-typography-size-xxl: 24px;
+  --alloy-typography-size-xs: 0.6875rem;
+  --alloy-typography-size-sm: 0.75rem;
+  --alloy-typography-size-base: 0.875rem;
+  --alloy-typography-size-lg: 1rem;
+  --alloy-typography-size-xl: 1.125rem;
+  --alloy-typography-size-xxl: 1.5rem;
   --alloy-typography-weight-regular: 400;
   --alloy-typography-weight-medium: 500;
   --alloy-typography-weight-semibold: 600;
@@ -187,17 +187,35 @@ html, body {
      keeps the semantics and gives the white label its contrast back. The 70% and the derivation
      are mirrored in the theme checker (`text_on_accent_danger_fill`); keep them in sync. */
   --alloy-danger-fill: color-mix(in srgb, var(--alloy-color-status-error) 70%, black);
-  /* UI type scale (ADR 0014). Four sizes with distinct jobs, so chrome stops reading as one
-     flat weight: panel titles, row names, previews, and tracked meta. */
-  --alloy-font-size-title: 15px;
-  --alloy-font-size-row: 13px;
-  --alloy-font-size-preview: 12px;
-  --alloy-font-size-meta: 10.5px;
   --alloy-letter-spacing-caps: 0.08em;
   --alloy-font-sans: var(--alloy-typography-font-family-sans);
   --alloy-font-mono: var(--alloy-typography-font-family-mono);
   --alloy-shadow-sm: var(--alloy-elevation-sm);
   --alloy-shadow-md: var(--alloy-elevation-md);
+  --alloy-motion-duration-instant: 75ms;
+  --alloy-motion-duration-pulse: 1200ms;
+  --alloy-motion-easing-standard: cubic-bezier(0.2, 0, 0, 1);
+  --alloy-motion-easing-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --alloy-motion-easing-exit: cubic-bezier(0.4, 0, 1, 1);
+  --alloy-motion-easing-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Relative rem typography scale (16px root baseline): overrides generated theme px tokens on
+   [data-theme] so prefs.fontScale scales the entire UI proportionally across active themes. */
+:root,
+:root[data-theme] {
+  --alloy-typography-size-xs: 0.6875rem;
+  --alloy-typography-size-sm: 0.75rem;
+  --alloy-typography-size-base: 0.875rem;
+  --alloy-typography-size-lg: 1rem;
+  --alloy-typography-size-xl: 1.125rem;
+  --alloy-typography-size-xxl: 1.5rem;
+  /* UI type scale (ADR 0014). Four sizes with distinct jobs, so chrome stops reading as one
+     flat weight: panel titles, row names, previews, and tracked meta. */
+  --alloy-font-size-title: 0.9375rem;
+  --alloy-font-size-row: 0.8125rem;
+  --alloy-font-size-preview: 0.75rem;
+  --alloy-font-size-meta: 0.65625rem;
 }
 
 /* Materials (ADR 0014). Every value is derived from the active theme's tokens, so a new theme gets
@@ -322,6 +340,11 @@ html, body {
     );
 }
 
+/* AMOLED keeps a true pure-black canvas without glowing aurora gradients. */
+:root[data-theme='alloy-amoled'] {
+  --alloy-canvas-art: var(--alloy-color-surface-canvas);
+}
+
 /* Reduced transparency and engines without backdrop-filter keep the layout but drop the glass.
    The dark-material rule above is more specific than these, so it is named again here: without
    that, a dark theme would keep its translucency even when the user asks for none. */
@@ -378,6 +401,8 @@ html, body {
   --alloy-spacing-avatar-size: 28px;
   --alloy-spacing-item-gap: var(--alloy-spacing-scale-1);
   --alloy-spacing-item-padding: var(--alloy-spacing-scale-1);
+  --alloy-spacing-bubble-x: 12px;
+  --alloy-spacing-bubble-y: 8px;
 }
 
 [data-density="normal"] {
@@ -386,6 +411,8 @@ html, body {
   --alloy-spacing-avatar-size: 36px;
   --alloy-spacing-item-gap: var(--alloy-spacing-scale-2);
   --alloy-spacing-item-padding: var(--alloy-spacing-scale-2);
+  --alloy-spacing-bubble-x: 14px;
+  --alloy-spacing-bubble-y: 10px;
 }
 
 [data-density="cozy"] {
@@ -394,11 +421,14 @@ html, body {
   --alloy-spacing-avatar-size: 40px;
   --alloy-spacing-item-gap: var(--alloy-spacing-scale-3);
   --alloy-spacing-item-padding: var(--alloy-spacing-scale-3);
+  --alloy-spacing-bubble-x: 16px;
+  --alloy-spacing-bubble-y: 12px;
 }
 
 /* 4. Reduced-Motion Handling */
 @media (prefers-reduced-motion: reduce) {
   :root {
+    --alloy-motion-duration-instant: 0ms !important;
     --alloy-motion-duration-fast: 0ms !important;
     --alloy-motion-duration-normal: 0ms !important;
     --alloy-motion-duration-slow: 0ms !important;
@@ -414,6 +444,7 @@ html, body {
 }
 
 [data-reduced-motion="true"] {
+  --alloy-motion-duration-instant: 0ms !important;
   --alloy-motion-duration-fast: 0ms !important;
   --alloy-motion-duration-normal: 0ms !important;
   --alloy-motion-duration-slow: 0ms !important;

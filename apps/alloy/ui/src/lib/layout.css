@@ -21,12 +21,22 @@
   --alloy-layout-control-height-sm: 28px;
   /* macOS overlay title bar only (see the rule below); zero everywhere else. */
   --alloy-titlebar-lights-inset: 0px;
+  /* Z-index scale shared by panes, sheets, modals, and floating layers. */
+  --alloy-z-base: 1;
+  --alloy-z-sticky: 10;
+  --alloy-z-drawer: 30;
+  --alloy-z-modal: 60;
+  --alloy-z-lightbox: 80;
+  --alloy-z-popover: 100;
+  --alloy-z-menu: 110;
+  --alloy-z-tooltip: 120;
 }
 
-/* Phones: controls become touch targets. Fields and buttons share this height so they match in a row. */
+/* Phones: controls become touch targets and headers expand to 56px. */
 @media (max-width: 899px) {
   :root {
     --alloy-layout-control-height: 44px;
+    --alloy-layout-header-height: 56px;
   }
 }
 

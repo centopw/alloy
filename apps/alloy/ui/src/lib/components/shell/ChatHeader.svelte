@@ -168,15 +168,14 @@
 
 <style>
   /* One row, one rail: the header starts where the conversation's bubbles start, so the identity,
-     the pinned bar and the composer all share a left edge. 56px keeps the identity block (avatar,
-     name, subtitle) on a single line with room for the 32px controls beside it. */
+     the pinned bar and the composer all share a left edge. */
   .head {
     display: flex;
     align-items: center;
     gap: var(--alloy-spacing-scale-2);
     flex-shrink: 0;
     min-width: 0;
-    height: 56px;
+    height: var(--alloy-layout-header-height);
     padding: 0 var(--conversation-rail, var(--alloy-layout-gutter)) 0
       max(var(--conversation-rail, var(--alloy-layout-gutter)), var(--chat-header-lead, 0px));
     border-bottom: 1px solid var(--alloy-chat-rim);
@@ -311,7 +310,7 @@
   @media (max-width: 899px) {
     .head {
       height: auto;
-      min-height: 56px;
+      min-height: var(--alloy-layout-header-height);
       padding: var(--alloy-spacing-scale-1) var(--conversation-rail, var(--alloy-layout-gutter));
     }
     .icon,

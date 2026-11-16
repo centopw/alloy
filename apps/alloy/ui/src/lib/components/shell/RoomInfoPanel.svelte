@@ -1,16 +1,16 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
-  import { Icon, X, ChevronLeft, File, ExternalLink, Download } from '$lib/icons';
+  import { tick, untrack } from 'svelte';
+  import { Icon, X, ChevronLeft, File, ExternalLink, Download, Pencil } from '$lib/icons';
   import { formatBytes, formatDay } from '$lib/content/format';
   import { viewport } from '$lib/stores/viewport.svelte';
   import { openExternal } from '$lib/platform/links';
   import { localFileUrl } from '$lib/platform/files';
-  import { pushBack } from '$lib/platform/backstack';
+  import { nextRovingIndex, rovingTabindex } from '$lib/platform/roving';
   import { client } from '$lib/ipc';
   import { roomInfo } from '$lib/stores/roomInfo.svelte';
   import { roomMedia } from '$lib/stores/roomMedia.svelte';
   import { membersStore, memberLabel } from '$lib/stores/members.svelte';
-  import { networkName, roomsStore } from '$lib/stores/rooms.svelte';
+  import { networkName, roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
   import { profileCard } from '$lib/stores/profileCard.svelte';
   import { errorMessage } from '$lib/stores/errors';
   import type { RoomInfoTab } from '$lib/stores/ui.svelte';
@@ -19,21 +19,24 @@
   import type { MenuItem } from '$lib/stores/contextmenu.svelte';
   import { contextmenu } from '$lib/platform/contextmenu';
   import { Avatar, Button, SegmentedControl, TextArea } from '../common';
+  import RoomSearchPanel from './RoomSearchPanel.svelte';
 
   import { t } from '$lib/i18n';
 
   type MediaView = 'media' | 'files' | 'links';
-  type View = 'overview' | MediaView | 'members';
+  type View = 'overview' | MediaView | 'members' | 'search';
+  type InspectorTab = 'overview' | 'members' | 'shared' | 'search';
 
   interface Props {
     roomId: string;
     onclose: () => void;
     /** Opens in-room search. The search button is hidden when omitted. */
     onsearch?: () => void;
+    ontabchange?: (tab: RoomInfoTab) => void;
     initialTab?: RoomInfoTab;
   }
 
-  let { roomId, onclose, onsearch, initialTab = 'info' }: Props = $props();
+  let { roomId, onclose, onsearch, ontabchange, initialTab = 'info' }: Props = $props();
 
   const MEDIA_KIND: Record<MediaView, RoomMediaKind> = {
     media: 'Media',
@@ -63,8 +66,23 @@
     links: t('room-info-panel-no-shared-links-yet'),
   };
 
+  const INSPECTOR_TABS: { id: InspectorTab; label: string }[] = [
+    { id: 'overview', label: t('room-info-panel-details') },
+    { id: 'members', label: t('room-info-panel-members-2') },
+    { id: 'shared', label: t('room-info-panel-shared') },
+    { id: 'search', label: t('common-search') },
+  ];
+
   function isMediaView(v: View): v is MediaView {
     return v === 'media' || v === 'files' || v === 'links';
+  }
+
+  function tabToView(tab: RoomInfoTab): View {
+    return tab === 'info' ? 'overview' : tab;
+  }
+
+  function viewToTab(v: View): RoomInfoTab {
+    return v === 'overview' ? 'info' : v;
   }
 
   function viewAll(count: number, done: boolean): string {
@@ -72,16 +90,64 @@
   }
 
   let view = $state<View>('overview');
+  let sharedTab = $state<MediaView>('media');
+  let tablistEl = $state<HTMLDivElement | null>(null);
+  let searchAutofocus = $state(true);
+
+  const activeInspectorTab = $derived<InspectorTab>(
+    view === 'overview'
+      ? 'overview'
+      : view === 'members'
+        ? 'members'
+        : view === 'search'
+          ? 'search'
+          : 'shared'
+  );
+  const activeTabIndex = $derived(
+    Math.max(0, INSPECTOR_TABS.findIndex((tab) => tab.id === activeInspectorTab))
+  );
+
+  function switchView(next: View, autofocusSearch = true) {
+    if (next === 'search') searchAutofocus = autofocusSearch;
+    if (isMediaView(next)) sharedTab = next;
+    view = next;
+    if (next === 'search' && !ontabchange && onsearch) onsearch();
+    else ontabchange?.(viewToTab(next));
+  }
+
+  function selectInspectorTab(tabId: InspectorTab, autofocusSearch: boolean) {
+    const next: View =
+      tabId === 'overview'
+        ? 'overview'
+        : tabId === 'members'
+          ? 'members'
+          : tabId === 'search'
+            ? 'search'
+            : isMediaView(view)
+              ? view
+              : sharedTab;
+    switchView(next, autofocusSearch);
+  }
+
+  function onInspectorTabKey(e: KeyboardEvent, index: number) {
+    const next = nextRovingIndex(index, INSPECTOR_TABS.length, e.key, {
+      orientation: 'horizontal',
+      rtl: typeof document !== 'undefined' && document.documentElement.dir === 'rtl',
+    });
+    if (next === null) return;
+    e.preventDefault();
+    selectInspectorTab(INSPECTOR_TABS[next].id, false);
+    tablistEl?.querySelectorAll<HTMLElement>('[role="tab"]')[next]?.focus();
+  }
 
   // Seed the view from the prop on mount and whenever the parent changes it.
   $effect(() => {
-    view = initialTab === 'info' ? 'overview' : initialTab;
-  });
-
-  // A sub-view registers a system Back handler so Back returns to the overview first (phone only).
-  $effect(() => {
-    if (view === 'overview') return;
-    return pushBack(() => (view = 'overview'));
+    const next = tabToView(initialTab);
+    if (isMediaView(next)) sharedTab = next;
+    if (next !== untrack(() => view)) {
+      if (next === 'search') searchAutofocus = true;
+      view = next;
+    }
   });
 
   const title = $derived(
@@ -89,7 +155,9 @@
       ? t('room-info-panel-details')
       : view === 'members'
         ? t('room-info-panel-members-2')
-        : MEDIA_TITLE[view]
+        : view === 'search'
+          ? t('room-search-panel-search-in-room')
+          : MEDIA_TITLE[view]
   );
 
   const details = $derived(roomInfo.details(roomId));
@@ -126,15 +194,28 @@
   let noteDirty = $state(false);
   let noteSaving = $state(false);
   let noteSaved = $state(false);
+  let editingNote = $state(false);
+  let noteInput = $state<HTMLTextAreaElement | null>(null);
+  let noteTrigger = $state<HTMLButtonElement | null>(null);
   let noteTimer: ReturnType<typeof setTimeout> | undefined;
+  const hasNote = $derived(noteDraft.trim().length > 0);
+
+  $effect(() => {
+    if (editingNote) noteInput?.focus();
+  });
 
   $effect(() => {
     const stored = roomInfo.note(roomId);
-    if (!noteDirty) noteDraft = stored;
+    if (!editingNote && !noteDirty && !noteSaving) noteDraft = stored;
   });
 
   $effect(() => {
     const id = roomId;
+    editingNote = false;
+    noteDirty = false;
+    noteSaving = false;
+    noteSaved = false;
+    noteDraft = untrack(() => roomInfo.note(id));
     untrack(() => void roomInfo.load(id));
     return () => {
       void flushNote(id);
@@ -149,13 +230,15 @@
     if (!noteDirty) return;
     const text = noteDraft;
     noteDirty = false;
-    noteSaving = true;
-    noteSaved = false;
+    if (id === roomId) {
+      noteSaving = true;
+      noteSaved = false;
+    }
     try {
       await roomInfo.saveNote(id, text);
-      noteSaved = !noteDirty;
+      if (id === roomId) noteSaved = !noteDirty;
     } finally {
-      noteSaving = false;
+      if (id === roomId) noteSaving = false;
     }
   }
 
@@ -168,13 +251,34 @@
     noteTimer = setTimeout(() => void flushNote(id), 800);
   }
 
+  function editNote() {
+    noteDraft = roomInfo.note(roomId);
+    noteDirty = false;
+    editingNote = true;
+  }
+
+  function cancelNoteEdit() {
+    if (noteTimer !== undefined) {
+      clearTimeout(noteTimer);
+      noteTimer = undefined;
+    }
+    noteDirty = false;
+    noteDraft = roomInfo.note(roomId);
+    editingNote = false;
+  }
+
+  async function saveNoteEdit() {
+    if (!editingNote) return;
+    editingNote = false;
+    await flushNote(roomId);
+  }
+
   // Media state. The overview previews all three kinds; a sub-view loads only its own kind.
   const mediaState = $derived({
     media: roomMedia.view(roomId, 'Media'),
     files: roomMedia.view(roomId, 'Files'),
     links: roomMedia.view(roomId, 'Links'),
   });
-  let sharedTab = $state<MediaView>('media');
   const sharedHasItems = $derived(SHARED_TABS.some(({ value }) => mediaState[value].items.length > 0));
   const current = $derived(isMediaView(view) ? mediaState[view] : null);
   /** Empty-state copy for the media sub-view that is open. */
@@ -365,16 +469,26 @@
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<aside class="panel" bind:this={panel} aria-label={t('room-info-panel-room-info')} onkeydown={(e) => e.key === 'Escape' && onclose()}>
+<aside
+  class="panel"
+  bind:this={panel}
+  aria-label={t('room-info-panel-room-info')}
+  onkeydown={(e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      onclose();
+    }
+  }}
+>
   <header class="bar">
     <button
       type="button"
       class="icon-btn"
-      aria-label={view === 'overview' ? t('room-info-panel-close-room-info') : t('room-info-panel-back-to-details')}
-      title={view === 'overview' ? t('room-info-panel-close-room-info') : t('room-info-panel-back-to-details')}
-      onclick={() => (view === 'overview' ? onclose() : (view = 'overview'))}
+      aria-label={viewport.isPhone ? t('common-back') : t('room-info-panel-close-room-info')}
+      title={viewport.isPhone ? t('common-back') : t('room-info-panel-close-room-info')}
+      onclick={onclose}
     >
-      <Icon icon={view === 'overview' ? X : ChevronLeft} size={20} />
+      <Icon icon={viewport.isPhone ? ChevronLeft : X} size={20} />
     </button>
     <h2 class="title">{title}</h2>
     {#if onsearch && view === 'overview'}
@@ -382,6 +496,32 @@
     {/if}
   </header>
 
+  <div class="inspector-tabs" role="tablist" aria-label={t('room-info-panel-room-info')} bind:this={tablistEl}>
+    {#each INSPECTOR_TABS as tab, i (tab.id)}
+      {@const selected = activeInspectorTab === tab.id}
+      <button
+        type="button"
+        role="tab"
+        class="inspector-tab"
+        tabindex={rovingTabindex(i, activeTabIndex)}
+        aria-selected={selected}
+        onclick={() => selectInspectorTab(tab.id, true)}
+        onkeydown={(e) => onInspectorTabKey(e, i)}
+      >
+        {tab.label}
+      </button>
+    {/each}
+  </div>
+
+  {#if view === 'search'}
+    <RoomSearchPanel
+      embedded
+      {roomId}
+      title={room ? roomTitle(room) : ''}
+      autofocus={searchAutofocus}
+      {onclose}
+    />
+  {:else}
   <div class="body">
     {#if view === 'overview'}
       <section class="block" aria-label={t('room-info-panel-about')}>
@@ -398,16 +538,47 @@
 
       <section class="block" aria-label={t('room-info-panel-private-note')}>
         <h3>{t('room-info-panel-private-note')}</h3>
-        <p class="hint">{t('room-info-panel-a-note-only-you-can-see')}</p>
-        <TextArea
-          value={noteDraft}
-          placeholder={t('room-info-panel-edit-private-note')}
-          aria-label={t('room-info-panel-private-note')}
-          oninput={(e: Event) => onNoteInput((e.currentTarget as HTMLTextAreaElement).value)}
-        />
-        <p class="hint" role="status">
-          {#if noteSaving}{t('room-info-panel-saving')}{:else if noteSaved}{t('room-info-panel-saved')}{/if}
-        </p>
+        {#if editingNote}
+          <TextArea
+            bind:el={noteInput}
+            value={noteDraft}
+            placeholder={t('room-info-panel-edit-private-note')}
+            aria-label={t('room-info-panel-private-note')}
+            oninput={(e: Event) => onNoteInput((e.currentTarget as HTMLTextAreaElement).value)}
+            onkeydown={(e: KeyboardEvent) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                void saveNoteEdit();
+                void tick().then(() => noteTrigger?.focus());
+              } else if (e.key === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation();
+                cancelNoteEdit();
+                void tick().then(() => noteTrigger?.focus());
+              }
+            }}
+            onblur={() => void saveNoteEdit()}
+          />
+          <p class="hint">{t('room-info-panel-enter-to-save-shift-enter-for-a-new-line-esc-to-')}</p>
+        {:else}
+          <button
+            type="button"
+            class="note-read"
+            class:is-empty={!hasNote}
+            bind:this={noteTrigger}
+            aria-label={hasNote ? `${t('room-info-panel-private-note')}: ${noteDraft}` : t('room-info-panel-edit-private-note')}
+            title={t('room-info-panel-edit-private-note')}
+            onclick={editNote}
+          >
+            <span class="note-text">{hasNote ? noteDraft : t('room-info-panel-a-note-only-you-can-see')}</span>
+            <span class="note-edit" aria-hidden="true"><Icon icon={Pencil} size={16} /></span>
+          </button>
+        {/if}
+        {#if noteSaving || noteSaved}
+          <p class="hint" role="status">
+            {#if noteSaving}{t('room-info-panel-saving')}{:else if noteSaved}{t('room-info-panel-saved')}{/if}
+          </p>
+        {/if}
         {#if roomInfo.error(roomId)}<p class="notice" role="alert">{roomInfo.error(roomId)}</p>{/if}
       </section>
 
@@ -439,7 +610,7 @@
               </li>
             {/each}
           </ul>
-          <Button variant="ghost" size="sm" onclick={() => (view = sharedTab)}>
+          <Button variant="ghost" size="sm" onclick={() => switchView(sharedTab)}>
             {viewAll(mediaState[sharedTab].items.length, mediaState[sharedTab].done)}
           </Button>
         {/if}
@@ -461,7 +632,7 @@
             {/each}
           </ul>
         {/each}
-        <Button variant="ghost" size="sm" onclick={() => (view = 'members')}>
+        <Button variant="ghost" size="sm" onclick={() => switchView('members')}>
           {t('room-info-panel-view-all')}
         </Button>
       </section>
@@ -492,6 +663,14 @@
         {/each}
       {/if}
     {:else if current}
+      <div class="tabs">
+        <SegmentedControl
+          label={t('room-info-panel-shared-content')}
+          options={SHARED_TABS.map((tab) => ({ value: tab.value, label: tab.label }))}
+          value={view}
+          onchange={(v) => switchView(v as MediaView)}
+        />
+      </div>
       {#if current.error}
         <div class="notice" role="alert">
           <p>{current.error}</p>
@@ -522,6 +701,7 @@
       {#if mediaError}<p class="notice" role="alert">{mediaError}</p>{/if}
     {/if}
   </div>
+  {/if}
 </aside>
 
 <style>
@@ -567,6 +747,56 @@
   .icon-btn:hover {
     background: var(--alloy-glass-control);
     color: var(--alloy-color-text-primary);
+  }
+  .inspector-tabs {
+    display: flex;
+    align-items: center;
+    gap: var(--alloy-spacing-scale-1);
+    padding: var(--alloy-spacing-scale-2) var(--alloy-layout-gutter);
+    border-bottom: 1px solid var(--alloy-glass-rim);
+    overflow-x: auto;
+    scrollbar-width: none;
+    flex-shrink: 0;
+  }
+  .inspector-tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .inspector-tab {
+    flex: 1 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 30px;
+    padding: 0 var(--alloy-spacing-scale-2);
+    border: 1px solid transparent;
+    border-radius: var(--alloy-radii-md);
+    background: transparent;
+    color: var(--alloy-color-text-secondary);
+    font: inherit;
+    font-size: var(--alloy-font-size-preview);
+    font-weight: var(--alloy-typography-weight-medium);
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background var(--alloy-motion-duration-fast) ease,
+      border-color var(--alloy-motion-duration-fast) ease,
+      color var(--alloy-motion-duration-fast) ease;
+  }
+  @media (hover: hover) {
+    .inspector-tab:hover {
+      background: var(--alloy-glass-control);
+      color: var(--alloy-color-text-primary);
+    }
+  }
+  .inspector-tab[aria-selected='true'] {
+    border-color: var(--alloy-glass-rim);
+    background: var(--alloy-glass-control-hover);
+    color: var(--alloy-color-text-primary);
+    font-weight: var(--alloy-typography-weight-semibold);
+  }
+  .inspector-tab:focus-visible {
+    outline: 2px solid var(--alloy-color-accent-primary);
+    outline-offset: 2px;
   }
   .body {
     flex: 1;
@@ -752,8 +982,77 @@
   .tile:hover {
     background: var(--alloy-glass-control-hover);
   }
+  .note-read {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--alloy-spacing-scale-2);
+    width: 100%;
+    min-height: 36px;
+    padding: var(--alloy-spacing-scale-1) var(--alloy-spacing-scale-2);
+    border: 1px solid transparent;
+    border-radius: var(--alloy-radii-md);
+    background: transparent;
+    color: var(--alloy-color-text-primary);
+    font: inherit;
+    font-size: var(--alloy-font-size-row);
+    text-align: start;
+    cursor: pointer;
+    transition: background var(--alloy-motion-duration-fast) ease;
+  }
+  .note-read.is-empty {
+    align-items: center;
+    border-color: var(--alloy-glass-rim);
+    background: var(--alloy-glass-control);
+    color: var(--alloy-color-text-muted);
+  }
+  .note-text {
+    flex: 1;
+    min-width: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .note-edit {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    color: var(--alloy-color-text-muted);
+    opacity: 0;
+    transition: opacity var(--alloy-motion-duration-fast) ease;
+  }
+  .note-read.is-empty .note-edit,
+  .note-read:hover .note-edit,
+  .note-read:focus-visible .note-edit {
+    opacity: 1;
+  }
+  @media (hover: hover) {
+    .note-read:hover {
+      background: var(--alloy-glass-control);
+    }
+  }
+  @media (hover: none) {
+    .note-edit {
+      opacity: 1;
+    }
+  }
+  .icon-btn:focus-visible,
+  .tile:focus-visible,
+  .member:focus-visible,
+  .note-read:focus-visible {
+    outline: 2px solid var(--alloy-color-accent-primary);
+    outline-offset: 2px;
+  }
+  @media (max-width: 899px), (pointer: coarse) {
+    .inspector-tab {
+      min-height: var(--alloy-touch-target, 44px);
+    }
+  }
   @media (max-width: 899px) {
-    .member {
+    .member,
+    .note-read {
       min-height: 44px;
     }
     .icon-btn {

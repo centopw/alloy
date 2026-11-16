@@ -163,9 +163,9 @@
   .card {
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-space-3);
+    gap: var(--alloy-spacing-scale-3);
     padding: var(--alloy-layout-gutter);
-    color: var(--alloy-text-primary);
+    color: var(--alloy-color-text-primary);
     font-family: var(--alloy-typography-font-family-sans);
     font-size: var(--alloy-typography-size-sm);
   }
@@ -179,7 +179,7 @@
   .identity {
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-space-1);
+    gap: var(--alloy-spacing-scale-1);
     min-width: 0;
   }
 
@@ -195,7 +195,7 @@
   .mxid-row {
     display: flex;
     align-items: center;
-    gap: var(--alloy-space-1);
+    gap: var(--alloy-spacing-scale-1);
     min-width: 0;
   }
 
@@ -203,7 +203,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: var(--alloy-text-muted);
+    color: var(--alloy-color-text-muted);
     font-size: var(--alloy-typography-size-xs);
   }
 
@@ -218,30 +218,30 @@
     border: none;
     border-radius: var(--alloy-radii-md);
     background: transparent;
-    color: var(--alloy-text-secondary);
+    color: var(--alloy-color-text-secondary);
     cursor: pointer;
   }
 
   .icon-btn:hover {
     background: var(--alloy-color-surface-hover);
-    color: var(--alloy-text-primary);
+    color: var(--alloy-color-text-primary);
   }
 
   .facts {
     display: flex;
     flex-direction: column;
-    gap: var(--alloy-space-2);
+    gap: var(--alloy-spacing-scale-2);
     margin: 0;
   }
 
   .fact {
     display: flex;
     justify-content: space-between;
-    gap: var(--alloy-space-2);
+    gap: var(--alloy-spacing-scale-2);
   }
 
   .fact dt {
-    color: var(--alloy-text-secondary);
+    color: var(--alloy-color-text-secondary);
   }
 
   .fact dd {
@@ -251,18 +251,18 @@
   .actions {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--alloy-space-2);
+    gap: var(--alloy-spacing-scale-2);
   }
 
   .status {
     margin: 0;
-    color: var(--alloy-text-muted);
+    color: var(--alloy-color-text-muted);
     font-size: var(--alloy-typography-size-xs);
   }
 
   .notice {
     margin: 0;
-    padding: var(--alloy-space-2);
+    padding: var(--alloy-spacing-scale-2);
     border-radius: var(--alloy-radii-sm);
     background: var(--alloy-color-surface-subtle);
     color: var(--alloy-color-status-error);
@@ -281,11 +281,11 @@
     }
     .icon-btn:hover {
       background: transparent;
-      color: var(--alloy-text-secondary);
+      color: var(--alloy-color-text-secondary);
     }
     .icon-btn:active {
       background: var(--alloy-color-surface-hover);
-      color: var(--alloy-text-primary);
+      color: var(--alloy-color-text-primary);
     }
     .mxid,
     .status,

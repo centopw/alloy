@@ -61,15 +61,15 @@
     block-size: var(--alloy-spacing-scale-1);
     border-radius: var(--alloy-radii-full);
     background: currentColor;
-    animation: typing-dot var(--alloy-motion-duration-slow) var(--alloy-motion-easing-ease-in-out) infinite;
+    animation: typing-dot var(--alloy-motion-duration-pulse, 1200ms) var(--alloy-motion-easing-ease-in-out) infinite;
   }
 
   .dots span:nth-child(2) {
-    animation-delay: calc(var(--alloy-motion-duration-slow) / 3);
+    animation-delay: calc(var(--alloy-motion-duration-pulse, 1200ms) / 3);
   }
 
   .dots span:nth-child(3) {
-    animation-delay: calc(var(--alloy-motion-duration-slow) * 2 / 3);
+    animation-delay: calc(var(--alloy-motion-duration-pulse, 1200ms) * 2 / 3);
   }
 
   @keyframes typing-dot {
@@ -88,5 +88,10 @@
       animation: none;
       opacity: 0.6;
     }
+  }
+
+  :global(:root[data-reduced-motion='true']) .dots span {
+    animation: none;
+    opacity: 0.6;
   }
 </style>

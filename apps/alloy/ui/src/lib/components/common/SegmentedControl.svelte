@@ -72,6 +72,7 @@
     border-radius: var(--alloy-radii-md);
     padding: 3px;
     gap: 2px;
+    opacity: {disabled ? 0.5 : 1};
     user-select: none;
   "
 >

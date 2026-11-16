@@ -65,6 +65,13 @@
     appearance: none;
     -webkit-appearance: none;
     outline: none;
+    transition: border-color var(--alloy-motion-duration-fast) ease;
+  }
+
+  @media (hover: hover) {
+    .text-field:not(:disabled):not(:focus):not(.invalid):not([aria-invalid='true']):hover {
+      border-color: var(--alloy-color-accent-primary);
+    }
   }
 
   .text-field::placeholder {

@@ -105,6 +105,11 @@
       opacity: 0.4;
     }
   }
+  :global(:root[data-reduced-motion='true']) .track.indeterminate .fill {
+    width: 100%;
+    animation: none;
+    opacity: 0.4;
+  }
   .meta {
     color: var(--alloy-color-text-secondary);
     font-variant-numeric: tabular-nums;

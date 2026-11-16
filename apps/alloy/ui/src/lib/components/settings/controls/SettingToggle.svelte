@@ -1,5 +1,6 @@
 <script lang="ts">
   import Toggle from '../../common/Toggle.svelte';
+  import SettingRow from './SettingRow.svelte';
 
   interface Props {
     label: string;
@@ -13,59 +14,22 @@
   let { label, description, checked, onchange, disabled = false, disabledReason }: Props = $props();
 </script>
 
-<div class="setting-row">
-  <div class="text">
-    <span class="label">{label}</span>
-    {#if description}
-      <span class="description">{description}</span>
-    {/if}
-    {#if disabled && disabledReason}
-      <span class="reason">{disabledReason}</span>
-    {/if}
-  </div>
-  <Toggle {checked} {label} {disabled} {onchange} />
-</div>
+<SettingRow {label} {description} reason={disabled ? disabledReason : undefined}>
+  <span class="toggle-hit">
+    <Toggle {checked} {label} {disabled} {onchange} />
+  </span>
+</SettingRow>
 
 <style>
-  .setting-row {
-    display: flex;
+  .toggle-hit {
+    display: inline-flex;
     align-items: center;
-    justify-content: space-between;
-    gap: var(--alloy-spacing-scale-4);
-    min-height: var(--alloy-layout-control-height);
-    padding: var(--alloy-spacing-scale-2) 0;
-    border-top: 1px solid var(--alloy-color-border-subtle);
+    flex-shrink: 0;
   }
 
-  .setting-row:first-child {
-    border-top: none;
-  }
-
-  .text {
-    display: flex;
-    flex: 1;
-    flex-direction: column;
-    gap: var(--alloy-spacing-scale-1);
-    min-width: 0;
-  }
-
-  .label {
-    font-size: var(--alloy-font-size-row);
-    font-weight: var(--alloy-typography-weight-medium);
-    color: var(--alloy-color-text-primary);
-  }
-
-  .description {
-    font-size: var(--alloy-font-size-preview);
-    color: var(--alloy-color-text-muted);
-  }
-
-  .reason {
-    font-size: var(--alloy-typography-size-xs);
-    color: var(--alloy-color-text-muted);
-  }
   @media (max-width: 899px) {
-    .setting-row :global(.alloy-toggle) {
+    .toggle-hit :global(.alloy-toggle) {
+      position: relative;
       flex-shrink: 0;
     }
     /*
@@ -74,7 +38,7 @@
      * vertically gives 16.4 + 28 = 44.4px and -7px horizontally gives 30 + 14 = 44px, so the tap
      * target clears ADR 0005's 44x44 minimum without changing the visible track.
      */
-    .setting-row :global(.alloy-toggle)::before {
+    .toggle-hit :global(.alloy-toggle)::before {
       content: '';
       position: absolute;
       inset: -14px -7px;

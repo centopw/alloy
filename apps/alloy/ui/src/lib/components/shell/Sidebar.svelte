@@ -6,12 +6,13 @@
   import TagEditDialog from '../tags/TagEditDialog.svelte';
   import Icon from '$lib/icons/Icon.svelte';
   import NetworkIcon from '$lib/icons/NetworkIcon.svelte';
-  import { Archive, ArchiveRestore, ArrowUpDown, Bell, BellOff, CheckCheck, ChevronDown, ChevronUp, Copy, Ellipsis, Info, Mail, Palette, Pencil, Pin, PinOff, RefreshCw, Search, Settings, StickyNote, Tag, Trash2 } from '$lib/icons';
+  import { Archive, ArchiveRestore, ArrowUpDown, Bell, BellOff, CheckCheck, ChevronDown, ChevronUp, Copy, Ellipsis, Info, Mail, Palette, Pencil, Pin, PinOff, Plus, RefreshCw, Search, Settings, StickyNote, Tag, Trash2 } from '$lib/icons';
   import { contextmenu } from '$lib/platform/contextmenu';
   import { pullToRefresh } from '$lib/platform/pullToRefresh';
   import { shortcutLabel } from '$lib/platform/shortcuts';
   import type { MenuItem } from '$lib/stores/contextmenu.svelte';
-  import { isRoomMuted, MUTE_FOREVER, networkName, ROOM_FILTERS, roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
+  import { isRoomMuted, MUTE_FOREVER, networkName, ROOM_FILTERS, roomsStore, roomTitle, type RoomFilter } from '$lib/stores/rooms.svelte';
+  import { session } from '$lib/stores/session.svelte';
   import { prefs } from '$lib/stores/prefs.svelte';
   import { displayTags, TAG_COLOUR_VARS, TAG_COLOURS } from '$lib/stores/tags';
   import { tags } from '$lib/stores/tags.svelte';
@@ -21,7 +22,7 @@
   import { groupRoomsByTag, ROOM_SORTS, sortForGroupToggle, type RoomSort } from '$lib/stores/roomSort';
   import { rovingTabStop, rovingTargetIndex } from '$lib/platform/rovingFocus';
   import { roomRowSelector } from '$lib/platform/shellFocus';
-  import type { TagColour } from '$lib/generated';
+  import type { Network, TagColour } from '$lib/generated';
   import { ui } from '$lib/stores/ui.svelte';
   import { viewport } from '$lib/stores/viewport.svelte';
   import { formatListTime } from '$lib/content/format';
@@ -39,7 +40,7 @@
   import { t } from '$lib/i18n';
   interface Props {
     onselect?: (roomId: string) => void;
-    onsettings?: (section?: 'tags') => void;
+    onsettings?: (section?: 'tags' | 'account') => void;
   }
   let { onselect, onsettings }: Props = $props();
 
@@ -67,10 +68,17 @@
     unread: t('sidebar-sort-unread-first'),
     tag: t('sidebar-sort-by-tag'),
   };
-  // The three filters people actually flip between; the rest stay in the More menu.
-  const PRIMARY_FILTERS = ROOM_FILTERS.filter(
-    (f) => f.value === 'all' || f.value === 'unread' || f.value === 'direct',
-  );
+  // The four filters people actually flip between; Archive and Sort stay in the More menu.
+  const PRIMARY_FILTERS: readonly RoomFilter[] = ['all', 'unread', 'direct', 'rooms'];
+  const PRIMARY_FILTER_ITEMS = PRIMARY_FILTERS.flatMap((value) => {
+    const item = ROOM_FILTERS.find((f) => f.value === value);
+    return item ? [item] : [];
+  });
+  const NETWORK_SCOPES: readonly { value: Network | null; label: string }[] = [
+    { value: null, label: t('room-filter-all') },
+    { value: 'telegram', label: t('chat-network-telegram') },
+    { value: 'messenger', label: t('chat-network-messenger') },
+  ];
 
   function openRoom(roomId: string) {
     roomsStore.select(roomId);
@@ -297,7 +305,7 @@
   }
 
   const filterLabel = $derived(ROOM_FILTERS.find((f) => f.value === roomsStore.filter)?.label ?? t('room-filter-all'));
-  const moreFilterActive = $derived(!PRIMARY_FILTERS.some((f) => f.value === roomsStore.filter));
+  const moreFilterActive = $derived(!PRIMARY_FILTERS.includes(roomsStore.filter));
   // The same count the shell badge shows: a forum counts once for its topics (`unreadChatCount`).
   const unreadRoomsCount = $derived(roomsStore.unreadChatCount);
   const multipleAccounts = $derived(roomsStore.accounts.length > 1);
@@ -599,20 +607,20 @@
 {/snippet}
 
 {#snippet listRow(r: RoomItem)}
-  {#if r.is_forum}
-    {@render forumRow(r)}
-  {:else}
-    <RoomSwipe
-      id={r.id}
-      enabled={viewport.isPhone}
-      archived={r.archived}
-      muted={isRoomMuted(r)}
-      onarchive={() => void roomsStore.setArchived(r.id, !r.archived)}
-      onmute={() => void (isRoomMuted(r) ? unmuteRoom(r.id) : muteRoom(r.id, null))}
-    >
+  <RoomSwipe
+    id={r.id}
+    enabled={viewport.isPhone}
+    archived={r.archived}
+    muted={isRoomMuted(r)}
+    onarchive={() => void roomsStore.setArchived(r.id, !r.archived)}
+    onmute={() => void (isRoomMuted(r) ? unmuteRoom(r.id) : muteRoom(r.id, null))}
+  >
+    {#if r.is_forum}
+      {@render forumRow(r)}
+    {:else}
       {@render roomRow(r, {})}
-    </RoomSwipe>
-  {/if}
+    {/if}
+  </RoomSwipe>
 {/snippet}
 
 {#snippet roomList(list: RoomItem[])}
@@ -680,6 +688,41 @@
     <p class="error" role="alert">{refreshStore.error}</p>
   {/if}
 
+  <div class="network-scope" role="toolbar" aria-label={t('settings-networks-title')}>
+    <div class="scope-pills">
+      {#each NETWORK_SCOPES as scope (scope.value ?? 'all')}
+        {@const active =
+          scope.value === null
+            ? roomsStore.networkFilter === null && roomsStore.accountFilter === null
+            : roomsStore.networkFilter === scope.value}
+        <button
+          type="button"
+          class="scope-pill"
+          class:on={active}
+          aria-pressed={active}
+          onclick={() => {
+            roomsStore.networkFilter = scope.value;
+            roomsStore.accountFilter = null;
+          }}
+        >
+          {scope.label}
+        </button>
+      {/each}
+    </div>
+    <button
+      type="button"
+      class="scope-add"
+      aria-label={t('account-add')}
+      data-tooltip={t('account-add')}
+      onclick={() => {
+        session.openAddAccount();
+        onsettings?.('account');
+      }}
+    >
+      <Icon icon={Plus} size={16} />
+    </button>
+  </div>
+
   <div class="search">
     <Icon icon={Search} size={16} />
     <input
@@ -693,7 +736,7 @@
 
   <div class="filters">
     <div class="filter-tabs" role="group" aria-label={t('sidebar-filter-rooms')}>
-      {#each PRIMARY_FILTERS as f (f.value)}
+      {#each PRIMARY_FILTER_ITEMS as f (f.value)}
         <button
           type="button"
           class="filter-tab"
@@ -893,6 +936,87 @@
     font-weight: var(--alloy-typography-weight-medium);
     white-space: nowrap;
   }
+  .network-scope {
+    display: flex;
+    align-items: center;
+    gap: var(--alloy-spacing-scale-1);
+    flex-shrink: 0;
+    margin: var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-2) 0;
+  }
+  .scope-pills {
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    gap: var(--alloy-spacing-scale-1);
+    min-width: 0;
+    padding: 2px 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .scope-pills::-webkit-scrollbar {
+    display: none;
+  }
+  .scope-pill {
+    display: inline-flex;
+    flex: 1 0 auto;
+    align-items: center;
+    justify-content: center;
+    height: 26px;
+    padding: 0 var(--alloy-spacing-scale-2);
+    border: 1px solid var(--alloy-chat-rim);
+    border-radius: var(--alloy-radii-full);
+    background: var(--alloy-glass-control);
+    color: var(--alloy-color-text-secondary);
+    font: inherit;
+    font-size: var(--alloy-font-size-preview);
+    font-weight: var(--alloy-typography-weight-medium);
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background var(--alloy-motion-duration-fast) ease,
+      border-color var(--alloy-motion-duration-fast) ease,
+      color var(--alloy-motion-duration-fast) ease;
+  }
+  @media (hover: hover) {
+    .scope-pill:not(.on):hover {
+      border-color: var(--alloy-glass-rim-strong);
+      background: var(--alloy-glass-control-hover);
+      color: var(--alloy-color-text-primary);
+    }
+  }
+  .scope-pill.on {
+    border-color: var(--alloy-color-accent-fill);
+    background: var(--alloy-color-accent-fill);
+    color: var(--alloy-color-text-on-accent);
+  }
+  .scope-pill:focus-visible {
+    outline: 2px solid var(--alloy-color-accent-primary);
+    outline-offset: 0;
+  }
+  .scope-add {
+    display: inline-grid;
+    flex: none;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: 1px solid var(--alloy-chat-rim);
+    border-radius: var(--alloy-radii-full);
+    background: var(--alloy-glass-control);
+    color: var(--alloy-color-text-secondary);
+    cursor: pointer;
+    transition:
+      background var(--alloy-motion-duration-fast) ease,
+      border-color var(--alloy-motion-duration-fast) ease,
+      color var(--alloy-motion-duration-fast) ease;
+  }
+  @media (hover: hover) {
+    .scope-add:hover {
+      border-color: var(--alloy-glass-rim-strong);
+      background: var(--alloy-glass-control-hover);
+      color: var(--alloy-color-text-primary);
+    }
+  }
   /* A quiet field: the sidebar's quick-switcher, not a toolbar. */
   .search {
     display: flex;
@@ -953,7 +1077,7 @@
     gap: var(--alloy-spacing-scale-2);
     margin: 0 var(--alloy-spacing-scale-2) var(--alloy-spacing-scale-2);
   }
-  /* A segmented control for the three views people flip between. Everything else — the remaining
+  /* A segmented control for the four views people flip between. Everything else — the remaining
      filters, sorting, bulk read state — sits behind the chevron so the list keeps the room. */
   .filter-tabs {
     display: flex;
@@ -969,12 +1093,12 @@
   .filter-tab {
     position: relative;
     display: inline-flex;
-    flex: 1 1 0;
+    flex: 1 1 auto;
     align-items: center;
     justify-content: center;
     min-width: 0;
     height: 24px;
-    padding: 0 var(--alloy-spacing-scale-2);
+    padding: 0 var(--alloy-spacing-scale-1);
     overflow: hidden;
     border: 0;
     border-radius: var(--alloy-radii-md);
@@ -991,9 +1115,11 @@
       color var(--alloy-motion-duration-fast) ease,
       box-shadow var(--alloy-motion-duration-fast) ease;
   }
-  .filter-tab:hover {
-    background: var(--alloy-glass-control-hover);
-    color: var(--alloy-color-text-primary);
+  @media (hover: hover) {
+    .filter-tab:hover {
+      background: var(--alloy-glass-control-hover);
+      color: var(--alloy-color-text-primary);
+    }
   }
   .filter-tab.on {
     background: var(--alloy-color-accent-fill);
@@ -1018,9 +1144,11 @@
       background var(--alloy-motion-duration-fast) ease,
       color var(--alloy-motion-duration-fast) ease;
   }
-  .filter-more:hover {
-    background: var(--alloy-glass-control-hover);
-    color: var(--alloy-color-text-primary);
+  @media (hover: hover) {
+    .filter-more:hover {
+      background: var(--alloy-glass-control-hover);
+      color: var(--alloy-color-text-primary);
+    }
   }
   .filter-more.on {
     background: var(--alloy-glass-control);
@@ -1153,8 +1281,10 @@
   button.row {
     cursor: pointer;
   }
-  button.row:hover {
-    background: var(--alloy-glass-control);
+  @media (hover: hover) {
+    button.row:hover {
+      background: var(--alloy-glass-control);
+    }
   }
   /* The open room keeps the solid accent rail, but its fill stays neutral: an accent wash under an
      accent unread badge is the one pair that reads as a rendering bug rather than a state. */
@@ -1467,19 +1597,35 @@
       min-height: 44px;
       font-size: var(--alloy-typography-size-lg);
     }
+    .network-scope,
     .filters,
     .tag-filter,
     .error {
       margin-left: var(--alloy-layout-gutter);
       margin-right: var(--alloy-layout-gutter);
     }
+    .scope-pill {
+      height: 44px;
+      padding: 0 var(--alloy-spacing-scale-3);
+      font-size: var(--alloy-font-size-row);
+    }
+    .scope-add {
+      width: 44px;
+      height: 44px;
+    }
     .filter-tabs {
       gap: var(--alloy-spacing-scale-1);
       padding: 0;
       border: 0;
       background: transparent;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .filter-tabs::-webkit-scrollbar {
+      display: none;
     }
     .filter-tab {
+      flex: 1 0 auto;
       height: 44px;
       padding: 0 var(--alloy-spacing-scale-3);
       border-radius: var(--alloy-radii-full);

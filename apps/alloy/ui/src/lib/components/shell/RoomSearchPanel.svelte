@@ -18,11 +18,13 @@
   import { t } from '$lib/i18n';
   interface Props {
     roomId: string;
-    title: string;
+    title?: string;
+    embedded?: boolean;
+    autofocus?: boolean;
     onclose: () => void;
   }
 
-  let { roomId, title, onclose }: Props = $props();
+  let { roomId, title = '', embedded = false, autofocus = true, onclose }: Props = $props();
 
   let inputEl: HTMLInputElement | null = $state(null);
   let listEl: HTMLUListElement | undefined = $state();
@@ -42,7 +44,7 @@
   });
 
   $effect(() => {
-    inputEl?.focus();
+    if (autofocus) inputEl?.focus();
   });
 
   const senderOptions = $derived<{ value: string; label: string }[]>([
@@ -112,21 +114,7 @@
   }
 </script>
 
-<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<aside class="panel" aria-label={t('room-search-panel-search-in-room')} onkeydown={onpanelKeydown}>
-  <header class="bar">
-    <h2 class="title">{t('room-search-panel-search-in')} {title}</h2>
-    <button
-      type="button"
-      class="icon-btn"
-      aria-label={viewport.isPhone ? t('common-back') : t('room-search-panel-close-search')}
-      title={viewport.isPhone ? t('common-back') : t('room-search-panel-close-search')}
-      onclick={onclose}
-    >
-      <Icon icon={viewport.isPhone ? ChevronLeft : X} size={20} />
-    </button>
-  </header>
-
+{#snippet searchContent()}
   <div class="controls">
     <TextField
       bind:el={inputEl}
@@ -209,13 +197,45 @@
       {/if}
     {/if}
   </div>
-</aside>
+{/snippet}
+
+{#if embedded}
+  <div class="embedded">
+    {@render searchContent()}
+  </div>
+{:else}
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <aside class="panel" aria-label={t('room-search-panel-search-in-room')} onkeydown={onpanelKeydown}>
+    <header class="bar">
+      <h2 class="title">{t('room-search-panel-search-in')} {title}</h2>
+      <button
+        type="button"
+        class="icon-btn"
+        aria-label={viewport.isPhone ? t('common-back') : t('room-search-panel-close-search')}
+        title={viewport.isPhone ? t('common-back') : t('room-search-panel-close-search')}
+        onclick={onclose}
+      >
+        <Icon icon={viewport.isPhone ? ChevronLeft : X} size={20} />
+      </button>
+    </header>
+    {@render searchContent()}
+  </aside>
+{/if}
 
 <style>
   .panel {
     display: flex;
     flex-direction: column;
     height: 100%;
+    min-height: 0;
+    background: transparent;
+    color: var(--alloy-color-text-primary);
+  }
+
+  .embedded {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
     min-height: 0;
     background: transparent;
     color: var(--alloy-color-text-primary);

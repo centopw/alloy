@@ -37,11 +37,8 @@ export function pushBack(handler: () => void): () => void {
   return () => {
     const i = stack.indexOf(entry);
     if (i < 0) return; // already consumed by Back
-    const wasTop = i === stack.length - 1;
     stack.splice(i, 1);
-    if (wasTop) {
-      programmaticPops++;
-      history.back();
-    }
+    programmaticPops++;
+    history.back();
   };
 }

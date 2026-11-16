@@ -4,5 +4,6 @@ export { default as SettingGroup } from './SettingGroup.svelte';
 export { default as SettingQuickReactions } from './SettingQuickReactions.svelte';
 export { default as SettingRadioCards } from './SettingRadioCards.svelte';
 export { default as SettingRadioMatrix } from './SettingRadioMatrix.svelte';
+export { default as SettingRow } from './SettingRow.svelte';
 export { default as SettingSelect } from './SettingSelect.svelte';
 export { default as SettingToggle } from './SettingToggle.svelte';

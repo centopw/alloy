@@ -5,7 +5,6 @@
   import TopicsRail from './TopicsRail.svelte';
   import MobileTabBar from './MobileTabBar.svelte';
   import RoomInfoPanel from './RoomInfoPanel.svelte';
-  import RoomSearchPanel from './RoomSearchPanel.svelte';
   import CommandPalette from './CommandPalette.svelte';
   import Timeline from '../timeline/Timeline.svelte';
   import Composer from '../composer/Composer.svelte';
@@ -27,7 +26,7 @@
   import { connectivity } from '$lib/stores/connectivity.svelte';
   import { client } from '$lib/ipc';
   import { pushBack } from '$lib/platform/backstack';
-  import { capabilities, currentEnv } from '$lib/platform/capabilities';
+  import { capabilities, currentEnv, type SettingsSectionId } from '$lib/platform/capabilities';
   import { roomsStore, roomTitle } from '$lib/stores/rooms.svelte';
   import { tags } from '$lib/stores/tags.svelte';
   import { roomInfo } from '$lib/stores/roomInfo.svelte';
@@ -53,8 +52,8 @@
   import { t } from '$lib/i18n';
   let paletteOpen = $state(false);
   let settingsOpen = $state(false);
-  let settingsSection = $state<'tags' | 'permissions' | undefined>();
-  function openSettings(section?: 'tags' | 'permissions') {
+  let settingsSection = $state<SettingsSectionId | undefined>();
+  function openSettings(section?: SettingsSectionId) {
     settingsSection = section;
     settingsOpen = true;
   }
@@ -238,9 +237,7 @@
   // On phones an open room info or room search overlay takes a Back entry, so Back closes it before the chat.
   $effect(() => {
     if (breakpoint !== 'narrow' || infoMode !== 'overlay') return;
-    if (infoPanel === 'room-search') return pushBack(() => ui.closeRoomSearch());
-    if (infoPanel === 'room-info') return pushBack(() => ui.closeRoomInfo());
-    return;
+    return pushBack(() => ui.closeRoomInfo());
   });
 
   // On phones the system Back button returns from a chat to the room list instead of leaving the app.
@@ -470,11 +467,12 @@
 
   {#if infoMode !== 'none' && active && activeId}
     <div class="side">
-      {#if infoPanel === 'room-search'}
-        <RoomSearchPanel roomId={activeId} title={roomTitle(active)} onclose={() => ui.closeRoomSearch()} />
-      {:else}
-        <RoomInfoPanel roomId={activeId} initialTab={ui.roomInfoTab} onclose={() => ui.closeRoomInfo()} onsearch={() => ui.openRoomSearch()} />
-      {/if}
+      <RoomInfoPanel
+        roomId={activeId}
+        initialTab={infoPanel === 'room-search' ? 'search' : ui.roomInfoTab}
+        ontabchange={(tab) => ui.openRoomInfo(tab)}
+        onclose={() => ui.closeRoomInfo()}
+      />
     </div>
   {/if}
 </div>

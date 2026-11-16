@@ -125,9 +125,9 @@
       if (!parent) {
         const opts = contextMenu.options;
         if (opts?.anchor && opts.matchWidth) {
-          node.style.width = `${opts.anchor.width}px`;
+          node.style.width = 'max-content';
           node.style.minWidth = `${opts.anchor.width}px`;
-          node.style.maxWidth = 'none';
+          node.style.maxWidth = 'min(360px, calc(100vw - 16px))';
         } else if (opts?.minWidth) {
           node.style.minWidth = `${opts.minWidth}px`;
           node.style.maxWidth = '';

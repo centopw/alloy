@@ -71,7 +71,7 @@
   // Picked, dropped or pasted files wait here until the user sends them, and the composer text
   // becomes their caption. Nothing leaves the device without an explicit Send.
   let staged = $state<StagedPicture[]>([]);
-  // The preview modal is how a person looks over what they attached and writes a caption for it.
+  // The preview modal opens on demand when clicking an item in the inline staging strip.
   let previewOpen = $state(false);
   // Staged attachments are sendable on their own.
   const canSend = $derived(text.trim().length > 0 || staged.length > 0);
@@ -149,12 +149,19 @@
     })
   );
 
+  let preEditDraft: string | null = null;
+  let wasEditing = false;
+
   // Entering edit mode prefills the field with the original text.
   $effect(() => {
     const e = editing;
     if (e && e.content.kind === 'TextMessage') {
+      if (!wasEditing) preEditDraft = untrack(() => text);
+      wasEditing = true;
       text = e.content.data.body;
       field?.focus();
+    } else {
+      wasEditing = false;
     }
   });
 
@@ -165,7 +172,7 @@
   async function restoreDraft(id: string) {
     const draft = await draftsStore.load(id);
     if (roomId !== id) return;
-    if (draft && text === '') {
+    if (draft && text === '' && !editing) {
       text = draft.text;
       void tickResize();
     }
@@ -179,6 +186,8 @@
     text = '';
     staged = [];
     draftReady = false;
+    preEditDraft = null;
+    wasEditing = false;
     untrack(() => emojiPicker.close());
     mention = null;
     mentionDismissed = null;
@@ -290,6 +299,7 @@
     if (!canSend) return;
     const body = text;
     text = '';
+    preEditDraft = null;
     mention = null;
     clearTimeout(typingTimer);
     setTyping(false);
@@ -311,6 +321,20 @@
     staged = staged.filter((item) => item.path !== path);
   }
 
+  /** Clears the composer draft after an attachment batch consumes it as a caption. */
+  function clearCaption() {
+    if (!text) return;
+    text = '';
+    mention = null;
+    void tickResize();
+  }
+
+  /** Moves focus into the inline composer field once staged items settle in the DOM. */
+  async function focusAfterStaging() {
+    await tick();
+    if (!previewOpen) field?.focus();
+  }
+
   /**
    * Sends the staged attachments. `captionOverride` is what the preview modal typed; without it the
    * composer text rides along, which is what the strip and Enter have always done. The caption goes
@@ -321,26 +345,20 @@
     if (items.length === 0) return;
     const caption = (captionOverride ?? text).trim();
     staged = [];
-    if (captionOverride === undefined && caption) {
-      text = '';
-      mention = null;
-      void tickResize();
-    }
+    if (captionOverride === undefined) clearCaption();
     for (const [index, item] of items.entries()) {
       await timelineStore.sendFile(item.path, null, index === 0 && caption ? caption : null);
     }
     dropPreviews(items);
   }
 
-  /** Adds picked or dropped files to the preview strip; pictures and videos get a thumbnail. */
+  /** Adds picked or dropped files to the inline staging strip; pictures and videos get a thumbnail. */
   async function stagePaths(paths: string[]) {
     for (const path of paths) {
       if (staged.some((item) => item.path === path)) continue;
       staged.push(await stageFile(path));
     }
-    // Attaching something is the moment to look at it. Even a file that was already staged opens the
-    // preview, because asking to attach it again is asking to look at it.
-    if (paths.length > 0) previewOpen = true;
+    if (paths.length > 0) await focusAfterStaging();
   }
 
   /**
@@ -408,7 +426,7 @@
       const picture = await stagePictureFromPath(rawPath);
       if (picture) {
         staged.push(picture);
-        previewOpen = true;
+        await focusAfterStaging();
       }
     } catch (err) {
       timelineStore.error = errorMessage(err);
@@ -420,6 +438,7 @@
     const pictures = pastedImageFiles(e.clipboardData);
     if (pictures.length > 0) {
       e.preventDefault();
+      let added = false;
       for (const file of pictures) {
         try {
           staged.push({
@@ -429,11 +448,12 @@
             preview: URL.createObjectURL(file),
             size: file.size,
           });
-          previewOpen = true;
+          added = true;
         } catch (err) {
           timelineStore.error = errorMessage(err);
         }
       }
+      if (added) await focusAfterStaging();
       return;
     }
     const pasted = e.clipboardData?.getData('text/plain') ?? '';
@@ -456,10 +476,23 @@
     }
     if (path) {
       staged.push(await stageFile(path));
-      previewOpen = true;
+      await focusAfterStaging();
     } else {
       field?.focus();
       document.execCommand('insertText', false, pasted);
+    }
+  }
+
+  function cancelActiveCompose() {
+    const isEditing = !!editing;
+    const saved = isEditing
+      ? (roomId ? (draftsStore.previewOf(roomId) ?? preEditDraft ?? '') : (preEditDraft ?? ''))
+      : '';
+    preEditDraft = null;
+    timelineStore.cancelCompose();
+    if (isEditing) {
+      text = saved;
+      void tickResize();
     }
   }
 
@@ -531,10 +564,7 @@
       void submit();
     } else if (e.key === 'Escape') {
       if (emojiPicker.isOpen) emojiPicker.close();
-      else if (replying || editing) {
-        timelineStore.cancelCompose();
-        if (editing) text = '';
-      }
+      else if (replying || editing) cancelActiveCompose();
     }
   }
 
@@ -647,11 +677,7 @@
         class="round"
         aria-label={editing ? t('composer-cancel-edit') : t('composer-cancel-reply')}
         data-shortcut="Esc"
-        onclick={() => {
-          const wasEditing = !!editing;
-          timelineStore.cancelCompose();
-          if (wasEditing) text = '';
-        }}
+        onclick={cancelActiveCompose}
       >
         <Icon icon={X} size={16} />
       </button>
@@ -662,28 +688,35 @@
     <div class="staged" role="group" aria-label={t('composer-attachments-ready-to-send')}>
       {#each staged as item (item.path)}
         <div class="picture">
-          {#if item.preview && item.kind === 'video'}
-            <!-- svelte-ignore a11y_media_has_caption -->
-            <video
-              src={`${item.preview}#t=0.1`}
-              muted
-              playsinline
-              preload="metadata"
-              aria-label={item.name}
-              onloadedmetadata={(e) => {
-                const v = e.currentTarget;
-                if (Number.isFinite(v.duration) && v.duration > 0) v.currentTime = Math.min(0.1, v.duration / 2);
-              }}
-              onerror={() => (item.preview = null)}
-            ></video>
-          {:else if item.preview}
-            <img src={item.preview} alt="" onerror={() => (item.preview = null)} />
-          {:else}
-            <span class="picture-icon" aria-hidden="true">
-              <Icon icon={item.kind === 'video' ? Play : item.kind === 'image' ? Image : File} size={20} />
-            </span>
-          {/if}
-          <span class="picture-name">{item.name}</span>
+          <button
+            type="button"
+            class="picture-preview"
+            aria-label={t('attachment-preview-picture-alt', { name: item.name })}
+            onclick={() => (previewOpen = true)}
+          >
+            {#if item.preview && item.kind === 'video'}
+              <!-- svelte-ignore a11y_media_has_caption -->
+              <video
+                src={`${item.preview}#t=0.1`}
+                muted
+                playsinline
+                preload="metadata"
+                aria-label={item.name}
+                onloadedmetadata={(e) => {
+                  const v = e.currentTarget;
+                  if (Number.isFinite(v.duration) && v.duration > 0) v.currentTime = Math.min(0.1, v.duration / 2);
+                }}
+                onerror={() => (item.preview = null)}
+              ></video>
+            {:else if item.preview}
+              <img src={item.preview} alt="" onerror={() => (item.preview = null)} />
+            {:else}
+              <span class="picture-icon" aria-hidden="true">
+                <Icon icon={item.kind === 'video' ? Play : item.kind === 'image' ? Image : File} size={20} />
+              </span>
+            {/if}
+            <span class="picture-name">{item.name}</span>
+          </button>
           <button type="button" class="round" aria-label={t('composer-remove-attachment', { name: item.name })} data-tooltip={t('common-remove')} onclick={() => unstage(item.path)}>
             <Icon icon={X} size={16} />
           </button>
@@ -699,17 +732,16 @@
   <AttachmentPreview
     open={previewOpen}
     items={staged}
-    initialCaption={text}
-    onclose={() => (previewOpen = false)}
+    bind:caption={text}
+    onclose={() => {
+      previewOpen = false;
+      void tickResize();
+    }}
     onsend={(caption) => {
       previewOpen = false;
-      // The caption box opened as the composer draft, so that draft is spent by this send rather
+      // The caption box is bound to the composer draft, so that draft is spent by this send rather
       // than left behind to look like a second, unsent message.
-      if (text.trim()) {
-        text = '';
-        mention = null;
-        void tickResize();
-      }
+      clearCaption();
       void sendStaged(caption);
     }}
     onremove={(path) => unstage(path)}
@@ -858,7 +890,7 @@
   }
   .staged-hint {
     color: var(--alloy-color-text-muted);
-    font-size: var(--alloy-typography-xs, 12px);
+    font-size: var(--alloy-typography-size-xs);
   }
   .staged {
     display: flex;
@@ -881,6 +913,29 @@
     min-width: 0;
     color: var(--alloy-color-text-secondary);
     font-size: var(--alloy-typography-size-sm);
+  }
+  .picture-preview {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--alloy-spacing-scale-2);
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    border-radius: var(--alloy-radii-lg);
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+  }
+  .picture-preview:focus-visible {
+    outline: 2px solid var(--alloy-color-accent-primary);
+    outline-offset: 2px;
+  }
+  @media (hover: hover) {
+    .picture-preview:hover {
+      opacity: 0.85;
+    }
   }
   .picture img,
   .picture video {
@@ -1061,6 +1116,9 @@
     .banner .round {
       width: 44px;
       height: 44px;
+    }
+    .picture-preview {
+      min-height: 44px;
     }
     textarea {
       box-sizing: border-box;

@@ -21,9 +21,22 @@
  *   </script>
  */
 
-export type Theme = "alloy-light" | "alloy-dark" | "alloy-amoled";
+export type Theme = "alloy-light" | "alloy-dark" | "alloy-amoled" | "midnight-ocean";
 export type Density = "compact" | "normal" | "cozy";
 export type MessageStyle = "bubble" | "gutter";
+
+const VALID_THEMES: readonly Theme[] = [
+  "alloy-light",
+  "alloy-dark",
+  "alloy-amoled",
+  "midnight-ocean",
+];
+const VALID_DENSITIES: readonly Density[] = ["compact", "normal", "cozy"];
+const VALID_MESSAGE_STYLES: readonly MessageStyle[] = ["bubble", "gutter"];
+
+function isValidTheme(value: unknown): value is Theme {
+  return typeof value === "string" && (VALID_THEMES as readonly string[]).includes(value);
+}
 
 const STORAGE_KEY = "alloy.theme.v1";
 
@@ -63,6 +76,11 @@ interface StoredPreferences {
   density?: Density;
   messageStyle?: MessageStyle;
   followSystem?: boolean;
+  prefersReducedMotion?: boolean;
+}
+
+interface UserPreferences {
+  prefersReducedMotion: boolean;
 }
 
 function loadStoredPreferences(): StoredPreferences {
@@ -99,15 +117,26 @@ class ThemeStore {
   density = $state<Density>("normal");
   messageStyle = $state<MessageStyle>("bubble");
   followSystem = $state<boolean>(true);
+  preferences = $state<UserPreferences>({ prefersReducedMotion: false });
   systemPreferences = $state<SystemPreferences>(getSystemPreferences());
 
   constructor() {
     // Load from localStorage
     const stored = loadStoredPreferences();
-    if (stored.theme) this.activeTheme = stored.theme;
-    if (stored.density) this.density = stored.density;
-    if (stored.messageStyle) this.messageStyle = stored.messageStyle;
-    if (stored.followSystem !== undefined) this.followSystem = stored.followSystem;
+    if (isValidTheme(stored.theme)) this.activeTheme = stored.theme;
+    if (stored.density && (VALID_DENSITIES as readonly string[]).includes(stored.density)) {
+      this.density = stored.density;
+    }
+    if (
+      stored.messageStyle &&
+      (VALID_MESSAGE_STYLES as readonly string[]).includes(stored.messageStyle)
+    ) {
+      this.messageStyle = stored.messageStyle;
+    }
+    if (typeof stored.followSystem === "boolean") this.followSystem = stored.followSystem;
+    if (typeof stored.prefersReducedMotion === "boolean") {
+      this.preferences.prefersReducedMotion = stored.prefersReducedMotion;
+    }
 
     // While following the system, the system owns the theme: resolve it before the first paint so
     // startup does not flash the last explicit choice.
@@ -144,7 +173,10 @@ class ThemeStore {
     html.setAttribute("data-theme", this.activeTheme);
     html.setAttribute("data-density", this.density);
     html.setAttribute("data-message-style", this.messageStyle);
-    html.setAttribute("data-reduced-motion", this.systemPreferences.prefersReducedMotion ? "true" : "false");
+    html.setAttribute(
+      "data-reduced-motion",
+      String(this.preferences.prefersReducedMotion || this.systemPreferences.prefersReducedMotion),
+    );
   }
 
   private setupListeners(): void {
@@ -176,7 +208,7 @@ class ThemeStore {
       if (typeof document !== "undefined") {
         document.documentElement.setAttribute(
           "data-reduced-motion",
-          e.matches ? "true" : "false",
+          String(this.preferences.prefersReducedMotion || this.systemPreferences.prefersReducedMotion),
         );
       }
     });
@@ -184,8 +216,21 @@ class ThemeStore {
 
   /** An explicit choice: it takes the theme back from the system. */
   setTheme(theme: Theme): void {
+    if (!isValidTheme(theme)) return;
     this.commitTheme(theme);
     if (this.followSystem) this.setFollowSystem(false);
+  }
+
+  setReducedMotion(reduced: boolean): void {
+    this.preferences.prefersReducedMotion = reduced;
+    if (typeof document !== "undefined") {
+      document.documentElement.setAttribute(
+        "data-reduced-motion",
+        String(this.preferences.prefersReducedMotion || this.systemPreferences.prefersReducedMotion),
+      );
+    }
+    const stored = loadStoredPreferences();
+    saveStoredPreferences({ ...stored, prefersReducedMotion: reduced });
   }
 
   setDensity(density: Density): void {

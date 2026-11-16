@@ -120,6 +120,10 @@ class RoomsStore {
   accounts = $state<Account[]>([]);
   activeRoomId = $state<string | null>(null);
   filter = $state<RoomFilter>('all');
+  /** Network the list is restricted to; null shows every network. */
+  networkFilter = $state<Network | null>(null);
+  /** Account id the list is restricted to; null shows every account. */
+  accountFilter = $state<string | null>(null);
   /** Tag id the list is restricted to; null shows every room. */
   tagFilter = $state<string | null>(null);
   query = $state('');
@@ -141,6 +145,8 @@ class RoomsStore {
       if (this.filter === 'unread' && !this.isUnread(r)) return false;
       if (this.filter === 'direct' && !r.is_direct) return false;
       if (this.filter === 'rooms' && r.is_direct) return false;
+      if (this.networkFilter !== null && r.network !== this.networkFilter) return false;
+      if (this.accountFilter !== null && r.account_id !== this.accountFilter) return false;
       return !q || roomTitle(r).toLowerCase().includes(q);
     });
     const tagId = this.tagFilter;
@@ -256,6 +262,8 @@ class RoomsStore {
     this.rooms.length = 0;
     this.activeRoomId = null;
     this.lastActive = null;
+    this.networkFilter = null;
+    this.accountFilter = null;
     if (id) await client.unsubscribe(id).catch(() => {});
   }
 

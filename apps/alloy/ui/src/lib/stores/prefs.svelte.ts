@@ -519,10 +519,11 @@ export function backgroundUrl(fileName: string): Promise<string | null> {
   return url;
 }
 
-/** Applies the font scale as the root font size. No-op without a DOM. */
+/** Applies the font scale as the root font size and `--alloy-font-scale` factor. No-op without a DOM. */
 export function applyFontScale(scale: FontScale): void {
   if (typeof document === 'undefined') return;
   document.documentElement.style.fontSize = `${scale}%`;
+  document.documentElement.style.setProperty('--alloy-font-scale', `${scale / 100}`);
 }
 
 /** Exposes the message layout as `data-message-layout` on the root element. No-op without a DOM. */

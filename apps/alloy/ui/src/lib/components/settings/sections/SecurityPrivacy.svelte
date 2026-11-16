@@ -32,6 +32,16 @@
       checked={prefs.sendTyping}
       onchange={(v) => prefs.set('sendTyping', v)}
     />
+    <SettingToggle
+      label={t('preferences-show-typing-notifications')}
+      checked={prefs.showTyping}
+      onchange={(v) => prefs.set('showTyping', v)}
+    />
+    <SettingToggle
+      label={t('appearance-send-and-show-read-receipts')}
+      checked={prefs.showReadReceipts}
+      onchange={(v) => prefs.set('showReadReceipts', v)}
+    />
   </SettingGroup>
   <SettingGroup title={t('security-privacy-storage')} description={t('security-privacy-storage-description')}>
     <SettingButtonRow

@@ -2,10 +2,13 @@
   import type { Component, Snippet } from 'svelte';
   import { Icon } from '$lib/icons';
 
+  export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
+
   interface Props {
-    variant?: 'primary' | 'ghost' | 'danger';
+    variant?: ButtonVariant;
     size?: 'sm' | 'md' | 'lg';
     disabled?: boolean;
+    loading?: boolean;
     type?: 'button' | 'submit' | 'reset';
     icon?: Component<{ size?: number; strokeWidth?: number; class?: string }>;
     ariaLabel?: string;
@@ -20,6 +23,7 @@
     variant = 'primary',
     size = 'md',
     disabled = false,
+    loading = false,
     type = 'button',
     icon,
     ariaLabel,
@@ -39,7 +43,8 @@
 
 <button
   {type}
-  {disabled}
+  disabled={disabled || loading}
+  aria-busy={loading || undefined}
   aria-label={ariaLabel}
   data-tooltip={tooltip}
   data-shortcut={shortcut}
@@ -73,11 +78,14 @@
     white-space: nowrap;
     user-select: none;
     cursor: pointer;
-    transition: background-color var(--alloy-motion-duration-fast, 150ms) ease, border-color var(--alloy-motion-duration-fast, 150ms) ease;
+    transition: background-color var(--alloy-motion-duration-fast, 150ms) ease, border-color var(--alloy-motion-duration-fast, 150ms) ease, transform var(--alloy-motion-duration-instant, 75ms) ease;
   }
   .alloy-button:disabled {
     cursor: not-allowed;
     opacity: 0.5;
+  }
+  .alloy-button:active:not(:disabled) {
+    transform: scale(0.98);
   }
   .size-sm {
     height: var(--alloy-layout-control-height-sm);
@@ -101,16 +109,15 @@
     color: var(--alloy-color-text-on-accent);
     border-color: transparent;
   }
-  .variant-primary:not(:disabled):hover {
-    background-color: var(--alloy-color-accent-hover);
+  .variant-secondary {
+    background-color: var(--alloy-color-surface-elevated);
+    color: var(--alloy-color-text-primary);
+    border-color: var(--alloy-color-border-prominent);
   }
   .variant-ghost {
     background-color: transparent;
     color: var(--alloy-color-text-primary);
     border-color: transparent;
-  }
-  .variant-ghost:not(:disabled):hover {
-    background-color: var(--alloy-color-surface-hover);
   }
   .variant-danger {
     /* The dedicated fill keeps the on-accent label at 4.5:1; status.error itself is tuned for
@@ -119,8 +126,19 @@
     color: var(--alloy-color-text-on-accent);
     border-color: transparent;
   }
-  .variant-danger:not(:disabled):hover {
-    filter: brightness(0.9);
+  @media (hover: hover) {
+    .variant-primary:not(:disabled):hover {
+      background-color: var(--alloy-color-accent-hover);
+    }
+    .variant-secondary:not(:disabled):hover {
+      background-color: var(--alloy-color-surface-hover);
+    }
+    .variant-ghost:not(:disabled):hover {
+      background-color: var(--alloy-color-surface-hover);
+    }
+    .variant-danger:not(:disabled):hover {
+      filter: brightness(0.9);
+    }
   }
   /* Touch: every button is a full-size target, whatever its desktop size. */
   @media (max-width: 899px) {

@@ -15,9 +15,12 @@
         const stored = localStorage.getItem('alloy.theme.v1');
         if (stored) {
           const prefs = JSON.parse(stored);
-          const theme = prefs.theme || 'alloy-dark';
-          const density = prefs.density || 'normal';
-          const style = prefs.messageStyle || 'bubble';
+          const validThemes = ['alloy-light', 'alloy-dark', 'alloy-amoled', 'midnight-ocean'];
+          const validDensities = ['compact', 'normal', 'cozy'];
+          const validStyles = ['bubble', 'gutter'];
+          const theme = validThemes.includes(prefs.theme) ? prefs.theme : 'alloy-dark';
+          const density = validDensities.includes(prefs.density) ? prefs.density : 'normal';
+          const style = validStyles.includes(prefs.messageStyle) ? prefs.messageStyle : 'bubble';
           const reducedMotion = prefs.prefersReducedMotion
             ? 'true'
             : window.matchMedia('(prefers-reduced-motion: reduce)').matches

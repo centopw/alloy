@@ -91,6 +91,13 @@
     -webkit-appearance: none;
     outline: none;
     resize: vertical;
+    transition: border-color var(--alloy-motion-duration-fast) ease;
+  }
+
+  @media (hover: hover) {
+    .text-area:not(:disabled):not(:focus):not(.invalid):not([aria-invalid='true']):hover {
+      border-color: var(--alloy-color-accent-primary);
+    }
   }
 
   /* An auto-growing field sizes itself, so it has no manual resize grip. */

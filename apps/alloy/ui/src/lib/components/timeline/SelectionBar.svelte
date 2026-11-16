@@ -67,7 +67,7 @@
     display: flex;
     align-items: center;
     gap: var(--alloy-spacing-scale-1);
-    min-height: 56px;
+    min-height: var(--alloy-layout-header-height);
     padding: 0 var(--alloy-spacing-scale-3);
     border-bottom: 1px solid var(--alloy-glass-rim);
     background: transparent;
