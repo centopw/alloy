@@ -228,12 +228,19 @@ impl TelegramConnector {
     }
 
     /// Resolves a remote chat id to something Telegram accepts.
+    ///
+    /// A forum topic's id is its forum's plus a `/t<N>` suffix, and a topic names no peer of its
+    /// own: the suffix is stripped here so every caller reaches the forum instead of failing.
     async fn resolve_peer(&self, remote_chat_id: &str) -> Result<PeerRef, ConnectorError> {
-        if let Some(reference) = self.shared.peer_ref(remote_chat_id) {
+        let (peer_chat_id, _topic) =
+            mapping::split_topic(remote_chat_id).ok_or_else(|| ConnectorError::InvalidInput {
+                message: format!("invalid chat id: {remote_chat_id}"),
+            })?;
+        if let Some(reference) = self.shared.peer_ref(peer_chat_id) {
             return Ok(reference);
         }
         let (kind, bare_id) =
-            mapping::decode_peer(remote_chat_id).ok_or_else(|| ConnectorError::InvalidInput {
+            mapping::decode_peer(peer_chat_id).ok_or_else(|| ConnectorError::InvalidInput {
                 message: format!("invalid chat id: {remote_chat_id}"),
             })?;
         let id = mapping::peer_id(kind, bare_id).ok_or_else(|| ConnectorError::InvalidInput {
@@ -2078,5 +2085,48 @@ impl Debug for TelegramConnector {
             .field("api_id", &self.shared.config.api_id)
             .field("logged_in", &self.shared.logged_in())
             .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const FORUM_ID: i64 = 2_734_773_276;
+
+    /// A connector with the forum already cached, so resolving it needs no network call.
+    fn connector_with_forum() -> TelegramConnector {
+        let connector = TelegramConnector::new(TelegramConfig::new(1, "0".repeat(32)));
+        connector
+            .shared
+            .insert_peer(PeerKindTag::Channel, FORUM_ID, 42);
+        connector
+    }
+
+    #[tokio::test]
+    async fn resolve_peer_strips_a_forum_topic_suffix() {
+        // A topic's id is its forum's id plus `/t<N>`; the forum is the peer every call takes.
+        let connector = connector_with_forum();
+        let peer = connector
+            .resolve_peer(&format!("ch{FORUM_ID}/t2052"))
+            .await
+            .expect("the topic resolves to its forum");
+        assert_eq!(
+            peer.id,
+            mapping::peer_id(PeerKindTag::Channel, FORUM_ID).expect("a valid channel id")
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_peer_rejects_a_topic_suffix_that_is_not_a_number() {
+        let connector = connector_with_forum();
+        let err = connector
+            .resolve_peer(&format!("ch{FORUM_ID}/tx"))
+            .await
+            .expect_err("a malformed topic suffix is invalid input");
+        assert!(
+            matches!(&err, ConnectorError::InvalidInput { message } if message.contains("invalid chat id")),
+            "{err:?}"
+        );
     }
 }

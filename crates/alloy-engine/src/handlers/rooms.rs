@@ -12,7 +12,7 @@ use alloy_protocol::{
 };
 use alloy_store::{
     AccountState as StoreAccountState, ChatFlagsUpdate, ChatKind as StoreChatKind, ChatRecord,
-    MessageKind as StoreMessageKind, MessageRecord, OutboxOp, RoomMediaQuery,
+    MessageKind as StoreMessageKind, MessageRecord, OutboxOp, RoomMediaQuery, Store,
 };
 use uuid::Uuid;
 
@@ -260,6 +260,29 @@ impl GroupHandler for RoomsHandler {
     }
 }
 
+/// The remote chat id a member listing must use. A forum topic is a conversation of its forum, not
+/// a chat of its own: its remote id carries the forum's id plus a `/t<N>` suffix, which names no
+/// member list. `None` when the topic's forum is not in the store yet — topics inherit the forum's
+/// membership, so there is nothing per-topic to list or to report.
+async fn members_remote_chat_id(store: &Store, chat: &ChatRecord) -> Option<String> {
+    let Some(parent) = chat.parent_remote_chat_id.as_deref() else {
+        return Some(chat.remote_chat_id.clone());
+    };
+    match store.find_chat(&chat.account_id, parent).await {
+        Ok(Some(forum)) => Some(forum.remote_chat_id),
+        Ok(None) => None,
+        Err(err) => {
+            tracing::warn!(
+                chat = %chat.chat_id,
+                forum = %parent,
+                error = %err,
+                "cannot read the forum of a topic"
+            );
+            None
+        }
+    }
+}
+
 /// Asks the network who is in a group or channel and stores the answer, returning each member's
 /// role by remote id. `None` when there is nothing fresher than the store: a direct chat, an
 /// account that is not connected, or a network that will not list the members.
@@ -270,8 +293,9 @@ async fn refresh_members(
     if chat.kind == StoreChatKind::Direct {
         return None;
     }
+    let remote_chat_id = members_remote_chat_id(&ctx.store, chat).await?;
     let runtime = ctx.accounts.get(&chat.account_id).await?;
-    let members = match runtime.connector.list_members(&chat.remote_chat_id).await {
+    let members = match runtime.connector.list_members(&remote_chat_id).await {
         Ok(members) => members,
         Err(err) => {
             tracing::warn!(chat = %chat.chat_id, error = %err, "member list unavailable");
@@ -1084,4 +1108,98 @@ async fn all_chats(ctx: &EngineContext) -> Result<Vec<ChatRecord>, EngineError> 
             .map_err(map_store)?,
     );
     Ok(chats)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_store::{AccountState, ChatUpsert, Network, NewAccount};
+
+    const KEY: [u8; 32] = [7; 32];
+
+    fn chat_upsert(account_id: &str, remote_chat_id: &str, parent: Option<&str>) -> ChatUpsert {
+        ChatUpsert {
+            account_id: account_id.to_string(),
+            remote_chat_id: remote_chat_id.to_string(),
+            kind: StoreChatKind::Group,
+            title: None,
+            avatar_media_id: None,
+            last_message_id: None,
+            last_activity_at: None,
+            parent_remote_chat_id: parent.map(str::to_string),
+            is_forum: false,
+        }
+    }
+
+    /// An empty store with one linked account, which the chats below belong to.
+    async fn store_with_account() -> Store {
+        let store = Store::open_in_memory(KEY).expect("open the store");
+        store
+            .insert_account(NewAccount {
+                account_id: Some("acct".to_string()),
+                network: Network::Telegram,
+                remote_user_id: None,
+                display_name: None,
+                state: AccountState::Active,
+            })
+            .await
+            .expect("insert the account");
+        store
+    }
+
+    #[tokio::test]
+    async fn a_topic_lists_the_members_of_its_forum() {
+        let store = store_with_account().await;
+        store
+            .upsert_chat(chat_upsert("acct", "ch9", None))
+            .await
+            .expect("insert the forum");
+        let topic_id = store
+            .upsert_chat(chat_upsert("acct", "ch9/t2052", Some("ch9")))
+            .await
+            .expect("insert the topic");
+        let topic = store
+            .get_chat(&topic_id)
+            .await
+            .expect("read the topic")
+            .expect("the topic exists");
+        // The topic's `/t2052` suffix names no member list; the forum's id does.
+        assert_eq!(
+            members_remote_chat_id(&store, &topic).await.as_deref(),
+            Some("ch9")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_topic_whose_forum_is_missing_lists_no_members() {
+        let store = store_with_account().await;
+        let topic_id = store
+            .upsert_chat(chat_upsert("acct", "ch9/t2052", Some("ch9")))
+            .await
+            .expect("insert the topic");
+        let topic = store
+            .get_chat(&topic_id)
+            .await
+            .expect("read the topic")
+            .expect("the topic exists");
+        assert_eq!(members_remote_chat_id(&store, &topic).await, None);
+    }
+
+    #[tokio::test]
+    async fn a_chat_that_is_not_a_topic_lists_its_own_members() {
+        let store = store_with_account().await;
+        let chat_id = store
+            .upsert_chat(chat_upsert("acct", "ch7", None))
+            .await
+            .expect("insert the chat");
+        let chat = store
+            .get_chat(&chat_id)
+            .await
+            .expect("read the chat")
+            .expect("the chat exists");
+        assert_eq!(
+            members_remote_chat_id(&store, &chat).await.as_deref(),
+            Some("ch7")
+        );
+    }
 }
