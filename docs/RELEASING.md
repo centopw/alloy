@@ -209,6 +209,13 @@ Because the certificate is self-signed and not issued by Apple:
 | `ANDROID_KEY_ALIAS` | Key alias name inside the keystore | Android |
 | `ANDROID_KEY_PASSWORD` | Password for the key alias | Android |
 
+### Homebrew tap (optional)
+| Secret | Description | Target Platform |
+|---|---|---|
+| `TAP_TOKEN` | Fine-grained PAT, Contents: read and write on `centopw/homebrew-tap` | Release workflow (see section 9) |
+
+Without `TAP_TOKEN` the release is still green; only the cask update is skipped.
+
 ---
 
 ## 5. Android Keystore Creation & Management
@@ -343,3 +350,47 @@ When cutting a new stable release (e.g. `v0.2.2`):
      APK are attached to the release.
    - Inspect the SBOMs (`alloy-sbom-*.json`) and `SHA256SUMS`.
    - `https://github.com/centopw/alloy/releases/download/updater-feed/latest.json` must report the new version.
+
+---
+
+## 9. Homebrew cask (macOS)
+
+macOS users can install Alloy with Homebrew from the `centopw/homebrew-tap` tap (token `alloy`):
+
+```bash
+brew install --cask centopw/tap/alloy
+```
+
+The cask lives in `centopw/homebrew-tap` at `Casks/alloy.rb`. It is **generated**, not written by hand:
+the template is `packaging/homebrew/alloy.rb.in` in this repository and `scripts/bump-cask.sh` renders it
+with the version and the two DMG checksums.
+
+### Automatic bump on release
+The `Update the Homebrew cask` job of `release.yml` runs after `checksums`. It downloads the release's
+`SHA256SUMS`, renders the cask for `vX.Y.Z` (arm64 from `Alloy_X.Y.Z_aarch64.dmg`, Intel from
+`Alloy_X.Y.Z_x64.dmg`) and pushes it to the tap's `main`, one commit per release.
+
+The job needs the repository secret `TAP_TOKEN`: a fine-grained personal access token whose only
+permission is **Contents: read and write** on `centopw/homebrew-tap`. It is used as an `x-access-token`
+HTTP header, never embedded in a clone URL, so it does not appear in logs.
+
+Without the secret the step still succeeds: `scripts/bump-cask.sh` prints `TAP_TOKEN is not set: skipping
+the Homebrew cask update.` and exits 0, and the rest of the release is unaffected. The cask then stays
+at the previous version until the secret is set and the job is re-run for that tag.
+
+### Bumping by hand
+Use the same script locally; `gh auth` supplies `GH_TOKEN` for the checksum download and `TAP_TOKEN` is
+needed only to push:
+
+```bash
+TAP_TOKEN=... scripts/bump-cask.sh v0.2.2              # download SHA256SUMS from the release
+scripts/bump-cask.sh v0.2.2 SHA256SUMS --dry-run       # print the rendered cask, touch nothing
+```
+
+The script reads `TAP_TOKEN` from the environment and the tap from `ALLOY_TAP` (default
+`centopw/homebrew-tap`); it is idempotent, so re-running it for an already-bumped version is a no-op.
+Any change to the cask (caveats, `zap` paths, URLs) goes into the template, not into the tap.
+
+The cask sets `auto_updates true`: after the first install, Alloy updates itself through the Tauri
+updater and the cask is not needed again. macOS Gatekeeper still warns on the first launch because the
+build is self-signed and not notarized (section 4); the cask's caveats repeat the right-click > Open step.

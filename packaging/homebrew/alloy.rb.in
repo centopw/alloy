@@ -1,0 +1,44 @@
+# Homebrew cask for Alloy. Rendered by scripts/bump-cask.sh into
+# centopw/homebrew-tap/Casks/alloy.rb; the release workflow does this after every stable release.
+# Change this template and the script, never the copy in the tap by hand.
+cask "alloy" do
+  version "@@VERSION@@"
+  sha256 arm:   "@@SHA256_ARM64@@",
+         intel: "@@SHA256_X64@@"
+
+  on_arm do
+    url "https://github.com/centopw/alloy/releases/download/v#{version}/Alloy_#{version}_aarch64.dmg"
+  end
+  on_intel do
+    url "https://github.com/centopw/alloy/releases/download/v#{version}/Alloy_#{version}_x64.dmg"
+  end
+
+  name "Alloy"
+  desc "Client for personal Telegram and Facebook Messenger accounts"
+  homepage "https://github.com/centopw/alloy"
+
+  # The cask is bumped by the release workflow; the app then installs its own updates (Tauri updater).
+  livecheck do
+    skip "Updated by scripts/bump-cask.sh in the release workflow"
+  end
+
+  auto_updates true
+  depends_on :macos
+
+  app "Alloy.app"
+
+  zap trash: [
+    "~/Library/Application Support/vn.hce.alloy",
+    "~/Library/Caches/vn.hce.alloy",
+    "~/Library/Logs/vn.hce.alloy",
+    "~/Library/Preferences/vn.hce.alloy.plist",
+    "~/Library/Saved Application State/vn.hce.alloy.savedState",
+    "~/Library/WebKit/vn.hce.alloy",
+  ]
+
+  caveats <<~EOS
+    Alloy is signed with a stable self-signed certificate but is not notarized, so the first launch
+    needs one extra step: right-click Alloy in Applications and choose Open, or allow it under
+    System Settings > Privacy & Security > Open Anyway.
+  EOS
+end

@@ -487,3 +487,27 @@ jobs:
             -printf '%f\n' | sort | xargs sha256sum > SHA256SUMS
           cat SHA256SUMS
           gh release upload "$TAG" SHA256SUMS --repo "$REPO" --clobber
+
+  # Bumps the cask in centopw/homebrew-tap (token "alloy") to this release and its two DMGs. Without
+  # the TAP_TOKEN secret the script prints a skip notice and exits 0, so a release without the secret
+  # is still green; the cask then stays at the previous version until the secret is configured.
+  homebrew-cask:
+    name: Update the Homebrew cask
+    needs: checksums
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Bump the cask in centopw/homebrew-tap
+        shell: bash
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh release download "$TAG" -R "$REPO" -p SHA256SUMS -O SHA256SUMS
+          scripts/bump-cask.sh "$TAG" SHA256SUMS
