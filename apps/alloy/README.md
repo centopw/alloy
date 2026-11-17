@@ -20,8 +20,11 @@ ui/          SvelteKit (static adapter), Svelte 5 runes only, pnpm only
 macOS, from the Homebrew tap (see [docs/RELEASING.md](../../docs/RELEASING.md) section 9):
 
 ```bash
-brew install --cask centopw/tap/alloy
+brew trust --cask centopw/tap/alloy-client
+brew install --cask centopw/tap/alloy-client
 ```
+
+Homebrew only loads casks from trusted taps, so the first command is needed once per machine.
 
 The first launch needs one extra step because the build is self-signed and not notarized: right-click
 Alloy in Applications and choose Open. Windows and Linux installers, the Android APK and the checksums

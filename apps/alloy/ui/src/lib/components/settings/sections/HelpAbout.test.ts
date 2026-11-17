@@ -65,8 +65,11 @@ describe('HelpAbout update surface', () => {
   it('tells a Homebrew copy the exact upgrade command instead of offering an install', () => {
     const root = render(info('homebrew'));
 
-    expect(root.querySelector('code')?.textContent?.trim()).toBe('brew upgrade --cask alloy');
+    expect(root.querySelector('code')?.textContent?.trim()).toBe(
+      'brew upgrade --cask centopw/tap/alloy-client'
+    );
     expect(root.textContent).toContain('brew tap centopw/tap');
+    expect(root.textContent).toContain('brew trust --cask centopw/tap/alloy-client');
     expect(root.textContent?.toLowerCase()).toContain('homebrew installed this copy');
 
     const labels = buttonLabels(root);
@@ -81,7 +84,9 @@ describe('HelpAbout update surface', () => {
     const copy = [...root.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Copy');
 
     copy?.click();
-    await vi.waitFor(() => expect(copyText).toHaveBeenCalledWith('brew upgrade --cask alloy'));
+    await vi.waitFor(() =>
+      expect(copyText).toHaveBeenCalledWith('brew upgrade --cask centopw/tap/alloy-client')
+    );
   });
 
   it('tells a translocated copy to move the app first and offers no install', () => {

@@ -9,11 +9,14 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 export type InstallMethod = 'manual' | 'homebrew' | 'translocated';
 
 /** Cask token that ships Alloy. */
-export const HOMEBREW_CASK = 'alloy';
+export const HOMEBREW_CASK = 'alloy-client';
 /** Tap hosting the cask, needed on a machine that has not tapped it yet. */
 export const HOMEBREW_TAP = 'centopw/tap';
-export const HOMEBREW_UPGRADE_COMMAND = `brew upgrade --cask ${HOMEBREW_CASK}`;
+/** Fully qualified cask, so a command works without the tap being trusted or tapped implicitly. */
+export const HOMEBREW_CASK_QUALIFIED = `${HOMEBREW_TAP}/${HOMEBREW_CASK}`;
+export const HOMEBREW_UPGRADE_COMMAND = `brew upgrade --cask ${HOMEBREW_CASK_QUALIFIED}`;
 export const HOMEBREW_TAP_COMMAND = `brew tap ${HOMEBREW_TAP}`;
+export const HOMEBREW_TRUST_COMMAND = `brew trust --cask ${HOMEBREW_CASK_QUALIFIED}`;
 
 /** Result of a `check_update` probe. `available: false` means the app is up to date. */
 export interface UpdateInfo {

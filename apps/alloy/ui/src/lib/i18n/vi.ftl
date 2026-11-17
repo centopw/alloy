@@ -214,6 +214,7 @@ help-about-download-updates-automatically = Tự động tải xuống bản c�
 help-about-engine = Engine
 help-about-homebrew-explains = Homebrew đã cài bản này, nên Homebrew nên đưa nó lên phiên bản mới. Cập nhật trong ứng dụng sẽ bỏ lại bản do cask quản lý và brew upgrade sẽ hoàn tác việc đó.
 help-about-homebrew-tap-note = Nếu máy Mac này chưa tap cask, hãy tap một lần:
+help-about-homebrew-trust-note = Homebrew chỉ tải cask từ tap đã tin cậy. Nếu nó từ chối cask này vì chưa tin cậy, hãy trust một lần:
 help-about-is-available = đã có sẵn.
 help-about-last-checked = Kiểm tra lần cuối
 help-about-licence = Giấy phép

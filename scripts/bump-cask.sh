@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Bump the Alloy cask (centopw/homebrew-tap, token "alloy") to a released version.
+# Bump the Alloy cask (centopw/homebrew-tap, token "alloy-client") to a released version.
 #   scripts/bump-cask.sh <version> [SHA256SUMS] [--dry-run]
 # <version> is a tag (`v0.4.18`) or a bare version (`0.4.18`). Without SHA256SUMS the file is
 # downloaded from the tag's GitHub release, which needs GH_TOKEN (set in the release workflow).
@@ -39,9 +39,9 @@ if [ -z "$token" ] && [ "$dry_run" = false ]; then
 fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-template="$repo_root/packaging/homebrew/alloy.rb.in"
+template="$repo_root/packaging/homebrew/alloy-client.rb.in"
 tap="${ALLOY_TAP:-centopw/homebrew-tap}"
-cask_path="Casks/alloy.rb"
+cask_path="Casks/alloy-client.rb"
 [ -f "$template" ] || { echo "missing cask template: $template" >&2; exit 1; }
 
 work="$(mktemp -d)"
@@ -106,6 +106,6 @@ git -C "$work/tap" \
   add "$cask_path"
 git -C "$work/tap" \
   -c user.name="Alloy Release" -c user.email="alloy-release@users.noreply.github.com" \
-  commit --quiet -m "alloy $version"
+  commit --quiet -m "alloy-client $version"
 git -C "$work/tap" -c http.extraHeader="$auth" push --quiet origin HEAD:main
 echo "Updated $tap/$cask_path to $version."

@@ -82,8 +82,8 @@ App commands (`apps/alloy/src-tauri/src/update.rs`):
   same version again keeps the stored package; a different version drops it. `install_method` is
   `manual`, `homebrew` or `translocated` (serde lower-case): who installed this copy, detected from
   the bundle path. `can_install` is true only for a `manual` install, so a cask or translocated copy
-  is never replaced by the app itself and instead shows where to update (`brew upgrade --cask alloy`
-  for the cask).
+  is never replaced by the app itself and instead shows where to update
+  (`brew upgrade --cask centopw/tap/alloy-client` for the cask).
 - `download_update()`: downloads and verifies the offered update without installing it. Emits
   `update://progress` (`{ downloaded, total }`, total is `null` when unknown) while downloading and
   `update://downloaded` (no payload) once the package is stored. Serialized: a concurrent call waits
@@ -359,15 +359,19 @@ When cutting a new stable release (e.g. `v0.2.2`):
 
 ## 9. Homebrew cask (macOS)
 
-macOS users can install Alloy with Homebrew from the `centopw/homebrew-tap` tap (token `alloy`):
+macOS users can install Alloy with Homebrew from the `centopw/homebrew-tap` tap (token `alloy-client`).
+Homebrew only loads casks from taps it trusts, so trust the cask once per machine:
 
 ```bash
-brew install --cask centopw/tap/alloy
+brew trust --cask centopw/tap/alloy-client
+brew install --cask centopw/tap/alloy-client
 ```
 
-The cask lives in `centopw/homebrew-tap` at `Casks/alloy.rb`. It is **generated**, not written by hand:
-the template is `packaging/homebrew/alloy.rb.in` in this repository and `scripts/bump-cask.sh` renders it
-with the version and the two DMG checksums.
+The cask lives in `centopw/homebrew-tap` at `Casks/alloy-client.rb`. It is **generated**, not written by
+hand: the template is `packaging/homebrew/alloy-client.rb.in` in this repository and
+`scripts/bump-cask.sh` renders it with the version and the two DMG checksums. An installed copy is
+upgraded with the same qualified name, `brew upgrade --cask centopw/tap/alloy-client`: the qualified
+form works whether or not the tap was added with `brew tap` first.
 
 ### Automatic bump on release
 The `Update the Homebrew cask` job of `release.yml` runs after `checksums`. It downloads the release's
@@ -396,5 +400,7 @@ The script reads `TAP_TOKEN` from the environment and the tap from `ALLOY_TAP` (
 Any change to the cask (caveats, `zap` paths, URLs) goes into the template, not into the tap.
 
 The cask sets `auto_updates true`: after the first install, Alloy updates itself through the Tauri
-updater and the cask is not needed again. macOS Gatekeeper still warns on the first launch because the
-build is self-signed and not notarized (section 4); the cask's caveats repeat the right-click > Open step.
+updater and the cask is not needed again. Homebrew refuses to load a cask from an untrusted tap, so a
+machine needs `brew trust --cask centopw/tap/alloy-client` once before install or upgrade. macOS
+Gatekeeper still warns on the first launch because the build is self-signed and not notarized
+(section 4); the cask's caveats repeat the right-click > Open step.

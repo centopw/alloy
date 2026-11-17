@@ -1,7 +1,7 @@
 # Homebrew cask for Alloy. Rendered by scripts/bump-cask.sh into
-# centopw/homebrew-tap/Casks/alloy.rb; the release workflow does this after every stable release.
+# centopw/homebrew-tap/Casks/alloy-client.rb; the release workflow does this after every stable release.
 # Change this template and the script, never the copy in the tap by hand.
-cask "alloy" do
+cask "alloy-client" do
   version "@@VERSION@@"
   sha256 arm:   "@@SHA256_ARM64@@",
          intel: "@@SHA256_X64@@"
@@ -40,5 +40,8 @@ cask "alloy" do
     Alloy is signed with a stable self-signed certificate but is not notarized, so the first launch
     needs one extra step: right-click Alloy in Applications and choose Open, or allow it under
     System Settings > Privacy & Security > Open Anyway.
+
+    Homebrew only loads casks from trusted taps: if it refuses this one, run
+      brew trust --cask centopw/tap/alloy-client
   EOS
 end

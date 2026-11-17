@@ -220,6 +220,7 @@ help-about-download-updates-automatically = Download updates automatically
 help-about-engine = Engine
 help-about-homebrew-explains = Homebrew installed this copy, so Homebrew should move it to the new version. Updating inside the app would leave the cask's copy behind, and brew upgrade would undo it.
 help-about-homebrew-tap-note = If the cask is not tapped on this Mac yet, tap it once:
+help-about-homebrew-trust-note = Homebrew only loads casks from trusted taps. If it refuses this one as untrusted, trust it once:
 help-about-is-available = is available
 help-about-last-checked = Last checked
 help-about-licence = Licence

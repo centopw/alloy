@@ -95,9 +95,10 @@ fn detect_install_method() -> InstallMethod {
 fn installable(method: InstallMethod) -> Result<(), String> {
     match method {
         InstallMethod::Manual => Ok(()),
-        InstallMethod::Homebrew => {
-            Err("this copy is managed by Homebrew; run `brew upgrade --cask alloy`".to_string())
-        }
+        InstallMethod::Homebrew => Err(
+            "this copy is managed by Homebrew; run `brew upgrade --cask centopw/tap/alloy-client`"
+                .to_string(),
+        ),
         InstallMethod::Translocated => Err(
             "this copy is running from a disk image; move Alloy to Applications first".to_string(),
         ),

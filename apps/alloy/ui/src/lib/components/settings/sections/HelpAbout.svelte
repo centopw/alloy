@@ -7,6 +7,7 @@
   import { openExternal } from '$lib/platform/links';
   import {
     HOMEBREW_TAP_COMMAND,
+    HOMEBREW_TRUST_COMMAND,
     HOMEBREW_UPGRADE_COMMAND,
     type InstallMethod,
   } from '$lib/platform/updates';
@@ -118,6 +119,13 @@
             <code class="mono">{HOMEBREW_TAP_COMMAND}</code>
             <Button variant="ghost" onclick={() => void copyCommand(HOMEBREW_TAP_COMMAND)}
               >{copiedCommand === HOMEBREW_TAP_COMMAND ? t('common-copied') : t('common-copy')}</Button
+            >
+          </div>
+          <p class="update-note">{t('help-about-homebrew-trust-note')}</p>
+          <div class="command">
+            <code class="mono">{HOMEBREW_TRUST_COMMAND}</code>
+            <Button variant="ghost" onclick={() => void copyCommand(HOMEBREW_TRUST_COMMAND)}
+              >{copiedCommand === HOMEBREW_TRUST_COMMAND ? t('common-copied') : t('common-copy')}</Button
             >
           </div>
         {:else if available && method === 'translocated'}
