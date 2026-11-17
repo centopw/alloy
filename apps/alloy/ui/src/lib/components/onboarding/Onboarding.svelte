@@ -2,6 +2,8 @@
   import { onMount, onDestroy, tick } from 'svelte';
   import { Button } from '../common';
   import LoginStep from './LoginStep.svelte';
+  import LinkDevice from './LinkDevice.svelte';
+  import RestoreBackup from './RestoreBackup.svelte';
   import TelegramAppForm from '../settings/sections/TelegramAppForm.svelte';
   import { session, networkLabel } from '$lib/stores/session.svelte';
   import { errorMessage } from '$lib/stores/errors';
@@ -24,14 +26,26 @@
   let networksError = $state<string | null>(null);
   /** The network whose setup form replaced the list: an unready network is not a dead end. */
   let setupFor = $state<NetworkInfoDto | null>(null);
+  /** Which way out of onboarding is open: the ways in, a backup restore, or the pairing accept. */
+  let view = $state<'choose' | 'restore' | 'link'>('choose');
   let panelEl: HTMLElement | undefined = $state();
   let live = true;
+
+  const subview = $derived(view !== 'choose');
+
+  /** Escape inside a sub-view returns to the start screen instead of closing the whole panel. */
+  function leaveSubview(): boolean {
+    if (!subview) return false;
+    view = 'choose';
+    return true;
+  }
 
   function onOverlayKey(e: KeyboardEvent) {
     if (!overlay || contextMenu.isOpen) return;
     if (e.key === 'Escape') {
       e.preventDefault();
       e.stopPropagation();
+      if (leaveSubview()) return;
       void session.closeAddAccount();
       return;
     }
@@ -40,6 +54,19 @@
       e.stopPropagation();
     }
   }
+
+  /** A sub-view is a screen of its own: Escape returns to the start screen, never past it. */
+  $effect(() => {
+    if (overlay) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || contextMenu.isOpen || attempt || setupFor) return;
+      if (!leaveSubview()) return;
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  });
 
   $effect(() => {
     if (!overlay) return;
@@ -149,7 +176,7 @@
 >
   <section
     class="panel"
-    data-step={attempt ? 'login' : 'network'}
+    data-step={attempt ? 'login' : view === 'choose' ? 'network' : view}
     data-overlay={overlay ? 'true' : undefined}
     bind:this={panelEl}
   >
@@ -194,18 +221,26 @@
             onback={() => session.dismissLogin()}
           />
         {/key}
+      {:else if view === 'link'}
+        <LinkDevice
+          onback={() => (view = 'choose')}
+          onaddaccount={() => (view = 'choose')}
+        />
+      {:else if view === 'restore'}
+        <RestoreBackup
+          onback={() => (view = 'choose')}
+          onaddaccount={() => (view = 'choose')}
+        />
       {:else}
         <div class="step-head">
           <p class="eyebrow">
             {setupFor ? networkLabel(setupFor.network) : t('onboarding-connect-account')}
           </p>
           <h2>
-            {setupFor ? t('onboarding-telegram-setup-title') : t('onboarding-choose-network')}
+            {setupFor ? t('onboarding-telegram-setup-title') : t('onboarding-start-title')}
           </h2>
           <p class="hint">
-            {setupFor
-              ? t('onboarding-telegram-setup-hint')
-              : t('onboarding-choose-network-hint')}
+            {setupFor ? t('onboarding-telegram-setup-hint') : t('onboarding-start-hint')}
           </p>
         </div>
 
@@ -259,6 +294,21 @@
               {/each}
             </ul>
           {/if}
+
+          <ul class="networks">
+            <li>
+              <button type="button" class="network" onclick={() => (view = 'restore')}>
+                <span class="network-name">{t('onboarding-restore-title')}</span>
+                <span class="network-detail">{t('onboarding-restore-detail')}</span>
+              </button>
+            </li>
+            <li>
+              <button type="button" class="network" onclick={() => (view = 'link')}>
+                <span class="network-name">{t('onboarding-link-title')}</span>
+                <span class="network-detail">{t('onboarding-link-detail')}</span>
+              </button>
+            </li>
+          </ul>
         {/if}
       {/if}
     </div>
@@ -569,7 +619,9 @@
       padding: calc(var(--alloy-spacing-scale-6) + var(--alloy-safe-area-top))
         var(--alloy-spacing-scale-4) var(--alloy-spacing-scale-6);
     }
-    .panel[data-step='login'] .story {
+    .panel[data-step='login'] .story,
+    .panel[data-step='link'] .story,
+    .panel[data-step='restore'] .story {
       display: none;
     }
     .step {
@@ -579,7 +631,9 @@
       background: none;
     }
     .panel[data-overlay='true'] .step,
-    .panel[data-step='login'] .step {
+    .panel[data-step='login'] .step,
+    .panel[data-step='link'] .step,
+    .panel[data-step='restore'] .step {
       padding-top: calc(var(--alloy-spacing-scale-4) + var(--alloy-safe-area-top));
     }
     .panel-close {

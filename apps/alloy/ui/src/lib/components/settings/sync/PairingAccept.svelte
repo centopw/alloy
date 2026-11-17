@@ -11,13 +11,22 @@
   interface Props {
     onsubmit: (ticket: string, code: string) => void;
     disabled?: boolean;
+    /** Onboarding opens straight onto the code entry: the ticket is usually pasted first. */
+    focusCode?: boolean;
   }
 
-  let { onsubmit, disabled = false }: Props = $props();
+  let { onsubmit, disabled = false, focusCode = false }: Props = $props();
 
   let ticket = $state('');
   let code = $state('');
   let submitted = $state(false);
+  let codeEl: HTMLInputElement | null = $state(null);
+
+  // `autofocus` alone is not enough on every platform (Android webview), so the bound element is
+  // focused once it exists; the attribute stays for the browser that honours it earlier.
+  $effect(() => {
+    if (focusCode && codeEl && document.activeElement !== codeEl) codeEl.focus();
+  });
 
   const ticketValid = $derived(ticket.trim().length > 0);
   const codeValid = $derived(isCompletePairingCode(code));
@@ -58,8 +67,10 @@
     <span class="field-label">{t('sync-accept-code')}</span>
     <TextField
       value={code}
+      bind:el={codeEl}
       oninput={onCodeInput}
       disabled={disabled}
+      autofocus={focusCode}
       maxlength={PAIRING_CODE_LENGTH}
       autocomplete="off"
       autocapitalize="characters"
