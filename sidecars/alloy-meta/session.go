@@ -7,31 +7,38 @@ import (
 	"strings"
 
 	"go.mau.fi/mautrix-meta/pkg/messagix/cookies"
+	"go.mau.fi/mautrix-meta/pkg/messagix/securehistory"
 	"go.mau.fi/mautrix-meta/pkg/messagix/types"
 )
 
 // sessionVersion is the version of the sidecar's SessionBlob payload. The host treats the
 // blob as opaque bytes, so bumping this is only a sidecar concern. Version 2 adds the native
-// session the Messenger Lite flow produces; version 1 blobs are still restored.
-const sessionVersion = 2
+// session the Messenger Lite flow produces; version 3 adds the enrolled encrypted-archive
+// device. Older blobs are still restored.
+const sessionVersion = 3
 
 // sessionVersionMin is the oldest payload the sidecar still reads.
 const sessionVersionMin = 1
 
 // sessionData is what the sidecar puts in a SessionBlob. It carries the cookies for the platform
-// the account logged in with and, for the Lite flow, the native session; the E2EE device store
-// lives in $ALLOY_SIDECAR_DATA_DIR/<remote_user_id>/e2ee.db.
+// the account logged in with, for the Lite flow the native session, and — once encrypted-archive
+// history has been enrolled — the library's archive device. The E2EE device store lives in
+// $ALLOY_SIDECAR_DATA_DIR/<remote_user_id>/e2ee.db.
+//
+// History is the only durable archive state. It deliberately holds no PIN, no recovery code and
+// no blob key: those live for one handshake inside the library.
 type sessionData struct {
-	V        int                  `json:"v"`
-	Platform string               `json:"platform"`
-	Cookies  map[string]string    `json:"cookies"`
-	Native   *types.NativeSession `json:"native_session,omitempty"`
+	V        int                   `json:"v"`
+	Platform string                `json:"platform"`
+	Cookies  map[string]string     `json:"cookies"`
+	Native   *types.NativeSession  `json:"native_session,omitempty"`
+	History  *securehistory.Device `json:"history_device,omitempty"`
 }
 
-// encodeSession serialises the cookies and, when the account logged in through Messenger Lite, the
-// native session. The platform is part of the payload because it decides the messagix endpoints and
-// whether a native session applies at all.
-func encodeSession(c *cookies.Cookies, native *types.NativeSession) (string, error) {
+// encodeSession serialises the cookies, the Lite native session and the enrolled archive device.
+// The platform is part of the payload because it decides the messagix endpoints and whether a
+// native session applies at all.
+func encodeSession(c *cookies.Cookies, native *types.NativeSession, history *securehistory.Device) (string, error) {
 	if c == nil {
 		return "", fmt.Errorf("encode session: no cookies")
 	}
@@ -47,6 +54,7 @@ func encodeSession(c *cookies.Cookies, native *types.NativeSession) (string, err
 		Platform: c.Platform.String(),
 		Cookies:  values,
 		Native:   native,
+		History:  history,
 	})
 	if err != nil {
 		return "", fmt.Errorf("encode session: %w", err)

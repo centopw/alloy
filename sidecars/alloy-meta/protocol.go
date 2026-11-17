@@ -110,6 +110,8 @@ type WireError struct {
 	RetryAfterMs *uint64 `json:"retry_after_ms,omitempty"`
 	Feature      string  `json:"feature,omitempty"`
 	Message      string  `json:"message,omitempty"`
+	// AttemptsRemaining accompanies pin_rejected: how many PIN tries Meta has left.
+	AttemptsRemaining *int `json:"attempts_remaining,omitempty"`
 }
 
 func (e *WireError) Error() string {
@@ -148,6 +150,30 @@ func errProtocol(message string) *WireError {
 
 func errInvalidInput(message string) *WireError {
 	return &WireError{Type: "invalid_input", Message: message}
+}
+
+// Encrypted-archive history capability. These codes are the wire contract of the
+// historyPin request: the host matches them instead of parsing a message.
+const (
+	errHistoryNoBackup  = "pin_backup_unavailable"
+	errHistoryPinReject = "pin_rejected"
+	errHistoryLockedOut = "pin_locked_out"
+)
+
+func errHistoryPinRejected(attemptsRemaining *int) *WireError {
+	return &WireError{Type: errHistoryPinReject, AttemptsRemaining: attemptsRemaining}
+}
+
+func errHistoryPinLockedOut() *WireError {
+	return &WireError{Type: errHistoryLockedOut, AttemptsRemaining: new(0)}
+}
+
+// HistoryStatus is the capability block the login payload carries: whether Meta holds a PIN
+// backup for this account, and whether this sidecar has an enrolled archive device. It is
+// deliberately not an error: an account without encrypted backups is a normal account.
+type HistoryStatus struct {
+	PinBackup bool `json:"pin_backup"`
+	Enrolled  bool `json:"enrolled"`
 }
 
 // ConnectionState mirrors alloy_connector::ConnectionState. Attempt is the 1-based count of failed
@@ -480,6 +506,8 @@ type LoginStep struct {
 	DisplayName   string        `json:"display_name,omitempty"`
 	Session       string        `json:"session,omitempty"`
 	Reason        *LoginFailure `json:"reason,omitempty"`
+	// History is the encrypted-archive capability block, present on the done step only.
+	History *HistoryStatus `json:"history,omitempty"`
 }
 
 func cookiesStep(fields []CookieField, helpURL string) LoginStep {
@@ -506,12 +534,13 @@ func passwordStep() LoginStep {
 	return LoginStep{Type: "password"}
 }
 
-func doneStep(remoteUserID, displayName, session string) LoginStep {
+func doneStep(remoteUserID, displayName, session string, history *HistoryStatus) LoginStep {
 	return LoginStep{
 		Type:         "done",
 		RemoteUserID: remoteUserID,
 		DisplayName:  displayName,
 		Session:      session,
+		History:      history,
 	}
 }
 
@@ -592,6 +621,12 @@ type BackfillParams struct {
 	RemoteChatID string  `json:"remote_chat_id"`
 	Before       *string `json:"before"`
 	Limit        uint64  `json:"limit"`
+}
+
+// HistoryPinParams carries the account's 6-digit secure-storage PIN. It is used once, inside the
+// library's OPAQUE handshake, and is never logged or persisted.
+type HistoryPinParams struct {
+	Pin string `json:"pin"`
 }
 
 type SendParams struct {

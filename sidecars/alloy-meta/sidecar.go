@@ -19,6 +19,7 @@ import (
 	"go.mau.fi/mautrix-meta/pkg/messagix"
 	"go.mau.fi/mautrix-meta/pkg/messagix/cookies"
 	"go.mau.fi/mautrix-meta/pkg/messagix/httpclient"
+	"go.mau.fi/mautrix-meta/pkg/messagix/securehistory"
 	"go.mau.fi/mautrix-meta/pkg/messagix/table"
 	"go.mau.fi/mautrix-meta/pkg/messagix/types"
 	"go.mau.fi/whatsmeow"
@@ -121,6 +122,15 @@ type Messenger struct {
 	e2eeRetry    *time.Timer
 	e2eeAttempts int
 	e2eeBusy     bool
+
+	// historyMu guards the enrolled encrypted-archive device. It is separate from mu because
+	// enrolment and paging hold it across network calls, while mu is held only for map reads.
+	historyMu  sync.Mutex
+	historyDev *securehistory.Device
+	// historyClient and historyKeyDeriver are test seams; production leaves both nil so the live
+	// messagix session and the library's own crypto are used.
+	historyClient     historyTransport
+	historyKeyDeriver historyKeys
 }
 
 func newMessenger(log zerolog.Logger, out *writer, cfg settings) *Messenger {
@@ -178,6 +188,8 @@ func (m *Messenger) handle(method string, params json.RawMessage) (any, *WireErr
 		return m.listMembers(ctx, params)
 	case "backfill":
 		return m.backfill(ctx, params)
+	case "historyPin":
+		return m.historyPin(ctx, params)
 	case "send":
 		return m.sendMessage(ctx, params)
 	case "edit":
@@ -265,6 +277,9 @@ func (m *Messenger) restore(ctx context.Context, params json.RawMessage) (any, *
 	m.cli.MessengerLite.SetNativeSession(native)
 	m.loggedOut = false
 	m.mu.Unlock()
+	m.historyMu.Lock()
+	m.historyDev = data.History
+	m.historyMu.Unlock()
 
 	if werr := m.loadInboxLockedGuarded(ctx); werr != nil {
 		m.mu.Lock()
@@ -381,16 +396,12 @@ func (m *Messenger) markOnline() {
 }
 
 // sessionRotationLoop emits SessionUpdated whenever the cookie jar changed (messagix rotates
-// the activity cookie on responses). The host persists it so the next launch stays logged in.
+// the activity cookie on responses). The host persists it so the next launch stays logged in. The
+// enrolled archive device rides along: any epoch edges derived from a page must survive a restart.
 func (m *Messenger) sessionRotationLoop(ctx context.Context) {
 	ticker := time.NewTicker(2 * time.Minute)
 	defer ticker.Stop()
-	var last string
-	m.mu.Lock()
-	if m.cookies != nil {
-		last, _ = encodeSession(m.cookies, m.native)
-	}
-	m.mu.Unlock()
+	last, _ := m.encodeCurrentSession()
 	for {
 		select {
 		case <-ctx.Done():
@@ -399,12 +410,11 @@ func (m *Messenger) sessionRotationLoop(ctx context.Context) {
 		}
 		m.mu.Lock()
 		c := m.cookies
-		native := m.native
 		m.mu.Unlock()
 		if c == nil {
 			continue
 		}
-		current, err := encodeSession(c, native)
+		current, err := m.encodeCurrentSession()
 		if err != nil || current == last {
 			continue
 		}

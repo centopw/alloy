@@ -487,13 +487,13 @@ func (m *Messenger) backfill(ctx context.Context, params json.RawMessage) (any, 
 	if limit < 0 || limit > 1000 {
 		return nil, errInvalidInput("limit must be between 1 and 1000")
 	}
-	threadKey, _, isE2EE, err := parseChatID(p.RemoteChatID)
+	threadKey, jid, isE2EE, err := parseChatID(p.RemoteChatID)
 	if err != nil {
 		return nil, errInvalidInput(err.Error())
 	}
 	if isE2EE {
-		// WhatsApp history for Messenger E2EE chats is not exposed by the socket API.
-		return nil, errNotSupported("backfill")
+		// WhatsApp history for Messenger E2EE chats only exists in Meta's encrypted archive.
+		return m.backfillArchive(ctx, p, jid, limit)
 	}
 
 	m.mu.Lock()

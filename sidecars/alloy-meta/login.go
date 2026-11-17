@@ -169,13 +169,14 @@ func (m *Messenger) finishLiteLogin(ctx context.Context, c *cookies.Cookies, fai
 	if cookieUser := c.GetUserID(); cookieUser != 0 && cookieUser != user.GetFBID() {
 		return fail(failureInvalidInput("password", "the session belongs to a different account than the login"))
 	}
-	session, err := encodeSession(c, native)
+	session, err := encodeSession(c, native, m.historySnapshot())
 	if err != nil {
 		return fail(failureInvalidInput("password", err.Error()))
 	}
 
 	remoteID := strconv.FormatInt(user.GetFBID(), 10)
 	m.mu.Lock()
+	previous := m.remoteUser
 	m.cookies = c
 	m.cli = cli
 	m.initial = initial
@@ -187,8 +188,14 @@ func (m *Messenger) finishLiteLogin(ctx context.Context, c *cookies.Cookies, fai
 	m.pendingLogin = false
 	m.lite = nil
 	m.mu.Unlock()
+	if previous != "" && previous != remoteID {
+		// A different account cannot inherit the previous account's archive enrolment.
+		m.historyMu.Lock()
+		m.historyDev = nil
+		m.historyMu.Unlock()
+	}
 
-	return doneStep(remoteID, user.GetName(), session), nil
+	return doneStep(remoteID, user.GetName(), session, m.historyStatus(ctx, cli, m.historySnapshot() != nil)), nil
 }
 
 // submitCookies is the fallback: it validates the exported messenger.com cookies by loading the
@@ -206,13 +213,14 @@ func (m *Messenger) submitCookies(ctx context.Context, values map[string]string,
 	if cookieUser := c.GetUserID(); cookieUser != 0 && cookieUser != user.GetFBID() {
 		return fail(failureInvalidInput("cookies", "the cookies belong to a different account than c_user"))
 	}
-	session, err := encodeSession(c, nil)
+	session, err := encodeSession(c, nil, m.historySnapshot())
 	if err != nil {
 		return fail(failureInvalidInput("cookies", err.Error()))
 	}
 
 	remoteID := strconv.FormatInt(user.GetFBID(), 10)
 	m.mu.Lock()
+	previous := m.remoteUser
 	m.cookies = c
 	m.cli = cli
 	m.initial = initial
@@ -224,8 +232,14 @@ func (m *Messenger) submitCookies(ctx context.Context, values map[string]string,
 	m.pendingLogin = false
 	m.lite = nil
 	m.mu.Unlock()
+	if previous != "" && previous != remoteID {
+		// A different account cannot inherit the previous account's archive enrolment.
+		m.historyMu.Lock()
+		m.historyDev = nil
+		m.historyMu.Unlock()
+	}
 
-	return doneStep(remoteID, user.GetName(), session), nil
+	return doneStep(remoteID, user.GetName(), session, m.historyStatus(ctx, cli, m.historySnapshot() != nil)), nil
 }
 
 // endLogin closes the attempt: the next begin_login starts a fresh Bloks flow.

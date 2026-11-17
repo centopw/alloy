@@ -370,10 +370,11 @@ func TestCaptchaStaysAnswerable(t *testing.T) {
 	}
 }
 
-// TestDoneLoginStep pins the terminal login step the host persists.
+// TestDoneLoginStep pins the terminal login step the host persists, including the archive
+// capability block.
 func TestDoneLoginStep(t *testing.T) {
-	got := encodeFrame(t, doneStep("100012345", "Ada", "AAAA"))
-	want := `{"type":"done","remote_user_id":"100012345","display_name":"Ada","session":"AAAA"}`
+	got := encodeFrame(t, doneStep("100012345", "Ada", "AAAA", &HistoryStatus{PinBackup: true, Enrolled: false}))
+	want := `{"type":"done","remote_user_id":"100012345","display_name":"Ada","session":"AAAA","history":{"pin_backup":true,"enrolled":false}}`
 	if got != want {
 		t.Fatalf("done step mismatch\n got: %s\nwant: %s", got, want)
 	}
@@ -511,7 +512,7 @@ func TestSessionRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build cookies: %v", err)
 	}
-	blob, err := encodeSession(c, nil)
+	blob, err := encodeSession(c, nil, nil)
 	if err != nil {
 		t.Fatalf("encode session: %v", err)
 	}
@@ -539,7 +540,7 @@ func TestSessionRoundTripNative(t *testing.T) {
 		cookies.MetaCookieDatr: "datr-value",
 	})
 	native := &types.NativeSession{AccessToken: "access", AppID: "app", DeviceID: uuid.MustParse("11111111-1111-1111-1111-111111111111")}
-	blob, err := encodeSession(c, native)
+	blob, err := encodeSession(c, native, nil)
 	if err != nil {
 		t.Fatalf("encode session: %v", err)
 	}
@@ -547,7 +548,7 @@ func TestSessionRoundTripNative(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decode session: %v", err)
 	}
-	if decoded.V != 2 || decoded.Platform != "messenger-lite-android" {
+	if decoded.V != sessionVersion || decoded.Platform != "messenger-lite-android" {
 		t.Fatalf("native session envelope lost fields: %+v", decoded)
 	}
 	restored, restoredNative, err := cookiesFromSession(decoded)
