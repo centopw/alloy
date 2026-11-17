@@ -16,7 +16,9 @@ use std::time::Duration;
 
 use alloy_engine::factory::{ConnectorFactory, DefaultConnectorFactory};
 use alloy_engine::{AppEngine, Engine, EngineContext};
-use alloy_protocol::{EngineCommand, EngineEvent, EngineResponse, PairingPhase, PairingRole};
+use alloy_protocol::{
+    EngineCommand, EngineEvent, EngineResponse, PAIRING_CODE_ALPHABET, PairingPhase, PairingRole,
+};
 use alloy_storage::InMemorySecretStore;
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -27,9 +29,6 @@ use tracing::span;
 use tracing::{Event, Level, Metadata, Subscriber};
 
 const WAIT: Duration = Duration::from_secs(10);
-
-/// The alphabet the storage layer draws codes from; a code outside it could not be typed in.
-const CODE_ALPHABET: &[u8] = b"23456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 async fn open_engine(data_dir: &Path) -> AppEngine {
     let secrets: Arc<dyn alloy_storage::SecretStore> = Arc::new(InMemorySecretStore::new());
@@ -194,7 +193,8 @@ async fn two_devices_without_a_configured_account_pair() {
     // the storage layer draws from, inside the 90-second window.
     assert_eq!(code.len(), 8, "the code is eight characters: {code:?}");
     assert!(
-        code.bytes().all(|byte| CODE_ALPHABET.contains(&byte)),
+        code.bytes()
+            .all(|byte| PAIRING_CODE_ALPHABET.as_bytes().contains(&byte)),
         "the code is typable from the shown alphabet: {code:?}"
     );
     let left_ms = expires_at_ms - alloy_engine::support::now_ms();

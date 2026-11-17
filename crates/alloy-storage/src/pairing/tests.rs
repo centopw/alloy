@@ -113,7 +113,9 @@ fn codes_use_the_unambiguous_alphabet() {
         assert_eq!(code.len(), 8);
         for ch in code.chars() {
             assert!(
-                CODE_ALPHABET.contains(&(ch as u8)),
+                alloy_protocol::PAIRING_CODE_ALPHABET
+                    .as_bytes()
+                    .contains(&(ch as u8)),
                 "{ch:?} is outside the code alphabet"
             );
             assert!(!"01OILU".contains(ch));

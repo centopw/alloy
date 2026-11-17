@@ -26,6 +26,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use alloy_protocol::PAIRING_CODE_ALPHABET;
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
 use hkdf::Hkdf;
@@ -53,9 +54,6 @@ pub const CODE_TTL: Duration = Duration::from_secs(90);
 
 /// Decimal digits in the short authentication string the two people compare.
 pub const SAS_DIGITS: usize = 6;
-
-/// Code alphabet without look-alikes: no `0`, `O`, `1`, `I`, `L`, `U`.
-pub const CODE_ALPHABET: &[u8; 30] = b"23456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 /// Pairing ids and nonces are displayable as hex in the QR payload.
 const PAIRING_ID_BYTES: usize = 16;
@@ -944,16 +942,17 @@ fn random_bytes<const N: usize>() -> [u8; N] {
 }
 
 fn random_code() -> String {
-    let alphabet = CODE_ALPHABET.len();
+    let alphabet = PAIRING_CODE_ALPHABET.as_bytes();
+    let len = alphabet.len();
     // Rejection sampling keeps every code equally likely: 30 does not divide 256.
-    let limit = (256 / alphabet) * alphabet;
+    let limit = (256 / len) * len;
     let mut rng = rand::rng();
     let mut code = String::with_capacity(8);
     while code.len() < 8 {
         let mut byte = [0u8; 1];
         rng.fill_bytes(&mut byte);
         if (byte[0] as usize) < limit {
-            code.push(CODE_ALPHABET[byte[0] as usize % alphabet] as char);
+            code.push(alphabet[byte[0] as usize % len] as char);
         }
     }
     code

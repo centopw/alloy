@@ -1,7 +1,8 @@
 /** Pure helpers for the pairing panels. Kept out of the components so they are testable. */
 
-/** Unambiguous alphabet: no 0/O, 1/I/L, so a code read aloud cannot be mistyped into another. */
-export const PAIRING_CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
+import { PAIRING_CODE_ALPHABET } from '$lib/generated';
+
+export { PAIRING_CODE_ALPHABET };
 
 export const PAIRING_CODE_LENGTH = 8;
 

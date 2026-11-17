@@ -159,6 +159,7 @@ describe('PairingAccept code field', () => {
   it('rejects codes that are short or outside the pairing alphabet', () => {
     expect(isCompletePairingCode('AB12CD3')).toBe(false);
     expect(isCompletePairingCode('AB12CD0I')).toBe(false);
+    expect(isCompletePairingCode('AB34CD5U')).toBe(false);
     expect(isCompletePairingCode('ab-34 cd-56')).toBe(true);
     expect(normalizePairingCode('abcd-efgh-ijkl')).toBe('ABCDEFGH');
   });
