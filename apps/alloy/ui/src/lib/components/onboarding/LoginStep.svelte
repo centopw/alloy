@@ -417,6 +417,8 @@
             bind:value={country}
             options={countryOptions}
             label={t('onboarding-phone-country-label')}
+            searchable
+            searchPlaceholder={t('onboarding-phone-country-search')}
           />
         </div>
         <label class="field">

@@ -17,6 +17,9 @@
     disabled?: boolean;
     id?: string;
     class?: string;
+    /** Adds a search field to the option list; typing filters rows by label. Use for long lists. */
+    searchable?: boolean;
+    searchPlaceholder?: string;
   }
 
   let {
@@ -27,6 +30,8 @@
     disabled = false,
     id,
     class: className = '',
+    searchable = false,
+    searchPlaceholder,
   }: Props = $props();
 
   let buttonEl: HTMLButtonElement | undefined = $state();
@@ -65,6 +70,9 @@
         },
         matchWidth: true,
         ariaLabel: label ?? 'Select an option',
+        search: searchable
+          ? { placeholder: searchPlaceholder ?? label ?? 'Search' }
+          : undefined,
         onclose: () => {
           isOpen = false;
           closedAt = Date.now();

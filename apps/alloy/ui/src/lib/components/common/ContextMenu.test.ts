@@ -85,3 +85,94 @@ describe('ContextMenu dismissal', () => {
     unmount(component);
   });
 });
+
+/**
+ * A select with hundreds of rows (the country picker) opens the root panel directly, so the root
+ * needs what a flyout already had: a scroll cap, and a search field that actually filters.
+ */
+describe('ContextMenu root search', () => {
+  const PLACEHOLDER = 'Search countries';
+  const ROWS = [
+    { id: 'AF', label: 'Afghanistan (+93)' },
+    { id: 'IS', label: 'Iceland (+354)' },
+    { id: 'IN', label: 'India (+91)' },
+    { id: 'ID', label: 'Indonesia (+62)' },
+    { id: 'VN', label: 'Vietnam (+84)' },
+  ];
+  const picked: string[] = [];
+  let component: ReturnType<typeof mount> | undefined;
+
+  // The dismissal tests above leave the store at phone width; the root cap is the desktop layout.
+  function forceDesktop() {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
+    window.dispatchEvent(new Event('resize'));
+    flushSync();
+  }
+
+  async function openCountryMenu() {
+    picked.length = 0;
+    forceDesktop();
+    ({ component } = render());
+    contextMenu.open(
+      ROWS.map((row) => ({ ...row, onselect: () => picked.push(row.id) })),
+      { x: 12, y: 24 },
+      { search: { placeholder: PLACEHOLDER } }
+    );
+    flushSync();
+    await tick();
+    const panel = document.querySelector<HTMLElement>('[data-context-menu]');
+    if (!panel) throw new Error('the root panel did not render');
+    const field = document.querySelector<HTMLInputElement>(`input[aria-label="${PLACEHOLDER}"]`);
+    if (!field) throw new Error('the root search field did not render');
+    return { panel, field };
+  }
+
+  function rowLabels(): string[] {
+    return [...document.querySelectorAll<HTMLElement>('.row')].map((el) => el.textContent?.trim() ?? '');
+  }
+
+  function type(field: HTMLInputElement, text: string) {
+    field.value = text;
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+  }
+
+  afterEach(() => {
+    if (component) unmount(component);
+    component = undefined;
+  });
+
+  it('caps the root height so a long list scrolls instead of running off screen', async () => {
+    const { panel } = await openCountryMenu();
+    expect(panel.style.maxHeight).toContain('360px');
+  });
+
+  it('shows every row until something is typed', async () => {
+    await openCountryMenu();
+    expect(rowLabels()).toHaveLength(ROWS.length);
+  });
+
+  it('filters by country name and by calling code', async () => {
+    const { field } = await openCountryMenu();
+
+    type(field, 'ice');
+    expect(rowLabels()).toEqual(['Iceland (+354)']);
+
+    type(field, '+91');
+    expect(rowLabels()).toEqual(['India (+91)']);
+
+    type(field, '');
+    expect(rowLabels()).toHaveLength(ROWS.length);
+  });
+
+  it('picks the first match when Enter is pressed in the search field', async () => {
+    const { field } = await openCountryMenu();
+
+    type(field, 'viet');
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    flushSync();
+
+    expect(picked).toEqual(['VN']);
+    expect(contextMenu.isOpen).toBe(false);
+  });
+});

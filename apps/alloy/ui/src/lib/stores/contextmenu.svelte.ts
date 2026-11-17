@@ -46,9 +46,15 @@ export interface MenuReactions {
 }
 
 
+export interface MenuRootSearch {
+  placeholder: string;
+}
+
 export interface MenuOptions {
   reactions?: MenuReactions;
   anchor?: MenuAnchor;
+  /** Adds a search field at the top of the root panel; typing filters its rows by label. */
+  search?: MenuRootSearch;
   /** Rect for the spotlight hole that keeps the pressed message bright on phones. */
   spotlight?: MenuAnchor;
   /** Actions shown on the mobile bottom action bar before tapping More. */

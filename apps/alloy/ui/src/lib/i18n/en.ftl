@@ -749,6 +749,7 @@ onboarding-phone-title = Your phone number
 onboarding-phone-label = Phone number
 onboarding-phone-hint = Pick your country and type the number on your account. A leading 0 or the country code is fine either way.
 onboarding-phone-country-label = Country
+onboarding-phone-country-search = Search by country, code or +dial
 onboarding-phone-preview = Alloy will sign in with { $phone }.
 onboarding-code-title = Enter the login code
 onboarding-code-label = Login code

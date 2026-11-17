@@ -28,6 +28,8 @@
   const TYPEAHEAD_RESET_MS = 600;
   const HOVER_OPEN_MS = 150;
   const FLYOUT_MAX_HEIGHT = 320;
+  /** The root panel scrolls past this height; a select can carry hundreds of rows. */
+  const ROOT_MAX_HEIGHT = 360;
   const NAV_SELECTOR = '[role^="menuitem"]:not([aria-disabled="true"])';
   const ROW_SELECTOR = '.row:not([aria-disabled="true"])';
 
@@ -62,6 +64,8 @@
   }
 
   let levels = $state.raw<Flyout[]>([]);
+  /** Root-panel search text, when the opener asked for a search field. */
+  let rootQuery = $state('');
   /** Bumped when a keepOpen row runs, so function-based submenu items are resolved again. */
   let revision = $state(0);
   /** Phone shows only the deepest panel (drill-in); desktop shows the whole chain. */
@@ -95,7 +99,8 @@
   function panelView(depth: number): PanelView {
     void revision;
     if (depth === 0) {
-      return { rows: contextMenu.items, query: '', showCreate: false, createRow: undefined };
+      const { items: rows, query } = submenuView(contextMenu.items, rootQuery, false);
+      return { rows, query, showCreate: false, createRow: undefined };
     }
     const flyout = levels[depth - 1];
     const create = flyout.sub.search?.create;
@@ -365,7 +370,7 @@
   }
 
   function typeIntoSearch(depth: number, key: string) {
-    const query = (levels[depth - 1]?.query ?? '') + key;
+    const query = depth === 0 ? rootQuery + key : (levels[depth - 1]?.query ?? '') + key;
     onSearchInput(depth, query);
     tick().then(() => {
       const input = menuEls.get(depth)?.querySelector<HTMLInputElement>('.search input');
@@ -404,7 +409,9 @@
       default:
         if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
           e.preventDefault();
-          if (levels[depth - 1]?.sub.search) typeIntoSearch(depth, e.key);
+          const searching =
+            depth === 0 ? contextMenu.options?.search : levels[depth - 1]?.sub.search;
+          if (searching) typeIntoSearch(depth, e.key);
           else typeahead(els, el, e.key);
         }
     }
@@ -437,6 +444,10 @@
   }
 
   function onSearchInput(depth: number, query: string) {
+    if (depth === 0) {
+      rootQuery = query;
+      return;
+    }
     trimLevels(depth);
     levels = levels.map((level, i) => (i === depth - 1 ? { ...level, query } : level));
   }
@@ -457,7 +468,15 @@
         e.preventDefault();
         const view = panelView(depth);
         // With no matches the only row is the create row.
-        if (view.createRow && view.rows.length === 1) selectByKeyboard(view.createRow);
+        if (view.createRow && view.rows.length === 1) {
+          selectByKeyboard(view.createRow);
+          break;
+        }
+        // The root search is a picker: Enter takes the first remaining row.
+        const first = depth === 0
+          ? view.rows.find((row): row is MenuAction => !isSeparator(row) && !row.disabled)
+          : undefined;
+        if (first && !isSubmenuAction(first)) selectByKeyboard(first);
         else rows[0]?.focus({ preventScroll: true });
         break;
       }
@@ -474,7 +493,10 @@
   $effect(() => {
     void contextMenu.items;
     void contextMenu.isOpen;
-    untrack(() => trimLevels(0));
+    untrack(() => {
+      rootQuery = '';
+      trimLevels(0);
+    });
     if (!contextMenu.isOpen) {
       showFullSheet = false;
       openedAt = 0;
@@ -593,7 +615,7 @@
   {#if !viewport.isPhone || !contextMenu.options?.phoneBar || showFullSheet}
     {#each renderedLevels as depth (depth)}
       {@const f = depth > 0 ? levels[depth - 1] : undefined}
-      {@const search = f?.sub.search}
+      {@const search = f ? f.sub.search : contextMenu.options?.search}
       {@const view = panelView(depth)}
       <div
         class="context-menu"
@@ -604,8 +626,8 @@
         tabindex="-1"
         aria-label={f ? f.label : (contextMenu.options?.ariaLabel ?? t('context-menu-actions'))}
         data-context-menu
-        style:max-height={!viewport.isPhone && f
-          ? `min(${f.sub.maxHeight ?? FLYOUT_MAX_HEIGHT}px, calc(100dvh - 16px))`
+        style:max-height={!viewport.isPhone
+          ? `min(${f ? (f.sub.maxHeight ?? FLYOUT_MAX_HEIGHT) : ROOT_MAX_HEIGHT}px, calc(100dvh - 16px))`
           : undefined}
         use:portal
         use:placeLevel={{ depth, rows: view.rows }}
@@ -810,8 +832,9 @@
     line-height: var(--alloy-typography-line-height-normal);
   }
 
-  /* Submenu flyout: scrolls past its max height; the scrollbar sits on the surface, not a transparent track. */
-  .context-menu.flyout {
+  /* Desktop panels scroll past their max height; the root needs it too, since a select can carry
+     hundreds of rows. The scrollbar sits on the surface, not a transparent track. */
+  .context-menu:not(.sheet) {
     overflow-y: auto;
     overscroll-behavior: contain;
     scrollbar-color: var(--alloy-color-border-prominent) var(--alloy-color-surface-elevated);

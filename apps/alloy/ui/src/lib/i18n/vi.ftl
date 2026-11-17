@@ -740,6 +740,7 @@ onboarding-phone-title = Số điện thoại của bạn
 onboarding-phone-label = Số điện thoại
 onboarding-phone-hint = Chọn quốc gia rồi nhập số của tài khoản. Có số 0 ở đầu hoặc mã quốc gia đều được.
 onboarding-phone-country-label = Quốc gia
+onboarding-phone-country-search = Tìm theo quốc gia, mã hoặc +mã vùng
 onboarding-phone-preview = Alloy sẽ đăng nhập bằng số { $phone }.
 onboarding-code-title = Nhập mã đăng nhập
 onboarding-code-label = Mã đăng nhập
