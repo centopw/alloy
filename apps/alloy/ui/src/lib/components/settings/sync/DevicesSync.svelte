@@ -78,6 +78,7 @@
       lastSyncMs: null,
       lastError: null,
       syncing: false,
+      layers: [],
     },
     pairing = null,
     devices = [],
