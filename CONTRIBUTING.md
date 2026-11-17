@@ -23,10 +23,10 @@ Ensure you have the following installed on your machine:
    rustup default stable
    rustup component add rustfmt clippy
    ```
-2. **Node.js & pnpm:** Node.js 22+ and pnpm 9+.
+2. **Node.js & pnpm:** Node.js 22+ and pnpm 11. `apps/alloy/ui/package.json` pins the exact
+   version in `packageManager`, so corepack installs it on first use.
    ```bash
    corepack enable
-   corepack prepare pnpm@latest --activate
    ```
 3. **Just:** Command runner used for project recipes.
    ```bash

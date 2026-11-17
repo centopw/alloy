@@ -1,6 +1,7 @@
 {
   "name": "alloy-ui",
   "type": "module",
+  "packageManager": "pnpm@11.25.0",
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
@@ -48,10 +49,5 @@
     "typescript": "~6.0.3",
     "vite": "^8.0.16",
     "vitest": "^5.0.4"
-  },
-  "pnpm": {
-    "patchedDependencies": {
-      "qrcode": "patches/qrcode.patch"
-    }
   }
 }

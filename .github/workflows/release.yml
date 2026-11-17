@@ -162,7 +162,7 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 9
+          package_json_file: apps/alloy/ui/package.json
 
       - uses: actions/setup-node@v7
         with:
@@ -403,7 +403,7 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 9
+          package_json_file: apps/alloy/ui/package.json
 
       - uses: actions/setup-node@v7
         with:

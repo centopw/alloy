@@ -16,3 +16,6 @@ docs/spikes/ui/e2e-failure.png
 
 # Messenger sidecar built on demand by apps/alloy/src-tauri/build.rs (`just sidecar` forces it).
 apps/alloy/src-tauri/binaries/
+
+# pnpm's content store, left at the repo root by the UI install; it is a cache, not source.
+.pnpm-store/
