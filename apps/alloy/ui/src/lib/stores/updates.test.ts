@@ -27,6 +27,7 @@ function info(overrides: Partial<UpdateInfo> = {}): UpdateInfo {
     can_install: true,
     url: RELEASE_URL,
     downloaded: false,
+    install_method: 'manual',
     ...overrides,
   };
 }
@@ -173,6 +174,25 @@ describe('UpdatesStore', () => {
     expect(deps.open).toHaveBeenCalledWith(RELEASE_URL);
     expect(deps.download).not.toHaveBeenCalled();
     expect(deps.apply).not.toHaveBeenCalled();
+  });
+
+  it('never installs in place over a copy Homebrew or a disk image owns', async () => {
+    const { deps, values } = harness();
+    values.autoDownloadUpdates = true;
+
+    for (const install_method of ['homebrew', 'translocated'] as const) {
+      const store = new UpdatesStore(deps);
+      // Even a backend answer that wrongly allowed installation must not arm the auto-install.
+      store.info = info({ install_method, can_install: true });
+
+      expect(store.installable).toBe(false);
+      expect(store.primaryLabel).toBe('Open release page');
+      await store.download();
+      await store.primary();
+
+      expect(deps.download).not.toHaveBeenCalled();
+      expect(deps.apply).not.toHaveBeenCalled();
+    }
   });
 
   it('surfaces install failures', async () => {

@@ -79,10 +79,19 @@ export class UpdatesStore {
     return info;
   }
 
+  /**
+   * Whether this copy may replace itself. The backend says whether it can, and only the manual
+   * install may: a cask copy belongs to Homebrew and a translocated copy sits on a disk image.
+   */
+  get installable(): boolean {
+    const info = this.info;
+    return Boolean(info?.can_install) && (info?.install_method ?? 'manual') === 'manual';
+  }
+
   /** Label of the primary action: open the release page, download, restart, or the current step. */
   get primaryLabel(): string {
     const info = this.info;
-    if (info && !info.can_install) return 'Open release page';
+    if (info && !this.installable) return 'Open release page';
     if (this.phase === 'downloading') {
       return this.progress === null ? 'Downloading update...' : `Downloading ${Math.round(this.progress * 100)}%`;
     }
@@ -138,7 +147,7 @@ export class UpdatesStore {
   /** Download and verify the available update without installing it. No-op where the app cannot install in place. */
   async download(): Promise<void> {
     const info = this.info;
-    if (!info?.available || !info.can_install) return;
+    if (!info?.available || !this.installable) return;
     if (this.phase === 'downloading' || this.phase === 'installing' || this.phase === 'ready') return;
     this.error = null;
     this.phase = 'downloading';
@@ -159,7 +168,7 @@ export class UpdatesStore {
   async apply(): Promise<void> {
     const info = this.info;
     if (!info?.available) return;
-    if (!info.can_install) return this.openReleasePage();
+    if (!this.installable) return this.openReleasePage();
     if (this.phase === 'downloading' || this.phase === 'installing') return;
     this.error = null;
     this.phase = 'installing';
@@ -177,7 +186,7 @@ export class UpdatesStore {
   async primary(): Promise<void> {
     const info = this.info;
     if (!info?.available) return;
-    if (!info.can_install) return this.openReleasePage();
+    if (!this.installable) return this.openReleasePage();
     if (info.downloaded) return this.apply();
     return this.download();
   }
@@ -246,7 +255,7 @@ export class UpdatesStore {
 
   #maybeAutoDownload(): void {
     const info = this.info;
-    if (!info?.available || !info.can_install || info.downloaded) return;
+    if (!info?.available || !this.installable || info.downloaded) return;
     if (!this.#deps.prefs.autoDownloadUpdates || info.version === this.skippedVersion) return;
     if (this.#autoStartedVersion === info.version) return;
     this.#autoStartedVersion = info.version;

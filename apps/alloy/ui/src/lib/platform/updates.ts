@@ -1,6 +1,20 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
+/**
+ * How this copy of the app was installed, detected once by the backend from the bundle path.
+ * `homebrew` means a cask owns the bundle, so only Homebrew may move it; `translocated` means the
+ * app runs from a quarantined disk-image path it cannot write to.
+ */
+export type InstallMethod = 'manual' | 'homebrew' | 'translocated';
+
+/** Cask token that ships Alloy. */
+export const HOMEBREW_CASK = 'alloy';
+/** Tap hosting the cask, needed on a machine that has not tapped it yet. */
+export const HOMEBREW_TAP = 'centopw/tap';
+export const HOMEBREW_UPGRADE_COMMAND = `brew upgrade --cask ${HOMEBREW_CASK}`;
+export const HOMEBREW_TAP_COMMAND = `brew tap ${HOMEBREW_TAP}`;
+
 /** Result of a `check_update` probe. `available: false` means the app is up to date. */
 export interface UpdateInfo {
   available: boolean;
@@ -13,6 +27,8 @@ export interface UpdateInfo {
   url: string;
   /** True when the update is already downloaded and only waits for `applyUpdate`. */
   downloaded: boolean;
+  /** Who installed this copy; decides whether the UI may offer the in-place install. */
+  install_method: InstallMethod;
 }
 
 /** Payload of the `update://progress` event emitted while `download_update` runs. */

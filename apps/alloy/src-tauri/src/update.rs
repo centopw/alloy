@@ -7,6 +7,18 @@
 
 use serde::Serialize;
 
+/// How this copy of the app was installed, and so who may replace it.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum InstallMethod {
+    /// Downloaded by hand or built here: the app updates itself.
+    Manual,
+    /// Installed by a Homebrew cask: the bundle belongs to the cask and only Homebrew may move it.
+    Homebrew,
+    /// Running from the read-only path macOS mounts a quarantined disk image at.
+    Translocated,
+}
+
 /// Result of an update check, shared by every platform.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct UpdateInfo {
@@ -20,10 +32,12 @@ pub struct UpdateInfo {
     pub url: String,
     /// The verified package for this version is already stored and `apply_update` will not download.
     pub downloaded: bool,
+    /// Who installed this copy; decides whether the UI offers the in-place install at all.
+    pub install_method: InstallMethod,
 }
 
 impl UpdateInfo {
-    fn up_to_date() -> Self {
+    fn up_to_date(install_method: InstallMethod) -> Self {
         Self {
             available: false,
             version: String::new(),
@@ -31,7 +45,62 @@ impl UpdateInfo {
             can_install: false,
             url: String::new(),
             downloaded: false,
+            install_method,
         }
+    }
+}
+
+/// Directory a cask keeps its bundle in, under any Homebrew prefix (`/opt/homebrew`, `/usr/local`,
+/// a custom one); `/Applications/Alloy.app` is a symlink into it.
+const CASKROOM: &str = "/Caskroom/";
+/// Where macOS mounts a quarantined download; the app cannot write there, so it cannot replace itself.
+const TRANSLOCATION: &str = "/AppTranslocation/";
+
+/// Classifies an executable or bundle path. Pure, so every install shape is unit tested.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn install_method_from_path(path: &str) -> InstallMethod {
+    if path.contains(TRANSLOCATION) {
+        InstallMethod::Translocated
+    } else if path.contains(CASKROOM) {
+        InstallMethod::Homebrew
+    } else {
+        InstallMethod::Manual
+    }
+}
+
+/// Detects the install method once per process. Only the bundle path is inspected: no `brew`
+/// subprocess, so a check never waits on Homebrew.
+#[cfg_attr(mobile, allow(dead_code))]
+fn install_method() -> InstallMethod {
+    static METHOD: std::sync::LazyLock<InstallMethod> =
+        std::sync::LazyLock::new(detect_install_method);
+    *METHOD
+}
+
+#[cfg_attr(mobile, allow(dead_code))]
+fn detect_install_method() -> InstallMethod {
+    #[cfg(target_os = "macos")]
+    if let Ok(exe) = std::env::current_exe() {
+        // The launched path may be `/Applications/Alloy.app`; resolving it finds the bundle the
+        // cask owns, which is what decides who may update it.
+        let path = std::fs::canonicalize(&exe).unwrap_or(exe);
+        return install_method_from_path(&path.to_string_lossy());
+    }
+    // Windows and Linux have no package-manager signal here; guessing one would be wrong.
+    InstallMethod::Manual
+}
+
+/// Refuses in-place update work on a copy the app must not replace.
+#[cfg_attr(mobile, allow(dead_code))]
+fn installable(method: InstallMethod) -> Result<(), String> {
+    match method {
+        InstallMethod::Manual => Ok(()),
+        InstallMethod::Homebrew => {
+            Err("this copy is managed by Homebrew; run `brew upgrade --cask alloy`".to_string())
+        }
+        InstallMethod::Translocated => Err(
+            "this copy is running from a disk image; move Alloy to Applications first".to_string(),
+        ),
     }
 }
 
@@ -173,6 +242,7 @@ mod platform {
     }
 
     pub async fn check(app: &AppHandle) -> Result<UpdateInfo, String> {
+        let method = super::install_method();
         let found = app
             .updater()
             .map_err(|e| e.to_string())?
@@ -183,7 +253,7 @@ mod platform {
         let mut slot = state.slot()?;
         let Some(update) = found else {
             slot.clear();
-            return Ok(UpdateInfo::up_to_date());
+            return Ok(UpdateInfo::up_to_date(method));
         };
         let version = update.version.clone();
         let notes = update.body.clone();
@@ -192,15 +262,18 @@ mod platform {
             available: true,
             version,
             notes,
-            can_install: true,
+            // A cask copy and a translocated copy must not be replaced by the app itself.
+            can_install: method == super::InstallMethod::Manual,
             url: String::new(),
             downloaded,
+            install_method: method,
         })
     }
 
     /// Returns the offered update with its verified package, downloading the package first when
     /// it is not stored yet.
     async fn fetch(app: &AppHandle) -> Result<(Update, Arc<Vec<u8>>), String> {
+        super::installable(super::install_method())?;
         let state = app.state::<PendingUpdate>();
         let _serial = state.download.lock().await;
         let offer = state
@@ -333,7 +406,7 @@ mod platform {
 
 #[cfg(mobile)]
 mod platform {
-    use super::{UpdateInfo, parse_version};
+    use super::{InstallMethod, UpdateInfo, parse_version};
     use serde::Deserialize;
     use tauri::AppHandle;
 
@@ -378,8 +451,10 @@ mod platform {
                 can_install: false,
                 url: r.html_url,
                 downloaded: false,
+                // Android installs from a store or by hand, never through Homebrew.
+                install_method: InstallMethod::Manual,
             },
-            _ => UpdateInfo::up_to_date(),
+            _ => UpdateInfo::up_to_date(InstallMethod::Manual),
         })
     }
 
@@ -404,7 +479,7 @@ fn store_manages_updates(distribution: Option<&str>) -> bool {
 #[tauri::command]
 pub async fn check_update(app: tauri::AppHandle) -> Result<UpdateInfo, String> {
     if store_manages_updates(option_env!("ALLOY_DISTRIBUTION")) {
-        return Ok(UpdateInfo::up_to_date());
+        return Ok(UpdateInfo::up_to_date(InstallMethod::Manual));
     }
     platform::check(&app).await
 }
@@ -423,13 +498,58 @@ pub async fn apply_update(app: tauri::AppHandle) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_version, store_manages_updates};
+    use super::{
+        InstallMethod, install_method_from_path, installable, parse_version, store_manages_updates,
+    };
 
     #[test]
     fn only_a_store_build_leaves_updates_to_the_store() {
         assert!(store_manages_updates(Some("fdroid")));
         assert!(!store_manages_updates(None));
         assert!(!store_manages_updates(Some("github")));
+    }
+
+    #[test]
+    fn a_bundle_under_any_caskroom_is_a_homebrew_install() {
+        // Apple Silicon, Intel and a custom prefix all keep the cask-owned bundle in `Caskroom`;
+        // `/Applications/Alloy.app` is only a symlink to one of these.
+        for prefix in ["/opt/homebrew", "/usr/local", "/Users/me/Build/homebrew"] {
+            let path = format!("{prefix}/Caskroom/alloy/0.4.18/Alloy.app/Contents/MacOS/alloy");
+            assert_eq!(
+                install_method_from_path(&path),
+                InstallMethod::Homebrew,
+                "{path}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_app_translocation_path_is_translocated() {
+        let path = "/private/var/folders/3k/abc/T/AppTranslocation/9E2F1C3A-0000/d/Alloy.app/Contents/MacOS/alloy";
+        assert_eq!(install_method_from_path(path), InstallMethod::Translocated);
+    }
+
+    #[test]
+    fn anything_else_is_manual() {
+        assert_eq!(
+            install_method_from_path("/Applications/Alloy.app/Contents/MacOS/alloy"),
+            InstallMethod::Manual
+        );
+        assert_eq!(
+            install_method_from_path("/usr/local/bin/alloy"),
+            InstallMethod::Manual
+        );
+        assert_eq!(
+            install_method_from_path("/Users/me/Downloads/Alloy.app/Contents/MacOS/alloy"),
+            InstallMethod::Manual
+        );
+    }
+
+    #[test]
+    fn only_a_manual_copy_may_be_replaced_in_place() {
+        assert!(installable(InstallMethod::Manual).is_ok());
+        assert!(installable(InstallMethod::Homebrew).is_err());
+        assert!(installable(InstallMethod::Translocated).is_err());
     }
 
     #[test]

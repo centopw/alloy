@@ -26,6 +26,7 @@ const INFO: UpdateInfo = {
   can_install: true,
   url: 'https://example.org/releases/1.2.0',
   downloaded: false,
+  install_method: 'manual',
 };
 
 afterEach(() => {
