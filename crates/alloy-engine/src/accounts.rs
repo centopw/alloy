@@ -333,6 +333,13 @@ pub async fn initial_sync(ctx: &EngineContext, runtime: &AccountRuntime) {
             .await
         {
             Ok(page) => page,
+            // A network that has no history API for this chat (Messenger's encrypted groups)
+            // answers NotSupported for it on every launch. That is a capability the network
+            // lacks, not a failure: the chat keeps its live messages and nothing is retried.
+            Err(ConnectorError::NotSupported { .. }) => {
+                tracing::debug!(chat = %chat.chat_id, "this chat has no history to backfill");
+                continue;
+            }
             Err(err) => {
                 tracing::warn!(chat = %chat.chat_id, error = %err, "history backfill failed");
                 continue;
