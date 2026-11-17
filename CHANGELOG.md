@@ -3,7 +3,7 @@
 ## 0.5.1 (pre-release)
 
 ### Fixed
-- **The Homebrew cask is `alloy-client`, and every command names its tap.** A bare cask token was ambiguous, and Homebrew now refuses to load a cask from a tap it has not trusted, so the install line alone failed with "untrusted tap". The install, upgrade and trust commands are all `centopw/tap/alloy-client` now — in the README, the release guide, the Homebrew copy's update notice (which also shows the one-time `brew trust --cask centopw/tap/alloy-client` step) and the backend's refusal when an in-place update is asked for. The tap's old `alloy.rb` is gone; `bump-cask.sh` writes `Casks/alloy-client.rb`.
+- **The Homebrew cask no longer upgrades somebody else's package.** `alloy` is an unrelated cask in Homebrew's own repository — the Alloy modelling language, which is Gatekeeper-disabled — so the `brew upgrade --cask alloy` the app printed for a Homebrew-installed copy sent people to that cask and could never update Alloy. A tap-qualified name alone was not enough either: Homebrew refuses to load a cask from a third-party tap until the tap is trusted, so a machine that had never trusted `centopw/tap` could not load the cask at all. Both are fixed: the token is `alloy-client` at its only source (the template and `bump-cask.sh`), the tap carries `Casks/alloy-client.rb` and its old `alloy.rb` is gone, every command the app or the docs print names `centopw/tap/alloy-client` in full, and the install docs, the cask's caveats and the Homebrew copy's update notice carry the one-time `brew trust` step.
 
 ## 0.5.0 (pre-release)
 
