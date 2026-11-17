@@ -247,10 +247,10 @@ pub(crate) fn forward_stderr(stderr: ChildStderr) {
     });
 }
 
-/// Forwards one sidecar diagnostic at the level its `level` field names. A line that is not a
-/// zerolog object is forwarded at `info`, because the sidecar wrote it deliberately.
+/// Forwards one sidecar diagnostic at the level the host assigns it. A line that is not a zerolog
+/// object is forwarded at `info`, because the sidecar wrote it deliberately.
 fn forward_stderr_line(line: &str) {
-    match stderr_level(line) {
+    match forwarded_level(line) {
         Some(StderrLevel::Trace) => tracing::trace!(target: "alloy_sidecar::stderr", "{line}"),
         Some(StderrLevel::Debug) => tracing::debug!(target: "alloy_sidecar::stderr", "{line}"),
         Some(StderrLevel::Info) | None => {
@@ -262,7 +262,7 @@ fn forward_stderr_line(line: &str) {
 }
 
 /// The severity a sidecar diagnostic announces in its leading zerolog JSON object.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum StderrLevel {
     Trace,
     Debug,
@@ -271,50 +271,155 @@ enum StderrLevel {
     Error,
 }
 
-/// Reads `level` from the JSON object on a diagnostic line. `None` means the line is not a zerolog
-/// object or names a level this host does not know, and it is forwarded at `info`.
-fn stderr_level(line: &str) -> Option<StderrLevel> {
+/// JSON field the sidecar stamps on every line a bundled dependency wrote through its logger.
+const DEPENDENCY_ORIGIN_FIELD: &str = "origin";
+
+/// Field value that marks a line as dependency output rather than an Alloy report.
+const DEPENDENCY_ORIGIN: &str = "dependency";
+
+/// One sidecar diagnostic as the host will treat it, before it reaches `tracing`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct StderrDiagnostic {
+    level: StderrLevel,
+    dependency: bool,
+}
+
+/// The level the host forwards one diagnostic at. `None` means the line is not a zerolog object or
+/// names a level this host does not know, and it is forwarded at `info`.
+///
+/// Classification is by the sidecar's provenance marker, never by the prose of the line: libsignal,
+/// whatsmeow and messagix log their own failed decryptions, MAC mismatches and retry probes at
+/// warn/error, and those are not events Alloy reports. Alloy's own reports carry no marker and keep
+/// their level.
+fn forwarded_level(line: &str) -> Option<StderrLevel> {
+    let StderrDiagnostic { level, dependency } = classify_stderr_line(line)?;
+    // Any dependency line above debug is chatter: forwarded at debug so a debug run still shows it.
+    if dependency && !matches!(level, StderrLevel::Trace | StderrLevel::Debug) {
+        return Some(StderrLevel::Debug);
+    }
+    Some(level)
+}
+
+/// Reads the level and provenance of a diagnostic line.
+fn classify_stderr_line(line: &str) -> Option<StderrDiagnostic> {
     if !line.starts_with('{') {
         return None;
     }
     let object: Value = serde_json::from_str(line).ok()?;
-    match object.get("level")?.as_str()? {
-        "trace" => Some(StderrLevel::Trace),
-        "debug" => Some(StderrLevel::Debug),
-        "info" => Some(StderrLevel::Info),
-        "warn" => Some(StderrLevel::Warn),
-        "error" => Some(StderrLevel::Error),
-        _ => None,
-    }
+    let dependency =
+        object.get(DEPENDENCY_ORIGIN_FIELD).and_then(Value::as_str) == Some(DEPENDENCY_ORIGIN);
+    let level = match object.get("level")?.as_str()? {
+        "trace" => StderrLevel::Trace,
+        "debug" => StderrLevel::Debug,
+        "info" => StderrLevel::Info,
+        "warn" => StderrLevel::Warn,
+        "error" => StderrLevel::Error,
+        _ => return None,
+    };
+    Some(StderrDiagnostic { level, dependency })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// The dependency lines captured from a real failed Messenger decryption, plus the one report
+    /// the sidecar emits for it. The dependency lines carry the `origin` marker the sidecar now
+    /// stamps; the final line is `handleE2EEUndecryptable`'s report.
+    const DECRYPT_FAILURE_FIXTURES: [&str; 4] = [
+        r#"{"level":"warn","origin":"dependency","component":"libsignal","caller":"SessionCipher.go:263","message":"mismatching MAC in signal message"}"#,
+        r#"{"level":"error","origin":"dependency","component":"libsignal","caller":"SessionCipher.go:319","message":"mismatching MAC in signal message"}"#,
+        r#"{"level":"warn","origin":"dependency","component":"whatsmeow","message":"failed to decrypt prekey message: no valid sessions"}"#,
+        r#"{"level":"warn","message_id":"3EB0C1D2","chat":"e2ee:100009129333612@msgr","sender":"100009129333612:111@msgr","unavailable":false,"decrypt_fail_mode":"","message":"Failed to decrypt a WhatsApp message; a retry receipt was sent to the sender"}"#,
+    ];
+
+    #[test]
+    fn one_decrypt_failure_yields_exactly_one_warn() {
+        let forwarded: Vec<_> = DECRYPT_FAILURE_FIXTURES
+            .iter()
+            .map(|line| forwarded_level(line).expect("fixtures are zerolog objects"))
+            .collect();
+
+        assert_eq!(
+            forwarded
+                .iter()
+                .filter(|level| **level == StderrLevel::Warn)
+                .count(),
+            1,
+            "the sidecar's own report is the only warn: {forwarded:?}"
+        );
+        assert!(
+            !forwarded.contains(&StderrLevel::Error),
+            "a decrypt failure answered with a retry receipt is not an error: {forwarded:?}"
+        );
+        assert_eq!(forwarded[0], StderrLevel::Debug, "libsignal warn is capped");
+        assert_eq!(
+            forwarded[1],
+            StderrLevel::Debug,
+            "libsignal error is capped"
+        );
+        assert_eq!(forwarded[2], StderrLevel::Debug, "whatsmeow warn is capped");
+        assert_eq!(
+            forwarded[3],
+            StderrLevel::Warn,
+            "Alloy's report keeps its level"
+        );
+    }
+
+    #[test]
+    fn dependency_provenance_is_read_from_the_marker_not_the_prose() {
+        assert_eq!(
+            classify_stderr_line(DECRYPT_FAILURE_FIXTURES[0]),
+            Some(StderrDiagnostic {
+                level: StderrLevel::Warn,
+                dependency: true,
+            })
+        );
+        assert_eq!(
+            classify_stderr_line(DECRYPT_FAILURE_FIXTURES[3]),
+            Some(StderrDiagnostic {
+                level: StderrLevel::Warn,
+                dependency: false,
+            })
+        );
+        // A dependency line is at most debug whatever level it announced, including info.
+        assert_eq!(
+            forwarded_level(
+                r#"{"level":"info","origin":"dependency","component":"messagix","message":"x"}"#
+            ),
+            Some(StderrLevel::Debug)
+        );
+        assert_eq!(
+            forwarded_level(
+                r#"{"level":"trace","origin":"dependency","component":"messagix","message":"x"}"#
+            ),
+            Some(StderrLevel::Trace)
+        );
+    }
+
     #[test]
     fn stderr_level_follows_the_level_field() {
         assert!(matches!(
-            stderr_level(r#"{"level":"trace","message":"x"}"#),
+            forwarded_level(r#"{"level":"trace","message":"x"}"#),
             Some(StderrLevel::Trace)
         ));
         assert!(matches!(
-            stderr_level(r#"{"level":"debug","message":"x"}"#),
+            forwarded_level(r#"{"level":"debug","message":"x"}"#),
             Some(StderrLevel::Debug)
         ));
         assert!(matches!(
-            stderr_level(r#"{"level":"error","message":"x"}"#),
+            forwarded_level(r#"{"level":"error","message":"x"}"#),
             Some(StderrLevel::Error)
         ));
         assert!(
-            stderr_level("sidecar: plain text").is_none(),
+            forwarded_level("sidecar: plain text").is_none(),
             "a line without a `level` is unstructured output"
         );
         assert!(
-            stderr_level(r#"{"level":"nonsense"}"#).is_none(),
+            forwarded_level(r#"{"level":"nonsense"}"#).is_none(),
             "an unknown level is not guessed at"
         );
-        assert!(stderr_level(r#"{"message":"no level field"}"#).is_none());
+        assert!(forwarded_level(r#"{"message":"no level field"}"#).is_none());
     }
 
     #[test]

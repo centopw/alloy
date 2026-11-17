@@ -32,7 +32,7 @@ func (l libsignalLogger) Configure(string) {}
 
 // installSignalLogger makes libsignal log through the sidecar, never on stdout.
 func installSignalLogger(log zerolog.Logger) {
-	l := libsignalLogger{log: log.With().Str("component", "libsignal").Logger()}
+	l := libsignalLogger{log: dependencyLogger(log.With().Str("component", "libsignal").Logger())}
 	// Setup takes a pointer to the interface value, so the concrete logger goes behind one first.
 	var target siglog.Loggable = l
 	siglog.Setup(&target)

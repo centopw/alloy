@@ -222,7 +222,7 @@ func (m *Messenger) ensureClientLocked() *WireError {
 }
 
 func (m *Messenger) logger() zerolog.Logger {
-	return m.log.With().Str("component", "messagix").Logger()
+	return dependencyLogger(m.log.With().Str("component", "messagix").Logger())
 }
 
 // loadInboxLocked performs the initial inbox load that authenticates the cookies. mu must be

@@ -138,7 +138,7 @@ func (m *Messenger) startE2EE(ctx context.Context) error {
 		return fmt.Errorf("create e2ee store directory: %w", err)
 	}
 	dbPath := filepath.ToSlash(filepath.Join(dir, "e2ee.db"))
-	waLogger := waLog.Zerolog(m.log.With().Str("component", "whatsmeow").Logger())
+	waLogger := waLog.Zerolog(dependencyLogger(m.log.With().Str("component", "whatsmeow").Logger()))
 	container, err := sqlstore.New(ctx, "sqlite",
 		"file:"+dbPath+"?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)", waLogger)
 	if err != nil {
