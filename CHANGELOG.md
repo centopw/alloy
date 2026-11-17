@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.18 (pre-release)
+
+### Added
+- **Settings → Devices & Sync enrols a second device without retyping the account.** One device shows a QR ticket and an eight-character code; the other types the code or scans the ticket, both sides compare a six-digit code, and the configuration bundle — settings, tagged chats, catalogue, backgrounds and theme — crosses only after both accept. A device that cannot be paired recovers from a 24-word phrase instead, which seals the master key under argon2id and is never stored.
+- **An optional sync server holds that configuration in one place without being able to read it.** The layers are published as sealed blobs under opaque ids, signed by the device over a chain of heads, and the client pins the server's certificate key when it is configured and refuses a different one afterwards. Local-only stays the default and is fully functional: the server is storage, never an identity or a sign-in. A device configured before this release must be configured again — the signed head gained a byte (`CHAIN_VERSION` is now 2) and there is no downgrade path.
+- **Revoking a device now makes the revocation mean something.** Removing a peer used to drop a roster entry and bump an epoch that the same master key still derived, so the revoked device could open everything. Revocation rotates the master key, re-seals the layers to each surviving device, and only then deletes the previous epochs' ciphertext; the page reports what the server actually kept instead of claiming a clean sweep, and marks a recovery phrase from before the rotation as stale. It is not retroactive: ciphertext the server already held before the revoke is old data.
+- **Message bodies can be mirrored, opt-in and never by accident.** Sync mode is Off, Settings and personal data, or Configuration and messages, and the last one opens a confirmation that states what it means: chat metadata, bodies and per-participant read markers sealed to the server, media never mirrored (`has_media` only), the newest window rather than all history, and losing every device plus the phrase losing the mirror.
+
+### Fixed
+- **A history backfill the network refuses logs as a debug line, not a warning.** Messenger's encrypted threads answer `NotSupported` for backfill on every launch, which surfaced as a WARN per chat; that is a capability the network lacks, not a failure. Only `NotSupported` moves to debug — a real transport failure still warns, and a regression test captures both levels.
+
 ## 0.4.17 (pre-release)
 
 ### Fixed
