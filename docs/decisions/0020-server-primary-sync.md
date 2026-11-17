@@ -21,10 +21,10 @@ tags: [adr, architecture, sync, security, crypto, hosting]
 ## Context
 
 Alloy today is single-device by construction. The account's connector material lives in
-`account_secrets` inside the SQLCipher database, the database key lives in `secrets.json` (0600, or
-the keychain when `ALLOY_SECRET_BACKEND=keychain` — ADR 0019), and nothing leaves the machine. Moving
-to a second device means repeating onboarding: reconnect Telegram/Messenger, re-create themes, tags,
-groups, pins, and layout.
+`account_secrets`, sealed per row with the store key, inside a plain SQLite database (not SQLCipher);
+the store key lives in `secrets.json` (0600, or the keychain when `ALLOY_SECRET_BACKEND=keychain` —
+ADR 0019), and nothing leaves the machine. Moving to a second device means repeating onboarding:
+reconnect Telegram/Messenger, re-create themes, tags, groups, pins, and layout.
 
 Two separate needs get confused in that complaint:
 
@@ -88,7 +88,7 @@ Messenger's own clouds:
 | Media | **never** mirrored | attachment bytes stay on the device; `has_media` in the mirror is the only trace that one exists |
 
 A fresh device enrols, unseals the master key, pulls the layers the user enabled, and populates its
-local SQLCipher database. The local database stays the working set — the server is authoritative for
+local SQLite database. The local database stays the working set — the server is authoritative for
 what it stores, not an RPC endpoint the UI waits on. Offline behaviour is unchanged.
 
 ### Recovery
@@ -162,16 +162,18 @@ remove it.
 
 Separate the two cases, because only one of them is defensible.
 
-**A stolen, locked device** (attacker has the hardware, not the user's session). Controls: the master
-key and the SQLCipher key live behind the platform's own lock — hardware-backed wrapping on Android
-(Keystore) and, where available, the OS keychain on desktop; an optional passphrase wraps the master
-key so a disk image alone does not yield it. This is the case the design is expected to survive.
+**A stolen, locked device** (attacker has the hardware, not the user's session). In the intended
+design the master key and the store key live behind the platform's own lock — hardware-backed wrapping
+on Android (Keystore) and, where available, the OS keychain on desktop — with an optional passphrase so
+a disk image alone does not yield them. None of that wrapping is implemented yet: today both keys sit
+in `secrets.json` at 0600 and a disk image takes them (ADR 0021, "Implementation status"). This is the
+case the design is expected to survive once the tiers land.
 
 **A stolen or compromised device with the attacker running as the user** — shell access, or any
 malware in the user's session. Honest answer: **this is total compromise of that device.** A
-same-UID process can read `secrets.json` (0600 is not a defence against its owner), the SQLCipher
-database while unlocked, and the connector session material. No client-side crypto fixes that. What
-the design does instead is bound the damage:
+same-UID process can read `secrets.json` (0600 is not a defence against its owner), the plaintext
+SQLite database, and the connector session material it can unseal with that store key. No client-side
+crypto fixes that. What the design does instead is bound the damage:
 
 | Control | Effect |
 |---|---|

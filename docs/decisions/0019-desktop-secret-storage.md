@@ -18,9 +18,10 @@ tags: [adr, storage, security, keychain, desktop]
 
 ## Context
 
-The engine keeps two secrets in the platform secret store: the SQLCipher key for `alloy.db` and the
-user's Telegram application pair. Desktop builds opened the OS keychain at startup, probed it with a
-write, and read the database key from it on every launch.
+The engine keeps two secrets in the platform secret store: the store key that seals connector session
+material in `alloy.db` (`alloy.store.key.v1`) and the user's Telegram application pair. The database
+file itself is plain SQLite — it is not SQLCipher-encrypted (see ADR 0021). Desktop builds opened the
+OS keychain at startup, probed it with a write, and read the store key from it on every launch.
 
 On macOS a keychain item's access control list is bound to the code signature of the binary that
 created it. Every unsigned development build, and every release, is a different identity, so the
@@ -28,7 +29,7 @@ system asks for the login password again on each launch — a prompt the app can
 user cannot make permanent. The write probe made it worse by touching the keychain three times before
 the first window appeared.
 
-The prompt protects the database key from *other users* and from processes that cannot read the
+The prompt protects the store key from *other users* and from processes that cannot read the
 user's home directory. On a single-user machine with full-disk encryption, that is the same
 protection class the owner-only file already gives, and the Android build has shipped with exactly
 that file since the first release.
@@ -67,8 +68,10 @@ Three supporting rules keep both backends cheap and honest:
 
 - No keychain prompt on launch, for any desktop build. The one prompt an existing install can see is
   the adoption read on the first start after upgrading, and it happens once.
-- The database key now lives in a user-readable file. It is readable by any process running as that
-  user — the same exposure the Android build already accepts. Losing the file loses the database.
+- The store key now lives in a user-readable file. It is readable by any process running as that
+  user — the same exposure the Android build already accepts. Losing the file loses the connector
+  sessions sealed with it (they must be signed in again); it does not lose `alloy.db`, which is not
+  encrypted.
 - `ALLOY_SECRET_BACKEND=keychain` stays supported and now reads each secret at most once per process.
 - Follow-up: wrap the file store with Android Keystore / Windows DPAPI, and file the `type:decision`
   issue for this record.
