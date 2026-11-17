@@ -77,9 +77,13 @@ into the app before it is installed. Updates only ever come from tagged releases
 nightlies.
 
 App commands (`apps/alloy/src-tauri/src/update.rs`):
-- `check_update() -> UpdateInfo { available, version, notes, can_install, url, downloaded }`.
+- `check_update() -> UpdateInfo { available, version, notes, can_install, url, downloaded, install_method }`.
   `downloaded` is true when the package for that version is already stored in memory. Checking the
-  same version again keeps the stored package; a different version drops it.
+  same version again keeps the stored package; a different version drops it. `install_method` is
+  `manual`, `homebrew` or `translocated` (serde lower-case): who installed this copy, detected from
+  the bundle path. `can_install` is true only for a `manual` install, so a cask or translocated copy
+  is never replaced by the app itself and instead shows where to update (`brew upgrade --cask alloy`
+  for the cask).
 - `download_update()`: downloads and verifies the offered update without installing it. Emits
   `update://progress` (`{ downloaded, total }`, total is `null` when unknown) while downloading and
   `update://downloaded` (no payload) once the package is stored. Serialized: a concurrent call waits
@@ -91,7 +95,7 @@ workflow fills it from the GitHub release body, so write the release page notes 
 
 **Android** cannot replace its own APK, so `can_install` is false: the app only tells the user a
 newer release exists, shows the notes, and opens the release page (`check_update` reads the GitHub
-releases list); `download_update` and `apply_update` return an error. Silent in-place
+releases list and fills `url`); `download_update` and `apply_update` return an error. Silent in-place
 updates need a store (Play, F-Droid) or a privileged installer. Updating the sideloaded APK also
 requires the same signing key every time, see section 5.
 
