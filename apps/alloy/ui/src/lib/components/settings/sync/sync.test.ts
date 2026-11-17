@@ -94,6 +94,15 @@ describe('DevicesSync pairing state machine', () => {
     expect(target.textContent).toContain(t('sync-pair-crosses'));
   });
 
+  it('stops offering the code once its expiry has passed', () => {
+    const expiredView = { ...pairing('waiting'), expiresAtMs: Date.now() - 1000 };
+    const target = render(DevicesSync, { pairing: expiredView, role: 'offer' as const });
+
+    expect(target.querySelector('output'), 'the dead code is not shown').toBeNull();
+    expect(target.textContent).not.toContain('AB34CD56');
+    expect(target.textContent).toContain(t('sync-offer-expired'));
+  });
+
   it('shows the six digits and both SAS answers once the SAS is ready', () => {
     const target = render(DevicesSync, { pairing: pairing('sas_ready'), role: 'accept' as const });
 

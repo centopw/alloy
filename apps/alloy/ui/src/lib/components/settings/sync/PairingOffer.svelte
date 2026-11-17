@@ -62,6 +62,8 @@
   const secondsLeft = $derived(
     expiresAtMs === null ? null : Math.max(0, Math.ceil((expiresAtMs - now) / 1000))
   );
+  /** The engine retires the pairing at the same deadline; until its event lands, offer nothing. */
+  const expired = $derived(secondsLeft === 0);
 
   async function copyCode() {
     if (!code) return;
@@ -77,34 +79,34 @@
 </script>
 
 <div class="offer">
-  <div class="qr-frame">
-    {#if qrSvg}
-      <div class="qr" role="img" aria-label={t('sync-offer-qr-label')}>
-        {@html qrSvg}
-      </div>
-    {:else if qrFailed}
-      <p class="qr-failure">{t('sync-offer-qr-failed')}</p>
-    {:else}
-      <span class="qr-wait" role="img" aria-label={t('sync-offer-qr-label')}></span>
+  {#if expired}
+    <p class="expiry">{t('sync-offer-expired')}</p>
+  {:else}
+    <div class="qr-frame">
+      {#if qrSvg}
+        <div class="qr" role="img" aria-label={t('sync-offer-qr-label')}>
+          {@html qrSvg}
+        </div>
+      {:else if qrFailed}
+        <p class="qr-failure">{t('sync-offer-qr-failed')}</p>
+      {:else}
+        <span class="qr-wait" role="img" aria-label={t('sync-offer-qr-label')}></span>
+      {/if}
+    </div>
+
+    <p class="hint">{t('sync-offer-hint')}</p>
+
+    <div class="code-row">
+      <span class="code-label">{t('sync-offer-code')}</span>
+      <output class="code">{code ?? ''}</output>
+      <Button variant="ghost" size="sm" disabled={!code} onclick={() => void copyCode()}>
+        {copied ? t('sync-offer-copied') : t('sync-offer-copy-code')}
+      </Button>
+    </div>
+
+    {#if secondsLeft !== null}
+      <p class="expiry">{t('sync-offer-expires-in', { seconds: secondsLeft })}</p>
     {/if}
-  </div>
-
-  <p class="hint">{t('sync-offer-hint')}</p>
-
-  <div class="code-row">
-    <span class="code-label">{t('sync-offer-code')}</span>
-    <output class="code">{code ?? ''}</output>
-    <Button variant="ghost" size="sm" disabled={!code} onclick={() => void copyCode()}>
-      {copied ? t('sync-offer-copied') : t('sync-offer-copy-code')}
-    </Button>
-  </div>
-
-  {#if secondsLeft !== null}
-    <p class="expiry">
-      {secondsLeft > 0
-        ? t('sync-offer-expires-in', { seconds: secondsLeft })
-        : t('sync-offer-expired')}
-    </p>
   {/if}
 
   <p class="crosses">{t('sync-pair-crosses')}</p>

@@ -718,6 +718,10 @@ fn set_transferred(pairings: &Pairings, pairing_id: &str, bytes: u64) {
 
 /// Ends a pairing: the terminal event carries the SAS, then the entry is dropped so the map holds
 /// only live pairings.
+///
+/// A pairing that expires, is declined or completes did what it was told: those are debug lines.
+/// Only `Failed` describes something actionable and reaches `warn`; the reason rides on it as
+/// `error`. Nothing here ever logs the pairing code.
 fn finish_pairing(
     pairings: &Pairings,
     sink: &EventSink,
@@ -732,8 +736,13 @@ fn finish_pairing(
             None => None,
         }
     };
-    if let Some(error) = error {
-        tracing::warn!(pairing_id, phase = ?phase, %error, "pairing ended");
+    match (phase, error) {
+        (PairingPhase::Failed, Some(error)) => {
+            tracing::warn!(pairing_id, %error, "pairing failed");
+        }
+        (PairingPhase::Failed, None) => tracing::warn!(pairing_id, "pairing failed"),
+        (_, Some(error)) => tracing::debug!(pairing_id, phase = ?phase, %error, "pairing ended"),
+        (_, None) => tracing::debug!(pairing_id, phase = ?phase, "pairing ended"),
     }
     sink.emit(EngineEvent::PairingChanged {
         pairing_id: pairing_id.to_string(),
@@ -2651,4 +2660,192 @@ fn decode_b64(text: &str, name: &str) -> Result<Vec<u8>, EngineError> {
 
 fn random_error(err: getrandom::Error) -> EngineError {
     EngineError::internal_error(format!("the OS random source failed: {err}"))
+}
+
+#[cfg(test)]
+mod tests {
+    //! Pins the end-of-pairing log policy: routine ends are debug, only a broken pairing warns.
+    //!
+    //! `finish_pairing` is the one place a pairing ends, so its level choice is the whole policy.
+    //! Log levels are observed with a hand-written subscriber installed as the thread-local
+    //! default, the same way `tests/backfill_warn.rs` does: `alloy-engine` has no
+    //! `tracing-subscriber` dependency to build a writer from.
+
+    use std::fmt::Write as _;
+    use std::sync::{Arc, Mutex};
+
+    use tracing::field::{Field, Visit};
+    use tracing::span;
+    use tracing::{Event, Level, Metadata, Subscriber};
+
+    use super::*;
+
+    #[derive(Default)]
+    struct LogCapture {
+        events: Mutex<Vec<(Level, String)>>,
+    }
+
+    impl LogCapture {
+        fn new() -> Self {
+            Self::default()
+        }
+
+        fn snapshot(&self) -> Vec<(Level, String)> {
+            self.events.lock().expect("log capture lock").clone()
+        }
+    }
+
+    /// Renders an event's fields as `name=value` pairs.
+    #[derive(Default)]
+    struct RenderedFields(String);
+
+    impl Visit for RenderedFields {
+        fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+            if !self.0.is_empty() {
+                self.0.push(' ');
+            }
+            let _ = write!(self.0, "{}={value:?}", field.name());
+        }
+    }
+
+    impl Subscriber for LogCapture {
+        fn enabled(&self, _metadata: &Metadata<'_>) -> bool {
+            // Capture every level, so a test proves `debug` replaced `warn` rather than both
+            // being filtered out.
+            true
+        }
+
+        fn new_span(&self, _span: &span::Attributes<'_>) -> span::Id {
+            span::Id::from_u64(1)
+        }
+
+        fn record(&self, _span: &span::Id, _values: &span::Record<'_>) {}
+
+        fn record_follows_from(&self, _span: &span::Id, _follows: &span::Id) {}
+
+        fn event(&self, event: &Event<'_>) {
+            let mut fields = RenderedFields::default();
+            event.record(&mut fields);
+            self.events
+                .lock()
+                .expect("log capture lock")
+                .push((*event.metadata().level(), fields.0));
+        }
+
+        fn enter(&self, _span: &span::Id) {}
+
+        fn exit(&self, _span: &span::Id) {}
+    }
+
+    fn live_pairing() -> (Pairings, EventSink) {
+        let pairings: Pairings = Arc::new(Mutex::new(HashMap::new()));
+        lock(&pairings).insert("p1".to_string(), PairingEntry::waiting());
+        (pairings, EventSink::new())
+    }
+
+    fn terminal_states(
+        events: &mut tokio::sync::broadcast::Receiver<EngineEvent>,
+    ) -> Vec<PairingPhase> {
+        let mut phases = Vec::new();
+        while let Ok(event) = events.try_recv() {
+            if let EngineEvent::PairingChanged { state, .. } = event {
+                phases.push(state);
+            }
+        }
+        phases
+    }
+
+    /// The report that produced this test: a pairing expiring after its 90 seconds logged
+    /// `WARN ... error=pairing code expired` and read as a failure. It is routine.
+    #[test]
+    fn an_expired_pairing_logs_no_warning() {
+        let capture = Arc::new(LogCapture::new());
+        let _guard = tracing::subscriber::set_default(capture.clone());
+        let (pairings, sink) = live_pairing();
+        let mut events = sink.subscribe();
+
+        finish_pairing(
+            &pairings,
+            &sink,
+            "p1",
+            PairingPhase::Expired,
+            Some("pairing code expired after 90s".to_string()),
+        );
+
+        let logged = capture.snapshot();
+        assert!(
+            logged.iter().all(|(level, _)| *level != Level::WARN),
+            "expiry must not warn: {logged:?}"
+        );
+        let debug: Vec<_> = logged
+            .iter()
+            .filter(|(level, _)| *level == Level::DEBUG)
+            .collect();
+        assert_eq!(
+            debug.len(),
+            1,
+            "expiry is still traceable at debug: {logged:?}"
+        );
+        assert_eq!(
+            terminal_states(&mut events),
+            vec![PairingPhase::Expired],
+            "the UI is told the code is no longer offered"
+        );
+        assert!(
+            !lock(&pairings).contains_key("p1"),
+            "the ended pairing is dropped, so its code and ticket do not outlive it"
+        );
+    }
+
+    #[test]
+    fn a_declined_pairing_logs_no_warning() {
+        let capture = Arc::new(LogCapture::new());
+        let _guard = tracing::subscriber::set_default(capture.clone());
+        let (pairings, sink) = live_pairing();
+
+        finish_pairing(
+            &pairings,
+            &sink,
+            "p1",
+            PairingPhase::Declined,
+            Some("the other device declined".to_string()),
+        );
+
+        let logged = capture.snapshot();
+        assert!(
+            logged.iter().all(|(level, _)| *level != Level::WARN),
+            "a decline is a decision, not an error: {logged:?}"
+        );
+    }
+
+    #[test]
+    fn a_failed_pairing_still_warns_with_its_reason() {
+        let capture = Arc::new(LogCapture::new());
+        let _guard = tracing::subscriber::set_default(capture.clone());
+        let (pairings, sink) = live_pairing();
+
+        finish_pairing(
+            &pairings,
+            &sink,
+            "p1",
+            PairingPhase::Failed,
+            Some("the peer proof did not verify".to_string()),
+        );
+
+        let logged = capture.snapshot();
+        let warnings: Vec<_> = logged
+            .iter()
+            .filter(|(level, _)| *level == Level::WARN)
+            .collect();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "a broken pairing is one actionable warning: {logged:?}"
+        );
+        assert!(
+            warnings[0].1.contains("the peer proof did not verify"),
+            "the warning keeps the reason: {:?}",
+            warnings[0].1
+        );
+    }
 }

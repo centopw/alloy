@@ -146,8 +146,23 @@
 
   function applyPairing(next: PairingState, sas: string | null, failure: string | null) {
     if (!pairing) return;
+    if (!LIVE_STATES.has(next)) {
+      // A terminal phase ends the pairing: the ticket and code are no longer valid, so they are
+      // dropped instead of lingering in the page. Expiry and decline did what the person chose;
+      // only `failed` is shown as an error.
+      pairing = {
+        state: next,
+        ticket: null,
+        code: null,
+        sas: sas ?? pairing.sas,
+        peerLabel: pairing.peerLabel,
+        expiresAtMs: null,
+        error: next === 'failed' ? failure : null,
+      };
+      stopPoll();
+      return;
+    }
     pairing = { ...pairing, state: next, sas: sas ?? pairing.sas, error: failure };
-    if (!LIVE_STATES.has(next)) stopPoll();
   }
 
   /** The event is the source of truth; the poll only covers a missed `PairingChanged`. */
