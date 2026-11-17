@@ -2,6 +2,8 @@
   import { untrack } from 'svelte';
   import { Button, Select, TextArea, TextField } from '../common';
   import { openExternal } from '$lib/platform/links';
+  import { importChromeSession, isChromeSessionSupported } from '$lib/platform/chromeSession';
+  import { errorMessage } from '$lib/stores/errors';
   import { toDataURL } from 'qrcode';
   import { cookiesFromPaste } from '$lib/content/curlCookies';
   import { COUNTRIES, defaultCountry, parsePhone } from '$lib/content/phone';
@@ -50,6 +52,14 @@
   let username = $state('');
   let credentialPassword = $state('');
   let cookieValues = $state<Record<string, string>>(untrack(() => cookieSeed(step)));
+
+  // Chrome's session is offered on the Mac app only, and only once the person presses it: nothing
+  // here reads Chrome or asks the Keychain (ADR 0022).
+  const chromeAvailable = isChromeSessionSupported();
+  let chromeBusy = $state(false);
+  let chromeError = $state<string | null>(null);
+  let chromeImported = $state(false);
+  let chromeShared = $state(false);
 
   function cookieSeed(value: LoginStepDto): Record<string, string> {
     if (value.type !== 'cookies') return {};
@@ -178,6 +188,29 @@
     }
     cookiePaste = text;
     absorbPaste(text);
+  }
+
+  /**
+   * Fills the cookies from the Chrome profile on this Mac. The import is a one-off: what it fills
+   * is submitted as the cookie login, and the account's own stored session takes over from there.
+   */
+  async function useChromeSession() {
+    if (step.type !== 'cookies' || busy || chromeBusy) return;
+    chromeBusy = true;
+    chromeError = null;
+    try {
+      const imported = await importChromeSession();
+      for (const field of step.fields) {
+        const value = imported.cookies[field.name];
+        if (value) cookieValues[field.name] = value;
+      }
+      chromeImported = true;
+      chromeShared = imported.active;
+    } catch (e) {
+      chromeError = errorMessage(e);
+    } finally {
+      chromeBusy = false;
+    }
   }
 
   // The cookie step is Messenger's (see LoginStep::Cookies in alloy-connector); its session
@@ -521,6 +554,27 @@
   {:else if step.type === 'cookies'}
     <h3>{t('onboarding-cookies-title')}</h3>
     <p class="hint">{t('onboarding-cookies-reason', { network: networkName })}</p>
+    {#if chromeAvailable && step.fields.some((field) => field.name === 'c_user')}
+      <div class="chrome-session">
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={busy || chromeBusy}
+          onclick={useChromeSession}
+        >
+          {chromeBusy ? t('onboarding-working') : t('onboarding-chrome-session')}
+        </Button>
+        {#if chromeImported}
+          <p class="hint" role="status">{t('onboarding-chrome-imported')}</p>
+          {#if chromeShared}
+            <p class="hint">{t('onboarding-chrome-shared')}</p>
+          {/if}
+        {/if}
+        {#if chromeError}
+          <p class="error" role="alert">{chromeError}</p>
+        {/if}
+      </div>
+    {/if}
     <ol class="steps">
       <li>
         <button type="button" class="link" onclick={() => void openExternal(COOKIE_SIGN_IN_URL)}>
@@ -797,6 +851,18 @@
     color: var(--alloy-color-text-secondary);
     font-size: var(--alloy-font-size-preview);
     line-height: var(--alloy-typography-line-height-normal, 1.45);
+  }
+  /* The Chrome import is one action above the manual steps, not a fifth step in their list. */
+  .chrome-session {
+    display: flex;
+    flex-direction: column;
+    gap: var(--alloy-spacing-scale-2);
+    margin-top: var(--alloy-spacing-scale-2);
+  }
+  .chrome-session :global(.alloy-button) {
+    width: 100%;
+    min-height: var(--alloy-layout-control-height);
+    touch-action: manipulation;
   }
   .steps .link {
     display: inline;

@@ -5,6 +5,13 @@ import { flushSync, mount, tick } from 'svelte';
 import LoginStep from './LoginStep.svelte';
 import type { LoginInputDto, LoginStepDto } from '$lib/generated/index.js';
 
+const chrome = vi.hoisted(() => ({ supported: false, import: vi.fn() }));
+
+vi.mock('$lib/platform/chromeSession', () => ({
+  isChromeSessionSupported: () => chrome.supported,
+  importChromeSession: (...args: unknown[]) => chrome.import(...args)
+}));
+
 const step: LoginStepDto = {
   type: 'cookies',
   fields: [
@@ -45,6 +52,8 @@ function render(shown: LoginStepDto = step) {
 
 afterEach(() => {
   document.body.replaceChildren();
+  chrome.supported = false;
+  chrome.import.mockReset();
 });
 
 describe('LoginStep browser sign-in', () => {
@@ -146,6 +155,70 @@ describe('LoginStep browser sign-in', () => {
     await tick();
     flushSync();
     expect(submit.disabled).toBe(true);
+  });
+});
+
+function chromeButton(): HTMLButtonElement | undefined {
+  return [...document.querySelectorAll('button')].find((b) =>
+    b.textContent?.includes('Use the Chrome session')
+  );
+}
+
+describe('LoginStep Chrome session import', () => {
+  const imported = {
+    cookies: { datr: 'D1', c_user: '42', xs: 'X%3A1', sb: 'SB1', fr: 'FR1' },
+    profile: 'Default',
+    active: true
+  };
+
+  it('offers the action without reading Chrome, and reads it once pressed', async () => {
+    chrome.supported = true;
+    chrome.import.mockResolvedValue(imported);
+    const { onsubmit, submit } = render();
+
+    const button = chromeButton();
+    expect(button).toBeTruthy();
+    // The lazy rule: mounting the step reaches no backend by itself.
+    expect(chrome.import).not.toHaveBeenCalled();
+    expect(submit.disabled).toBe(true);
+
+    button!.click();
+    await vi.waitFor(() => expect(chrome.import).toHaveBeenCalledTimes(1));
+    await tick();
+    flushSync();
+
+    expect(document.body.textContent).toContain('Session imported from Chrome.');
+    expect(document.body.textContent).toContain('Sign out of Messenger in Chrome after this');
+    expect(submit.disabled).toBe(false);
+
+    document.querySelector('form')!.dispatchEvent(new Event('submit', { cancelable: true }));
+    expect(onsubmit).toHaveBeenCalledWith({
+      type: 'cookies',
+      values: { datr: 'D1', c_user: '42', sb: 'SB1', xs: 'X%3A1' }
+    });
+  });
+
+  it('surfaces one readable failure and leaves the manual form as it was', async () => {
+    chrome.supported = true;
+    chrome.import.mockRejectedValue('This Chrome profile is not signed in to Messenger.');
+    const { submit } = render();
+
+    chromeButton()!.click();
+    await vi.waitFor(() =>
+      expect(document.querySelector('[role="alert"]')?.textContent).toContain(
+        'not signed in to Messenger'
+      )
+    );
+    expect(submit.disabled).toBe(true);
+    // No automatic fallback: the same manual steps are still the only other way in.
+    expect(document.body.textContent).toContain('Request copied as cURL');
+  });
+
+  it('shows nothing about Chrome where there is none', () => {
+    chrome.supported = false;
+    render();
+    expect(chromeButton()).toBeUndefined();
+    expect(document.body.textContent).not.toContain('Chrome');
   });
 });
 

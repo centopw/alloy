@@ -40,6 +40,18 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tauri-plugin-updater = "2"
 tauri-plugin-autostart = "2"
 
+# Reading Chrome's cookie store happens only on macOS (see `src/chrome.rs`); the crates are not
+# linked anywhere else. rusqlite is unfetched here because alloy-store already selects its
+# `bundled` SQLite for the same build.
+[target.'cfg(target_os = "macos")'.dependencies]
+aes = "0.8"
+cbc = "0.1"
+keyring = { version = "3.6", features = ["apple-native"] }
+pbkdf2 = { version = "0.13", features = ["hmac"] }
+rusqlite = "0.41"
+sha1 = "0.11"
+sha2 = "0.10"
+
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
 

@@ -1,6 +1,7 @@
 //! Alloy desktop and mobile application shell.
 
 mod background;
+pub mod chrome;
 pub mod commands;
 mod logs;
 mod notify;
@@ -249,6 +250,7 @@ pub fn run() {
             logs::debug_logs,
             logs::debug_clear_logs,
             logs::debug_save_logs,
+            chrome::import_chrome_session,
             update::check_update,
             update::download_update,
             update::apply_update,
