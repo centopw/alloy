@@ -458,14 +458,10 @@ func (m *Messenger) stop() *WireError {
 }
 
 func (m *Messenger) logout(ctx context.Context) {
-	m.e2eeMu.Lock()
-	e2ee := m.e2ee
-	m.e2eeMu.Unlock()
-	if e2ee != nil {
-		if err := e2ee.Logout(ctx); err != nil {
-			m.log.Warn().Err(err).Msg("E2EE remote logout failed; wiping local credentials anyway")
-		}
-	}
+	// There is no remote unlink to ask for: the bundled library refuses `Logout` for a
+	// Messenger-credentialled E2EE client and changes nothing when it tries. Only the local state
+	// is ours to drop, so logout is local teardown: stop the process, close the device store and
+	// its rows, and let every data call answer `unauthorized`.
 	// The device row is deleted while its store is still open; stop() closes that store.
 	m.e2eeMu.Lock()
 	device := m.device
