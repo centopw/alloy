@@ -91,6 +91,9 @@ struct State {
     auto_restart: bool,
     /// The newest session blob seen from `restore`, a completed login, or `session_updated`.
     session: Option<SessionBlob>,
+    /// Set by [`Runtime::logout`]: the account is signed out, so every data call is rejected with
+    /// `Unauthorized` instead of relaunching a process with no session to restore.
+    logged_out: bool,
     restarts: VecDeque<Instant>,
 }
 
@@ -107,6 +110,7 @@ impl Default for State {
             started: false,
             auto_restart: true,
             session: None,
+            logged_out: false,
             restarts: VecDeque::new(),
         }
     }
@@ -468,6 +472,9 @@ impl Runtime {
     ) -> Result<(), ConnectorError> {
         let (running, session) = {
             let state = self.state.lock().await;
+            if state.logged_out {
+                return Err(ConnectorError::Unauthorized);
+            }
             (state.writer.is_some(), state.session.clone())
         };
         if !running {
@@ -547,6 +554,18 @@ impl Runtime {
         }
     }
 
+    /// Signs the account out: the process is stopped (which disconnects the session and closes the
+    /// E2EE device store), and every later data call is rejected with `Unauthorized`.
+    ///
+    /// No logout request is sent: this host serves Messenger, and the library refuses to unlink a
+    /// Messenger-credentialled E2EE client ("can't logout with Messenger credentials"), deleting
+    /// nothing when it does. There is no remote state to revoke, so the sign-out is local teardown.
+    pub(crate) async fn logout(&self) -> Result<(), ConnectorError> {
+        let result = self.stop().await;
+        self.state.lock().await.logged_out = true;
+        result
+    }
+
     /// Sends one request and waits for its response.
     async fn request(&self, method: &str, params: Value) -> Result<Value, ConnectorError> {
         let (id, writer, receiver) = {
@@ -600,6 +619,9 @@ impl Runtime {
         method: &str,
         params: Value,
     ) -> Result<T, ConnectorError> {
+        if self.state.lock().await.logged_out {
+            return Err(ConnectorError::Unauthorized);
+        }
         let value = self.request(method, params).await?;
         serde_json::from_value(value).map_err(|error| ConnectorError::Protocol {
             message: format!("the sidecar returned an invalid `{method}` result: {error}"),
@@ -612,6 +634,9 @@ impl Runtime {
         method: &str,
         params: Value,
     ) -> Result<(), ConnectorError> {
+        if self.state.lock().await.logged_out {
+            return Err(ConnectorError::Unauthorized);
+        }
         match self.request(method, params).await? {
             Value::Null => Ok(()),
             other => Err(ConnectorError::Protocol {

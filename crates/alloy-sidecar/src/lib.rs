@@ -43,9 +43,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use alloy_connector::{
-    Capabilities, Connector, ConnectorError, ConnectorEvent, LoginFailure, LoginInput, LoginStep,
-    MediaRef, Network, OutgoingMessage, Page, RemoteChat, RemoteMember, RemoteMessage, RemoteUser,
-    SendAck, SessionBlob,
+    Capabilities, Connector, ConnectorError, ConnectorEvent, HistoryEnrolment, HistoryPin,
+    LoginFailure, LoginInput, LoginStep, MediaRef, Network, OutgoingMessage, Page, RemoteChat,
+    RemoteMember, RemoteMessage, RemoteUser, SendAck, SessionBlob,
 };
 use async_trait::async_trait;
 use serde_json::json;
@@ -117,6 +117,38 @@ impl Connector for SidecarConnector {
         let user = self.runtime.call("restore", params).await?;
         self.runtime.remember_session(session).await;
         Ok(user)
+    }
+
+    async fn enrol_history(&self, pin: HistoryPin) -> Result<HistoryEnrolment, ConnectorError> {
+        // The method name and the single `pin` parameter are the wire contract with the sidecar;
+        // the PIN travels no further than this call and is never stored or logged here.
+        let value = self
+            .runtime
+            .call::<serde_json::Value>("historyPin", json!({ "pin": pin }))
+            .await?;
+        match value {
+            // The sidecar's existing `ok` shape is a bare null.
+            serde_json::Value::Null => Ok(HistoryEnrolment {
+                pin_backup: true,
+                enrolled: true,
+            }),
+            serde_json::Value::Object(ref map)
+                if map.get("enrolled").and_then(serde_json::Value::as_bool) == Some(true) =>
+            {
+                Ok(HistoryEnrolment {
+                    pin_backup: map
+                        .get("pin_backup")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(true),
+                    enrolled: true,
+                })
+            }
+            other => Err(ConnectorError::Protocol {
+                message: format!(
+                    "`historyPin` returned {other}, which carries no successful enrolment"
+                ),
+            }),
+        }
     }
 
     async fn start(&self, events: Sender<ConnectorEvent>) -> Result<(), ConnectorError> {
@@ -280,7 +312,13 @@ impl Connector for SidecarConnector {
     }
 
     async fn logout(&self) -> Result<(), ConnectorError> {
-        self.runtime.call_unit("logout", json!({})).await
+        // A Messenger account cannot be unlinked from this device: the library the sidecar bundles
+        // refuses the call for a Messenger-credentialled E2EE client and changes nothing when it
+        // does, so asking would be a guaranteed failure the sidecar reports at warn on every
+        // sign-out. There is no remote state to revoke here, only local state to drop, and stopping
+        // the process does that: the socket disconnects, the E2EE device store closes, and the
+        // engine removes the account directory. Data calls then answer `Unauthorized`.
+        self.runtime.logout().await
     }
 }
 
@@ -305,5 +343,9 @@ fn login_failure(error: ConnectorError) -> LoginFailure {
             field: None,
             message,
         },
+        // The archive is not part of login; none of these can come from a login step.
+        ConnectorError::PinBackupUnavailable
+        | ConnectorError::PinRejected { .. }
+        | ConnectorError::PinLockedOut => LoginFailure::NotSupported,
     }
 }

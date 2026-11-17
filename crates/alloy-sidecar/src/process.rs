@@ -277,6 +277,13 @@ const DEPENDENCY_ORIGIN_FIELD: &str = "origin";
 /// Field value that marks a line as dependency output rather than an Alloy report.
 const DEPENDENCY_ORIGIN: &str = "dependency";
 
+/// JSON field whatsmeow's logger stamps on every line a sublogger writes.
+///
+/// The receive loop's socket teardown (`sublogger: "Socket"`) reaches the sidecar through a logger
+/// built inside the library, so it carries no `origin` marker; its `sublogger` field is still the
+/// library's own provenance and cannot be written by an Alloy report.
+const DEPENDENCY_SUBLOGGER_FIELD: &str = "sublogger";
+
 /// One sidecar diagnostic as the host will treat it, before it reaches `tracing`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct StderrDiagnostic {
@@ -288,9 +295,9 @@ struct StderrDiagnostic {
 /// names a level this host does not know, and it is forwarded at `info`.
 ///
 /// Classification is by the sidecar's provenance marker, never by the prose of the line: libsignal,
-/// whatsmeow and messagix log their own failed decryptions, MAC mismatches and retry probes at
-/// warn/error, and those are not events Alloy reports. Alloy's own reports carry no marker and keep
-/// their level.
+/// whatsmeow and messagix log their own failed decryptions, MAC mismatches, retry probes and socket
+/// teardown at warn/error, and those are not events Alloy reports. Alloy's own reports carry no
+/// marker and keep their level.
 fn forwarded_level(line: &str) -> Option<StderrLevel> {
     let StderrDiagnostic { level, dependency } = classify_stderr_line(line)?;
     // Any dependency line above debug is chatter: forwarded at debug so a debug run still shows it.
@@ -306,8 +313,9 @@ fn classify_stderr_line(line: &str) -> Option<StderrDiagnostic> {
         return None;
     }
     let object: Value = serde_json::from_str(line).ok()?;
-    let dependency =
-        object.get(DEPENDENCY_ORIGIN_FIELD).and_then(Value::as_str) == Some(DEPENDENCY_ORIGIN);
+    let dependency = object.get(DEPENDENCY_ORIGIN_FIELD).and_then(Value::as_str)
+        == Some(DEPENDENCY_ORIGIN)
+        || object.get(DEPENDENCY_SUBLOGGER_FIELD).is_some();
     let level = match object.get("level")?.as_str()? {
         "trace" => StderrLevel::Trace,
         "debug" => StderrLevel::Debug,
@@ -332,6 +340,44 @@ mod tests {
         r#"{"level":"warn","origin":"dependency","component":"whatsmeow","message":"failed to decrypt prekey message: no valid sessions"}"#,
         r#"{"level":"warn","message_id":"3EB0C1D2","chat":"e2ee:100009129333612@msgr","sender":"100009129333612:111@msgr","unavailable":false,"decrypt_fail_mode":"","message":"Failed to decrypt a WhatsApp message; a retry receipt was sent to the sender"}"#,
     ];
+
+    /// The teardown pair captured from a real Messenger sign-out: the report the sidecar wrote when
+    /// it tried to unlink the device, and the socket close that followed.
+    ///
+    /// The second line is whatsmeow's receive loop closing a socket that is being torn down — the
+    /// normal end of a connection, forwarded at debug and visible only in a debug run. The first
+    /// line is Alloy's own report and would keep its warn: it is prevented at the source, because
+    /// the host no longer asks a Messenger sidecar for a remote logout the library refuses. So no
+    /// sign-out produces either line at the host.
+    const TEARDOWN_FIXTURES: [&str; 2] = [
+        r#"{"level":"warn","error":"can't logout with Messenger credentials","message":"E2EE remote logout failed; wiping local credentials anyway"}"#,
+        r#"{"level":"warn","component":"messagix","component":"whatsmeow","sublogger":"Socket","message":"Error sending close to websocket: failed to close WebSocket: failed to read frame header: EOF"}"#,
+    ];
+
+    #[test]
+    fn closing_a_socket_is_teardown_chatter_not_an_event() {
+        assert_eq!(
+            forwarded_level(TEARDOWN_FIXTURES[1]),
+            Some(StderrLevel::Debug),
+            "the socket-close line carries whatsmeow's sublogger provenance"
+        );
+        assert_eq!(
+            classify_stderr_line(TEARDOWN_FIXTURES[1]),
+            Some(StderrDiagnostic {
+                level: StderrLevel::Warn,
+                dependency: true,
+            })
+        );
+        // Alloy's own reports keep their level: the logout report is not silenced here, it is not
+        // produced at all (see `logout_needs_no_remote_call` in the host's integration tests).
+        assert_eq!(
+            classify_stderr_line(TEARDOWN_FIXTURES[0]),
+            Some(StderrDiagnostic {
+                level: StderrLevel::Warn,
+                dependency: false,
+            })
+        );
+    }
 
     #[test]
     fn one_decrypt_failure_yields_exactly_one_warn() {

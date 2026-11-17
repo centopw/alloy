@@ -71,6 +71,7 @@ async fn login(connector: &SidecarConnector) {
             remote_user_id,
             display_name,
             session,
+            ..
         } => {
             assert_eq!(remote_user_id, FAKE_USER_ID);
             assert_eq!(display_name, "Fake User");
@@ -547,6 +548,58 @@ async fn stop_terminates_the_sidecar() {
     );
 
     connector.stop().await.expect("stop is idempotent");
+}
+
+/// Signing out cannot be answered by the network: the library refuses to unlink a
+/// Messenger-credentialled E2EE client, so the host does the local teardown and never sends the
+/// logout request. The fake answers `logout` with `NotSupported`, so a request would fail here.
+#[tokio::test]
+async fn logout_is_local_teardown_and_never_asks_the_sidecar() {
+    let directory = tempfile::tempdir().expect("temp dir");
+    let pid_file = directory.path().join("sidecar.pid");
+    let pid_path = pid_file.to_str().expect("a UTF-8 temp path").to_string();
+
+    let connector = SidecarConnector::spawn(config(
+        directory.path(),
+        &[("ALLOY_FAKE_SIDECAR_PID_FILE", pid_path.as_str())],
+    ))
+    .await
+    .expect("spawn");
+    login(&connector).await;
+
+    let (sender, mut events) = channel(32);
+    connector.start(sender).await.expect("start");
+    wait_for_online(&mut events).await;
+
+    connector
+        .logout()
+        .await
+        .expect("the sign-out is local teardown, not a refused remote logout");
+
+    #[cfg(unix)]
+    assert!(
+        !process_alive(recorded_pid(&pid_file)),
+        "logout stops the sidecar process"
+    );
+
+    let error = connector
+        .list_chats(None, 10)
+        .await
+        .expect_err("a signed-out connector answers nothing");
+    assert!(
+        matches!(error, ConnectorError::Unauthorized),
+        "unexpected error after logout: {error:?}"
+    );
+
+    let (sender, _events) = channel(32);
+    let error = connector
+        .start(sender)
+        .await
+        .expect_err("a signed-out connector does not relaunch");
+    assert!(
+        matches!(error, ConnectorError::Unauthorized),
+        "unexpected error restarting after logout: {error:?}"
+    );
 }
 
 #[cfg(unix)]

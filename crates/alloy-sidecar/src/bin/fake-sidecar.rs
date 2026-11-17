@@ -340,10 +340,6 @@ async fn dispatch(
             let dest_path = PathBuf::from(&params.dest_path);
             encode_result(connector.fetch_media(&params.media, &dest_path).await?)
         }
-        "logout" => {
-            connector.logout().await?;
-            Ok(Value::Null)
-        }
         other => Err(ConnectorError::NotSupported {
             feature: other.to_string(),
         }),
