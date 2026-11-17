@@ -399,6 +399,8 @@ impl TelegramConnector {
             remote_user_id: profile.remote_user_id,
             display_name: profile.display_name,
             session,
+            // Telegram has no encrypted history archive.
+            history: Default::default(),
         }
     }
 
@@ -2076,6 +2078,10 @@ fn login_failure(error: &ConnectorError) -> LoginFailure {
         ConnectorError::Unauthorized => LoginFailure::Network {
             message: "the stored session is no longer valid".to_string(),
         },
+        // Telegram has no encrypted history archive, so these never reach a login step.
+        ConnectorError::PinBackupUnavailable
+        | ConnectorError::PinRejected { .. }
+        | ConnectorError::PinLockedOut => LoginFailure::NotSupported,
     }
 }
 

@@ -37,5 +37,13 @@ pub fn map_connector(err: ConnectorError) -> EngineError {
             EngineError::internal_error(format!("connector protocol error: {message}"))
         }
         ConnectorError::InvalidInput { message } => EngineError::invalid_argument(message),
+        // The archive's expected failures have their own command outcome; reaching here means a
+        // call other than `EnrolHistory` saw one, which is a contract violation rather than a
+        // capability the UI should offer.
+        ConnectorError::PinBackupUnavailable => EngineError::not_supported("history_pin_backup"),
+        ConnectorError::PinRejected { attempts_remaining } => EngineError::auth_failed(format!(
+            "the archive PIN was rejected ({attempts_remaining} attempts remain)"
+        )),
+        ConnectorError::PinLockedOut => EngineError::auth_failed("the archive PIN is locked"),
     }
 }

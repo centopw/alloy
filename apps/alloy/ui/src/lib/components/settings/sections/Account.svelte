@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Button } from '$lib/components/common';
+  import HistoryPinSection from './HistoryPinSection.svelte';
   import { session, networkLabel } from '$lib/stores/session.svelte';
   import type { Account, AccountId, ConnectionStatus } from '$lib/generated/index.js';
 
@@ -97,6 +98,11 @@
               >{t('account-log-out')}</Button
             >
           </div>
+          <HistoryPinSection
+            capabilities={account.capabilities}
+            busy={session.busy}
+            onenrol={(pin) => session.enrolHistory(account.id, pin)}
+          />
         </li>
       {/each}
     </ul>
@@ -143,6 +149,7 @@
   }
   .account {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
     gap: var(--alloy-spacing-scale-4);

@@ -1,5 +1,11 @@
 import { client, applyDiff } from '../ipc/index.js';
-import type { CapabilitiesDto, EngineEvent, TimelineItemDto, UserId } from '../generated/index.js';
+import type {
+  CapabilitiesDto,
+  EngineEvent,
+  HistoryLimit,
+  TimelineItemDto,
+  UserId,
+} from '../generated/index.js';
 import { FrameBatcher, Subscription } from './subscription.js';
 import { errorMessage, expect, isSoftError } from './errors.js';
 import { uploadsStore } from './uploads.svelte.js';
@@ -15,6 +21,8 @@ export const TIMELINE_CACHE_LIMIT = 8;
 interface CachedTimeline {
   items: TimelineItemDto[];
   reachedStart: boolean;
+  /** Why paging stopped, when it stopped short of the start of what exists. */
+  historyLimit: HistoryLimit | null;
   scrollTop: number;
 }
 
@@ -142,6 +150,8 @@ class TimelineStore {
   loading = $state(false);
   paginating = $state(false);
   reachedStart = $state(false);
+  /** Why older history is not available here, `null` while none was reported (never guesses). */
+  historyLimit = $state<HistoryLimit | null>(null);
   error = $state<string | null>(null);
   /** True when the shown error is a warning: the action is refused for now, not broken. */
   errorIsWarning = $state(false);
@@ -221,12 +231,14 @@ class TimelineStore {
       this.cache.set(roomId, cached);
       this.items = cached.items.slice();
       this.reachedStart = cached.reachedStart;
+      this.historyLimit = cached.historyLimit;
       this.scrollTop = cached.scrollTop;
       this.pendingScroll = cached.scrollTop;
       this.loading = false;
     } else {
       this.items = [];
       this.reachedStart = false;
+      this.historyLimit = null;
       this.scrollTop = 0;
       this.pendingScroll = null;
       this.loading = true;
@@ -281,6 +293,7 @@ class TimelineStore {
     this.awaitingReset = false;
     this.scrollTop = 0;
     this.reachedStart = false;
+    this.historyLimit = null;
     this.replyTo = null;
     this.editing = null;
     this.lastReceiptEvent = null;
@@ -352,7 +365,12 @@ class TimelineStore {
   /** Keeps a room's timeline for reopening and evicts the least recently used past the limit. */
   private remember(roomId: string, scrollTop: number) {
     this.cache.delete(roomId);
-    this.cache.set(roomId, { items: this.items.slice(), reachedStart: this.reachedStart, scrollTop });
+    this.cache.set(roomId, {
+      items: this.items.slice(),
+      reachedStart: this.reachedStart,
+      historyLimit: this.historyLimit,
+      scrollTop,
+    });
     while (this.cache.size > TIMELINE_CACHE_LIMIT) {
       const oldest = this.cache.keys().next().value as string;
       this.cache.delete(oldest);
@@ -372,7 +390,10 @@ class TimelineStore {
         'Paginated'
       );
       // The user may have switched rooms meanwhile: another room's start says nothing about this one.
-      if (this.roomId === roomId) this.reachedStart = res.payload.reached_start;
+      if (this.roomId === roomId) {
+        this.reachedStart = res.payload.reached_start;
+        this.historyLimit = res.payload.history ?? null;
+      }
     } catch (e) {
       if (this.roomId === roomId) this.setError(e);
     } finally {

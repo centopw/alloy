@@ -479,6 +479,7 @@ async fn fake_login_happy_path_issues_a_restorable_session() {
             remote_user_id,
             display_name,
             session,
+            ..
         } => {
             assert_eq!(remote_user_id, FAKE_USER_ID);
             assert_eq!(display_name, "Fake User");
@@ -986,6 +987,36 @@ fn connector_errors_serialize_and_classify_retryability() {
 
     let unauthorized = serde_json::to_value(ConnectorError::Unauthorized).unwrap();
     assert_eq!(unauthorized, serde_json::json!({"type": "unauthorized"}));
+
+    // The archive codes are the sidecar's stable wire types; a rejected PIN carries the count,
+    // and a locked archive's `attempts_remaining: 0` is accepted rather than rejected as unknown.
+    assert_eq!(
+        serde_json::to_value(ConnectorError::PinBackupUnavailable).unwrap(),
+        serde_json::json!({"type": "pin_backup_unavailable"})
+    );
+    assert_eq!(
+        serde_json::to_value(ConnectorError::PinRejected {
+            attempts_remaining: 3
+        })
+        .unwrap(),
+        serde_json::json!({"type": "pin_rejected", "attempts_remaining": 3})
+    );
+    assert_eq!(
+        serde_json::from_value::<ConnectorError>(serde_json::json!({
+            "type": "pin_locked_out",
+            "attempts_remaining": 0
+        }))
+        .unwrap(),
+        ConnectorError::PinLockedOut
+    );
+    // A rejection without the count still decodes: the network may not say how many are left.
+    assert_eq!(
+        serde_json::from_value::<ConnectorError>(serde_json::json!({"type": "pin_rejected"}))
+            .unwrap(),
+        ConnectorError::PinRejected {
+            attempts_remaining: 0
+        }
+    );
 
     assert!(ConnectorError::RateLimited { retry_after_ms: 10 }.is_retryable());
     assert!(

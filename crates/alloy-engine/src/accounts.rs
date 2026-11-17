@@ -32,6 +32,9 @@ pub struct AccountRuntime {
     pub remote_user_id: Option<String>,
     pub connector: Arc<dyn Connector>,
     pub capabilities: Capabilities,
+    /// The account's encrypted-archive state. Enrolment changes `enrolled` while the connector
+    /// keeps running, so it is not folded into the immutable `capabilities`.
+    pub history: std::sync::Mutex<alloy_connector::HistoryCapabilities>,
     /// The connector's event channel. Kept so a reconnect can restart the connector while the actor
     /// keeps draining the same receiver.
     events: mpsc::Sender<ConnectorEvent>,
@@ -162,7 +165,13 @@ pub async fn account_dto(
     record: &AccountRecord,
 ) -> Result<AccountDto, EngineError> {
     let capabilities = match ctx.accounts.get(&record.account_id).await {
-        Some(runtime) => convert::capabilities_dto(&runtime.capabilities),
+        Some(runtime) => {
+            let history = *runtime
+                .history
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            convert::capabilities_dto(&runtime.capabilities, history)
+        }
         None => convert::no_capabilities(),
     };
     Ok(AccountDto {
@@ -222,7 +231,21 @@ pub async fn start_stored_account(
             return Err(map_connector(err));
         }
     };
-    start_with_connector(ctx, record, connector, Some(user.remote_user_id)).await
+    // `restore` cannot report the archive capability, so the flags the login step recorded are
+    // the only source here. The device itself stays in the connector's sealed session blob.
+    let history = ctx
+        .store
+        .get_history_capabilities(&record.account_id)
+        .await
+        .map_err(map_store)?;
+    start_with_connector(
+        ctx,
+        record,
+        connector,
+        Some(user.remote_user_id),
+        convert::history_store_to_connector(history),
+    )
+    .await
 }
 
 /// Starts the actor and outbox worker for an account whose connector is already usable.
@@ -234,6 +257,7 @@ pub async fn start_with_connector(
     record: AccountRecord,
     connector: Arc<dyn Connector>,
     remote_user_id: Option<String>,
+    history: alloy_connector::HistoryCapabilities,
 ) -> Result<Arc<AccountRuntime>, EngineError> {
     let (sender, receiver) = mpsc::channel::<ConnectorEvent>(512);
     let runtime = Arc::new(AccountRuntime {
@@ -241,6 +265,7 @@ pub async fn start_with_connector(
         network: record.network,
         remote_user_id: remote_user_id.or_else(|| record.remote_user_id.clone()),
         capabilities: connector.capabilities(),
+        history: std::sync::Mutex::new(history),
         connector: connector.clone(),
         events: sender.clone(),
         wake: Arc::new(Notify::new()),

@@ -2,10 +2,10 @@
 
 use std::path::Path;
 
-use alloy_connector::{LoginStep, SessionBlob};
+use alloy_connector::{ConnectorError, HistoryCapabilities, LoginStep, SessionBlob};
 use alloy_protocol::{
-    AccountId, EngineCommand, EngineEvent, EngineResponse, LoginId, LoginInputDto, LoginStepDto,
-    Network,
+    AccountId, EngineCommand, EngineEvent, EngineResponse, HistoryEnrolmentOutcome, HistoryPin,
+    LoginId, LoginInputDto, LoginStepDto, Network,
 };
 use alloy_store::AccountState as StoreAccountState;
 use alloy_store::{AccountRecord, NewAccount};
@@ -72,6 +72,9 @@ impl GroupHandler for AccountsHandler {
             } => set_network_setting(ctx, network, &key, &value).await,
             EngineCommand::ClearNetworkSetting { network, key } => {
                 clear_network_setting(ctx, network, &key).await
+            }
+            EngineCommand::EnrolHistory { account_id, pin } => {
+                enrol_history(ctx, &account_id, pin).await
             }
             _ => Err(EngineError::invalid_argument(format!(
                 "Command '{}' does not belong to the Accounts group",
@@ -151,6 +154,7 @@ async fn settle_step(
             remote_user_id,
             display_name,
             session,
+            history,
         } => {
             complete_login(
                 ctx,
@@ -159,6 +163,7 @@ async fn settle_step(
                 remote_user_id,
                 display_name,
                 session,
+                history,
             )
             .await
         }
@@ -196,6 +201,7 @@ async fn complete_login(
     remote_user_id: String,
     display_name: String,
     session: SessionBlob,
+    history: HistoryCapabilities,
 ) -> Result<EngineResponse, EngineError> {
     // Signing in again to a network account that is already linked refreshes that account. A
     // second row would violate `accounts(network, remote_user_id)` and leave the old row (and the
@@ -207,7 +213,16 @@ async fn complete_login(
         .await
         .map_err(map_store)?
     {
-        return relink_account(ctx, login_id, attempt, existing, display_name, session).await;
+        return relink_account(
+            ctx,
+            login_id,
+            attempt,
+            existing,
+            display_name,
+            session,
+            history,
+        )
+        .await;
     }
 
     // The id and the directory were fixed when the attempt started, so the store row, the
@@ -238,11 +253,34 @@ async fn complete_login(
         return Err(map_store(err));
     }
 
+    // The login step is the only place the archive capability arrives, so record it before the
+    // connector starts; a later launch from the stored session reads it back.
+    if let Err(err) = ctx
+        .store
+        .put_history_capabilities(
+            &record.account_id,
+            convert::history_connector_to_store(history),
+        )
+        .await
+    {
+        tracing::warn!(
+            account = %record.account_id,
+            error = %err,
+            "cannot record the account's archive capability"
+        );
+    }
+
     // A connector that cannot start does not undo the login: the credentials are valid and
     // stored, so the account exists and only its session needs attention. Its directory is the
     // account directory, so it is kept for the next start.
-    if let Err(err) =
-        start_with_connector(ctx, record.clone(), attempt.connector, Some(remote_user_id)).await
+    if let Err(err) = start_with_connector(
+        ctx,
+        record.clone(),
+        attempt.connector,
+        Some(remote_user_id),
+        history,
+    )
+    .await
     {
         tracing::warn!(
             account = %record.account_id,
@@ -282,6 +320,7 @@ async fn relink_account(
     existing: AccountRecord,
     display_name: String,
     session: SessionBlob,
+    history: HistoryCapabilities,
 ) -> Result<EngineResponse, EngineError> {
     if let Err(err) = attempt.connector.stop().await {
         tracing::warn!(error = %err, "stopping the duplicate login connector failed");
@@ -320,6 +359,22 @@ async fn relink_account(
         .update_account_state(&existing.account_id, StoreAccountState::Active)
         .await
         .map_err(map_store)?;
+    // The refreshed login reports the archive capability again; `start_stored_account` reads it
+    // from here because `restore` cannot carry it.
+    if let Err(err) = ctx
+        .store
+        .put_history_capabilities(
+            &existing.account_id,
+            convert::history_connector_to_store(history),
+        )
+        .await
+    {
+        tracing::warn!(
+            account = %existing.account_id,
+            error = %err,
+            "cannot record the account's archive capability"
+        );
+    }
 
     let record = ctx
         .store
@@ -468,6 +523,98 @@ fn remove_cached_file(path: &str) {
         Err(err) => {
             tracing::warn!(path = %path, error = %err, "cannot remove a cached media file");
         }
+    }
+}
+
+/// Enrols this device in the account's encrypted history archive, once, with the user's PIN.
+///
+/// The PIN exists only for the length of this call: it is validated, handed to the connector and
+/// dropped. Nothing here stores it, logs it, or puts it in an error message, and the outcome for
+/// every expected failure is a typed response the UI branches on.
+async fn enrol_history(
+    ctx: &EngineContext,
+    account_id: &AccountId,
+    pin: HistoryPin,
+) -> Result<EngineResponse, EngineError> {
+    let digits = pin.expose();
+    if digits.len() != 6 || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(EngineError::invalid_argument(
+            "the archive PIN must be exactly six digits",
+        ));
+    }
+    let runtime = ctx
+        .accounts
+        .get(&account_id.0)
+        .await
+        .ok_or_else(|| EngineError::not_found(format!("account '{}'", account_id.0)))?;
+
+    let outcome = match runtime
+        .connector
+        .enrol_history(alloy_connector::HistoryPin::new(digits))
+        .await
+    {
+        Ok(enrolment) => {
+            let history = alloy_connector::HistoryCapabilities {
+                pin_backup: enrolment.pin_backup || runtime_history(&runtime).pin_backup,
+                enrolled: enrolment.enrolled,
+            };
+            let outcome = if enrolment.enrolled {
+                HistoryEnrolmentOutcome::Enrolled
+            } else {
+                HistoryEnrolmentOutcome::NotSupported
+            };
+            apply_history(ctx, &account_id.0, &runtime, history).await;
+            outcome
+        }
+        Err(ConnectorError::PinBackupUnavailable) => {
+            // The sidecar said the account had a backup and the archive disagrees; the capability
+            // is the more recent truth, so stop offering the PIN.
+            let mut history = runtime_history(&runtime);
+            history.pin_backup = false;
+            history.enrolled = false;
+            apply_history(ctx, &account_id.0, &runtime, history).await;
+            HistoryEnrolmentOutcome::PinBackupUnavailable
+        }
+        Err(ConnectorError::PinRejected { attempts_remaining }) => {
+            HistoryEnrolmentOutcome::PinRejected { attempts_remaining }
+        }
+        Err(ConnectorError::PinLockedOut) => HistoryEnrolmentOutcome::LockedOut,
+        Err(ConnectorError::NotSupported { .. }) => HistoryEnrolmentOutcome::NotSupported,
+        Err(other) => return Err(map_connector(other)),
+    };
+
+    if matches!(outcome, HistoryEnrolmentOutcome::Enrolled) {
+        let accounts = accounts_dto(ctx).await?;
+        ctx.sink.emit(EngineEvent::AccountsChanged { accounts });
+    }
+    Ok(EngineResponse::HistoryEnrolment { outcome })
+}
+
+/// The archive flags this runtime currently holds.
+fn runtime_history(runtime: &crate::accounts::AccountRuntime) -> HistoryCapabilities {
+    *runtime
+        .history
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Records new archive flags on the runtime and in the store, so a relaunch agrees with the UI.
+async fn apply_history(
+    ctx: &EngineContext,
+    account_id: &str,
+    runtime: &crate::accounts::AccountRuntime,
+    history: HistoryCapabilities,
+) {
+    *runtime
+        .history
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = history;
+    if let Err(err) = ctx
+        .store
+        .put_history_capabilities(account_id, convert::history_connector_to_store(history))
+        .await
+    {
+        tracing::warn!(account = %account_id, error = %err, "cannot record the account's archive capability");
     }
 }
 

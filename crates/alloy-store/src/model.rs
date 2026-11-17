@@ -128,6 +128,17 @@ pub struct AccountRecord {
     pub updated_at: i64,
 }
 
+/// Whether one account has an encrypted history archive, and whether this device is enrolled.
+///
+/// Messenger reports both flags in the login `done` step only. A launch from the stored session
+/// never logs in again, so the host mirrors the flags here to know whether to offer the PIN; the
+/// archive device itself stays in the connector's sealed session blob.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistoryCapabilities {
+    pub pin_backup: bool,
+    pub enrolled: bool,
+}
+
 /// Fields a caller supplies when linking a new account. `account_id` is generated unless the
 /// caller already allocated one (the engine names the account's directory before login ends).
 #[derive(Debug, Clone, PartialEq, Eq)]

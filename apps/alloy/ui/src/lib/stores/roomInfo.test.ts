@@ -39,6 +39,7 @@ function details(name: string | null) {
       formatted_text: false,
       pin_chats: true,
       pin_messages: true,
+      history: { pin_backup: false, enrolled: false },
     },
   };
 }

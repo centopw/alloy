@@ -13,6 +13,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use crate::capabilities::HistoryCapabilities;
 use crate::types::SessionBlob;
 
 /// A cookie the user has to supply for cookie-based login (Messenger).
@@ -157,6 +158,12 @@ pub enum LoginStep {
         remote_user_id: String,
         display_name: String,
         session: SessionBlob,
+        /// Whether the account has an encrypted history archive and this device is enrolled in
+        /// it. The network reports it here and nowhere else, so the host persists it for the
+        /// launches that begin from the stored session. Absent from a connector that has no
+        /// archive: both false.
+        #[serde(default)]
+        history: HistoryCapabilities,
     },
     /// The attempt failed. Terminal for this attempt.
     Failed { reason: LoginFailure },

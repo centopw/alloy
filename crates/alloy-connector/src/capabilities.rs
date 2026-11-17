@@ -7,6 +7,24 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Whether this account can read its network's PIN-protected encrypted archive.
+///
+/// Messenger keeps the history of encrypted chats in an archive keyed by a six-digit PIN. Having
+/// an archive (`pin_backup`) is a property of the account; being able to read it (`enrolled`) is a
+/// property of this device, and starts out false on every device the account has not enrolled.
+///
+/// This is a capability, not a failure: `pin_backup: false` means the account has no encrypted
+/// archive at all, and nothing about it deserves a warning.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistoryCapabilities {
+    /// The network holds a PIN-protected archive for this account.
+    #[serde(default)]
+    pub pin_backup: bool,
+    /// This device has been enrolled with the PIN and can read the archive.
+    #[serde(default)]
+    pub enrolled: bool,
+}
+
 /// The feature set of one connector instance.
 ///
 /// A `true` flag promises the matching [`crate::Connector`] method works; `false` promises it

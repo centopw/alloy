@@ -24,6 +24,35 @@ describe('loadOlder', () => {
     expect(timelineStore.reachedStart).toBe(false);
     expect(timelineStore.paginating).toBe(false);
   });
+
+  it('keeps the live rows and records why older history is unavailable, without paging again', async () => {
+    ipc.invoke.mockReturnValueOnce(
+      Promise.resolve({
+        type: 'Paginated',
+        payload: { reached_start: true, history: 'not_enrolled' },
+      })
+    );
+    const live = [{ internal_id: 'live-1' }] as unknown as typeof timelineStore.items;
+    timelineStore.roomId = 'archive-chat';
+    timelineStore.reachedStart = false;
+    timelineStore.historyLimit = null;
+    timelineStore.items = live;
+
+    await timelineStore.loadOlder();
+
+    expect(timelineStore.reachedStart).toBe(true);
+    expect(timelineStore.historyLimit).toBe('not_enrolled');
+    expect(timelineStore.items.map((item) => item.internal_id)).toEqual(['live-1']);
+
+    // Paging stopped for good: scrolling further asks the engine nothing.
+    await timelineStore.loadOlder();
+    expect(ipc.invoke).toHaveBeenCalledTimes(1);
+
+    timelineStore.roomId = null;
+    timelineStore.reachedStart = false;
+    timelineStore.historyLimit = null;
+    timelineStore.items = [];
+  });
 });
 
 describe('findRowIndexByEventId', () => {

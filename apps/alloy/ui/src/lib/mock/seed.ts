@@ -125,6 +125,7 @@ export const TELEGRAM_CAPABILITIES: CapabilitiesDto = {
   pin_chats: true,
   pin_messages: true,
   topics: true,
+  history: { pin_backup: false, enrolled: false },
 };
 
 /** Messenger: 15-minute edit window, 25 MiB attachments, polls but no shared locations. */
@@ -146,6 +147,7 @@ export const MESSENGER_CAPABILITIES: CapabilitiesDto = {
   formatted_text: false,
   pin_chats: true,
   pin_messages: false,
+  history: { pin_backup: true, enrolled: false },
 };
 
 /** The deterministic test connector: enough to exercise the flows, nothing network-specific. */
@@ -167,6 +169,7 @@ export const FAKE_CAPABILITIES: CapabilitiesDto = {
   formatted_text: false,
   pin_chats: true,
   pin_messages: true,
+  history: { pin_backup: false, enrolled: false },
 };
 
 const CAPABILITIES_BY_NETWORK: Record<Account['network'], CapabilitiesDto> = {

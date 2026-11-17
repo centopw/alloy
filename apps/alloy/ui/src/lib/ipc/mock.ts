@@ -825,6 +825,16 @@ export class MockTransport implements Transport {
         return { type: 'NetworkSettingCleared' };
       }
 
+      case 'EnrolHistory': {
+        const account = this.accountById(command.params.account_id);
+        if (!/^[0-9]{6}$/.test(command.params.pin)) {
+          throw invalidArgument('the archive PIN must be exactly six digits');
+        }
+        account.capabilities.history = { pin_backup: true, enrolled: true };
+        this.emit({ type: 'AccountsChanged', payload: { accounts: this.accountList() } });
+        return { type: 'HistoryEnrolment', payload: { outcome: 'enrolled' as const } };
+      }
+
       case 'BeginLogin': {
         const info = this.networkInfo().find(
           (candidate) => candidate.network === command.params.network
@@ -1234,7 +1244,7 @@ export class MockTransport implements Transport {
       case 'PaginateBackwards':
         this.roomById(command.params.room_id);
         // The demo timelines hold their whole history already.
-        return { type: 'Paginated', payload: { reached_start: true } };
+        return { type: 'Paginated', payload: { reached_start: true, history: 'start' } };
 
       case 'SendText': {
         const roomId = command.params.room_id;

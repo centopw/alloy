@@ -34,8 +34,10 @@ pub mod types;
 #[cfg(feature = "testing")]
 pub mod fake;
 
-pub use capabilities::Capabilities;
-pub use connector::{Connector, LocalAttachment, OutgoingMessage, Page, SendAck};
+pub use capabilities::{Capabilities, HistoryCapabilities};
+pub use connector::{
+    Connector, HistoryEnrolment, HistoryPin, LocalAttachment, OutgoingMessage, Page, SendAck,
+};
 pub use error::ConnectorError;
 pub use events::{ConnectionState, ConnectorEvent};
 pub use login::{

@@ -295,9 +295,15 @@ async fn startup_logs(error: ConnectorError) -> Vec<(Level, String)> {
         error,
     });
 
-    let runtime = start_with_connector(&ctx, record, connector, None)
-        .await
-        .expect("start the account");
+    let runtime = start_with_connector(
+        &ctx,
+        record,
+        connector,
+        None,
+        alloy_connector::HistoryCapabilities::default(),
+    )
+    .await
+    .expect("start the account");
     runtime.abort_tasks();
 
     capture.snapshot()

@@ -6,6 +6,7 @@
 //! implementation run in-process (Telegram, M2), behind the NDJSON sidecar bridge (Messenger, M3),
 //! or inside the M6 gateway without a second trait.
 
+use std::fmt;
 use std::path::Path;
 
 use async_trait::async_trait;
@@ -68,6 +69,44 @@ pub struct SendAck {
     pub sent_at: i64,
 }
 
+/// A six-digit PIN that unlocks the network's encrypted history archive.
+///
+/// The value exists only while it is being handed to the connector that enrols this device; the
+/// host never stores it and never logs it. [`fmt::Debug`] prints `<redacted>`, so no `{:?}` of a
+/// request, error or captured argument can leak it by accident.
+#[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct HistoryPin(String);
+
+impl HistoryPin {
+    /// Wraps a PIN as entered; validation belongs to the engine, not the wire type.
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    /// The digits themselves, for the one call that hands them to the network.
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for HistoryPin {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("HistoryPin(<redacted>)")
+    }
+}
+
+/// The archive state a successful enrolment reports.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistoryEnrolment {
+    /// Whether the account has a PIN-protected archive. An enrolment implies it does.
+    #[serde(default)]
+    pub pin_backup: bool,
+    /// Whether this device can now read the archive.
+    #[serde(default)]
+    pub enrolled: bool,
+}
+
 /// A connected network account.
 ///
 /// # Contract
@@ -111,6 +150,24 @@ pub trait Connector: Send + Sync {
     ///
     /// Fails with [`ConnectorError::Unauthorized`] when the blob is invalid or expired.
     async fn restore(&self, session: SessionBlob) -> Result<RemoteUser, ConnectorError>;
+
+    /// Enrols this device in the account's encrypted history archive with its PIN.
+    ///
+    /// The PIN is used once, here: no implementation may store, echo or log it, and the host
+    /// discards it after the call. The enrolment itself lives in the connector's own session
+    /// state, so a later launch reads the archive without asking again. Fails with
+    /// [`ConnectorError::PinBackupUnavailable`] when the account has no archive,
+    /// [`ConnectorError::PinRejected`] when the PIN is wrong, and
+    /// [`ConnectorError::PinLockedOut`] after too many wrong attempts.
+    ///
+    /// The default is for connectors without an archive: `NotSupported("history_pin")`. An older
+    /// sidecar answers the same, so nothing about the protocol version changes.
+    async fn enrol_history(&self, pin: HistoryPin) -> Result<HistoryEnrolment, ConnectorError> {
+        let _ = pin;
+        Err(ConnectorError::NotSupported {
+            feature: "history_pin".to_string(),
+        })
+    }
 
     /// Begins live updates, sending events to `events`.
     ///

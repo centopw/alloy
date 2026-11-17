@@ -9,6 +9,7 @@
   import { roomsStore } from '$lib/stores/rooms.svelte';
   import { prefs, backgroundUrl } from '$lib/stores/prefs.svelte';
   import TypingIndicator from './TypingIndicator.svelte';
+  import HistoryLimitNotice from './HistoryLimitNotice.svelte';
   import PinnedBar from './PinnedBar.svelte';
   import Icon from '$lib/icons/Icon.svelte';
   import { ArrowDown, AtSign } from '$lib/icons';
@@ -45,6 +46,8 @@
   let vlist: VListHandle | undefined = $state();
   let viewportEl = $state<HTMLElement | undefined>();
   let atBottom = $state(true);
+  /** True at the oldest loaded row, where the reason history stops belongs. */
+  let atTop = $state(true);
   let viewportHeight = $state(0);
   let shift = $state(false);
   /** Messages from others that arrived while scrolled up, and which of them mention the user. */
@@ -397,6 +400,7 @@
     const distance = vlist.getScrollSize() - (offset + vlist.getViewportSize());
     bottomGap = Math.max(0, distance);
     atBottom = distance < 80;
+    atTop = offset < 8;
     if (atBottom && (unseen > 0 || mentionIds.length > 0)) {
       unseen = 0;
       mentionIds = [];
@@ -594,6 +598,8 @@
         style:background-image={backgroundSrc ? `url("${backgroundSrc}")` : null}
       ></div>
     {/if}
+    <!-- Only where history runs out: the reason paging stopped, when it stopped short. -->
+    <HistoryLimitNotice limit={atTop ? timelineStore.historyLimit : null} />
     {#if timelineStore.loading && rows.length === 0}
       <p class="status" aria-busy="true">{t('timeline-loading-messages')}</p>
     {:else if rows.length === 0}

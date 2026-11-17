@@ -340,7 +340,13 @@ async fn room_details(ctx: &EngineContext, room_id: RoomId) -> Result<RoomDetail
         .await
         .map_err(map_store)?;
     let capabilities = match ctx.accounts.get(&chat.account_id).await {
-        Some(runtime) => convert::capabilities_dto(&runtime.capabilities),
+        Some(runtime) => {
+            let history = *runtime
+                .history
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            convert::capabilities_dto(&runtime.capabilities, history)
+        }
         None => convert::no_capabilities(),
     };
     Ok(RoomDetails {

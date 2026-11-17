@@ -9,9 +9,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use alloy_protocol::{
-    AccountId, EngineEvent, EventId, MediaSource, NotificationCount, ReactionSummary, RoomId,
-    RoomSummary, SubscriptionId, TimelineItemContent, TimelineItemDto, TimelineItemPreview, UserId,
-    VectorDiffDto,
+    AccountId, EngineEvent, EventId, HistoryLimit, MediaSource, NotificationCount, ReactionSummary,
+    RoomId, RoomSummary, SubscriptionId, TimelineItemContent, TimelineItemDto, TimelineItemPreview,
+    UserId, VectorDiffDto,
 };
 use alloy_store::{
     AccountRecord, ChatKind, ChatRecord, MediaRecord, MessageKind as StoreMessageKind,
@@ -805,12 +805,16 @@ fn day_divider(timestamp_millis: i64) -> TimelineItemDto {
 }
 
 /// Prepends older history to an open timeline, backfilling through the connector when the store
-/// has nothing older. Returns whether the start of the chat was reached.
+/// has nothing older.
+///
+/// Returns `None` when older rows were added, and otherwise why paging stopped: the start of what
+/// exists, or the reason this device cannot read this chat's history. An unreadable archive is an
+/// answer, not a failure — only a real transport or store error is an `Err`.
 pub async fn paginate_backwards(
     ctx: &EngineContext,
     room_id: &RoomId,
     count: usize,
-) -> Result<bool, EngineError> {
+) -> Result<Option<HistoryLimit>, EngineError> {
     let window = ctx
         .timelines
         .get(&room_id.0)
@@ -848,6 +852,9 @@ pub async fn paginate_backwards(
     } else {
         None
     };
+    // Set when the network would not hand over older history: `Start` when there is genuinely
+    // nothing older, otherwise the reason this device cannot read it.
+    let mut limit: Option<HistoryLimit> = None;
     if let Some(event_id) = anchor {
         let remote_anchor = ctx
             .store
@@ -883,11 +890,34 @@ pub async fn paginate_backwards(
                 }
                 // A connector that cannot page history (Messenger's encrypted groups) answers
                 // NotSupported every time the user scrolls up. That is the end of the reachable
-                // conversation, not a failure worth a warning.
+                // conversation, not a failure worth a warning: the reason goes to the timeline.
                 Err(alloy_connector::ConnectorError::NotSupported { .. }) => {
+                    let history = *runtime
+                        .history
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    limit = Some(if history.pin_backup && !history.enrolled {
+                        HistoryLimit::NotEnrolled
+                    } else {
+                        HistoryLimit::NotInArchive
+                    });
                     tracing::debug!(chat = %chat.chat_id, "this chat has no history to backfill");
                 }
+                // No archive at all is a capability of the account, never a warning.
+                Err(alloy_connector::ConnectorError::PinBackupUnavailable) => {
+                    limit = Some(HistoryLimit::NoBackup);
+                    tracing::debug!(chat = %chat.chat_id, "this account has no encrypted archive");
+                }
+                Err(alloy_connector::ConnectorError::PinRejected { attempts_remaining }) => {
+                    limit = Some(HistoryLimit::PinRejected { attempts_remaining });
+                    tracing::debug!(chat = %chat.chat_id, "the archive rejected the PIN");
+                }
+                Err(alloy_connector::ConnectorError::PinLockedOut) => {
+                    limit = Some(HistoryLimit::LockedOut);
+                    tracing::debug!(chat = %chat.chat_id, "the archive PIN is locked");
+                }
                 Err(err) => {
+                    limit = Some(HistoryLimit::Unreadable);
                     tracing::warn!(chat = %chat.chat_id, error = %err, "history backfill failed");
                 }
             }
@@ -895,7 +925,7 @@ pub async fn paginate_backwards(
     }
 
     if older.is_empty() {
-        return Ok(true);
+        return Ok(Some(limit.unwrap_or(HistoryLimit::Start)));
     }
 
     let account = ctx
@@ -930,5 +960,5 @@ pub async fn paginate_backwards(
         });
     }
     *items = combined;
-    Ok(false)
+    Ok(None)
 }

@@ -94,6 +94,8 @@ export type CapabilitiesDto = {
 	 *  supergroups). The UI nests the topics of a forum under its row.
 	 */
 	topics?: boolean,
+	/**  Whether the account has an encrypted history archive and this device can read it. */
+	history: HistoryCapabilitiesDto,
 };
 
 /**
@@ -246,6 +248,18 @@ export type EngineCommand =
 { action: "ClearNetworkSetting"; params: {
 	network: Network,
 	key: string,
+} } | 
+/**
+ *  Enrols this device in the account's encrypted history archive with its PIN.
+ * 
+ *  The PIN is used once and discarded: it is never stored, echoed or logged, and [`HistoryPin`]
+ *  redacts it in `Debug`. `pin` must be exactly six digits; anything else is `invalid_argument`
+ *  before the connector is called. Outcomes other than success are reported in
+ *  [`EngineResponse::HistoryEnrolment`], not as command failures.
+ */
+{ action: "EnrolHistory"; params: {
+	account_id: AccountId,
+	pin: HistoryPin,
 } } | 
 /**  Starts the room list stream; `filter` narrows the projection by chat name. */
 { action: "SubscribeRoomList"; params: {
@@ -662,6 +676,10 @@ export type EngineResponse = { type: "AccountsList"; payload: {
 } } | 
 /**  The stored value is gone; the declared default applies again. */
 { type: "NetworkSettingCleared" } | 
+/**  What enrolling this device in the encrypted history archive achieved. */
+{ type: "HistoryEnrolment"; payload: {
+	outcome: HistoryEnrolmentOutcome,
+} } | 
 /**  The next login step of `login_id`; answers both `BeginLogin` and `SubmitLogin`. */
 { type: "LoginStep"; payload: {
 	login_id: LoginId,
@@ -718,8 +736,13 @@ export type EngineResponse = { type: "AccountsList"; payload: {
 } } | { type: "MediaCacheCleared" } | { type: "SyncRefreshed" } | { type: "TimelineSubscribed"; payload: {
 	subscription_id: SubscriptionId,
 } } | { type: "TimelineClosed" } | { type: "Paginated"; payload: {
-	/**  True when the start of the chat history was reached. */
+	/**  True when no older messages can be added; paging stops here. */
 	reached_start: boolean,
+	/**
+	 *  Why paging stopped, when it did: the start of what exists, an archive this device
+	 *  cannot read, or a chat missing from the archive. `None` when older rows were added.
+	 */
+	history?: HistoryLimit | null,
 } } | 
 /**
  *  The message was queued; the local echo arrives through `TimelineDiff` and the final state
@@ -879,6 +902,74 @@ export type GlobalSearchHit = {
 	timestamp_millis: number,
 	body: string,
 };
+
+/**
+ *  Whether an account has an encrypted message archive, and whether this device is enrolled in it.
+ * 
+ *  Messenger keeps the history of encrypted chats in an archive opened by a six-digit PIN. Having
+ *  an archive is a property of the account; being enrolled is a property of this device. Neither
+ *  state is a failure, and the UI offers enrolment only while `pin_backup` is true and `enrolled`
+ *  is false.
+ */
+export type HistoryCapabilitiesDto = {
+	/**  The network holds a PIN-protected encrypted archive for this account. */
+	pin_backup: boolean,
+	/**  This device is enrolled and can read the archive. */
+	enrolled: boolean,
+};
+
+/**
+ *  What `EnrolHistory` achieved, including the ways it can fall short.
+ * 
+ *  These are expected outcomes, not command failures: the UI renders each one as its own message.
+ */
+export type HistoryEnrolmentOutcome = 
+/**  This device can now read the archive. */
+"enrolled" | 
+/**  The account has no PIN-protected encrypted archive. */
+"pin_backup_unavailable" | 
+/**  The archive rejected the PIN; `attempts_remaining` tries are left. */
+{ pin_rejected: {
+	attempts_remaining: number,
+} } | 
+/**  Too many wrong PINs: the archive is locked until the network unlocks it. */
+"locked_out" | 
+/**  The connector cannot enrol at all (an older sidecar, or a network without an archive). */
+"not_supported";
+
+/**
+ *  Why paging returned no older messages from the network.
+ * 
+ *  `Start` is an answer, not a failure: the conversation really begins here. Every other variant
+ *  says history exists (or may exist) but this device cannot show it, and names the reason so the
+ *  timeline can say it in one line instead of pretending the conversation began here.
+ */
+export type HistoryLimit = 
+/**  The oldest message the network holds was reached. */
+"start" | 
+/**  The account has no encrypted archive. */
+"no_backup" | 
+/**  The account has an archive but this device is not enrolled with its PIN. */
+"not_enrolled" | 
+/**  The archive rejected the PIN; `attempts_remaining` tries are left. */
+{ pin_rejected: {
+	attempts_remaining: number,
+} } | 
+/**  The archive is locked after too many wrong PINs. */
+"locked_out" | 
+/**  This chat has no entry in the archive. */
+"not_in_archive" | 
+/**  History could not be read for another reason (transport, unsupported page). */
+"unreadable";
+
+/**
+ *  The six-digit PIN that opens the account's encrypted history archive.
+ * 
+ *  The wire shape stays a plain string, but [`fmt::Debug`] prints `<redacted>`: no log line, panic
+ *  message or `{:?}` of [`EngineCommand`] can leak it. The engine hands the digits to the connector
+ *  once and stores nothing.
+ */
+export type HistoryPin = string;
 
 /**  A sign-in method offered next to the one currently asked for. */
 export type LoginAlternativeDto = 

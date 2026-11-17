@@ -50,8 +50,12 @@ impl GroupHandler for TimelineHandler {
                 Ok(EngineResponse::TimelineClosed)
             }
             EngineCommand::PaginateBackwards { room_id, count } => {
-                let reached_start = projection::paginate_backwards(ctx, &room_id, count).await?;
-                Ok(EngineResponse::Paginated { reached_start })
+                let history = projection::paginate_backwards(ctx, &room_id, count).await?;
+                Ok(EngineResponse::Paginated {
+                    // Nothing older can be added once a reason is reported; the field says why.
+                    reached_start: history.is_some(),
+                    history,
+                })
             }
             EngineCommand::SendText {
                 room_id,

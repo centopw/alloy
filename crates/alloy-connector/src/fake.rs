@@ -36,8 +36,8 @@ use async_trait::async_trait;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;
 
-use crate::capabilities::Capabilities;
-use crate::connector::{Connector, OutgoingMessage, Page, SendAck};
+use crate::capabilities::{Capabilities, HistoryCapabilities};
+use crate::connector::{Connector, HistoryEnrolment, HistoryPin, OutgoingMessage, Page, SendAck};
 use crate::error::ConnectorError;
 use crate::events::{ConnectionState, ConnectorEvent};
 use crate::login::{ChallengeKind, CodeChannel, LoginFailure, LoginInput, LoginStep};
@@ -89,6 +89,25 @@ impl FakeConnector {
         Self {
             inner: Mutex::new(Inner::seeded()),
         }
+    }
+
+    /// Declares the account's encrypted-archive state, as a network would report it.
+    pub async fn set_history(&self, pin_backup: bool, enrolled: bool) {
+        let mut inner = self.inner.lock().await;
+        inner.history = HistoryCapabilities {
+            pin_backup,
+            enrolled,
+        };
+    }
+
+    /// Makes the next `enrol_history` calls fail with `error`; `None` restores success.
+    pub async fn fail_history_enrolment(&self, error: Option<ConnectorError>) {
+        self.inner.lock().await.enrolment_error = error;
+    }
+
+    /// How many times `enrol_history` was called, including rejected attempts.
+    pub async fn history_enrolment_calls(&self) -> usize {
+        self.inner.lock().await.enrolment_calls
     }
 
     /// Injects an incoming message from another participant, as a live update would.
@@ -194,6 +213,24 @@ impl Connector for FakeConnector {
         Network::Fake
     }
 
+    async fn enrol_history(&self, pin: HistoryPin) -> Result<HistoryEnrolment, ConnectorError> {
+        let mut inner = self.inner.lock().await;
+        inner.enrolment_calls += 1;
+        // The fake only needs to know a PIN arrived; it never keeps or echoes the digits.
+        let _digits = pin.expose();
+        if let Some(error) = inner.enrolment_error.clone() {
+            return Err(error);
+        }
+        inner.history = HistoryCapabilities {
+            pin_backup: true,
+            enrolled: true,
+        };
+        Ok(HistoryEnrolment {
+            pin_backup: true,
+            enrolled: true,
+        })
+    }
+
     fn capabilities(&self) -> Capabilities {
         Capabilities {
             edit: true,
@@ -257,6 +294,7 @@ impl Connector for FakeConnector {
                     remote_user_id: user.remote_user_id,
                     display_name: user.display_name,
                     session: Self::session_for(FAKE_USER_ID),
+                    history: inner.history,
                 }
             }
             (_, LoginInput::Code { .. }) => {
@@ -897,6 +935,9 @@ struct Inner {
     read_markers: BTreeMap<String, String>,
     next_seq: u64,
     clock_ms: i64,
+    history: HistoryCapabilities,
+    enrolment_error: Option<ConnectorError>,
+    enrolment_calls: usize,
 }
 
 impl Inner {
@@ -1047,6 +1088,9 @@ impl Inner {
             read_markers: BTreeMap::new(),
             next_seq: 1,
             clock_ms: 1_700_000_400_000,
+            history: HistoryCapabilities::default(),
+            enrolment_error: None,
+            enrolment_calls: 0,
         }
     }
 

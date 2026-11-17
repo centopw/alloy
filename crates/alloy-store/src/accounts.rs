@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::Store;
 use crate::crypto;
 use crate::error::StoreError;
-use crate::model::{AccountRecord, AccountState, Network, NewAccount, now_ms};
+use crate::model::{AccountRecord, AccountState, HistoryCapabilities, Network, NewAccount, now_ms};
 use crate::rows;
 
 impl Store {
@@ -191,6 +191,57 @@ impl Store {
             };
             let plaintext = crypto::open(&key, account.as_bytes(), &nonce, &ciphertext, &account)?;
             Ok(Some(plaintext))
+        })
+        .await
+    }
+
+    /// Records the encrypted-archive capability the login step reported for `account_id`.
+    pub async fn put_history_capabilities(
+        &self,
+        account_id: &str,
+        capabilities: HistoryCapabilities,
+    ) -> Result<(), StoreError> {
+        let account = account_id.to_owned();
+        self.with_conn(move |conn| {
+            conn.execute(
+                "INSERT INTO account_history (account_id, pin_backup, enrolled, updated_at)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT (account_id) DO UPDATE SET
+                     pin_backup = excluded.pin_backup,
+                     enrolled = excluded.enrolled,
+                     updated_at = excluded.updated_at",
+                rusqlite::params![
+                    account,
+                    capabilities.pin_backup,
+                    capabilities.enrolled,
+                    now_ms()
+                ],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// The last encrypted-archive capability recorded for `account_id`, defaulting to neither.
+    pub async fn get_history_capabilities(
+        &self,
+        account_id: &str,
+    ) -> Result<HistoryCapabilities, StoreError> {
+        let account = account_id.to_owned();
+        self.with_conn(move |conn| {
+            let stored = conn
+                .query_row(
+                    "SELECT pin_backup, enrolled FROM account_history WHERE account_id = ?1",
+                    [&account],
+                    |row| Ok((row.get::<_, bool>(0)?, row.get::<_, bool>(1)?)),
+                )
+                .optional()?;
+            Ok(stored
+                .map(|(pin_backup, enrolled)| HistoryCapabilities {
+                    pin_backup,
+                    enrolled,
+                })
+                .unwrap_or_default())
         })
         .await
     }

@@ -206,6 +206,75 @@ impl fmt::Debug for ApiHash {
     }
 }
 
+/// The six-digit PIN that opens the account's encrypted history archive.
+///
+/// The wire shape stays a plain string, but [`fmt::Debug`] prints `<redacted>`: no log line, panic
+/// message or `{:?}` of [`EngineCommand`] can leak it. The engine hands the digits to the connector
+/// once and stores nothing.
+#[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+#[serde(transparent)]
+pub struct HistoryPin(String);
+
+impl HistoryPin {
+    /// Wraps a PIN as entered; validation belongs to the engine, not the wire type.
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    /// The digits themselves, for the one call that hands them to the connector.
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for HistoryPin {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "HistoryPin({REDACTED})")
+    }
+}
+
+/// What `EnrolHistory` achieved, including the ways it can fall short.
+///
+/// These are expected outcomes, not command failures: the UI renders each one as its own message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum HistoryEnrolmentOutcome {
+    /// This device can now read the archive.
+    Enrolled,
+    /// The account has no PIN-protected encrypted archive.
+    PinBackupUnavailable,
+    /// The archive rejected the PIN; `attempts_remaining` tries are left.
+    PinRejected { attempts_remaining: u32 },
+    /// Too many wrong PINs: the archive is locked until the network unlocks it.
+    LockedOut,
+    /// The connector cannot enrol at all (an older sidecar, or a network without an archive).
+    NotSupported,
+}
+
+/// Why paging returned no older messages from the network.
+///
+/// `Start` is an answer, not a failure: the conversation really begins here. Every other variant
+/// says history exists (or may exist) but this device cannot show it, and names the reason so the
+/// timeline can say it in one line instead of pretending the conversation began here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum HistoryLimit {
+    /// The oldest message the network holds was reached.
+    Start,
+    /// The account has no encrypted archive.
+    NoBackup,
+    /// The account has an archive but this device is not enrolled with its PIN.
+    NotEnrolled,
+    /// The archive rejected the PIN; `attempts_remaining` tries are left.
+    PinRejected { attempts_remaining: u32 },
+    /// The archive is locked after too many wrong PINs.
+    LockedOut,
+    /// This chat has no entry in the archive.
+    NotInArchive,
+    /// History could not be read for another reason (transport, unsupported page).
+    Unreadable,
+}
+
 /// Lifecycle of one locally stored account.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
@@ -272,6 +341,22 @@ pub struct CapabilitiesDto {
     /// supergroups). The UI nests the topics of a forum under its row.
     #[serde(default)]
     pub topics: bool,
+    /// Whether the account has an encrypted history archive and this device can read it.
+    pub history: HistoryCapabilitiesDto,
+}
+
+/// Whether an account has an encrypted message archive, and whether this device is enrolled in it.
+///
+/// Messenger keeps the history of encrypted chats in an archive opened by a six-digit PIN. Having
+/// an archive is a property of the account; being enrolled is a property of this device. Neither
+/// state is a failure, and the UI offers enrolment only while `pin_backup` is true and `enrolled`
+/// is false.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct HistoryCapabilitiesDto {
+    /// The network holds a PIN-protected encrypted archive for this account.
+    pub pin_backup: bool,
+    /// This device is enrolled and can read the archive.
+    pub enrolled: bool,
 }
 
 /// One connected account, as listed by `ListAccounts`.
@@ -1072,6 +1157,16 @@ pub enum EngineCommand {
         network: Network,
         key: String,
     },
+    /// Enrols this device in the account's encrypted history archive with its PIN.
+    ///
+    /// The PIN is used once and discarded: it is never stored, echoed or logged, and [`HistoryPin`]
+    /// redacts it in `Debug`. `pin` must be exactly six digits; anything else is `invalid_argument`
+    /// before the connector is called. Outcomes other than success are reported in
+    /// [`EngineResponse::HistoryEnrolment`], not as command failures.
+    EnrolHistory {
+        account_id: AccountId,
+        pin: HistoryPin,
+    },
     // Chats
     /// Starts the room list stream; `filter` narrows the projection by chat name.
     SubscribeRoomList {
@@ -1434,6 +1529,10 @@ pub enum EngineResponse {
     },
     /// The stored value is gone; the declared default applies again.
     NetworkSettingCleared,
+    /// What enrolling this device in the encrypted history archive achieved.
+    HistoryEnrolment {
+        outcome: HistoryEnrolmentOutcome,
+    },
     /// The next login step of `login_id`; answers both `BeginLogin` and `SubmitLogin`.
     LoginStep {
         login_id: LoginId,
@@ -1506,8 +1605,13 @@ pub enum EngineResponse {
     },
     TimelineClosed,
     Paginated {
-        /// True when the start of the chat history was reached.
+        /// True when no older messages can be added; paging stops here.
         reached_start: bool,
+        /// Why paging stopped, when it did: the start of what exists, an archive this device
+        /// cannot read, or a chat missing from the archive. `None` when older rows were added.
+        #[specta(optional)]
+        #[serde(default)]
+        history: Option<HistoryLimit>,
     },
     /// The message was queued; the local echo arrives through `TimelineDiff` and the final state
     /// through the item's `send_state`.
@@ -1890,6 +1994,7 @@ pub fn register_types() -> Types {
         .register::<SubscriptionId>()
         .register::<LoginId>()
         .register::<ApiHash>()
+        .register::<HistoryPin>()
         .register::<Network>()
         .register::<AccountState>()
         .register::<CapabilitiesDto>()
@@ -1993,6 +2098,78 @@ mod tests {
         // TypeScript sees the newtype as an alias of `string`, so the UI sends a plain string.
         let ts = export_typescript().expect("export typescript should succeed");
         assert!(ts.contains("export type ApiHash = string"), "{ts}");
+    }
+
+    #[test]
+    fn test_history_pin_is_redacted_in_debug_and_plain_on_the_wire() {
+        const PIN: &str = "481516";
+        let command = EngineCommand::EnrolHistory {
+            account_id: AccountId("acc-1".into()),
+            pin: HistoryPin::new(PIN),
+        };
+
+        assert_eq!(
+            format!("{:?}", HistoryPin::new(PIN)),
+            "HistoryPin(<redacted>)",
+            "the PIN itself must never reach Debug output"
+        );
+        let rendered = format!("{command:?}");
+        assert!(rendered.contains("<redacted>"), "{rendered}");
+        assert!(
+            !rendered.contains(PIN),
+            "Debug of the command leaked the PIN: {rendered}"
+        );
+
+        let wire = serde_json::to_value(&command).expect("serialize the command");
+        assert_eq!(
+            wire,
+            json!({
+                "action": "EnrolHistory",
+                "params": { "account_id": "acc-1", "pin": PIN },
+            })
+        );
+        assert_eq!(
+            serde_json::from_value::<EngineCommand>(wire).expect("deserialize the command"),
+            command
+        );
+    }
+
+    #[test]
+    fn test_paginated_history_field_round_trips_and_stays_additive() {
+        let answer = EngineResponse::Paginated {
+            reached_start: true,
+            history: Some(HistoryLimit::PinRejected {
+                attempts_remaining: 2,
+            }),
+        };
+        let wire = serde_json::to_value(&answer).expect("serialize the answer");
+        assert_eq!(
+            wire,
+            json!({
+                "type": "Paginated",
+                "payload": {
+                    "reached_start": true,
+                    "history": { "pin_rejected": { "attempts_remaining": 2 } },
+                },
+            })
+        );
+        assert_eq!(
+            serde_json::from_value::<EngineResponse>(wire).expect("deserialize the answer"),
+            answer
+        );
+
+        // A payload written before the field existed still decodes, with no reason attached.
+        let older = json!({
+            "type": "Paginated",
+            "payload": { "reached_start": true },
+        });
+        assert_eq!(
+            serde_json::from_value::<EngineResponse>(older).expect("decode an older payload"),
+            EngineResponse::Paginated {
+                reached_start: true,
+                history: None,
+            }
+        );
     }
 
     #[test]

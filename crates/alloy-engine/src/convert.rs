@@ -4,7 +4,9 @@
 //! The three crates deliberately do not depend on each other, so every crossing goes through this
 //! one module instead of ad-hoc `From` impls scattered across handlers.
 
-use alloy_connector::capabilities::Capabilities as ConnectorCapabilities;
+use alloy_connector::capabilities::{
+    Capabilities as ConnectorCapabilities, HistoryCapabilities as ConnectorHistoryCapabilities,
+};
 use alloy_connector::events::ConnectionState;
 use alloy_connector::login::{
     ChallengeKind as ConnectorChallengeKind, CodeChannel as ConnectorCodeChannel, CookieField,
@@ -198,7 +200,10 @@ pub fn message_kind_connector_to_store(kind: ConnectorMessageKind) -> StoreMessa
 
 // === Capabilities ===
 
-pub fn capabilities_dto(capabilities: &ConnectorCapabilities) -> CapabilitiesDto {
+pub fn capabilities_dto(
+    capabilities: &ConnectorCapabilities,
+    history: ConnectorHistoryCapabilities,
+) -> CapabilitiesDto {
     CapabilitiesDto {
         edit: capabilities.edit,
         edit_window_secs: capabilities.edit_window_secs,
@@ -218,6 +223,37 @@ pub fn capabilities_dto(capabilities: &ConnectorCapabilities) -> CapabilitiesDto
         pin_chats: capabilities.pin_chats,
         pin_messages: capabilities.pin_messages,
         topics: capabilities.topics,
+        history: history_capabilities_dto(history),
+    }
+}
+
+/// The encrypted-archive state of one account, as the UI sees it.
+pub fn history_capabilities_dto(
+    history: ConnectorHistoryCapabilities,
+) -> alloy_protocol::HistoryCapabilitiesDto {
+    alloy_protocol::HistoryCapabilitiesDto {
+        pin_backup: history.pin_backup,
+        enrolled: history.enrolled,
+    }
+}
+
+/// The archive flags a login step reported, in the form the store keeps.
+pub fn history_connector_to_store(
+    history: ConnectorHistoryCapabilities,
+) -> alloy_store::HistoryCapabilities {
+    alloy_store::HistoryCapabilities {
+        pin_backup: history.pin_backup,
+        enrolled: history.enrolled,
+    }
+}
+
+/// The archive flags the store kept, in the form the connector and engine use.
+pub fn history_store_to_connector(
+    history: alloy_store::HistoryCapabilities,
+) -> ConnectorHistoryCapabilities {
+    ConnectorHistoryCapabilities {
+        pin_backup: history.pin_backup,
+        enrolled: history.enrolled,
     }
 }
 
@@ -245,6 +281,10 @@ pub fn no_capabilities() -> CapabilitiesDto {
         pin_chats: false,
         pin_messages: false,
         topics: false,
+        history: alloy_protocol::HistoryCapabilitiesDto {
+            pin_backup: false,
+            enrolled: false,
+        },
     }
 }
 

@@ -3,6 +3,7 @@ import type {
   Account,
   AccountId,
   ConnectionStatus,
+  HistoryEnrolmentOutcome,
   LoginId,
   LoginAlternativeDto,
   LoginInputDto,
@@ -168,6 +169,21 @@ class SessionStore {
       'NetworkSettingCleared'
     );
     await this.loadNetworks();
+  }
+
+  /**
+   * Enrols this device in the account's encrypted history archive with its six-digit PIN.
+   *
+   * The PIN is handed to the engine and nowhere else; every expected shortfall (no backup, a
+   * rejected PIN, a locked archive) comes back as its own typed outcome so the caller renders its
+   * own line. A successful enrolment emits `AccountsChanged`, which refreshes `accounts`.
+   */
+  async enrolHistory(accountId: AccountId, pin: string): Promise<HistoryEnrolmentOutcome> {
+    const res = expect(
+      await client.invoke({ action: 'EnrolHistory', params: { account_id: accountId, pin } }),
+      'HistoryEnrolment'
+    );
+    return res.payload.outcome;
   }
 
   /** Opens onboarding over the app, keeping the current accounts on screen behind it. */

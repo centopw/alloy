@@ -34,9 +34,9 @@ pub use error::StoreError;
 pub use migrate::{CURRENT_SCHEMA_VERSION, migrate};
 pub use model::{
     AccountRecord, AccountState, ChatFlagsUpdate, ChatKind, ChatRecord, ChatUpsert, EventRecord,
-    MediaRecord, MessageKind, MessageRecord, Network, NewAccount, NewEvent, NewMedia, NewMessage,
-    NewOutboxItem, OutboxItem, OutboxOp, OutboxState, ParticipantRecord, ReactionRecord,
-    ReadMarkerRecord, RoomMediaQuery, SendState,
+    HistoryCapabilities, MediaRecord, MessageKind, MessageRecord, Network, NewAccount, NewEvent,
+    NewMedia, NewMessage, NewOutboxItem, OutboxItem, OutboxOp, OutboxState, ParticipantRecord,
+    ReactionRecord, ReadMarkerRecord, RoomMediaQuery, SendState,
 };
 
 /// Shared handle to the local database.
