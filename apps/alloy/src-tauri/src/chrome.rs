@@ -11,8 +11,10 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 
 /// The cookies the Messenger cookie login accepts (`cookieFields` in `sidecars/alloy-meta`).
+#[cfg(target_os = "macos")]
 const MESSENGER_COOKIES: [&str; 5] = ["xs", "c_user", "datr", "sb", "fr"];
 /// Without these the login cannot load the inbox, so a profile that lacks them is not a session.
+#[cfg(target_os = "macos")]
 const MESSENGER_REQUIRED: [&str; 3] = ["xs", "c_user", "datr"];
 
 /// What the page gets back.
